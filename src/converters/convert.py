@@ -6,7 +6,9 @@ from pydash import get
 import os
 import safetensors
 import glob
-
+from src.transformer_models.base import get_transformer
+from src.vae import get_vae
+from accelerate import init_empty_weights
 from src.converters.transformer_converters import (
     WanTransformerConverter,
     WanVaceTransformerConverter,
@@ -208,14 +210,18 @@ def convert_vae(
     return model
 
 def get_transformer_keys(model_type: str):
-    converter = get_transformer_converter(model_type)
-    return converter.rename_dict.keys()
+    transformer = get_transformer(model_type)
+    with init_empty_weights():
+        model = transformer()
+    return model.state_dict().keys()
 
 def get_vae_keys(vae_type: str):
     if vae_type != "ltx":
         return []
-    converter = get_vae_converter(vae_type)
-    return converter.rename_dict.keys()
+    model_class = get_vae(vae_type)
+    with init_empty_weights():
+        model = model_class()
+    return model.state_dict().keys()
 
 if __name__ == "__main__":
     model = convert_transformer(
