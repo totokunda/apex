@@ -1249,15 +1249,16 @@ if __name__ == "__main__":
         model_type=ModelType.T2V,
         save_path="/Users/tosinkuye/apex-models",  # Change this to your desired save path
         component_dtypes={
-            "text_encoder": torch.float16,
-            "transformer": torch.float16,
-            "vae": torch.float32,
+            "text_encoder": torch.bfloat16,
+            "transformer": torch.bfloat16,
+            "vae": torch.bfloat16,
         },
         component_load_dtypes={
-            "text_encoder": torch.float16,
-            "transformer": torch.float16,
-            "vae": torch.float32,
+            "text_encoder": torch.bfloat16,
+            "transformer": torch.bfloat16,
+            "vae": torch.bfloat16,
         },
+        save_converted_weights=True,
     )
 
     image = '/Users/tosinkuye/Desktop/12608188-A-couple-kissing-tenderly-affectionate-kiss.jpg'
@@ -1268,19 +1269,17 @@ if __name__ == "__main__":
     height = 480
     width = 832
     timesteps = [1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250]
-    timesteps = [timestep * 1000 for timestep in timesteps]
 
     video = engine.run(
         height=height,
         width=width,
         prompt=prompt,
-        #negative_prompt=negative_prompt,
         use_cfg_guidance=False,
-        duration=49,
+        duration=25,
         num_videos=1,
         num_inference_steps=len(timesteps),
         guidance_scale=3.0,
         timesteps=timesteps,
     )
 
-    export_to_video(video[0], "t2v_2b_ltx.mp4", fps=24, quality=8)
+    export_to_video(video[0], "t2v_fp8b_ltx.mp4", fps=24, quality=8)
