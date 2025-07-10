@@ -1259,6 +1259,7 @@ if __name__ == "__main__":
             "vae": torch.bfloat16,
         },
         save_converted_weights=True,
+        components_to_load=["transformer", "vae"],
     )
 
     image = '/Users/tosinkuye/Desktop/12608188-A-couple-kissing-tenderly-affectionate-kiss.jpg'
