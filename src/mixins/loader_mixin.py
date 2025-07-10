@@ -240,15 +240,15 @@ class LoaderMixin:
 
         return component
     
-    def save_component(self, component: Any, model_path: str, component_type: str, save_kwargs: Dict[str, Any] = {}):
+    def save_component(self, component: Any, model_path: str, component_type: str, **save_kwargs: Dict[str, Any]):
         if component_type == "transformer":
-            if isinstance(component, ModelMixin):
-                component.save_pretrained(model_path)
+            if issubclass(type(component), ModelMixin):
+                component.save_pretrained(model_path, **save_kwargs)
             else:
                 raise ValueError(f"Unsupported component type: {component_type}")
         elif component_type == "vae":
-            if isinstance(component, AutoencoderKL):
-                component.save_pretrained(model_path)
+            if issubclass(type(component), ModelMixin):
+                component.save_pretrained(model_path, **save_kwargs)
             else:
                 raise ValueError(f"Unsupported component type: {component_type}")
         else:
