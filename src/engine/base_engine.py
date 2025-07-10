@@ -11,6 +11,7 @@ import math
 import shutil
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 from src.transformer_models.base import TRANSFORMERS_REGISTRY
 from src.text_encoder.text_encoder import TextEncoder
 from src.vae import get_vae
@@ -79,6 +80,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.save_path = kwargs.get("save_path", None)
 
         self.download(self.save_path)
+        
+        for key, value in kwargs.items():
+            if key not in ["save_path", "config_kwargs", "components_to_load", "component_load_dtypes", "component_dtypes", "component_init_kwargs", "preprocessors_to_load", "device"]:
+                setattr(self, key, value)
 
         self._parse_config(
             self.config,
@@ -212,25 +217,36 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.scheduler = self._load_component(component)
 
     def load_vae(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
-        if self.check_weights and self._check_weights(component):
+        component["model_path"] = self._check_convert_model_path(component)
+        
+        
+        if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             self.vae = self.convert_vae_weights(component)
             if self.save_converted_weights:
+                self.logger.info(f"Saving converted vae weights to {component.get('model_path', None)}")
                 model_path = component.get("model_path", None)
                 tmp_dir = tempfile.mkdtemp()
                 try:
-                    self.save_component(self.vae, tmp_dir, "vae", safe_serialization=True, **self.config.get("save_kwargs", {}))
+                    self.save_component(self.vae, tmp_dir, "vae", **self.config.get("save_kwargs", {}))
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
-                        shutil.copytree(tmp_dir, model_path, dirs_exist_ok=True)
+                        # add subdirectory called vae
+                        vae_dir = os.path.join(model_path, "vae")
+                        os.makedirs(vae_dir, exist_ok=True)
+                        os.rename(tmp_dir, vae_dir)
                     else:
                         # Atomically replace file with directory
                         shutil.rmtree(model_path, ignore_errors=True)
-                        os.rename(tmp_dir, model_path)
+                        model_dir = os.path.dirname(model_path)
+                        vae_path = os.path.join(model_dir, "vae")
+                        os.makedirs(vae_path, exist_ok=True)
+                        os.rename(tmp_dir, vae_path)
                 finally:
                     # Clean up temp dir if it still exists
                     if os.path.exists(tmp_dir):
                         shutil.rmtree(tmp_dir)
+                self.logger.info(f"Converted vae weights to diffusers format")
                 empty_cache()
         else:
             self.vae = self._load_model(component, get_vae, "VAE", load_dtype)
@@ -261,25 +277,35 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_transformer(
         self, component: Dict[str, Any], load_dtype: torch.dtype | None
     ):
-        if self.check_weights and self._check_weights(component):
+        component["model_path"] = self._check_convert_model_path(component)
+        
+        if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             self.transformer = self.convert_transformer_weights(component)
             if self.save_converted_weights:
+                self.logger.info(f"Saving converted transformer weights to {component.get('model_path', None)}")
                 model_path = component.get("model_path", None)
                 tmp_dir = tempfile.mkdtemp()
                 try:
                     self.save_component(self.transformer, tmp_dir, "transformer", **self.config.get("save_kwargs", {}))
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
-                        shutil.copytree(tmp_dir, model_path, dirs_exist_ok=True)
+                        # add subdirectory called transformer
+                        transformer_dir = os.path.join(model_path, "transformer")
+                        os.makedirs(transformer_dir, exist_ok=True)
+                        os.rename(tmp_dir, transformer_dir)
                     else:
                         # Atomically replace file with directory
                         shutil.rmtree(model_path, ignore_errors=True)
-                        os.rename(tmp_dir, model_path)
+                        model_dir = os.path.dirname(model_path)
+                        transformer_path = os.path.join(model_dir, "transformer")
+                        os.makedirs(transformer_path, exist_ok=True)
+                        os.rename(tmp_dir, transformer_path)
                 finally:
                     # Clean up temp dir if it still exists
                     if os.path.exists(tmp_dir):
                         shutil.rmtree(tmp_dir)
+                self.logger.info(f"Converted transformer weights to diffusers format")
                 empty_cache()
         else:
             self.transformer = self._load_model(
@@ -313,6 +339,22 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 partial_state = partial_state[list(partial_state.keys())[0]]
         keys.update(partial_state.keys())
         return keys
+    
+
+    def _check_convert_model_path(self, component: Dict[str, Any]):
+        assert "model_path" in component, "`model_path` is required"
+        assert component.get("type") in ["transformer", "vae"], "Only transformer and vae are supported for now"
+        model_path = component["model_path"]
+        component_type = component.get("type")
+        if os.path.isfile(model_path):
+            # check base directory
+            if os.path.isdir(os.path.dirname(model_path)):
+                if os.path.isdir(os.path.join(os.path.dirname(model_path), component_type)):
+                    return os.path.join(os.path.dirname(model_path), component_type)
+        elif os.path.isdir(model_path):
+            if os.path.isdir(os.path.join(model_path, component_type)):
+                return os.path.join(model_path, component_type)
+        return model_path
 
     def _check_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
@@ -354,21 +396,20 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 keys.update(self._get_pt_keys(model_path, model_key))
 
         if component_type == "transformer":
-            _keys = get_transformer_keys(base)
-            _keys = list(_keys)
+            _keys = set(get_transformer_keys(base))
             iterating_keys = _keys.copy()
         elif component_type == "vae":
-            _keys = get_vae_keys(base)
-            _keys = list(_keys)
+            _keys = set(get_vae_keys(base))
             iterating_keys = _keys.copy()
 
-        for key in iterating_keys:
+        found_keys = set()
+        for iterating_key in iterating_keys:
             for key in keys:
-                if key in iterating_keys:
-                    iterating_keys.remove(key)
+                if key == iterating_key:
+                    found_keys.add(iterating_key)
                     break
-
-        return len(iterating_keys) > 0
+        
+        return len(found_keys) == len(iterating_keys)
 
     def convert_transformer_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
@@ -445,10 +486,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self, components: List[Dict[str, Any]], components_to_load: List[str] | None
     ):
         for component in components:
-            if (
-                components_to_load is None
-                or component.get("type") in components_to_load
-            ):
+            if components_to_load and component.get("type") in components_to_load:
                 self.load_component(
                     component,
                     (
