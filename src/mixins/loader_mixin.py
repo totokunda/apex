@@ -31,6 +31,7 @@ from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 
+
 def is_safetensors_file(file_path: str):
     try:
         with safetensors.safe_open(file_path, framework="pt", device="cpu") as f:
@@ -239,15 +240,15 @@ class LoaderMixin:
 
         return component
     
-    def save_component(self, component: Any, model_path: str, component_type: str, **kwargs):
+    def save_component(self, component: Any, model_path: str, component_type: str, save_kwargs: Dict[str, Any] = {}):
         if component_type == "transformer":
             if isinstance(component, ModelMixin):
-                component.save_pretrained(model_path, **kwargs)
+                component.save_pretrained(model_path)
             else:
                 raise ValueError(f"Unsupported component type: {component_type}")
         elif component_type == "vae":
             if isinstance(component, AutoencoderKL):
-                component.save_pretrained(model_path, **kwargs)
+                component.save_pretrained(model_path)
             else:
                 raise ValueError(f"Unsupported component type: {component_type}")
         else:
