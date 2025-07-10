@@ -1,0 +1,37 @@
+name: "Wan 2.1 14B Video Animation Control Editing"
+description: "Wan 2.1 14B is a 14B parameter model for image-to-video generation."
+engine: wan
+type: vace
+
+shared: 
+  - shared_wan.yml 
+
+components:
+  - type: scheduler
+    base: "diffusers.UniPCMultistepScheduler"
+    config:
+      flow_shift: 5.0
+    config_path: "https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/scheduler/scheduler_config.json"
+
+  - type: vae
+    base: "wan"
+    model_path: Wan-AI/Wan2.1-VACE-14B-diffusers/vae
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/vae/config.json
+
+  - !include shared:wan/text_encoder
+  
+  - type: transformer
+    base: "wan.vace" 
+    model_path:  Wan-AI/Wan2.1-VACE-14B-diffusers/transformer
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/transformer/config.json
+    tag: "wan_vace_14b"
+
+preprocessors: []
+
+defaults:
+  run:
+    num_inference_steps: 30
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    attention_kwargs: {}

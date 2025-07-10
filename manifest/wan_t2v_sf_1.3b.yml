@@ -1,0 +1,35 @@
+name: "Wan 2.1 1.3B Self-Forcing Text to Video"
+description: "Wan 2.1 1.3B Self-Forcing is a 1.3B parameter model for text-to-video generation."
+engine: wan
+type: t2v
+
+shared: 
+  - shared_wan.yml # path to shared_wan.yml
+
+components:
+  - type: scheduler
+    base: "src.scheduler.FlowMatchScheduler"
+    config:
+      shift: 5.0
+      sigma_min: 0.0
+      extra_one_step: True
+
+  - !include shared:wan/vae
+  - !include shared:wan/text_encoder
+  
+  - type: transformer
+    base: "wan.causal"
+    model_path: https://huggingface.co/gdhe17/Self-Forcing/resolve/main/checkpoints/self_forcing_dmd.pt
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/transformer/config.json
+    tag: "wan_t2v_causal_1.3b"
+
+preprocessors: null 
+
+defaults:
+  run:
+    num_inference_steps: 4
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    attention_kwargs: {}
+    local_attn_size: -1

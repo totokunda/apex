@@ -1,0 +1,43 @@
+name: "LTX T2V 2B"
+description: "LTX T2V 2B is a 2B parameter model for text-to-video generation."
+engine: ltx
+type: t2v
+
+shared: 
+  - shared_ltx.yml
+
+components:
+  - !include shared:ltx/text_encoder
+  - type: scheduler
+    base: "diffusers.FlowMatchEulerDiscreteScheduler"
+    config_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/scheduler/scheduler_config.json
+  
+  - type: vae
+    base: "ltx"
+    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-fp8.safetensors
+    converter_kwargs:
+      version: "0.9.7"
+    tag: "ltx_0.9.7"
+
+  - type: transformer
+    base: "ltx.base"
+    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-fp8.safetensors
+    file_pattern: "*.safetensors"
+    tag: "ltx_x2v_13b"
+
+preprocessors: null
+
+defaults:
+  run:
+    num_inference_steps: 30
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    guidance_rescale: 0.0
+    offload: true
+    render_on_step: false
+    generator: null
+
+save_kwargs:
+  safe_serialization: true
+  max_shard_size: "5GB"

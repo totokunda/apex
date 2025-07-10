@@ -1,0 +1,30 @@
+name: "SkyReels 14B Text to Video"
+description: "SkyReels 14B is a 14B parameter model for text-to-video generation."
+engine: skyreels
+type: t2v
+
+shared: 
+  - shared_wan.yml # path to shared_wan.yml
+  - shared_skyreels.yml
+
+components:
+  - !include shared:skyreels/scheduler
+  - !include shared:wan/vae
+  - !include shared:wan/text_encoder
+  
+  - type: transformer
+    base: "skyreels.base" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: Skywork/SkyReels-V2-T2V-14B-540P
+    config_path: https://huggingface.co/Skywork/SkyReels-V2-T2V-14B-540P/resolve/main/config.json
+    file_pattern: "*.safetensors"
+    tag: "skyreels_t2v_14b"
+
+preprocessors: null 
+
+defaults:
+  run:
+    num_inference_steps: 30
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    attention_kwargs: {}

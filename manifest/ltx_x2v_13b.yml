@@ -1,0 +1,32 @@
+name: "LTX T2V 2B"
+description: "LTX T2V 2B is a 2B parameter model for text-to-video generation."
+engine: ltx
+type: t2v
+
+shared: 
+  - shared_ltx.yml
+
+components:
+  - !include shared:ltx/vae
+  - !include shared:ltx/text_encoder
+  - !include shared:ltx/scheduler
+
+  - type: transformer
+    base: "ltx.base"
+    model_path: Lightricks/LTX-Video-0.9.7-dev/transformer
+    config_path: https://huggingface.co/Lightricks/LTX-Video-0.9.7-dev/resolve/main/transformer/config.json
+    file_pattern: "*.safetensors"
+    tag: "ltx_x2v_13b"
+
+preprocessors: null
+
+defaults:
+  run:
+    num_inference_steps: 30
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    guidance_rescale: 0.0
+    offload: true
+    render_on_step: false
+    generator: null
