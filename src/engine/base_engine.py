@@ -219,14 +219,13 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_vae(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
         component["model_path"] = self._check_convert_model_path(component)
         
-        
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             self.vae = self.convert_vae_weights(component)
             if self.save_converted_weights:
                 self.logger.info(f"Saving converted vae weights to {component.get('model_path', None)}")
                 model_path = component.get("model_path", None)
-                tmp_dir = tempfile.mkdtemp()
+                tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
                 try:
                     self.save_component(self.vae, tmp_dir, "vae", **self.config.get("save_kwargs", {}))
                     if os.path.isdir(model_path):
@@ -285,7 +284,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             if self.save_converted_weights:
                 self.logger.info(f"Saving converted transformer weights to {component.get('model_path', None)}")
                 model_path = component.get("model_path", None)
-                tmp_dir = tempfile.mkdtemp()
+                tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
                 try:
                     self.save_component(self.transformer, tmp_dir, "transformer", **self.config.get("save_kwargs", {}))
                     if os.path.isdir(model_path):
@@ -396,10 +395,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 keys.update(self._get_pt_keys(model_path, model_key))
 
         if component_type == "transformer":
-            _keys = set(get_transformer_keys(base))
+            _keys = set(get_transformer_keys(base, component.get("tag", None), component.get("converter_kwargs", {})))
             iterating_keys = _keys.copy()
         elif component_type == "vae":
-            _keys = set(get_vae_keys(base))
+            _keys = set(get_vae_keys(base, component.get("tag", None), component.get("converter_kwargs", {})))
             iterating_keys = _keys.copy()
 
         found_keys = set()
@@ -408,7 +407,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 if key == iterating_key:
                     found_keys.add(iterating_key)
                     break
-        
+
         return len(found_keys) == len(iterating_keys)
 
     def convert_transformer_weights(self, component: Dict[str, Any]):
@@ -461,10 +460,13 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         sample_mode: str = "mode",
         sample_generator: torch.Generator = None,
         dtype: torch.dtype = None,
+        normalize_latents: bool = True,
+        normalize_latents_dtype: torch.dtype | None = None,
     ):
         if self.vae is None:
             self.load_component_by_type("vae")
         self.to_device(self.vae)
+        
         video = video.to(dtype=self.vae.dtype, device=self.device)
 
         latents = self.vae.encode(video, return_dict=False)[0]
@@ -474,13 +476,18 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             latents = latents.mode()
         else:
             raise ValueError(f"Invalid sample mode: {sample_mode}")
-        latents = latents.to(dtype=dtype)
-
-        latents = self.vae.normalize_latents(latents)
+        
+        if not normalize_latents_dtype:
+            normalize_latents_dtype = self.vae.dtype
+        
+        if normalize_latents:   
+            latents = latents.to(dtype=normalize_latents_dtype)
+            latents = self.vae.normalize_latents(latents)
+            
         if offload:
             self._offload(self.vae)
-
-        return latents
+        
+        return latents.to(dtype=dtype)
 
     def load_components(
         self, components: List[Dict[str, Any]], components_to_load: List[str] | None
@@ -646,9 +653,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         rendered_video = self._postprocess(video)
         render_on_step_callback(rendered_video)
 
-    def _postprocess(self, video: torch.Tensor):
+    def _postprocess(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
-            video, output_type="np"
+            video, output_type=output_type
         )
         return postprocessed_video
 

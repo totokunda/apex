@@ -34,10 +34,15 @@ def fetch_and_save_tokenizer_from_config(
     Returns:
         transformers.AutoTokenizer: the loaded tokenizer instance.
     """
-    if not config:
-        config = json.load(open(config_path, "r"))
+    if config_path:
+        loaded_config = json.load(open(config_path, "r"))
+    else:
+        loaded_config = {}
+    
+    if config:
+        loaded_config.update(config)
 
-    _name_or_path = tokenizer_name or config.get("_name_or_path", None)
+    _name_or_path = tokenizer_name or loaded_config.get("_name_or_path", None)
 
     if _name_or_path is not None:
         tokenizer_kwargs["from_tiktoken"] = False
