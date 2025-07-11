@@ -7,9 +7,23 @@ shared:
   - shared_ltx.yml
 
 components:
-  - !include shared:ltx/vae
-  - !include shared:ltx/text_encoder
-  - !include shared:ltx/scheduler
+  - type: text_encoder
+    name: "ltx/text_encoder"
+    base: "T5EncoderModel"
+    model_path: Lightricks/LTX-Video-0.9.7-dev/text_encoder
+    config_path: https://huggingface.co/Lightricks/LTX-Video-0.9.7-dev/resolve/main/text_encoder/config.json
+
+  - type: scheduler
+    base: "diffusers.FlowMatchEulerDiscreteScheduler"
+    config_path: https://huggingface.co/Lightricks/LTX-Video-0.9.7-dev/resolve/main/scheduler/scheduler_config.json
+  
+  - type: vae
+    base: "ltx"
+    model_path: Lightricks/LTX-Video-0.9.7-dev/vae
+    config_path: https://huggingface.co/Lightricks/LTX-Video-0.9.7-dev/resolve/main/vae/config.json
+    converter_kwargs:
+      version: "0.9.7"
+    tag: "ltx_0.9.7"
 
   - type: transformer
     base: "ltx.base"
@@ -23,10 +37,13 @@ preprocessors: null
 defaults:
   run:
     num_inference_steps: 30
-    guidance_scale: 5.0
+    guidance_scale: 3.0
     return_latents: false
-    text_encoder_kwargs: {}
+    text_encoder_kwargs: 
+      max_sequence_length: 128
+      use_mask_in_input: false
+      pad_with_zero: false
+      clean_text: false
     guidance_rescale: 0.0
     offload: true
     render_on_step: false
-    generator: null

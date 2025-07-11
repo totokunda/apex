@@ -52,7 +52,7 @@ class LoaderMixin:
             return False
 
     def _fetch_url_config(self, url: str):
-        response = requests.get(url, timeout=10, verify=False, headers=DEFAULT_HEADERS)
+        response = requests.get(url, timeout=10, headers=DEFAULT_HEADERS)
         response.raise_for_status()
         if url.endswith((".yaml", ".json")):
             return response.json()

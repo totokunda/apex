@@ -87,48 +87,69 @@ class TextEncoder(torch.nn.Module):
         device: torch.device = None,
         batch_size: int = 1,
         return_attention_mask: bool = False,
+        use_mask_in_input: bool = True,
+        pad_with_zero: bool = True,
+        clean_text: bool = True,
     ):
         if isinstance(text, str):
             text = [text]
-        text = [self.prompt_clean(t) for t in text]
+        if clean_text:
+            text = [self.prompt_clean(t) for t in text]
+
         text_inputs = self.tokenizer(
             text,
             padding="max_length" if pad_to_max_length else "longest",
             max_length=max_sequence_length,
             truncation=True,
             add_special_tokens=True,
-            return_attention_mask=True,
             return_tensors="pt",
         )
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
-
-        prompt_embeds = self.model(
+        mask = mask.bool()
+        
+       
+        result  = self.model(
             text_input_ids.to(device=self.model.device),
-            mask.to(device=self.model.device),
-        ).last_hidden_state
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
-        prompt_embeds = torch.stack(
-            [
-                (
-                    torch.cat(
-                        [u, u.new_zeros(max_sequence_length - u.size(0), u.size(1))]
-                    )
-                    if pad_to_max_length
-                    else u
-                )
-                for u in prompt_embeds
-            ],
-            dim=0,
+            mask.to(device=self.model.device) if use_mask_in_input else None,
         )
-        # duplicate text embeddings for each generation per prompt, using mps friendly method
-        _, seq_len, _ = prompt_embeds.shape
-        prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
 
-        prompt_embeds = prompt_embeds.view(
-            batch_size * num_videos_per_prompt, seq_len, -1
-        )
+        prompt_embeds = result.last_hidden_state
+        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        
+        if pad_with_zero:
+            prompt_embeds = torch.cat([prompt_embeds, prompt_embeds.new_zeros(prompt_embeds.shape[0], 1, prompt_embeds.shape[1])], dim=1)
+            prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
+            prompt_embeds = torch.stack(
+                [
+                    (
+                        torch.cat(
+                            [u, u.new_zeros(max_sequence_length - u.size(0), u.size(1))]
+                        )
+                        if pad_to_max_length
+                        else u
+                    )
+                    for u in prompt_embeds
+                ],
+                dim=0,
+            )
+            # duplicate text embeddings for each generation per prompt, using mps friendly method
+            _, seq_len, _ = prompt_embeds.shape
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            mask = mask.repeat(1, num_videos_per_prompt)
+
+            prompt_embeds = prompt_embeds.view(
+                batch_size * num_videos_per_prompt, seq_len, -1
+            )
+        else:
+            _, seq_len, _ = prompt_embeds.shape
+            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            
+            prompt_embeds = prompt_embeds.view(
+                batch_size * num_videos_per_prompt, seq_len, -1
+            )
+            mask = mask.repeat(1, num_videos_per_prompt)
+            
         if return_attention_mask:
             return prompt_embeds, mask
         else:

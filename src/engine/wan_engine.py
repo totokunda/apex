@@ -383,8 +383,8 @@ class WanEngine(BaseEngine, WanDenoise):
         inactive = preprocessed_video * (1 - mask)
         reactive = preprocessed_video * mask
 
-        inactive = self.vae_encode(inactive, offload=offload, dtype=torch.float32)
-        reactive = self.vae_encode(reactive, offload=offload, dtype=torch.float32)
+        inactive = self.vae_encode(inactive, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32)
+        reactive = self.vae_encode(reactive, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32)
 
         latents = torch.cat([inactive, reactive], dim=1)
 
@@ -399,7 +399,7 @@ class WanEngine(BaseEngine, WanDenoise):
                     None, :, None, :, :
                 ]  # [1, C, 1, H, W]
                 reference_latent = self.vae_encode(
-                    reference_image, offload=offload, dtype=torch.float32
+                    reference_image, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32
                 )
                 reference_latent = reference_latent.squeeze(0)  # [C, 1, H, W]
                 reference_latent = torch.cat(
@@ -638,7 +638,7 @@ class WanEngine(BaseEngine, WanDenoise):
         )
 
         latent_condition = self.vae_encode(
-            video_condition, offload=offload, dtype=latents.dtype
+            video_condition, offload=offload, dtype=latents.dtype, normalize_latents_dtype=latents.dtype
         )
         batch_size, _, _, latent_height, latent_width = latents.shape
 
@@ -845,7 +845,7 @@ class WanEngine(BaseEngine, WanDenoise):
         )
 
         latent_condition = self.vae_encode(
-            video_condition, offload=offload, sample_mode="mode", dtype=latents.dtype
+            video_condition, offload=offload, sample_mode="mode", dtype=latents.dtype, normalize_latents_dtype=latents.dtype
         )
 
         batch_size, _, _, latent_height, latent_width = latents.shape
@@ -988,7 +988,7 @@ class WanEngine(BaseEngine, WanDenoise):
             ).to(self.device, dtype=torch.float32)
 
             latent_image = self.vae_encode(
-                preprocessed_image.unsqueeze(2), offload=offload, sample_mode="mode"
+                preprocessed_image.unsqueeze(2), offload=offload, sample_mode="mode", normalize_latents_dtype=torch.float32
             )
             num_input_frames = latent_image.shape[2]
         elif video is not None:
@@ -997,7 +997,7 @@ class WanEngine(BaseEngine, WanDenoise):
                 loaded_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)
             latent_video = self.vae_encode(
-                preprocessed_video, offload=offload, sample_mode="mode"
+                preprocessed_video, offload=offload, sample_mode="mode", normalize_latents_dtype=torch.float32
             )
             num_input_frames = latent_video.shape[2]
 

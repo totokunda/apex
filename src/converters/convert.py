@@ -9,6 +9,7 @@ import glob
 from src.transformer_models.base import get_transformer
 from src.vae import get_vae
 from accelerate import init_empty_weights
+
 from src.converters.transformer_converters import (
     WanTransformerConverter,
     WanVaceTransformerConverter,
@@ -57,7 +58,6 @@ def get_vae_converter(vae_type: str, **additional_kwargs):
     else:
         raise ValueError(f"VAE type {vae_type} not supported")
 
-
 def load_safetensors(dir: pathlib.Path):
     """Load a sharded safetensors file."""
     # load all shards
@@ -101,7 +101,6 @@ def is_safetensors_file(file_path: str):
         return True
     except Exception:
         return False
-
 
 def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None = None):
     pt_extensions = tuple(["pt", "bin", "pth"])
@@ -159,6 +158,8 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
 
     return state_dict
 
+
+
 def convert_transformer(
     model_tag: str,
     model_type: str,
@@ -169,6 +170,7 @@ def convert_transformer(
 ):
 
     config = get_transformer_config(model_tag, config_path=transformer_converter_kwargs.get("config_path", None))
+    
     model_class = get_model_class(model_type, config, model_type="transformer_models")
 
     converter = get_transformer_converter(model_type)
@@ -198,9 +200,10 @@ def convert_vae(
 
     converter = get_vae_converter(vae_type, **vae_converter_kwargs)
     state_dict = load_state_dict(ckpt_path, model_key, pattern)
+    
 
     model = get_empty_model(model_class, config)
-
+    
     converter.convert(state_dict)
 
     state_dict = strip_common_prefix(state_dict, model.state_dict())
@@ -209,18 +212,19 @@ def convert_vae(
 
     return model
 
-def get_transformer_keys(model_type: str):
+def get_transformer_keys(model_type: str, model_tag: str, transformer_converter_kwargs: dict):
     transformer = get_transformer(model_type)
-    with init_empty_weights():
-        model = transformer()
+    config = get_transformer_config(model_tag, config_path=transformer_converter_kwargs.get("config_path", None))
+    model_class = get_model_class(model_type, config, model_type="transformer_models")
+    model = get_empty_model(model_class, config)
     return model.state_dict().keys()
 
-def get_vae_keys(vae_type: str):
+def get_vae_keys(vae_type: str, vae_tag: str, vae_converter_kwargs: dict):
     if vae_type != "ltx":
         return []
     model_class = get_vae(vae_type)
-    with init_empty_weights():
-        model = model_class()
+    config = get_vae_config(vae_tag, config_path=vae_converter_kwargs.get("config_path", None))
+    model = get_empty_model(model_class, config)
     return model.state_dict().keys()
 
 if __name__ == "__main__":
