@@ -22,7 +22,7 @@ from src.utils.dtype_utils import select_ideal_dtypes
 from src.attention import attention_register
 from src.utils.cache_utils import empty_cache
 from logging import Logger
-from src.preprocess import CLIPPreprocessor
+from src.preprocess import CLIPPreprocessor, CameraPreprocessor
 from typing import Callable
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -217,7 +217,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.scheduler = self._load_component(component)
 
     def load_vae(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
-        component["model_path"] = self._check_convert_model_path(component)
+        component["model_path"], is_converted = self._check_convert_model_path(component)
+        if is_converted:
+            component["config_path"] = os.path.join(component["model_path"], "config.json")
         
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
@@ -276,7 +278,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_transformer(
         self, component: Dict[str, Any], load_dtype: torch.dtype | None
     ):
-        component["model_path"] = self._check_convert_model_path(component)
+        component["model_path"], is_converted = self._check_convert_model_path(component)
+        if is_converted:
+            component["config_path"] = os.path.join(component["model_path"], "config.json")
         
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
@@ -349,11 +353,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             # check base directory
             if os.path.isdir(os.path.dirname(model_path)):
                 if os.path.isdir(os.path.join(os.path.dirname(model_path), component_type)):
-                    return os.path.join(os.path.dirname(model_path), component_type)
+                    return os.path.join(os.path.dirname(model_path), component_type), True
         elif os.path.isdir(model_path):
             if os.path.isdir(os.path.join(model_path, component_type)):
-                return os.path.join(model_path, component_type)
-        return model_path
+                return os.path.join(model_path, component_type), True
+        return model_path, False
 
     def _check_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
@@ -532,6 +536,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         preprocessor_type = config.get("type")
         if preprocessor_type == "clip":
             return CLIPPreprocessor(**config)
+        elif preprocessor_type == "camera":
+            return CameraPreprocessor(**config)
         else:
             raise ValueError(f"Preprocessor type {preprocessor_type} not supported")
 

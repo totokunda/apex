@@ -1227,8 +1227,6 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
                 [*extra_conditioning_mask, conditioning_mask], dim=1
             )
 
-
-        
         latents = self.denoise(
             timesteps=timesteps,
             latents=latents,

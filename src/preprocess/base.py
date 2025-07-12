@@ -11,9 +11,10 @@ import PIL
 
 
 class BasePreprocessor(DownloadMixin, LoaderMixin, ToMixin, nn.Module):
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str = None, **kwargs):
         super().__init__()
         self.model_path = model_path
+        self.kwargs = kwargs
 
     def __call__(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement this method")

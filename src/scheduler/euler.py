@@ -1,7 +1,6 @@
 import torch
 from src.scheduler.scheduler import SchedulerInterface
 
-
 class FlowMatchScheduler(SchedulerInterface):
 
     def __init__(
@@ -79,7 +78,6 @@ class FlowMatchScheduler(SchedulerInterface):
         else:
             sigma_ = self.sigmas[timestep_id + 1].reshape(-1, 1, 1, 1)
 
-        print(sigma, sigma_)
         prev_sample = sample + model_output * (sigma_ - sigma)
         return (prev_sample,)
 

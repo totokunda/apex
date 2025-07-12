@@ -118,7 +118,6 @@ class TextEncoder(torch.nn.Module):
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
         
         if pad_with_zero:
-            prompt_embeds = torch.cat([prompt_embeds, prompt_embeds.new_zeros(prompt_embeds.shape[0], 1, prompt_embeds.shape[1])], dim=1)
             prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
             prompt_embeds = torch.stack(
                 [

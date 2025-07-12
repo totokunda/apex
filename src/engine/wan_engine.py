@@ -12,7 +12,7 @@ from typing import Union
 from src.mixins import OffloadMixin
 import torchvision.transforms.functional as TF
 from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
-
+from src.preprocess.camera import Camera
 
 class ModelType(Enum):
     VACE = "vace"  # vace
@@ -20,6 +20,7 @@ class ModelType(Enum):
     I2V = "i2v"  # image to video
     FFLF = "fflf"  # first frame last frame
     CAUSAL = "causal"  # causal
+    CAMERA = "camera"  # camera
 
 
 class WanEngine(BaseEngine, WanDenoise):
@@ -70,6 +71,8 @@ class WanEngine(BaseEngine, WanDenoise):
             return self.fflf_run(**final_kwargs)
         elif self.model_type == ModelType.CAUSAL:
             return self.causal_run(**final_kwargs)
+        elif self.model_type == ModelType.CAMERA:
+            return self.camera_run(**final_kwargs)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
@@ -1294,12 +1297,314 @@ class WanEngine(BaseEngine, WanDenoise):
             postprocessed_video = self._postprocess(video)
             return postprocessed_video
 
+
+    def _prepare_camera_control_latents(
+        self, control, dtype=torch.float32, generator:torch.Generator | None = None
+    ):
+        # resize the control to latents shape as we concatenate the control to the latents
+        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
+        # and half precision
+
+        control = control.to(device=self.device, dtype=dtype)
+        bs = 1
+        new_control = []
+        for i in range(0, control.shape[0], bs):
+            control_bs = control[i : i + bs]
+            control_bs = self.vae_encode(control_bs, sample_generator=generator, normalize_latents_dtype=dtype)
+            new_control.append(control_bs)
+        control = torch.cat(new_control, dim = 0)
+
+        return control
+    
+    def camera_run(
+        self,
+        reference_image: Union[
+            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
+        start_image: Union[
+            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
+        video: Union[
+            List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
+        camera_poses: Union[
+            List[float], str, List[Camera], Camera, None
+        ] = None,
+        subject_reference_images: Union[
+            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
+        prompt: List[str] | str = None,
+        negative_prompt: List[str] | str = None,
+        duration: int | str = 16,
+        height: int = 480,
+        width: int = 832,
+        num_inference_steps: int = 30,
+        num_videos: int = 1,
+        seed: int | None = None,
+        fps: int = 16,
+        guidance_scale: float = 5.0,
+        use_cfg_guidance: bool = True,
+        return_latents: bool = False,
+        text_encoder_kwargs: Dict[str, Any] = {},
+        attention_kwargs: Dict[str, Any] = {},
+        render_on_step_callback: Callable = None,
+        generator: torch.Generator | None = None,
+        offload: bool = True,
+        render_on_step: bool = False,
+        timesteps: List[int] | None = None,
+        timesteps_as_indices: bool = True,
+    ):
+
+        if not self.text_encoder:
+            self.load_component_by_type("text_encoder")
+
+        self.to_device(self.text_encoder)
+
+        prompt_embeds = self.text_encoder.encode(
+            prompt,
+            device=self.device,
+            num_videos_per_prompt=num_videos,
+            **text_encoder_kwargs,
+        )
+
+        if negative_prompt is not None and use_cfg_guidance:
+            negative_prompt_embeds = self.text_encoder.encode(
+                negative_prompt,
+                device=self.device,
+                num_videos_per_prompt=num_videos,
+                **text_encoder_kwargs,
+            )
+        else:
+            negative_prompt_embeds = None
+
+        if offload:
+            self._offload(self.text_encoder)
+
+        if not self.preprocessors or "clip" not in self.preprocessors:
+            self.load_preprocessor_by_type("clip")
+
+        self.to_device(self.preprocessors["clip"])
+        
+        
+        
+        
+        if start_image is not None:
+            loaded_image = self._load_image(start_image)
+
+            loaded_image, height, width = self._aspect_ratio_resize(
+                loaded_image, max_area=height * width
+            )
+            preprocessed_image = self.video_processor.preprocess(
+                loaded_image, height=height, width=width
+            ).to(self.device, dtype=torch.float32).unsqueeze(2)
+            
+            start_image_latents = self._prepare_camera_control_latents(
+                preprocessed_image, dtype=torch.float32, generator=generator
+            )
+            
+            print(start_image_latents.shape)
+           
+        
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+
+        transformer_dtype = self.component_dtypes["transformer"]
+
+        self.to_device(self.transformer)
+        
+        latents = self._get_latents(
+            height,
+            width,
+            duration,
+            fps=fps,
+            num_videos=num_videos,
+            seed=seed,
+            dtype=torch.float32,
+            generator=generator,
+        )
+        
+        if start_image is not None:
+            start_image_latents_in = torch.zeros_like(latents)
+            if start_image_latents_in.shape[2] > 1:
+                start_image_latents_in[:, :, :1] = start_image_latents
+        else:
+            preprocessed_image = None
+            start_image_latents = None
+            start_image_latents_in = torch.zeros_like(latents)
+            
+        if camera_poses is not None:
+            control_latents = None
+            if isinstance(camera_poses, Camera):
+                camera_poses = [camera_poses]
+            camera_preprocessor = self.preprocessors["camera"]
+            control_camera_video = camera_preprocessor(camera_poses, H=height, W=width, device=self.device)
+            control_camera_latents = torch.concat(
+                [
+                    torch.repeat_interleave(control_camera_video[:, :, 0:1], repeats=4, dim=2),
+                    control_camera_video[:, :, 1:]
+                ], dim=2
+            ).transpose(1, 2)
+            
+            # Reshape, transpose, and view into desired shape
+            b, f, c, h, w = control_camera_latents.shape
+            control_camera_latents = control_camera_latents.contiguous().view(b, f // 4, 4, c, h, w).transpose(2, 3)
+            control_camera_latents = control_camera_latents.contiguous().view(b, f // 4, c * 4, h, w).transpose(1, 2)
+        
+        elif video is not None:
+            pt, ph, pw = self.transformer.config.patch_size
+            loaded_video = self._load_video(video)
+            video_height, video_width = self.video_processor.get_default_height_width(
+                loaded_video[0]
+            )
+            base = self.vae_scale_factor_spatial * ph
+            if video_height * video_width > height * width:
+                scale = min(width / video_width, height / video_height)
+                video_height, video_width = int(video_height * scale), int(
+                    video_width * scale
+                )
+
+            if video_height % base != 0 or video_width % base != 0:
+                video_height = (video_height // base) * base
+                video_width = (video_width // base) * base
+
+            assert video_height * video_width <= height * width
+
+            preprocessed_video = self.video_processor.preprocess_video(
+                loaded_video, video_height, video_width
+            )
+            control_latents = self._prepare_camera_control_latents(
+                preprocessed_video, dtype=torch.float32, generator=generator
+            )
+            control_camera_latents = None
+        else:
+            control_latents = torch.zeros_like(latents)
+            control_camera_latents = None
+            
+        if reference_image is not None and self.transformer.config.get("add_ref_control", False):
+            loaded_image = self._load_image(reference_image)
+            loaded_image, height, width = self._aspect_ratio_resize(
+                loaded_image, max_area=height * width
+            )
+            preprocessed_image = self.video_processor.preprocess(
+                loaded_image, height=height, width=width
+            ).to(self.device, dtype=torch.float32).unsqueeze(2)
+            
+            reference_image_latents = self._prepare_camera_control_latents(
+                preprocessed_image, dtype=torch.float32, generator=generator
+            )
+        else:
+            reference_image_latents = torch.zeros_like(latents)[:, :, :1]
+            
+        if subject_reference_images is not None:
+            subject_reference_image_latents = []
+            for image in subject_reference_images:
+                loaded_image = self._load_image(image)
+                loaded_image, height, width = self._aspect_ratio_resize(
+                    loaded_image, max_area=height * width
+                )
+                preprocessed_image = self.video_processor.preprocess(
+                    loaded_image, height=height, width=width
+                ).to(self.device, dtype=torch.float32).unsqueeze(2)
+                subject_reference_image_latent = self._prepare_camera_control_latents(
+                    preprocessed_image, dtype=torch.float32, generator=generator
+                )
+                subject_reference_image_latents.append(subject_reference_image_latent)
+            subject_reference_image_latents = torch.cat(subject_reference_image_latents, dim=2)
+        else:
+            subject_reference_image_latents = None
+        
+        if reference_image is not None:
+            clip_image = reference_image
+        elif start_image is not None:
+            clip_image = start_image
+        
+        if clip_image is not None:
+            loaded_image = self._load_image(clip_image)
+            loaded_image, height, width = self._aspect_ratio_resize(
+                loaded_image, max_area=height * width
+            )
+            image_embeds = self.preprocessors["clip"](
+                loaded_image, hidden_states_layer=-2
+            ).to(self.device, dtype=transformer_dtype)
+        else:
+            image_embeds = None
+            
+        prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
+
+        if negative_prompt_embeds is not None:
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
+
+        if offload:
+            self._offload(self.preprocessors["clip"])
+
+        if not self.scheduler:
+            self.load_component_by_type("scheduler")
+        self.to_device(self.scheduler)
+
+        scheduler = self.scheduler
+        scheduler.set_timesteps(
+            num_inference_steps if timesteps is None else 1000, device=self.device
+        )
+        
+        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        
+        if control_latents is not None:
+            control_latents = torch.concat([
+                control_latents,
+                start_image_latents_in,
+            ], dim=1)
+        else:
+            control_latents = start_image_latents_in
+        
+        latents = self.denoise(
+            timesteps=timesteps,
+            latents=latents,
+            latent_condition=control_latents,
+            transformer_kwargs=dict(
+                encoder_hidden_states=prompt_embeds,
+                encoder_hidden_states_image=image_embeds,
+                encoder_hidden_states_camera=control_camera_latents.to(transformer_dtype) if control_camera_latents is not None else None,
+                encoder_hidden_states_full_ref=reference_image_latents.to(transformer_dtype) if reference_image_latents is not None else None,
+                encoder_hidden_states_subject_ref=subject_reference_image_latents.to(transformer_dtype) if subject_reference_image_latents is not None else None,
+                attention_kwargs=attention_kwargs,
+            ),
+            unconditional_transformer_kwargs=(
+                dict(
+                    encoder_hidden_states=negative_prompt_embeds,
+                    encoder_hidden_states_image=image_embeds,
+                    encoder_hidden_states_camera=control_camera_latents.to(transformer_dtype) if control_camera_latents is not None else None,
+                    encoder_hidden_states_full_ref=reference_image_latents.to(transformer_dtype) if reference_image_latents is not None else None,
+                    encoder_hidden_states_subject_ref=subject_reference_image_latents.to(transformer_dtype) if subject_reference_image_latents is not None else None,
+                    attention_kwargs=attention_kwargs,
+                )
+                if negative_prompt_embeds is not None
+                else None
+            ),
+            transformer_dtype=transformer_dtype,
+            use_cfg_guidance=use_cfg_guidance,
+            render_on_step=render_on_step,
+            render_on_step_callback=render_on_step_callback,
+            scheduler=scheduler,
+            guidance_scale=guidance_scale,
+        )
+
+        if offload:
+            self._offload(self.transformer)
+
+        if return_latents:
+            return latents
+        else:
+            video = self.vae_decode(latents, offload=offload)
+            postprocessed_video = self._postprocess(video)
+            return postprocessed_video
+
     def __str__(self):
         return f"WanEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
         return self.__str__()
-
 
 if __name__ == "__main__":
     from diffusers.utils import export_to_video
