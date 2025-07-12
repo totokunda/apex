@@ -32,7 +32,7 @@ from src.converters.utils import (
 from src.converters.vae_converters import LTXVAEConverter
 
 def get_transformer_converter(model_type: str):
-    if model_type == "wan.base" or model_type == "wan.causal":
+    if model_type == "wan.base" or model_type == "wan.causal" or model_type == "wan.fun":
         return WanTransformerConverter()
     elif model_type == "wan.vace":
         return WanVaceTransformerConverter()
@@ -213,7 +213,6 @@ def convert_vae(
     return model
 
 def get_transformer_keys(model_type: str, model_tag: str, transformer_converter_kwargs: dict):
-    transformer = get_transformer(model_type)
     config = get_transformer_config(model_tag, config_path=transformer_converter_kwargs.get("config_path", None))
     model_class = get_model_class(model_type, config, model_type="transformer_models")
     model = get_empty_model(model_class, config)
