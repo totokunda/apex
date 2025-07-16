@@ -20,6 +20,7 @@ class VAEConverter:
                     continue
                 handler_fn_inplace(key, state_dict)
 
+
 class LTXVAEConverter(VAEConverter):
     def __init__(self, version: str | None = None):
         super().__init__()
@@ -99,7 +100,7 @@ class LTXVAEConverter(VAEConverter):
                 # common
                 "last_time_embedder": "time_embedder",
                 "last_scale_shift_table": "scale_shift_table",
-            }
+            },
         }
 
         additional_rename_dict["0.9.7"] = additional_rename_dict["0.9.5"].copy()

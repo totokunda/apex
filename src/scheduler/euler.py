@@ -1,6 +1,7 @@
 import torch
 from src.scheduler.scheduler import SchedulerInterface
 
+
 class FlowMatchScheduler(SchedulerInterface):
 
     def __init__(

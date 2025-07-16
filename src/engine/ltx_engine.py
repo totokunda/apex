@@ -17,86 +17,11 @@ from diffusers.utils.torch_utils import randn_tensor
 import inspect
 from src.mixins.loader_mixin import LoaderMixin
 
+
 class ModelType(Enum):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     CONTROL = "control"
-
-def calculate_shift(
-    image_seq_len,
-    base_seq_len: int = 256,
-    max_seq_len: int = 4096,
-    base_shift: float = 0.5,
-    max_shift: float = 1.15,
-):
-    m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
-    b = base_shift - m * base_seq_len
-    mu = image_seq_len * m + b
-    return mu
-
-
-def retrieve_timesteps(
-    scheduler,
-    num_inference_steps: Optional[int] = None,
-    device: Optional[Union[str, torch.device]] = None,
-    timesteps: Optional[List[int]] = None,
-    sigmas: Optional[List[float]] = None,
-    **kwargs,
-):
-    r"""
-    Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
-    custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
-
-    Args:
-        scheduler (`SchedulerMixin`):
-            The scheduler to get timesteps from.
-        num_inference_steps (`int`):
-            The number of diffusion steps used when generating samples with a pre-trained model. If used, `timesteps`
-            must be `None`.
-        device (`str` or `torch.device`, *optional*):
-            The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
-        timesteps (`List[int]`, *optional*):
-            Custom timesteps used to override the timestep spacing strategy of the scheduler. If `timesteps` is passed,
-            `num_inference_steps` and `sigmas` must be `None`.
-        sigmas (`List[float]`, *optional*):
-            Custom sigmas used to override the timestep spacing strategy of the scheduler. If `sigmas` is passed,
-            `num_inference_steps` and `timesteps` must be `None`.
-
-    Returns:
-        `Tuple[torch.Tensor, int]`: A tuple where the first element is the timestep schedule from the scheduler and the
-        second element is the number of inference steps.
-    """
-    if timesteps is not None and sigmas is not None:
-        raise ValueError(
-            "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
-        )
-    if timesteps is not None:
-        accepts_timesteps = "timesteps" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys()
-        )
-        if not accepts_timesteps:
-            raise ValueError(
-                f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
-                f" timestep schedules. Please check whether you are using the correct scheduler."
-            )
-        scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-        num_inference_steps = len(timesteps)
-    elif sigmas is not None:
-        accept_sigmas = "sigmas" in set(
-            inspect.signature(scheduler.set_timesteps).parameters.keys()
-        )
-        if not accept_sigmas:
-            scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
-            timesteps = scheduler.timesteps
-        else:
-            scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
-            timesteps = scheduler.timesteps
-            num_inference_steps = len(timesteps)
-    else:
-        scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
-        timesteps = scheduler.timesteps
-    return timesteps, num_inference_steps
 
 
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
@@ -249,7 +174,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
                 generator = torch.Generator(device=device).manual_seed(seed)
         else:
             device = generator.device
-        
+
         noise = torch.randn(
             (
                 num_videos,
@@ -434,6 +359,8 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         decode_timestep: Union[float, List[float]] = 0.0,
         decode_noise_scale: Optional[Union[float, List[float]]] = None,
         dtype: torch.dtype = None,
+        upsample_latents: bool = False,
+        upsample_kwargs: Dict[str, Any] = None,
     ):
         latents = self._unpack_latents(
             latents,
@@ -448,11 +375,15 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             self._offload(self.transformer)
 
         batch_size = latents.shape[0]
-        
+
         if not self.vae:
             self.load_component_by_type("vae")
 
         self.to_device(self.vae)
+
+        if upsample_latents:
+            latents = self.upsample_latents(latents, **upsample_kwargs)
+
         latents = self.vae.denormalize_latents(latents)
 
         latents = latents.to(dtype)
@@ -483,7 +414,6 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             )[:, None, None, None, None]
             latents = (1 - decode_noise_scale) * latents + decode_noise_scale * noise
 
-        latents = latents.to(self.vae.dtype)
         decoded_video = self.vae.decode(latents, timestep, return_dict=False)[0]
         video = self._postprocess(decoded_video)
 
@@ -491,6 +421,13 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             self._offload(self.vae)
 
         return video
+
+    def upsample_latents(self, latents: torch.Tensor, **kwargs):
+        if "latent_upsampler" not in self.postprocessors:
+            self.load_postprocessor_by_type("latent_upsampler")
+        self.to_device(self.postprocessors["latent_upsampler"])
+        latents = self.postprocessors["latent_upsampler"](latents, **kwargs)
+        return latents
 
     def t2v_run(
         self,
@@ -519,11 +456,12 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         **kwargs,
     ):
 
+        postprocessor_kwargs = kwargs.get("postprocessor_kwargs", None)
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
 
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
             prompt,
@@ -532,7 +470,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
-        
+
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds, negative_prompt_attention_mask = (
                 self.text_encoder.encode(
@@ -547,13 +485,13 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             negative_prompt_embeds, negative_prompt_attention_mask = torch.zeros_like(
                 prompt_embeds
             ), torch.zeros_like(prompt_attention_mask)
-        
+
         if use_cfg_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask], dim=0
             )
-        
+
         if offload:
             self._offload(self.text_encoder)
 
@@ -575,7 +513,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             generator=generator,
             return_generator=True,
         )
-        
+
         latents = self._pack_latents(
             latents,
             self.transformer_spatial_patch_size,
@@ -596,8 +534,8 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         video_sequence_length = latent_num_frames * latent_height * latent_width
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
-        
-        mu = calculate_shift(
+
+        mu = self._calculate_shift(
             video_sequence_length,
             scheduler.config.get("base_image_seq_len", 256),
             scheduler.config.get("max_image_seq_len", 4096),
@@ -605,7 +543,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             scheduler.config.get("max_shift", 1.15),
         )
 
-        timesteps, num_inference_steps = retrieve_timesteps(
+        timesteps, num_inference_steps = self._get_timesteps(
             scheduler,
             num_inference_steps=num_inference_steps,
             device=self.device,
@@ -615,9 +553,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         )
 
         prompt_embeds = prompt_embeds.to(device=self.device, dtype=transformer_dtype)
-        prompt_attention_mask = prompt_attention_mask.to(
-            device=self.device
-        )
+        prompt_attention_mask = prompt_attention_mask.to(device=self.device)
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * scheduler.order, 0
@@ -667,6 +603,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             decode_timestep=decode_timestep,
             decode_noise_scale=decode_noise_scale,
             dtype=prompt_embeds.dtype,
+            postprocessor_kwargs=postprocessor_kwargs,
         )
 
     def i2v_run(
@@ -696,15 +633,18 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         decode_noise_scale: Optional[Union[float, List[float]]] = None,
         **kwargs,
     ):
+        postprocessor_kwargs = kwargs.get("postprocessor_kwargs", None)
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
+
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
         elif seed is not None and generator is not None:
-            self.logger.warning("Both seed and generator are provided. Ignoring seed and using generator.")
+            self.logger.warning(
+                "Both seed and generator are provided. Ignoring seed and using generator."
+            )
             seed = None
 
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
@@ -730,7 +670,6 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
                 prompt_embeds
             ), torch.zeros_like(prompt_attention_mask)
 
-
         if use_cfg_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat(
@@ -749,8 +688,12 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         if image is not None:
             loaded_image = self._load_image(image)
             # make height divisible by vae_scale_factor_spatial
-            height = height // self.vae_scale_factor_spatial * self.vae_scale_factor_spatial
-            width = width // self.vae_scale_factor_spatial * self.vae_scale_factor_spatial
+            height = (
+                height // self.vae_scale_factor_spatial * self.vae_scale_factor_spatial
+            )
+            width = (
+                width // self.vae_scale_factor_spatial * self.vae_scale_factor_spatial
+            )
 
             prepocessed_image = self.video_processor.preprocess(
                 loaded_image, height=height, width=width
@@ -758,18 +701,22 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             prepocessed_image = prepocessed_image.to(
                 device=self.device, dtype=transformer_dtype
             ).unsqueeze(2)
-        
+
         num_frames = self._parse_num_frames(duration, fps)
         latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
         video_sequence_length = latent_num_frames * latent_height * latent_width
         batch_size = num_videos
-        
+
         init_latents = self.vae_encode(
-            prepocessed_image, sample_generator=generator, sample_mode="sample", dtype=torch.float32, offload=offload
+            prepocessed_image,
+            sample_generator=generator,
+            sample_mode="sample",
+            dtype=torch.float32,
+            offload=offload,
         ).repeat(1, 1, latent_num_frames, 1, 1)
-        
+
         conditioning_mask = torch.zeros(
             batch_size,
             1,
@@ -779,9 +726,9 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             device=self.device,
             dtype=torch.float32,
         )
-        
+
         conditioning_mask[:, :, 0] = 1.0
-        
+
         noise_latents = self._get_latents(
             height=height,
             width=width,
@@ -793,12 +740,11 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             generator=generator,
             parse_frames=False,
         )
-        
 
         latents = init_latents * conditioning_mask + noise_latents * (
             1 - conditioning_mask
         )
-        
+
         conditioning_mask = self._pack_latents(
             conditioning_mask,
             self.transformer_spatial_patch_size,
@@ -812,22 +758,20 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         )
 
         prompt_embeds = prompt_embeds.to(device=self.device, dtype=transformer_dtype)
-        prompt_attention_mask = prompt_attention_mask.to(
-            device=self.device
-        )
-        
+        prompt_attention_mask = prompt_attention_mask.to(device=self.device)
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
-        
+
         self.to_device(self.scheduler)
-            
+
         scheduler = self.scheduler
-        
+
         if use_cfg_guidance:
             conditioning_mask = torch.cat([conditioning_mask, conditioning_mask])
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
-        mu = calculate_shift(
+        mu = self._calculate_shift(
             video_sequence_length,
             scheduler.config.get("base_image_seq_len", 256),
             scheduler.config.get("max_image_seq_len", 4096),
@@ -835,19 +779,19 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             scheduler.config.get("max_shift", 1.15),
         )
 
-        timesteps, num_inference_steps = retrieve_timesteps(
+        timesteps, num_inference_steps = self._get_timesteps(
             scheduler,
             num_inference_steps,
             self.device,
             timesteps,
-            mu=mu,  
+            mu=mu,
             sigmas=sigmas if not timesteps else None,
         )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * scheduler.order, 0
         )
-        
+
         # 6. Prepare micro-conditions
         rope_interpolation_scale = (
             self.vae_scale_factor_temporal / fps,
@@ -892,6 +836,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             generator=generator,
             decode_timestep=decode_timestep,
             decode_noise_scale=decode_noise_scale,
+            postprocessor_kwargs=postprocessor_kwargs,
         )
 
     def control_run(
@@ -942,13 +887,14 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
         generator: torch.Generator | None = None,
         **kwargs,
     ):
+        postprocessor_kwargs = kwargs.get("postprocessor_kwargs", None)
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        text_encoder_kwargs['max_sequence_length'] = 256
-        text_encoder_kwargs['use_mask_in_input'] = True
+        text_encoder_kwargs["max_sequence_length"] = 256
+        text_encoder_kwargs["use_mask_in_input"] = True
 
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
             prompt,
@@ -1063,17 +1009,21 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
         scheduler = self.scheduler
-        
+
         prompt_embeds = prompt_embeds.to(device=self.device, dtype=transformer_dtype)
         prompt_attention_mask = prompt_attention_mask.to(device=self.device)
 
         if timesteps is None:
             sigmas = linear_quadratic_schedule(num_inference_steps)
             timesteps = sigmas * 1000
-        timesteps, num_inference_steps = retrieve_timesteps(
-            scheduler, num_inference_steps, self.device, timesteps
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            num_inference_steps=num_inference_steps,
+            device=self.device,
+            timesteps=timesteps,
+            sigmas=sigmas if not timesteps else None,
         )
-        
+
         sigmas = scheduler.sigmas
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * scheduler.order, 0
@@ -1091,7 +1041,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         if len(conditioning_tensors) > 0:
             condition_latent_frames_mask = torch.zeros(
                 (batch_size, latent_num_frames), device=self.device, dtype=torch.float32
@@ -1105,7 +1055,13 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             for data, strength, frame_index in zip(
                 conditioning_tensors, strength, frame_index
             ):
-                condition_latents = self.vae_encode(data, sample_generator=generator, offload=offload, sample_mode="sample", dtype=torch.float32)
+                condition_latents = self.vae_encode(
+                    data,
+                    sample_generator=generator,
+                    offload=offload,
+                    sample_mode="sample",
+                    dtype=torch.float32,
+                )
                 num_data_frames = data.size(2)
                 num_cond_frames = condition_latents.size(2)
                 if frame_index == 0:
@@ -1187,7 +1143,7 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             patch_size=self.transformer_spatial_patch_size,
             device=self.device,
         )
-        
+
         if len(conditioning_tensors) > 0:
             conditioning_mask = condition_latent_frames_mask.gather(1, video_ids[:, 0])
         else:
@@ -1206,18 +1162,20 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             self.transformer_spatial_patch_size,
             self.transformer_temporal_patch_size,
         )
-        
+
         if len(conditioning_tensors) > 0 and len(extra_conditioning_latents) > 0:
             latents = torch.cat([*extra_conditioning_latents, latents], dim=1)
             video_ids = torch.cat([*extra_conditioning_video_ids, video_ids], dim=2)
-            conditioning_mask = torch.cat([*extra_conditioning_mask, conditioning_mask], dim=1)
-        
+            conditioning_mask = torch.cat(
+                [*extra_conditioning_mask, conditioning_mask], dim=1
+            )
+
         video_ids = video_ids.float()
         video_ids[:, 0] = video_ids[:, 0] * (1.0 / fps)
-        
+
         if use_cfg_guidance:
             video_ids = torch.cat([video_ids, video_ids], dim=0)
-        
+
         init_latents = latents.clone() if is_conditioning_image_or_video else None
 
         if len(conditioning_tensors) > 0 and len(extra_conditioning_latents) > 0:
@@ -1265,7 +1223,9 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             generator=generator,
             decode_timestep=decode_timestep,
             decode_noise_scale=decode_noise_scale,
+            postprocessor_kwargs=postprocessor_kwargs,
         )
+
 
 if __name__ == "__main__":
     from diffusers.utils import export_to_video
@@ -1273,35 +1233,31 @@ if __name__ == "__main__":
 
     engine = LTXEngine(
         yaml_path="manifest/ltx_x2v_13b.yml",
-        model_type=ModelType.CONTROL,
-        save_path="/mnt/localssd",  # Change this to your desired save path
-        components_to_load=["transformer", "vae"]
+        model_type=ModelType.T2V,
+        save_path="/tmp/apex_models",  # Change this to your desired save path
+        components_to_load=["transformer", "vae", "text_encoder", "scheduler"],
+        postprocessors_to_load=["latent_upscaler"],
     )
 
-    image = Image.open('/path/to/image.jpg')
-    prompt="A quiet, romantic indoor scene. A couple stands close together in a softly lit white room, their bodies turned inward, lost in each other. The woman gently places her arms around the man’s shoulders, while he wraps his arms around her waist. Slowly, they lean in and share a tender kiss. The camera circles around them as they embrace, highlighting the subtle shifts in their posture and the stillness of the moment. Her long hair moves softly as they kiss, and their connection is intimate, warm, and calm. Time seems to pause. As the kiss gently fades, they remain close—foreheads touching, eyes closed, smiling softly—surrounded by silence, affection, and peace."
-    negative_prompt="worst quality, inconsistent motion, blurry, jittery, distorted"
+    prompt = "A majestic lion basking in the golden hour sun"
+    negative_prompt = "worst quality, inconsistent motion, blurry, jittery, distorted"
 
     height = 480
     width = 832
     print(f"height: {height}, width: {width}")
 
-    conditions = [
-        LTXVideoCondition(image=image, strength=1.0, frame_index=0)
-    ]
-
     video = engine.run(
-        conditions=conditions,
         height=height,
         width=width,
         prompt=prompt,
         negative_prompt=negative_prompt,
         use_cfg_guidance=True,
-        duration="121f",
+        duration="25f",
         num_videos=1,
         guidance_scale=3.0,
         num_inference_steps=30,
         generator=torch.Generator(device="cuda").manual_seed(42),
+        postprocessor_kwargs={"adain_factor": 0.5},
     )
 
-    export_to_video(video[0], "control_ltx2v.mp4", fps=24, quality=8)
+    export_to_video(video[0], "t2v_ltx2v_upscaled.mp4", fps=24, quality=8)

@@ -1697,9 +1697,7 @@ class AutoencoderKLLTXVideo(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         return DecoderOutput(sample=dec)
 
-    def normalize_latents(
-        self, latents: torch.Tensor
-    ) -> torch.Tensor:
+    def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         latents_mean = self.latents_mean.view(1, -1, 1, 1, 1).to(
             latents.device, latents.dtype
         )
@@ -1710,9 +1708,7 @@ class AutoencoderKLLTXVideo(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         latents = (latents - latents_mean) * scaling_factor / latents_std
         return latents
 
-    def denormalize_latents(
-        self, latents: torch.Tensor
-    ) -> torch.Tensor:
+    def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         latents_mean = self.latents_mean.view(1, -1, 1, 1, 1).to(
             latents.device, latents.dtype
         )

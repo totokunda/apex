@@ -239,8 +239,14 @@ class LoaderMixin:
         component = component_class(**config)
 
         return component
-    
-    def save_component(self, component: Any, model_path: str, component_type: str, **save_kwargs: Dict[str, Any]):
+
+    def save_component(
+        self,
+        component: Any,
+        model_path: str,
+        component_type: str,
+        **save_kwargs: Dict[str, Any],
+    ):
         if component_type == "transformer":
             if issubclass(type(component), ModelMixin):
                 component.save_pretrained(model_path, **save_kwargs)

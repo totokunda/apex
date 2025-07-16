@@ -12,7 +12,9 @@ from typing import Union
 from src.mixins import OffloadMixin
 import torchvision.transforms.functional as TF
 from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
-from src.preprocess.camera import Camera
+from src.preprocess.base.camera import Camera
+import torch.nn.functional as F
+
 
 class ModelType(Enum):
     VACE = "vace"  # vace
@@ -20,7 +22,7 @@ class ModelType(Enum):
     I2V = "i2v"  # image to video
     FFLF = "fflf"  # first frame last frame
     CAUSAL = "causal"  # causal
-    CAMERA = "camera"  # camera
+    FUN = "fun"  # fun
 
 
 class WanEngine(BaseEngine, WanDenoise):
@@ -71,8 +73,8 @@ class WanEngine(BaseEngine, WanDenoise):
             return self.fflf_run(**final_kwargs)
         elif self.model_type == ModelType.CAUSAL:
             return self.causal_run(**final_kwargs)
-        elif self.model_type == ModelType.CAMERA:
-            return self.camera_run(**final_kwargs)
+        elif self.model_type == ModelType.FUN:
+            return self.fun_run(**final_kwargs)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
@@ -144,7 +146,12 @@ class WanEngine(BaseEngine, WanDenoise):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
 
         latents = self._get_latents(
             height,
@@ -264,7 +271,12 @@ class WanEngine(BaseEngine, WanDenoise):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
 
         loaded_video = self._load_video(video)
         if mask:
@@ -386,8 +398,18 @@ class WanEngine(BaseEngine, WanDenoise):
         inactive = preprocessed_video * (1 - mask)
         reactive = preprocessed_video * mask
 
-        inactive = self.vae_encode(inactive, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32)
-        reactive = self.vae_encode(reactive, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32)
+        inactive = self.vae_encode(
+            inactive,
+            offload=offload,
+            dtype=torch.float32,
+            normalize_latents_dtype=torch.float32,
+        )
+        reactive = self.vae_encode(
+            reactive,
+            offload=offload,
+            dtype=torch.float32,
+            normalize_latents_dtype=torch.float32,
+        )
 
         latents = torch.cat([inactive, reactive], dim=1)
 
@@ -402,7 +424,10 @@ class WanEngine(BaseEngine, WanDenoise):
                     None, :, None, :, :
                 ]  # [1, C, 1, H, W]
                 reference_latent = self.vae_encode(
-                    reference_image, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32
+                    reference_image,
+                    offload=offload,
+                    dtype=torch.float32,
+                    normalize_latents_dtype=torch.float32,
                 )
                 reference_latent = reference_latent.squeeze(0)  # [C, 1, H, W]
                 reference_latent = torch.cat(
@@ -434,7 +459,7 @@ class WanEngine(BaseEngine, WanDenoise):
             mask_ = mask_.permute(2, 4, 0, 1, 3).flatten(
                 0, 1
             )  # [8x8, num_frames, new_height, new_width]
-            mask_ = torch.nn.functional.interpolate(
+            mask_ = F.interpolate(
                 mask_.unsqueeze(0),
                 size=(new_num_frames, new_height, new_width),
                 mode="nearest-exact",
@@ -609,7 +634,12 @@ class WanEngine(BaseEngine, WanDenoise):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
         num_frames = self._parse_num_frames(duration, fps)
 
         latents = self._get_latents(
@@ -641,7 +671,10 @@ class WanEngine(BaseEngine, WanDenoise):
         )
 
         latent_condition = self.vae_encode(
-            video_condition, offload=offload, dtype=latents.dtype, normalize_latents_dtype=latents.dtype
+            video_condition,
+            offload=offload,
+            dtype=latents.dtype,
+            normalize_latents_dtype=latents.dtype,
         )
         batch_size, _, _, latent_height, latent_width = latents.shape
 
@@ -812,7 +845,12 @@ class WanEngine(BaseEngine, WanDenoise):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
         num_frames = self._parse_num_frames(duration, fps)
 
         latents = self._get_latents(
@@ -848,7 +886,11 @@ class WanEngine(BaseEngine, WanDenoise):
         )
 
         latent_condition = self.vae_encode(
-            video_condition, offload=offload, sample_mode="mode", dtype=latents.dtype, normalize_latents_dtype=latents.dtype
+            video_condition,
+            offload=offload,
+            sample_mode="mode",
+            dtype=latents.dtype,
+            normalize_latents_dtype=latents.dtype,
         )
 
         batch_size, _, _, latent_height, latent_width = latents.shape
@@ -991,7 +1033,10 @@ class WanEngine(BaseEngine, WanDenoise):
             ).to(self.device, dtype=torch.float32)
 
             latent_image = self.vae_encode(
-                preprocessed_image.unsqueeze(2), offload=offload, sample_mode="mode", normalize_latents_dtype=torch.float32
+                preprocessed_image.unsqueeze(2),
+                offload=offload,
+                sample_mode="mode",
+                normalize_latents_dtype=torch.float32,
             )
             num_input_frames = latent_image.shape[2]
         elif video is not None:
@@ -1000,7 +1045,10 @@ class WanEngine(BaseEngine, WanDenoise):
                 loaded_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)
             latent_video = self.vae_encode(
-                preprocessed_video, offload=offload, sample_mode="mode", normalize_latents_dtype=torch.float32
+                preprocessed_video,
+                offload=offload,
+                sample_mode="mode",
+                normalize_latents_dtype=torch.float32,
             )
             num_input_frames = latent_video.shape[2]
 
@@ -1092,7 +1140,12 @@ class WanEngine(BaseEngine, WanDenoise):
             device=self.device,
         )
 
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
 
         num_output_frames = num_input_frames + latent_frames
         num_blocks = latent_frames // num_frame_per_block
@@ -1297,9 +1350,8 @@ class WanEngine(BaseEngine, WanDenoise):
             postprocessed_video = self._postprocess(video)
             return postprocessed_video
 
-
-    def _prepare_camera_control_latents(
-        self, control, dtype=torch.float32, generator:torch.Generator | None = None
+    def _prepare_fun_control_latents(
+        self, control, dtype=torch.float32, generator: torch.Generator | None = None
     ):
         # resize the control to latents shape as we concatenate the control to the latents
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
@@ -1310,29 +1362,57 @@ class WanEngine(BaseEngine, WanDenoise):
         new_control = []
         for i in range(0, control.shape[0], bs):
             control_bs = control[i : i + bs]
-            control_bs = self.vae_encode(control_bs, sample_generator=generator, normalize_latents_dtype=dtype)
+            control_bs = self.vae_encode(
+                control_bs, sample_generator=generator, normalize_latents_dtype=dtype
+            )
             new_control.append(control_bs)
-        control = torch.cat(new_control, dim = 0)
+        control = torch.cat(new_control, dim=0)
 
         return control
-    
-    def camera_run(
+
+    def fun_run(
         self,
         reference_image: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+            Image.Image,
+            List[Image.Image],
+            List[str],
+            str,
+            np.ndarray,
+            torch.Tensor,
+            None,
         ] = None,
         start_image: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+            Image.Image,
+            List[Image.Image],
+            List[str],
+            str,
+            np.ndarray,
+            torch.Tensor,
+            None,
         ] = None,
         video: Union[
             List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
         ] = None,
-        camera_poses: Union[
-            List[float], str, List[Camera], Camera, None
-        ] = None,
+        camera_poses: Union[List[float], str, List[Camera], Camera, None] = None,
         subject_reference_images: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+            Image.Image,
+            List[Image.Image],
+            List[str],
+            str,
+            np.ndarray,
+            torch.Tensor,
+            None,
         ] = None,
+        mask: Union[
+            Image.Image,
+            List[Image.Image],
+            List[str],
+            str,
+            np.ndarray,
+            torch.Tensor,
+            None,
+        ] = None,
+        process_first_mask_frame_only: bool = False,
         prompt: List[str] | str = None,
         negative_prompt: List[str] | str = None,
         duration: int | str = 16,
@@ -1384,34 +1464,32 @@ class WanEngine(BaseEngine, WanDenoise):
             self.load_preprocessor_by_type("clip")
 
         self.to_device(self.preprocessors["clip"])
-        
-        
-        
-        
+
         if start_image is not None:
             loaded_image = self._load_image(start_image)
 
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width
             )
-            preprocessed_image = self.video_processor.preprocess(
-                loaded_image, height=height, width=width
-            ).to(self.device, dtype=torch.float32).unsqueeze(2)
-            
-            start_image_latents = self._prepare_camera_control_latents(
+            preprocessed_image = (
+                self.video_processor.preprocess(
+                    loaded_image, height=height, width=width
+                )
+                .to(self.device, dtype=torch.float32)
+                .unsqueeze(2)
+            )
+
+            start_image_latents = self._prepare_fun_control_latents(
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
-            
-            print(start_image_latents.shape)
-           
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
 
         transformer_dtype = self.component_dtypes["transformer"]
 
         self.to_device(self.transformer)
-        
+
         latents = self._get_latents(
             height,
             width,
@@ -1422,7 +1500,7 @@ class WanEngine(BaseEngine, WanDenoise):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         if start_image is not None:
             start_image_latents_in = torch.zeros_like(latents)
             if start_image_latents_in.shape[2] > 1:
@@ -1431,26 +1509,40 @@ class WanEngine(BaseEngine, WanDenoise):
             preprocessed_image = None
             start_image_latents = None
             start_image_latents_in = torch.zeros_like(latents)
-            
+
         if camera_poses is not None:
             control_latents = None
             if isinstance(camera_poses, Camera):
                 camera_poses = [camera_poses]
             camera_preprocessor = self.preprocessors["camera"]
-            control_camera_video = camera_preprocessor(camera_poses, H=height, W=width, device=self.device)
+            control_camera_video = camera_preprocessor(
+                camera_poses, H=height, W=width, device=self.device
+            )
             control_camera_latents = torch.concat(
                 [
-                    torch.repeat_interleave(control_camera_video[:, :, 0:1], repeats=4, dim=2),
-                    control_camera_video[:, :, 1:]
-                ], dim=2
+                    torch.repeat_interleave(
+                        control_camera_video[:, :, 0:1], repeats=4, dim=2
+                    ),
+                    control_camera_video[:, :, 1:],
+                ],
+                dim=2,
             ).transpose(1, 2)
-            
+
             # Reshape, transpose, and view into desired shape
             b, f, c, h, w = control_camera_latents.shape
-            control_camera_latents = control_camera_latents.contiguous().view(b, f // 4, 4, c, h, w).transpose(2, 3)
-            control_camera_latents = control_camera_latents.contiguous().view(b, f // 4, c * 4, h, w).transpose(1, 2)
-        
+            control_camera_latents = (
+                control_camera_latents.contiguous()
+                .view(b, f // 4, 4, c, h, w)
+                .transpose(2, 3)
+            )
+            control_camera_latents = (
+                control_camera_latents.contiguous()
+                .view(b, f // 4, c * 4, h, w)
+                .transpose(1, 2)
+            )
+
         elif video is not None:
+
             pt, ph, pw = self.transformer.config.patch_size
             loaded_video = self._load_video(video)
             video_height, video_width = self.video_processor.get_default_height_width(
@@ -1472,29 +1564,121 @@ class WanEngine(BaseEngine, WanDenoise):
             preprocessed_video = self.video_processor.preprocess_video(
                 loaded_video, video_height, video_width
             )
-            control_latents = self._prepare_camera_control_latents(
-                preprocessed_video, dtype=torch.float32, generator=generator
-            )
-            control_camera_latents = None
+
+            if mask is not None:
+                batch_size, latent_num_frames, _, _, _ = latents.shape
+                loaded_mask = self._load_video(mask)
+                preprocessed_mask = self.video_processor.preprocess_video(
+                    loaded_mask, video_height, video_width
+                )
+                preprocessed_mask = torch.clamp(
+                    (preprocessed_mask + 1) / 2, min=0, max=1
+                )
+
+                if (preprocessed_mask == 0).all():
+                    mask_latents = torch.tile(
+                        torch.zeros_like(latents)[:, :1].to(
+                            self.device, transformer_dtype
+                        ),
+                        [1, 4, 1, 1, 1],
+                    )
+                    masked_video_latents = torch.zeros_like(latents).to(
+                        self.device, transformer_dtype
+                    )
+                else:
+                    masked_video = preprocessed_video * (
+                        torch.tile(preprocessed_mask, [1, 3, 1, 1, 1]) < 0.5
+                    )
+                    masked_video_latents = self._prepare_fun_control_latents(
+                        masked_video, dtype=torch.float32, generator=generator
+                    )
+                    mask_condition = torch.concat(
+                        [
+                            torch.repeat_interleave(
+                                preprocessed_mask[:, :, 0:1], repeats=4, dim=2
+                            ),
+                            preprocessed_mask[:, :, 1:],
+                        ],
+                        dim=2,
+                    )
+                    mask_condition = mask_condition.view(
+                        batch_size, mask_condition.shape[2] // 4, 4, height, width
+                    )
+                    mask_condition = mask_condition.transpose(1, 2)
+                    latent_size = latents.size()
+                    batch_size, channels, num_frames, height, width = (
+                        masked_video_latents.shape
+                    )
+                    inverse_mask_condition = 1 - mask_condition
+
+                    if process_first_mask_frame_only:
+                        target_size = list(latent_size[2:])
+                        target_size[0] = 1
+                        first_frame_resized = F.interpolate(
+                            inverse_mask_condition[:, :, 0:1, :, :],
+                            size=target_size,
+                            mode="trilinear",
+                            align_corners=False,
+                        )
+
+                        target_size = list(latent_size[2:])
+                        target_size[0] = target_size[0] - 1
+                        if target_size[0] != 0:
+                            remaining_frames_resized = F.interpolate(
+                                inverse_mask_condition[:, :, 1:, :, :],
+                                size=target_size,
+                                mode="trilinear",
+                                align_corners=False,
+                            )
+                            resized_mask = torch.cat(
+                                [first_frame_resized, remaining_frames_resized], dim=2
+                            )
+                        else:
+                            resized_mask = first_frame_resized
+                    else:
+                        target_size = list(latent_size[2:])
+                        resized_mask = F.interpolate(
+                            inverse_mask_condition,
+                            size=target_size,
+                            mode="trilinear",
+                            align_corners=False,
+                        )
+                    mask_latents = resized_mask
+
+                control_camera_latents = None
+                control_latents = torch.concat(
+                    [mask_latents, masked_video_latents], dim=1
+                )
+            else:
+                control_latents = self._prepare_fun_control_latents(
+                    preprocessed_video, dtype=torch.float32, generator=generator
+                )
+                control_camera_latents = None
         else:
             control_latents = torch.zeros_like(latents)
             control_camera_latents = None
-            
-        if reference_image is not None and self.transformer.config.get("add_ref_control", False):
+
+        if reference_image is not None and self.transformer.config.get(
+            "add_ref_control", False
+        ):
             loaded_image = self._load_image(reference_image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width
             )
-            preprocessed_image = self.video_processor.preprocess(
-                loaded_image, height=height, width=width
-            ).to(self.device, dtype=torch.float32).unsqueeze(2)
-            
-            reference_image_latents = self._prepare_camera_control_latents(
+            preprocessed_image = (
+                self.video_processor.preprocess(
+                    loaded_image, height=height, width=width
+                )
+                .to(self.device, dtype=torch.float32)
+                .unsqueeze(2)
+            )
+
+            reference_image_latents = self._prepare_fun_control_latents(
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
         else:
             reference_image_latents = torch.zeros_like(latents)[:, :, :1]
-            
+
         if subject_reference_images is not None:
             subject_reference_image_latents = []
             for image in subject_reference_images:
@@ -1502,22 +1686,28 @@ class WanEngine(BaseEngine, WanDenoise):
                 loaded_image, height, width = self._aspect_ratio_resize(
                     loaded_image, max_area=height * width
                 )
-                preprocessed_image = self.video_processor.preprocess(
-                    loaded_image, height=height, width=width
-                ).to(self.device, dtype=torch.float32).unsqueeze(2)
-                subject_reference_image_latent = self._prepare_camera_control_latents(
+                preprocessed_image = (
+                    self.video_processor.preprocess(
+                        loaded_image, height=height, width=width
+                    )
+                    .to(self.device, dtype=torch.float32)
+                    .unsqueeze(2)
+                )
+                subject_reference_image_latent = self._prepare_fun_control_latents(
                     preprocessed_image, dtype=torch.float32, generator=generator
                 )
                 subject_reference_image_latents.append(subject_reference_image_latent)
-            subject_reference_image_latents = torch.cat(subject_reference_image_latents, dim=2)
+            subject_reference_image_latents = torch.cat(
+                subject_reference_image_latents, dim=2
+            )
         else:
             subject_reference_image_latents = None
-        
+
         if reference_image is not None:
             clip_image = reference_image
         elif start_image is not None:
             clip_image = start_image
-        
+
         if clip_image is not None:
             loaded_image = self._load_image(clip_image)
             loaded_image, height, width = self._aspect_ratio_resize(
@@ -1528,7 +1718,7 @@ class WanEngine(BaseEngine, WanDenoise):
             ).to(self.device, dtype=transformer_dtype)
         else:
             image_embeds = None
-            
+
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
 
         if negative_prompt_embeds is not None:
@@ -1547,17 +1737,25 @@ class WanEngine(BaseEngine, WanDenoise):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        
-        timesteps = self._get_timesteps(timesteps, timesteps_as_indices)
-        
-        if control_latents is not None:
-            control_latents = torch.concat([
-                control_latents,
-                start_image_latents_in,
-            ], dim=1)
-        else:
+
+        timesteps, num_inference_steps = self._get_timesteps(
+            scheduler=scheduler,
+            timesteps=timesteps,
+            timesteps_as_indices=timesteps_as_indices,
+            num_inference_steps=num_inference_steps,
+        )
+
+        if control_latents is not None and start_image_latents_in is not None:
+            control_latents = torch.concat(
+                [
+                    control_latents,
+                    start_image_latents_in,
+                ],
+                dim=1,
+            )
+        elif control_latents is None and start_image_latents_in is not None:
             control_latents = start_image_latents_in
-        
+
         latents = self.denoise(
             timesteps=timesteps,
             latents=latents,
@@ -1565,18 +1763,42 @@ class WanEngine(BaseEngine, WanDenoise):
             transformer_kwargs=dict(
                 encoder_hidden_states=prompt_embeds,
                 encoder_hidden_states_image=image_embeds,
-                encoder_hidden_states_camera=control_camera_latents.to(transformer_dtype) if control_camera_latents is not None else None,
-                encoder_hidden_states_full_ref=reference_image_latents.to(transformer_dtype) if reference_image_latents is not None else None,
-                encoder_hidden_states_subject_ref=subject_reference_image_latents.to(transformer_dtype) if subject_reference_image_latents is not None else None,
+                encoder_hidden_states_camera=(
+                    control_camera_latents.to(transformer_dtype)
+                    if control_camera_latents is not None
+                    else None
+                ),
+                encoder_hidden_states_full_ref=(
+                    reference_image_latents.to(transformer_dtype)
+                    if reference_image_latents is not None
+                    else None
+                ),
+                encoder_hidden_states_subject_ref=(
+                    subject_reference_image_latents.to(transformer_dtype)
+                    if subject_reference_image_latents is not None
+                    else None
+                ),
                 attention_kwargs=attention_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
                     encoder_hidden_states=negative_prompt_embeds,
                     encoder_hidden_states_image=image_embeds,
-                    encoder_hidden_states_camera=control_camera_latents.to(transformer_dtype) if control_camera_latents is not None else None,
-                    encoder_hidden_states_full_ref=reference_image_latents.to(transformer_dtype) if reference_image_latents is not None else None,
-                    encoder_hidden_states_subject_ref=subject_reference_image_latents.to(transformer_dtype) if subject_reference_image_latents is not None else None,
+                    encoder_hidden_states_camera=(
+                        control_camera_latents.to(transformer_dtype)
+                        if control_camera_latents is not None
+                        else None
+                    ),
+                    encoder_hidden_states_full_ref=(
+                        reference_image_latents.to(transformer_dtype)
+                        if reference_image_latents is not None
+                        else None
+                    ),
+                    encoder_hidden_states_subject_ref=(
+                        subject_reference_image_latents.to(transformer_dtype)
+                        if subject_reference_image_latents is not None
+                        else None
+                    ),
                     attention_kwargs=attention_kwargs,
                 )
                 if negative_prompt_embeds is not None
@@ -1606,6 +1828,7 @@ class WanEngine(BaseEngine, WanDenoise):
     def __repr__(self):
         return self.__str__()
 
+
 if __name__ == "__main__":
     from diffusers.utils import export_to_video
     from PIL import Image
@@ -1613,7 +1836,7 @@ if __name__ == "__main__":
     engine = WanEngine(
         yaml_path="manifest/wan_t2v_sf_1.3b.yml",
         model_type=ModelType.CAUSAL,
-        save_path="/Users/tosinkuye/apex-models",  # Change this to your desired save path,  # Change this to your desired save path
+        save_path="./apex-models",  # Change this to your desired save path,  # Change this to your desired save path
         components_to_load=["transformer"],
         component_dtypes={"vae": torch.float16},
     )

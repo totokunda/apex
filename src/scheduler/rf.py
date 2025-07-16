@@ -213,7 +213,7 @@ class RectifiedFlowScheduler(SchedulerMixin, ConfigMixin, TimestepShifter):
             return torch.linspace(1, 1 / num_timesteps, num_timesteps)
         elif self.sampler == "LinearQuadratic":
             return linear_quadratic_schedule(num_timesteps)
-        elif self.sampler == "Constant":  
+        elif self.sampler == "Constant":
             assert (
                 shift is not None
             ), "Shift must be provided for constant time shift sampler."

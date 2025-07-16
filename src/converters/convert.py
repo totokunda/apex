@@ -31,8 +31,13 @@ from src.converters.utils import (
 
 from src.converters.vae_converters import LTXVAEConverter
 
+
 def get_transformer_converter(model_type: str):
-    if model_type == "wan.base" or model_type == "wan.causal" or model_type == "wan.fun":
+    if (
+        model_type == "wan.base"
+        or model_type == "wan.causal"
+        or model_type == "wan.fun"
+    ):
         return WanTransformerConverter()
     elif model_type == "wan.vace":
         return WanVaceTransformerConverter()
@@ -58,6 +63,7 @@ def get_vae_converter(vae_type: str, **additional_kwargs):
     else:
         raise ValueError(f"VAE type {vae_type} not supported")
 
+
 def load_safetensors(dir: pathlib.Path):
     """Load a sharded safetensors file."""
     # load all shards
@@ -74,6 +80,7 @@ def load_safetensors(dir: pathlib.Path):
         shard_state_dict = load_file(shard)
         state_dict.update(shard_state_dict)
     return state_dict
+
 
 def load_pt(dir: pathlib.Path):
     """Load a sharded pt file."""
@@ -101,6 +108,7 @@ def is_safetensors_file(file_path: str):
         return True
     except Exception:
         return False
+
 
 def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None = None):
     pt_extensions = tuple(["pt", "bin", "pth"])
@@ -159,18 +167,19 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
     return state_dict
 
 
-
 def convert_transformer(
     model_tag: str,
     model_type: str,
     ckpt_path: str = None,
     model_key: str = None,
     pattern: str | None = None,
-    **transformer_converter_kwargs
+    **transformer_converter_kwargs,
 ):
 
-    config = get_transformer_config(model_tag, config_path=transformer_converter_kwargs.get("config_path", None))
-    
+    config = get_transformer_config(
+        model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
+    )
+
     model_class = get_model_class(model_type, config, model_type="transformer_models")
 
     converter = get_transformer_converter(model_type)
@@ -193,17 +202,18 @@ def convert_vae(
     ckpt_path: str = None,
     model_key: str = None,
     pattern: str | None = None,
-    **vae_converter_kwargs
+    **vae_converter_kwargs,
 ):
-    config = get_vae_config(vae_tag, config_path=vae_converter_kwargs.get("config_path", None))
+    config = get_vae_config(
+        vae_tag, config_path=vae_converter_kwargs.get("config_path", None)
+    )
     model_class = get_model_class(vae_type, config, model_type="vae")
 
     converter = get_vae_converter(vae_type, **vae_converter_kwargs)
     state_dict = load_state_dict(ckpt_path, model_key, pattern)
-    
 
     model = get_empty_model(model_class, config)
-    
+
     converter.convert(state_dict)
 
     state_dict = strip_common_prefix(state_dict, model.state_dict())
@@ -212,19 +222,28 @@ def convert_vae(
 
     return model
 
-def get_transformer_keys(model_type: str, model_tag: str, transformer_converter_kwargs: dict):
-    config = get_transformer_config(model_tag, config_path=transformer_converter_kwargs.get("config_path", None))
+
+def get_transformer_keys(
+    model_type: str, model_tag: str, transformer_converter_kwargs: dict
+):
+    config = get_transformer_config(
+        model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
+    )
     model_class = get_model_class(model_type, config, model_type="transformer_models")
     model = get_empty_model(model_class, config)
     return model.state_dict().keys()
+
 
 def get_vae_keys(vae_type: str, vae_tag: str, vae_converter_kwargs: dict):
     if vae_type != "ltx":
         return []
     model_class = get_vae(vae_type)
-    config = get_vae_config(vae_tag, config_path=vae_converter_kwargs.get("config_path", None))
+    config = get_vae_config(
+        vae_tag, config_path=vae_converter_kwargs.get("config_path", None)
+    )
     model = get_empty_model(model_class, config)
     return model.state_dict().keys()
+
 
 if __name__ == "__main__":
     model = convert_transformer(

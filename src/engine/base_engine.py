@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Union
 import torch
 from loguru import logger
 import urllib3
@@ -23,6 +23,7 @@ from src.attention import attention_register
 from src.utils.cache_utils import empty_cache
 from logging import Logger
 from src.preprocess import CLIPPreprocessor, CameraPreprocessor
+from src.postprocess import LatentUpscaler
 from typing import Callable
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -34,10 +35,16 @@ import tempfile
 from src.mixins import DownloadMixin, LoaderMixin, ToMixin, OffloadMixin
 from glob import glob
 from safetensors import safe_open
-from src.converters import get_transformer_keys, convert_transformer, get_vae_keys, convert_vae 
+from src.converters import (
+    get_transformer_keys,
+    convert_transformer,
+    get_vae_keys,
+    convert_vae,
+)
 import numpy as np
 from PIL import Image
 from torchvision import transforms as TF
+import inspect
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -50,6 +57,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     transformer: ModelMixin | None = None
     device: torch.device | None = None
     preprocessors: Dict[str, Any] = {}
+    postprocessors: Dict[str, Any] = {}
     offload_to_cpu: bool = False
     video_processor: VideoProcessor
     config_save_path: str = None
@@ -57,6 +65,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     component_dtypes: Dict[str, torch.dtype] | None = None
     components_to_load: List[str] | None = None
     preprocessors_to_load: List[str] | None = None
+    postprocessors_to_load: List[str] | None = None
     component_init_kwargs: Dict[str, Any] | None = None
     save_path: str = None
     logger: Logger
@@ -80,9 +89,19 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.save_path = kwargs.get("save_path", None)
 
         self.download(self.save_path)
-        
+
         for key, value in kwargs.items():
-            if key not in ["save_path", "config_kwargs", "components_to_load", "component_load_dtypes", "component_dtypes", "component_init_kwargs", "preprocessors_to_load", "device"]:
+            if key not in [
+                "save_path",
+                "config_kwargs",
+                "components_to_load",
+                "component_load_dtypes",
+                "component_dtypes",
+                "component_init_kwargs",
+                "preprocessors_to_load",
+                "postprocessors_to_load",
+                "device",
+            ]:
                 setattr(self, key, value)
 
         self._parse_config(
@@ -93,6 +112,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             kwargs.get("component_dtypes", None),
             kwargs.get("component_init_kwargs", {}),
             kwargs.get("preprocessors_to_load", None),
+            kwargs.get("postprocessors_to_load", None),
         )
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
@@ -128,6 +148,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         component_dtypes: Dict[str, str] | None,
         component_init_kwargs: Dict[str, Any] | None,
         preprocessors_to_load: List[str] | None,
+        postprocessors_to_load: List[str] | None,
     ):
         self.logger.info(f"Loading model {config['name']}")
         self.component_init_kwargs = component_init_kwargs
@@ -167,6 +188,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.load_components(components, components_to_load)
         self.load_preprocessors(
             config.get("preprocessors", []) or [], preprocessors_to_load
+        )
+        self.load_postprocessors(
+            config.get("postprocessors", []) or [], postprocessors_to_load
         )
 
     @contextmanager
@@ -217,19 +241,27 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.scheduler = self._load_component(component)
 
     def load_vae(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
-        component["model_path"], is_converted = self._check_convert_model_path(component)
+        component["model_path"], is_converted = self._check_convert_model_path(
+            component
+        )
         if is_converted:
-            component["config_path"] = os.path.join(component["model_path"], "config.json")
-        
+            component["config_path"] = os.path.join(
+                component["model_path"], "config.json"
+            )
+
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             self.vae = self.convert_vae_weights(component)
             if self.save_converted_weights:
-                self.logger.info(f"Saving converted vae weights to {component.get('model_path', None)}")
+                self.logger.info(
+                    f"Saving converted vae weights to {component.get('model_path', None)}"
+                )
                 model_path = component.get("model_path", None)
                 tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
                 try:
-                    self.save_component(self.vae, tmp_dir, "vae", **self.config.get("save_kwargs", {}))
+                    self.save_component(
+                        self.vae, tmp_dir, "vae", **self.config.get("save_kwargs", {})
+                    )
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
                         # add subdirectory called vae
@@ -278,19 +310,30 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_transformer(
         self, component: Dict[str, Any], load_dtype: torch.dtype | None
     ):
-        component["model_path"], is_converted = self._check_convert_model_path(component)
+        component["model_path"], is_converted = self._check_convert_model_path(
+            component
+        )
         if is_converted:
-            component["config_path"] = os.path.join(component["model_path"], "config.json")
-        
+            component["config_path"] = os.path.join(
+                component["model_path"], "config.json"
+            )
+
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             self.transformer = self.convert_transformer_weights(component)
             if self.save_converted_weights:
-                self.logger.info(f"Saving converted transformer weights to {component.get('model_path', None)}")
+                self.logger.info(
+                    f"Saving converted transformer weights to {component.get('model_path', None)}"
+                )
                 model_path = component.get("model_path", None)
                 tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
                 try:
-                    self.save_component(self.transformer, tmp_dir, "transformer", **self.config.get("save_kwargs", {}))
+                    self.save_component(
+                        self.transformer,
+                        tmp_dir,
+                        "transformer",
+                        **self.config.get("save_kwargs", {}),
+                    )
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
                         # add subdirectory called transformer
@@ -342,18 +385,25 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 partial_state = partial_state[list(partial_state.keys())[0]]
         keys.update(partial_state.keys())
         return keys
-    
 
     def _check_convert_model_path(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
-        assert component.get("type") in ["transformer", "vae"], "Only transformer and vae are supported for now"
+        assert component.get("type") in [
+            "transformer",
+            "vae",
+        ], "Only transformer and vae are supported for now"
         model_path = component["model_path"]
         component_type = component.get("type")
         if os.path.isfile(model_path):
             # check base directory
             if os.path.isdir(os.path.dirname(model_path)):
-                if os.path.isdir(os.path.join(os.path.dirname(model_path), component_type)):
-                    return os.path.join(os.path.dirname(model_path), component_type), True
+                if os.path.isdir(
+                    os.path.join(os.path.dirname(model_path), component_type)
+                ):
+                    return (
+                        os.path.join(os.path.dirname(model_path), component_type),
+                        True,
+                    )
         elif os.path.isdir(model_path):
             if os.path.isdir(os.path.join(model_path, component_type)):
                 return os.path.join(model_path, component_type), True
@@ -364,7 +414,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         model_path = component["model_path"]
         base = component.get("base", None)
         component_type = component.get("type")
-        assert component_type in ["transformer", "vae"], "Only transformer and vae are supported for now"
+        assert component_type in [
+            "transformer",
+            "vae",
+        ], "Only transformer and vae are supported for now"
         file_pattern = component.get("file_pattern", None)
 
         pt_extensions = tuple(["pt", "bin", "pth"])
@@ -399,10 +452,22 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 keys.update(self._get_pt_keys(model_path, model_key))
 
         if component_type == "transformer":
-            _keys = set(get_transformer_keys(base, component.get("tag", None), component.get("converter_kwargs", {})))
+            _keys = set(
+                get_transformer_keys(
+                    base,
+                    component.get("tag", None),
+                    component.get("converter_kwargs", {}),
+                )
+            )
             iterating_keys = _keys.copy()
         elif component_type == "vae":
-            _keys = set(get_vae_keys(base, component.get("tag", None), component.get("converter_kwargs", {})))
+            _keys = set(
+                get_vae_keys(
+                    base,
+                    component.get("tag", None),
+                    component.get("converter_kwargs", {}),
+                )
+            )
             iterating_keys = _keys.copy()
 
         found_keys = set()
@@ -426,7 +491,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             component.get("model_key", None),
             component.get("file_pattern", None),
         )
-        
+
     def convert_vae_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
         component_type = component.get("type")
@@ -438,7 +503,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             component["model_path"],
             component.get("model_key", None),
             component.get("file_pattern", None),
-            **component.get("converter_kwargs", {})
+            **component.get("converter_kwargs", {}),
         )
 
     @torch.inference_mode()
@@ -470,7 +535,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         if self.vae is None:
             self.load_component_by_type("vae")
         self.to_device(self.vae)
-        
+
         video = video.to(dtype=self.vae.dtype, device=self.device)
 
         latents = self.vae.encode(video, return_dict=False)[0]
@@ -480,17 +545,17 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             latents = latents.mode()
         else:
             raise ValueError(f"Invalid sample mode: {sample_mode}")
-        
+
         if not normalize_latents_dtype:
             normalize_latents_dtype = self.vae.dtype
-        
-        if normalize_latents:   
+
+        if normalize_latents:
             latents = latents.to(dtype=normalize_latents_dtype)
             latents = self.vae.normalize_latents(latents)
-            
+
         if offload:
             self._offload(self.vae)
-        
+
         return latents.to(dtype=dtype)
 
     def load_components(
@@ -555,6 +620,33 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                     preprocessor
                 )
 
+    def load_postprocessor_by_type(self, postprocessor_type: str):
+        for postprocessor in self.config.get("postprocessors", []):
+            if postprocessor.get("type") == postprocessor_type:
+                self.load_postprocessor(postprocessor)
+                break
+
+    def load_postprocessor(self, config: Dict[str, Any]):
+        postprocessor_type = config.get("type")
+        if postprocessor_type == "latent_upsampler":
+            return LatentUpsamplerPostprocessor(self, **config)
+        else:
+            raise ValueError(f"Postprocessor type {postprocessor_type} not supported")
+
+    def load_postprocessors(
+        self,
+        postprocessors: List[Dict[str, Any]],
+        postprocessors_to_load: List[str] | None,
+    ):
+        for postprocessor in postprocessors:
+            if (
+                postprocessors_to_load is None
+                or postprocessor.get("type") in postprocessors_to_load
+            ):
+                self.postprocessors[postprocessor.get("type")] = (
+                    self.load_postprocessor(postprocessor)
+                )
+
     def apply_lora(self, lora_path: str):
         pass
 
@@ -569,6 +661,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         save_path: str | None = None,
         components_path: str | None = None,
         preprocessors_path: str | None = None,
+        postprocessors_path: str | None = None,
     ):
         if save_path is None:
             save_path = self.save_path
@@ -578,6 +671,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             components_path = os.path.join(save_path, "components")
         if preprocessors_path is None:
             preprocessors_path = os.path.join(save_path, "preprocessors")
+        if postprocessors_path is None:
+            postprocessors_path = os.path.join(save_path, "postprocessors")
 
         os.makedirs(save_path, exist_ok=True)
         for component in self.config.get("components", []):
@@ -596,6 +691,17 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 )
                 if downloaded_preprocessor_path:
                     preprocessor["model_path"] = downloaded_preprocessor_path
+
+        postprocessors = self.config.get("postprocessors", []) or []
+        if postprocessors:
+            self.logger.info(f"Downloading {len(postprocessors)} postprocessors")
+        for postprocessor in postprocessors:
+            if postprocessor_path := postprocessor.get("model_path"):
+                downloaded_postprocessor_path = self._download(
+                    postprocessor_path, postprocessors_path
+                )
+                if downloaded_postprocessor_path:
+                    postprocessor["model_path"] = downloaded_postprocessor_path
 
     def _get_latents(
         self,
@@ -666,32 +772,65 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         return postprocessed_video
 
     def _get_timesteps(
-        self, timesteps: List[int] | None, timesteps_as_indices: bool = True
+        self,
+        num_inference_steps: Optional[int] = None,
+        timesteps: Optional[List[int]] = None,
+        sigmas: Optional[List[float]] = None,
+        timesteps_as_indices: bool = False,
+        **kwargs,
     ):
-        if timesteps is not None:
-            timestep_ids = torch.tensor(timesteps, dtype=torch.long, device=self.device)
-            num_train_timesteps = getattr(self.scheduler, "num_train_timesteps", 1000)
-            if timesteps_as_indices:
-                timesteps = self.scheduler.timesteps[num_train_timesteps - timestep_ids]
-            else:
-                # find the argmin to each timestep
-                timesteps = torch.zeros(
-                    len(timestep_ids), dtype=torch.long, device=self.device
-                )
-                for i in range(len(timestep_ids)):
-                    timesteps[i] = torch.argmin(
-                        torch.abs(
-                            self.scheduler.timesteps - timestep_ids[i].unsqueeze(0)
-                        ),
-                        dim=0,
-                    )
-                timesteps = self.scheduler.timesteps[timesteps]
+        scheduler = self.scheduler
+        device = self.device
+        if timesteps is not None and sigmas is not None:
+            raise ValueError(
+                "Only one of `timesteps` or `sigmas` can be passed. Please choose one to set custom values"
+            )
 
-            self.scheduler.timesteps = timesteps
-            self.scheduler.sigmas = self.scheduler.timesteps / num_train_timesteps
+        if timesteps is not None:
+            if timesteps_as_indices:
+                # This is the logic from the old _get_timesteps
+                timestep_ids = torch.tensor(
+                    timesteps, dtype=torch.long, device=self.device
+                )
+                num_train_timesteps = getattr(
+                    self.scheduler, "num_train_timesteps", 1000
+                )
+                timesteps = self.scheduler.timesteps[num_train_timesteps - timestep_ids]
+                self.scheduler.timesteps = timesteps
+                self.scheduler.sigmas = self.scheduler.timesteps / num_train_timesteps
+                timesteps = self.scheduler.timesteps
+                num_inference_steps = len(timesteps)
+            else:
+                # This is the logic from retrieve_timesteps
+                accepts_timesteps = "timesteps" in set(
+                    inspect.signature(scheduler.set_timesteps).parameters.keys()
+                )
+                if not accepts_timesteps:
+                    raise ValueError(
+                        f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
+                        f" timestep schedules. Please check whether you are using the correct scheduler."
+                    )
+                scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
+                timesteps = scheduler.timesteps
+                num_inference_steps = len(timesteps)
+
+        elif sigmas is not None:
+            accepts_sigmas = "sigmas" in set(
+                inspect.signature(scheduler.set_timesteps).parameters.keys()
+            )
+            if not accepts_sigmas:
+                # This is a fallback from retrieve_timesteps
+                scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
+                timesteps = scheduler.timesteps
+            else:
+                scheduler.set_timesteps(sigmas=sigmas, device=device, **kwargs)
+                timesteps = scheduler.timesteps
+                num_inference_steps = len(timesteps)
         else:
-            timesteps = self.scheduler.timesteps
-        return timesteps
+            scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
+            timesteps = scheduler.timesteps
+
+        return timesteps, num_inference_steps
 
     def _parse_num_frames(self, duration: int | str, fps: int = 16):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
@@ -719,6 +858,20 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             )
         duration = max(duration, 1)
         return duration
+
+    def _calculate_shift(
+        self,
+        image_seq_len,
+        base_seq_len=256,
+        max_seq_len=4096,
+        base_shift=0.5,
+        max_shift=1.15,
+    ):
+        """Calculate shift parameter for timestep scheduling"""
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        mu = image_seq_len * m + b
+        return mu
 
     def _render_step(self, latents: torch.Tensor, **kwargs):
         raise NotImplementedError("Subclasses must implement this method")

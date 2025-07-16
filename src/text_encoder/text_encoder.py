@@ -107,16 +107,15 @@ class TextEncoder(torch.nn.Module):
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
         mask = mask.bool()
-        
-       
-        result  = self.model(
+
+        result = self.model(
             text_input_ids.to(device=self.model.device),
             mask.to(device=self.model.device) if use_mask_in_input else None,
         )
 
         prompt_embeds = result.last_hidden_state
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        
+
         if pad_with_zero:
             prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
             prompt_embeds = torch.stack(
@@ -143,12 +142,12 @@ class TextEncoder(torch.nn.Module):
         else:
             _, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            
+
             prompt_embeds = prompt_embeds.view(
                 batch_size * num_videos_per_prompt, seq_len, -1
             )
             mask = mask.repeat(1, num_videos_per_prompt)
-            
+
         if return_attention_mask:
             return prompt_embeds, mask
         else:

@@ -247,7 +247,10 @@ class SkyReelsEngine(WanEngine):
             ).to(self.device, dtype=torch.float32)
 
             prefix_latent = self.vae_encode(
-                preprocessed_image, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32
+                preprocessed_image,
+                offload=offload,
+                dtype=torch.float32,
+                normalize_latents_dtype=torch.float32,
             )
 
         if end_image is not None:
@@ -261,7 +264,10 @@ class SkyReelsEngine(WanEngine):
             ).to(self.device, dtype=torch.float32)
 
             end_latent = self.vae_encode(
-                preprocessed_end_image, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32
+                preprocessed_end_image,
+                offload=offload,
+                dtype=torch.float32,
+                normalize_latents_dtype=torch.float32,
             )
 
         if not self.scheduler:
@@ -428,7 +434,10 @@ class SkyReelsEngine(WanEngine):
                             self.device
                         )
                         prefix_latent = self.vae_encode(
-                            prefix_video, offload=offload, dtype=torch.float32, normalize_latents_dtype=torch.float32
+                            prefix_video,
+                            offload=offload,
+                            dtype=torch.float32,
+                            normalize_latents_dtype=torch.float32,
                         )
                         if prefix_latent.shape[2] % causal_block_size != 0:
                             truncate_len = prefix_latent.shape[1] % causal_block_size

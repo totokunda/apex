@@ -78,5 +78,5 @@ def _download_from_gcs(gcs_path: str, save_path: str):
 
 if __name__ == "__main__":
     path = "apex_models/1.3b-standard-1/checkpoint_1070/pytorch_model_fsdp_0"
-    local_dir = "/home/tosinkuye/.models"
+    local_dir = "./.models"
     _download_from_gcs(path, local_dir)
