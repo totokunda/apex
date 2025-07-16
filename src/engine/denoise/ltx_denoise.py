@@ -87,9 +87,7 @@ class LTXDenoise:
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
-                
-                
-                
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
@@ -120,7 +118,6 @@ class LTXDenoise:
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
@@ -169,7 +166,7 @@ class LTXDenoise:
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
                 timestep = timestep.unsqueeze(-1) * (1 - conditioning_mask)
-                
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
@@ -353,7 +350,5 @@ class LTXDenoise:
                     (i + 1) > num_warmup_steps and (i + 1) % scheduler.order == 0
                 ):
                     progress_bar.update()
-
-
 
         return latents

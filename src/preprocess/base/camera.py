@@ -1,7 +1,7 @@
 from transformers import AutoProcessor
 from transformers.image_processing_utils import ImageProcessingMixin
 from PIL import Image
-from src.preprocess.base import BasePreprocessor
+from src.preprocess.base.base import BasePreprocessor
 from typing import Union
 
 import numpy as np
@@ -13,9 +13,10 @@ import torch
 from packaging import version as pver
 from einops import rearrange
 
+
 class Camera(object):
-    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
-    """
+    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py"""
+
     def __init__(self, entry: List[float]):
         fx, fy, cx, cy = entry[1:5]
         self.fx = fx
@@ -30,35 +31,32 @@ class Camera(object):
 
 
 def get_relative_pose(cam_params):
-    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
-    """
+    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py"""
     abs_w2cs = [cam_param.w2c_mat for cam_param in cam_params]
     abs_c2ws = [cam_param.c2w_mat for cam_param in cam_params]
     cam_to_origin = 0
-    target_cam_c2w = np.array([
-        [1, 0, 0, 0],
-        [0, 1, 0, -cam_to_origin],
-        [0, 0, 1, 0],
-        [0, 0, 0, 1]
-    ])
+    target_cam_c2w = np.array(
+        [[1, 0, 0, 0], [0, 1, 0, -cam_to_origin], [0, 0, 1, 0], [0, 0, 0, 1]]
+    )
     abs2rel = target_cam_c2w @ abs_w2cs[0]
-    ret_poses = [target_cam_c2w, ] + [abs2rel @ abs_c2w for abs_c2w in abs_c2ws[1:]]
+    ret_poses = [
+        target_cam_c2w,
+    ] + [abs2rel @ abs_c2w for abs_c2w in abs_c2ws[1:]]
     ret_poses = np.array(ret_poses, dtype=np.float32)
     return ret_poses
 
 
 def custom_meshgrid(*args):
-    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
-    """
+    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py"""
     # ref: https://pytorch.org/docs/stable/generated/torch.meshgrid.html?highlight=meshgrid#torch.meshgrid
-    if pver.parse(torch.__version__) < pver.parse('1.10'):
+    if pver.parse(torch.__version__) < pver.parse("1.10"):
         return torch.meshgrid(*args)
     else:
-        return torch.meshgrid(*args, indexing='ij')
+        return torch.meshgrid(*args, indexing="ij")
+
 
 def ray_condition(K, c2w, H, W, device):
-    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py
-    """
+    """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py"""
     # c2w: B, V, 4, 4
     # K: B, V, 4
 
@@ -91,21 +89,29 @@ def ray_condition(K, c2w, H, W, device):
     # plucker = plucker.permute(0, 1, 4, 2, 3)
     return plucker
 
+
 class CameraPreprocessor(BasePreprocessor):
-    def __init__(self,  **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-    
-    
+
     def read_camera_poses(self, path: str):
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             lines = f.readlines()
         poses = []
         for line in lines:
-            entry = list(map(float, line.strip().split(' ')))
+            entry = list(map(float, line.strip().split(" ")))
             poses.append(Camera(entry))
         return poses
-    
-    def __call__(self, poses: Union[List[Camera], str, List[float]], H: int, W: int, device: torch.device, original_H: int=640, original_W: int=480):
+
+    def __call__(
+        self,
+        poses: Union[List[Camera], str, List[float]],
+        H: int,
+        W: int,
+        device: torch.device,
+        original_H: int = 640,
+        original_W: int = 480,
+    ):
         if isinstance(poses, str):
             poses = self.read_camera_poses(poses)
         elif isinstance(poses, list) and isinstance(poses[0], float):
@@ -114,7 +120,7 @@ class CameraPreprocessor(BasePreprocessor):
             pass
         else:
             raise ValueError(f"Invalid poses type: {type(poses)}")
-    
+
         sample_wh_ratio = W / H
         original_wh_ratio = original_W / original_H
         if sample_wh_ratio > original_wh_ratio:
@@ -127,24 +133,30 @@ class CameraPreprocessor(BasePreprocessor):
             for cam in poses:
                 cam.fy = cam.fy * resized_h / H
                 cam.cy = cam.cy * resized_h / H
-        
-        intrinsic = np.asarray([[cam_param.fx * W,
-                                cam_param.fy * H,
-                                cam_param.cx * W,
-                                cam_param.cy * H]
-                                for cam_param in poses], dtype=np.float32)
+
+        intrinsic = np.asarray(
+            [
+                [cam_param.fx * W, cam_param.fy * H, cam_param.cx * W, cam_param.cy * H]
+                for cam_param in poses
+            ],
+            dtype=np.float32,
+        )
 
         K = torch.as_tensor(intrinsic, device=device)[None]  # [1, 1, 4]
         c2ws = get_relative_pose(poses)  # Assuming this function is defined elsewhere
         c2ws = torch.as_tensor(c2ws, device=device)[None]  # [1, n_frame, 4, 4]
-        plucker_embedding = ray_condition(K, c2ws, H, W, device=device)[0].permute(0, 3, 1, 2).contiguous()  # V, 6, H, W
+        plucker_embedding = (
+            ray_condition(K, c2ws, H, W, device=device)[0]
+            .permute(0, 3, 1, 2)
+            .contiguous()
+        )  # V, 6, H, W
         plucker_embedding = plucker_embedding[None]
         plucker_embedding = rearrange(plucker_embedding, "b f c h w -> b f h w c")[0]
         return plucker_embedding.permute([3, 0, 1, 2]).unsqueeze(0)
-    
+
     def __str__(self):
         return f"CameraPreprocessor(model_path={self.model_path}, preprocessor_path={self.preprocessor_path}, model_config_path={self.model_config_path}, model_config={self.model_config}, save_path={self.save_path}, config_save_path={self.config_save_path}, processor_class={self.processor_class}, model_class={self.model_class}, dtype={self.dtype})"
-    
+
     def __repr__(self):
         return self.__str__()
 
@@ -152,5 +164,7 @@ class CameraPreprocessor(BasePreprocessor):
 if __name__ == "__main__":
     preprocessor = CameraPreprocessor()
     poses = preprocessor.read_camera_poses("data/pan_left.txt")
-    plucker_embedding = preprocessor(poses, 640, 480, device=torch.device("cuda"), original_H=640, original_W=480)
+    plucker_embedding = preprocessor(
+        poses, 640, 480, device=torch.device("cuda"), original_H=640, original_W=480
+    )
     print(plucker_embedding.shape)

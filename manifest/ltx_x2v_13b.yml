@@ -34,6 +34,10 @@ components:
 
 preprocessors: null
 
+postprocessors:
+  - type: latent_upscaler
+    model_path: Lightricks/LTX-Latent-Upsampler-0.9.7
+
 defaults:
   run:
     num_inference_steps: 30

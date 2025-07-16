@@ -16,22 +16,27 @@ VAE_CONFIG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vae_configs"
 )
 
+
 def get_transformer_config(model_tag: str, config_path: str | None = None):
     if config_path is None:
         model_base = model_tag.split("_")[0]
-        config_path = os.path.join(TRANSFORMER_CONFIG_DIR, model_base, f"{model_tag}.json")
+        config_path = os.path.join(
+            TRANSFORMER_CONFIG_DIR, model_base, f"{model_tag}.json"
+        )
     with open(config_path, "r") as f:
         config = json.load(f)
     return config
+
 
 def get_vae_config(vae_tag: str, config_path: str | None = None):
     if config_path is None:
         model_base = vae_tag.split("_")[0]
         config_path = os.path.join(VAE_CONFIG_DIR, model_base, f"{vae_tag}.json")
-    
+
     with open(config_path, "r") as f:
         config = json.load(f)
     return config
+
 
 def get_model_class(
     model_base: str, model_config: dict, model_type: str = "transformer_models"

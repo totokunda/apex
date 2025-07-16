@@ -6,6 +6,7 @@ import json
 import transformers
 from src.utils.module_utils import find_class_recursive
 
+
 def fetch_and_save_tokenizer_from_config(
     model_path: str,
     config_path: str,
@@ -38,7 +39,7 @@ def fetch_and_save_tokenizer_from_config(
         loaded_config = json.load(open(config_path, "r"))
     else:
         loaded_config = {}
-    
+
     if config:
         loaded_config.update(config)
 

@@ -44,6 +44,7 @@ from src.transformer_models.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+
 class WanImageEmbedding(torch.nn.Module):
     def __init__(self, in_features: int, out_features: int, pos_embed_seq_len=None):
         super().__init__()
@@ -75,14 +76,16 @@ class WanImageEmbedding(torch.nn.Module):
 class WanCameraAdapter(nn.Module):
     def __init__(self, in_dim, out_dim, kernel_size, stride, num_residual_blocks=1):
         super(WanCameraAdapter, self).__init__()
-        
+
         # Pixel Unshuffle: reduce spatial dimensions by a factor of 8
         self.pixel_unshuffle = nn.PixelUnshuffle(downscale_factor=8)
-        
+
         # Convolution: reduce spatial dimensions by a factor
         #  of 2 (without overlap)
-        self.conv = nn.Conv2d(in_dim * 64, out_dim, kernel_size=kernel_size, stride=stride, padding=0)
-        
+        self.conv = nn.Conv2d(
+            in_dim * 64, out_dim, kernel_size=kernel_size, stride=stride, padding=0
+        )
+
         # Residual blocks for feature extraction
         self.residual_blocks = nn.Sequential(
             *[ResidualBlock(out_dim) for _ in range(num_residual_blocks)]
@@ -92,23 +95,24 @@ class WanCameraAdapter(nn.Module):
         # Reshape to merge the frame dimension into batch
         bs, c, f, h, w = x.size()
         x = x.permute(0, 2, 1, 3, 4).contiguous().view(bs * f, c, h, w)
-        
+
         # Pixel Unshuffle operation
         x_unshuffled = self.pixel_unshuffle(x)
-        
+
         # Convolution operation
         x_conv = self.conv(x_unshuffled)
-        
+
         # Feature extraction with residual blocks
         out = self.residual_blocks(x_conv)
-        
+
         # Reshape to restore original bf dimension
         out = out.view(bs, f, out.size(1), out.size(2), out.size(3))
-        
+
         # Permute dimensions to reorder (if needed), e.g., swap channels and feature frames
         out = out.permute(0, 2, 1, 3, 4)
 
         return out
+
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
@@ -123,6 +127,7 @@ class ResidualBlock(nn.Module):
         out = self.conv2(out)
         out += residual
         return out
+
 
 class WanTimeTextImageEmbedding(nn.Module):
     def __init__(
@@ -423,15 +428,26 @@ class WanFunTransformer3DModel(
         self.patch_embedding = nn.Conv3d(
             in_channels, inner_dim, kernel_size=patch_size, stride=patch_size
         )
-        
+
         self.attention_head_dim = attention_head_dim
 
         if add_control_adapter:
-            self.control_adapter = WanCameraAdapter(in_dim_control_adapter, inner_dim, kernel_size=patch_size[1:], stride=patch_size[1:], num_residual_blocks=1)
-        
+            self.control_adapter = WanCameraAdapter(
+                in_dim_control_adapter,
+                inner_dim,
+                kernel_size=patch_size[1:],
+                stride=patch_size[1:],
+                num_residual_blocks=1,
+            )
+
         if add_ref_conv:
-            self.ref_conv = nn.Conv2d(in_dim_ref_conv, inner_dim, kernel_size=patch_size[1:], stride=patch_size[1:])
-        
+            self.ref_conv = nn.Conv2d(
+                in_dim_ref_conv,
+                inner_dim,
+                kernel_size=patch_size[1:],
+                stride=patch_size[1:],
+            )
+
         self.add_ref_conv = add_ref_conv
         self.add_control_adapter = add_control_adapter
 
@@ -470,7 +486,6 @@ class WanFunTransformer3DModel(
         )
 
         self.gradient_checkpointing = False
-    
 
     def forward(
         self,
@@ -508,42 +523,63 @@ class WanFunTransformer3DModel(
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Update rope!!! 
+        # Update rope!!!
         hidden_states_shape = list(hidden_states.shape)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         if encoder_hidden_states_camera is not None and self.control_adapter:
-            
-            encoder_hidden_states_camera = self.control_adapter(encoder_hidden_states_camera)
+
+            encoder_hidden_states_camera = self.control_adapter(
+                encoder_hidden_states_camera
+            )
             # concat camera features to hidden_states
-            encoder_hidden_states_camera = encoder_hidden_states_camera.flatten(2).transpose(1, 2)
+            encoder_hidden_states_camera = encoder_hidden_states_camera.flatten(
+                2
+            ).transpose(1, 2)
             hidden_states = hidden_states + encoder_hidden_states_camera
 
         if encoder_hidden_states_full_ref is not None and hasattr(self, "ref_conv"):
-            encoder_hidden_states_full_ref = self.ref_conv(encoder_hidden_states_full_ref)
+            encoder_hidden_states_full_ref = self.ref_conv(
+                encoder_hidden_states_full_ref
+            )
             hidden_states_shape[2] += encoder_hidden_states_full_ref.shape[2]
-            encoder_hidden_states_full_ref = encoder_hidden_states_full_ref.flatten(2).transpose(1, 2)
+            encoder_hidden_states_full_ref = encoder_hidden_states_full_ref.flatten(
+                2
+            ).transpose(1, 2)
             # concat full ref features to hidden_states
-            hidden_states = torch.cat([hidden_states, encoder_hidden_states_full_ref], dim=1)
-        
+            hidden_states = torch.cat(
+                [hidden_states, encoder_hidden_states_full_ref], dim=1
+            )
+
         if encoder_hidden_states_subject_ref is not None:
-            encoder_hidden_states_subject_ref = self.patch_embedding(encoder_hidden_states_subject_ref)
+            encoder_hidden_states_subject_ref = self.patch_embedding(
+                encoder_hidden_states_subject_ref
+            )
             hidden_states_shape[2] += encoder_hidden_states_subject_ref.shape[2]
-            encoder_hidden_states_subject_ref = encoder_hidden_states_subject_ref.flatten(2).transpose(1, 2)
+            encoder_hidden_states_subject_ref = (
+                encoder_hidden_states_subject_ref.flatten(2).transpose(1, 2)
+            )
             # concat subject ref features to hidden_states
-            hidden_states = torch.cat([hidden_states, encoder_hidden_states_subject_ref], dim=1)
+            hidden_states = torch.cat(
+                [hidden_states, encoder_hidden_states_subject_ref], dim=1
+            )
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = (
             self.condition_embedder(
                 timestep, encoder_hidden_states, encoder_hidden_states_image
             )
         )
-        
 
-        rotary_emb = self.rope(torch.zeros(hidden_states_shape, device=hidden_states.device, dtype=hidden_states.dtype))
-        
+        rotary_emb = self.rope(
+            torch.zeros(
+                hidden_states_shape,
+                device=hidden_states.device,
+                dtype=hidden_states.dtype,
+            )
+        )
+
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
         if encoder_hidden_states_image is not None:

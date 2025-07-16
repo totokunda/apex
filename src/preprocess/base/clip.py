@@ -1,7 +1,7 @@
 from transformers import AutoProcessor
 from transformers.image_processing_utils import ImageProcessingMixin
 from PIL import Image
-from src.preprocess.base import BasePreprocessor
+from src.preprocess.base.base import BasePreprocessor
 from typing import Union
 from src.utils.defaults import (
     DEFAULT_CONFIG_SAVE_PATH,
