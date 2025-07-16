@@ -1348,7 +1348,7 @@ class HunyuanVideoTransformer3DModel(
 
             for block_idx, block in enumerate(self.single_transformer_blocks):
                 if block_idx == len(self.single_transformer_blocks) - 1:
-                    self.cache_hidden_states = hidden_states.clone()
+                    self.latent_cache = hidden_states.clone()
 
                 hidden_states, encoder_hidden_states = block(
                     hidden_states,
@@ -1360,7 +1360,7 @@ class HunyuanVideoTransformer3DModel(
                     first_frame_num_tokens,
                 )
         else:
-            hidden_states = self.cache_hidden_states
+            hidden_states = self.latent_cache
             if len(self.single_transformer_blocks) > 0:
                 for layer_num, block in enumerate(self.single_transformer_blocks):
                     if layer_num < (len(self.single_transformer_blocks) - 1):

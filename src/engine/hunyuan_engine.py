@@ -6,7 +6,6 @@ from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from PIL import Image
 import numpy as np
-from src.mixins import OffloadMixin
 from src.engine.denoise import HunyuanDenoise, HunyuanDenoiseType
 import torch.nn.functional as F
 from src.utils.pos_emb_utils import get_nd_rotary_pos_embed_new
@@ -1158,133 +1157,31 @@ class HunyuanEngine(BaseEngine, HunyuanDenoise):
         infer_length = latents.shape[2]
         video_length = infer_length
 
-        frames_per_batch = 33  # From the reference implementation
-        shift = 0
-        shift_offset = 10  # From the reference implementation
-
-        if infer_length <= frames_per_batch:
-            shift_offset = 0
-
-        with self._progress_bar(total=num_inference_steps) as progress_bar:
-            for i, t in enumerate(timesteps):
-
-                pred_latents = torch.zeros_like(latents_all, dtype=latents_all.dtype)
-                counter = torch.zeros_like(latents_all, dtype=latents_all.dtype)
-
-                for index_start in range(0, infer_length, frames_per_batch):
-                    index_start = index_start - shift
-
-                    idx_list = [
-                        ii % infer_length
-                        for ii in range(index_start, index_start + frames_per_batch)
-                    ]
-                    latents = latents_all[:, :, idx_list].clone()
-
-                    idx_list_audio = [
-                        ii % audio_prompts.shape[1]
-                        for ii in range(
-                            index_start * 4, (index_start + frames_per_batch) * 4
-                        )
-                    ]
-
-                    # Ensure audio prompt list is not out of bounds
-                    if max(idx_list_audio) >= audio_prompts.shape[1]:
-                        idx_list_audio = [
-                            min(i, audio_prompts.shape[1] - 1) for i in idx_list_audio
-                        ]
-
-                    current_audio_prompts = audio_prompts[:, idx_list_audio].clone()
-                    current_uncond_audio_prompts = uncond_audio_prompts[
-                        :, idx_list_audio
-                    ].clone()
-
-                    # Classifier-Free Guidance setup
-                    latent_model_input = torch.cat([latents] * 2)
-                    latent_model_input = self.scheduler.scale_model_input(
-                        latent_model_input, t
-                    )
-
-                    # Dynamic Guidance
-                    if i < 10:
-                        current_guidance_scale = (1 - i / len(timesteps)) * (
-                            guidance_scale - 2
-                        ) + 2
-                        current_face_masks = face_masks * 0.6
-                        text_embeds_input = torch.cat(
-                            [negative_prompt_embeds, prompt_embeds]
-                        )
-                        text_mask_input = torch.cat(
-                            [negative_prompt_attention_mask, prompt_attention_mask]
-                        )
-                        pooled_embeds_input = torch.cat(
-                            [negative_pooled_prompt_embeds, pooled_prompt_embeds]
-                        )
-                    else:
-                        current_guidance_scale = (1 - i / len(timesteps)) * (
-                            6.5 - 3.5
-                        ) + 3.5
-                        current_face_masks = face_masks
-                        text_embeds_input = torch.cat(
-                            [prompt_embeds, prompt_embeds]
-                        )  # Use conditional prompts for both
-                        text_mask_input = torch.cat(
-                            [prompt_attention_mask, prompt_attention_mask]
-                        )
-                        pooled_embeds_input = torch.cat(
-                            [pooled_prompt_embeds, pooled_prompt_embeds]
-                        )
-
-                    # Concatenate inputs for CFG
-                    audio_prompts_input = torch.cat(
-                        [current_uncond_audio_prompts, current_audio_prompts]
-                    )
-                    face_masks_input = torch.cat([current_face_masks] * 2)
-                    ref_latents_input = torch.cat(
-                        [uncond_ref_latents, ref_latents] * num_videos
-                    )
-                    motion_exp_input = torch.cat([motion_exp] * 2)
-                    motion_pose_input = torch.cat([motion_pose] * 2)
-                    fps_input = torch.cat([fps_tensor] * 2)
-
-                    noise_pred = self.transformer(
-                        hidden_states=latent_model_input,
-                        timestep=t,
-                        encoder_hidden_states=text_embeds_input,
-                        encoder_attention_mask=text_mask_input,
-                        pooled_projections=pooled_embeds_input,
-                        ref_latents=ref_latents_input,
-                        encoder_hidden_states_face_mask=face_masks_input,
-                        encoder_hidden_states_audio=audio_prompts_input,
-                        encoder_hidden_states_motion=motion_exp_input,
-                        encoder_hidden_states_pose=motion_pose_input,
-                        encoder_hidden_states_fps=fps_input,
-                        freqs_cos=freqs_cis[0],
-                        freqs_sin=freqs_cis[1],
-                        return_dict=False,
-                    )[0]
-
-                    # Perform guidance
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + current_guidance_scale * (
-                        noise_pred_text - noise_pred_uncond
-                    )
-
-                    # Scheduler step
-                    latents_step = self.scheduler.step(
-                        noise_pred, t, latents, return_dict=False
-                    )[0]
-
-                    for latent_idx, master_idx in enumerate(idx_list):
-                        pred_latents[:, :, master_idx] += latents_step[:, :, latent_idx]
-                        counter[:, :, master_idx] += 1
-
-                shift += shift_offset
-                shift = shift % frames_per_batch
-
-                # Average the predictions from the sliding windows
-                latents_all = pred_latents / counter.clamp(min=1)
-
-                progress_bar.update()
+        latents_all = self.denoise(
+            infer_length=infer_length,
+            latents_all=latents_all,
+            audio_prompts=audio_prompts,
+            uncond_audio_prompts=uncond_audio_prompts,
+            face_masks=face_masks,
+            negative_prompt_embeds=negative_prompt_embeds,
+            prompt_embeds=prompt_embeds,
+            uncond_audio_prompts=uncond_audio_prompts,
+            negative_prompt_attention_mask=negative_prompt_attention_mask,
+            prompt_attention_mask=prompt_attention_mask,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+            ref_latents=ref_latents,
+            uncond_ref_latents=uncond_ref_latents,
+            timesteps=timesteps,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            motion_exp=motion_exp,
+            motion_pose=motion_pose,
+            fps_tensor=fps_tensor,
+            freqs_cis=freqs_cis,
+            num_videos=num_videos,
+            **kwargs,
+        )
 
         if offload:
             self._offload(self.transformer)
