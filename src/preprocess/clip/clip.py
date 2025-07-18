@@ -1,7 +1,5 @@
-from transformers import AutoProcessor
-from transformers.image_processing_utils import ImageProcessingMixin
 from PIL import Image
-from src.preprocess.base.base import BasePreprocessor
+from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
 from typing import Union
 from src.utils.defaults import (
     DEFAULT_CONFIG_SAVE_PATH,
@@ -11,11 +9,9 @@ from src.utils.defaults import (
 import numpy as np
 import torch
 from typing import Union, Dict, Any, List
-from src.utils.module_utils import find_class_recursive
-import importlib
-import torch
 
 
+@preprocessor_registry("clip")
 class CLIPPreprocessor(BasePreprocessor):
 
     def __init__(
@@ -31,7 +27,7 @@ class CLIPPreprocessor(BasePreprocessor):
         dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
-        super().__init__(model_path=model_path)
+        super().__init__(model_path=model_path, preprocessor_type=PreprocessorType.IMAGE)
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
@@ -48,44 +44,13 @@ class CLIPPreprocessor(BasePreprocessor):
             },
             module_name="transformers",
         )
+        
 
     def find_key_with_type(self, config: Dict[str, Any]) -> str:
         for key, value in config.items():
             if "type" in key:
                 return key
         return None
-
-    def load_processor(self, processor_path: Dict[str, Any] | str) -> AutoProcessor:
-        try:
-            processor_class = find_class_recursive(
-                importlib.import_module("transformers"), self.processor_class
-            )
-            if self._is_huggingface_repo(processor_path):
-                if len(processor_path.split("/")) > 2:
-                    subfolder = "/".join(processor_path.split("/")[2:])
-                    processor_path = "/".join(processor_path.split("/")[:2])
-                    return processor_class.from_pretrained(
-                        processor_path,
-                        subfolder=subfolder,
-                        save_dir=self.config_save_path,
-                    )
-                else:
-                    return processor_class.from_pretrained(
-                        processor_path, save_dir=self.config_save_path
-                    )
-            else:
-                return processor_class.from_pretrained(processor_path)
-        except Exception as e:
-            processor_config = self.fetch_config(processor_path)
-            processor_class = find_class_recursive(
-                importlib.import_module("transformers"),
-                processor_config[self.find_key_with_type(processor_config)],
-            )
-            if not issubclass(processor_class, ImageProcessingMixin):
-                processor_class = find_class_recursive(
-                    importlib.import_module("transformers"), self.processor_class
-                )
-            return processor_class(**processor_config)
 
     @torch.inference_mode()
     def __call__(

@@ -16,12 +16,10 @@ from typing import Optional, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from stepvideo.text_encoder.flashattention import FlashSelfAttention
-from stepvideo.utils import with_empty_init
+from accelerate import init_empty_weights
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 from einops import rearrange
-import json
-from src.preprocess.base.base import BasePreprocessor
+from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
 from src.attention import attention_register
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -521,14 +519,14 @@ class Transformer(nn.Module):
 class Step1Model(PreTrainedModel):
     config_class = PretrainedConfig
 
-    @with_empty_init
     def __init__(
         self,
         config,
     ):
         super().__init__(config)
-        self.tok_embeddings = LLaMaEmbedding(config)
-        self.transformer = Transformer(config)
+        with init_empty_weights():  
+            self.tok_embeddings = LLaMaEmbedding(config)
+            self.transformer = Transformer(config)
 
     def forward(
         self,
@@ -544,7 +542,7 @@ class Step1Model(PreTrainedModel):
         )
         return hidden_states
 
-
+@preprocessor_registry("stepvideo.llm")
 class Step1TextEncoderPreprocessor(BasePreprocessor):
     def __init__(
         self,
@@ -554,12 +552,11 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         dtype=torch.bfloat16,
         max_length=320,
     ):
-        super(Step1TextEncoderPreprocessor, self).__init__()
+        super(Step1TextEncoderPreprocessor, self).__init__(model_path, save_path, preprocessor_type=PreprocessorType.TEXT)
         self.max_length = max_length
         self.save_path = save_path
         self.dtype = dtype
         tokenizer_path = self._download(tokenizer_path, save_path)
-        model_path = self._download(model_path, save_path)
         self.text_tokenizer = Wrapped_StepChatTokenizer(tokenizer_path)
         text_encoder = Step1Model.from_pretrained(model_path)
         self.text_encoder = text_encoder.eval().to(dtype)

@@ -1,17 +1,13 @@
-from transformers import AutoProcessor
-from transformers.image_processing_utils import ImageProcessingMixin
-from PIL import Image
-from src.preprocess.base.base import BasePreprocessor
+from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
 from typing import Union
 
 import numpy as np
 import torch
-from typing import Union, Dict, Any, List
-from src.utils.module_utils import find_class_recursive
-import importlib
+from typing import Union, List
 import torch
 from packaging import version as pver
 from einops import rearrange
+
 
 
 class Camera(object):
@@ -90,9 +86,11 @@ def ray_condition(K, c2w, H, W, device):
     return plucker
 
 
+@preprocessor_registry("camera")
 class CameraPreprocessor(BasePreprocessor):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(**kwargs, preprocessor_type=PreprocessorType.POSE)
+        
 
     def read_camera_poses(self, path: str):
         with open(path, "r") as f:

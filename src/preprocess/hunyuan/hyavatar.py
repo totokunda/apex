@@ -3,7 +3,7 @@ from PIL import Image
 from transformers import WhisperModel, AutoFeatureExtractor
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 from src.preprocess.hunyuan.align import AlignImage
-from src.preprocess.base.base import BasePreprocessor
+from src.preprocess.base import BasePreprocessor
 from torchvision import transforms
 from transformers import CLIPImageProcessor
 import torch
@@ -14,9 +14,10 @@ from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 from einops import rearrange
 from src.preprocess.hunyuan.align import get_facemask
+from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
 
-
-class HyAvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
+@preprocessor_registry("hunyuan.avatar")
+class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
     def __init__(
         self,
         model_path: str,
@@ -24,6 +25,7 @@ class HyAvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         align_pt_path: str = None,
         device: str = "cuda",
     ):
+        super().__init__(model_path, save_path, preprocessor_type=PreprocessorType.AUDIO)
         self.model_path = model_path
         self.save_path = save_path
         self.wav2vec_model = WhisperModel.from_pretrained(
@@ -53,7 +55,7 @@ class HyAvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
     def __call__(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
-        audio: str = None,
+        audio: str,
         image_height: int = 720,
         image_width: int = 1280,
         fps: int = 25,

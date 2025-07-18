@@ -1,3 +1,3 @@
-from .ltx import LatentUpscaler
+from .ltx import LatentUpsamplerPostprocessor
 
-__all__ = ["LatentUpscaler"]
+__all__ = ["LatentUpsamplerPostprocessor"]

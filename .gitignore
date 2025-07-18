@@ -124,3 +124,5 @@ parts/
 **/.vscode/*
 scripts/zip_branch.sh
 scripts/zip_branches.sh
+thirdparty/MAGI-1
+thirdparty/VACE
