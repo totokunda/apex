@@ -295,7 +295,7 @@ class LoaderMixin:
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
     ) -> List[Image.Image]:
         if isinstance(video_input, List):
-            if not video_input or isinstance(video_input[0], Image.Image):
+            if not video_input or isinstance(video_input[0], Image.Image) or isinstance(video_input[0], str):
                 return video_input
             return [self._load_image(v) for v in video_input]
 

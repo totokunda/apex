@@ -1,7 +1,5 @@
 import torch
 from enum import Enum
-from typing import Optional
-
 
 class DenoiseType(Enum):
     BASE = "base"

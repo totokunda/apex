@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import torch
 from src.mixins import LoaderMixin
-
+from src.register import ClassRegister
 
 class Postprocessor(ABC, LoaderMixin):
     def __init__(self, engine, **kwargs):
@@ -12,3 +12,6 @@ class Postprocessor(ABC, LoaderMixin):
     @abstractmethod
     def __call__(self, latents: torch.Tensor, **kwargs):
         pass
+
+
+postprocessor_registry = ClassRegister()

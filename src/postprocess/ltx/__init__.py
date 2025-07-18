@@ -1,1 +1,3 @@
-from .latent_upsampler import LatentUpscaler
+from .latent_upsampler import LatentUpsamplerPostprocessor
+
+__all__ = ['LatentUpsamplerPostprocessor']

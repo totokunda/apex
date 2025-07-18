@@ -5,7 +5,7 @@ from src.engine.wan_engine import WanEngine, ModelType
 
 engine = WanEngine(
         yaml_path="manifest/wan_x2v_camera_1.3b.yml",
-        model_type=ModelType.CAMERA,
+        model_type=ModelType.FUN,
         save_path="/mnt/localssd/apex-models",  # Change this to your desired save path,  # Change this to your desired save path
         components_to_load=["transformer"],
         component_dtypes={"vae": torch.bfloat16}

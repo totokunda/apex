@@ -23,7 +23,6 @@ from src.attention import attention_register
 from src.utils.cache_utils import empty_cache
 from logging import Logger
 from src.preprocess import CLIPPreprocessor, CameraPreprocessor
-from src.postprocess import LatentUpscaler
 from typing import Callable
 from src.utils.defaults import (
     DEFAULT_DEVICE,

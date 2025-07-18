@@ -1,4 +1,4 @@
-from src.preprocess.base.base import BasePreprocessor
+from src.preprocess.base import BasePreprocessor, preprocessor_registry
 from PIL import Image
 from typing import Union, List
 import numpy as np
@@ -10,7 +10,7 @@ import importlib
 from typing import Dict, Any
 from transformers.image_processing_utils import ImageProcessingMixin
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
-
+from src.preprocess.base import PreprocessorType
 
 def _expand_input_ids_with_image_tokens(
     text_input_ids,
@@ -66,6 +66,7 @@ def _expand_input_ids_with_image_tokens(
     }
 
 
+@preprocessor_registry("hunyuan.llama")
 class LlamaPreprocessor(BasePreprocessor):
     def __init__(
         self,
@@ -77,7 +78,7 @@ class LlamaPreprocessor(BasePreprocessor):
         model_class: str = "AutoModel",
         **kwargs,
     ):
-        super().__init__(model_path=model_path)
+        super().__init__(model_path=model_path, save_path=save_path, preprocessor_type=PreprocessorType.IMAGE_TEXT)
         # Default prompt template for HunyuanVideo
         self.default_prompt_template = {
             "template": (
@@ -97,7 +98,6 @@ class LlamaPreprocessor(BasePreprocessor):
             "double_return_token_id": 271,
         }
 
-        self.model_path = self._download(model_path, save_path)
         self.model = self._load_model(
             {
                 "type": "llama",

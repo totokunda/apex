@@ -2,6 +2,7 @@ from src.vae.cogvideo.model import AutoencoderKLCogVideoX as CogVideoXVAE
 from src.vae.wan.model import AutoencoderKLWan as WanVAE
 from src.vae.hunyuan.model import AutoencoderKLHunyuanVideo as HunyuanVideoVAE
 from src.vae.ltx.model import AutoencoderKLLTXVideo as LTXVideoVAE
+from src.vae.magi.model import AutoencoderKLMagi as MagiVAE
 from src.vae.mochi.model import AutoencoderKLMochi as MochiVAE
 from src.vae.stepvideo.model import AutoencoderKL as StepVideoVAE
 
@@ -10,6 +11,7 @@ __all__ = [
     "WanVAE",
     "HunyuanVideoVAE",
     "LTXVideoVAE",
+    "MagiVAE",
     "MochiVAE",
     "StepVideoVAE",
 ]
@@ -24,6 +26,8 @@ def get_vae(vae_name: str):
         return HunyuanVideoVAE
     elif vae_name == "ltx":
         return LTXVideoVAE
+    elif vae_name == "magi":
+        return MagiVAE
     elif vae_name == "mochi":
         return MochiVAE
     elif vae_name == "stepvideo":
