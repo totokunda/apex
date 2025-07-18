@@ -7,7 +7,7 @@ class DenoiseType(Enum):
 
 
 class HunyuanDenoise:
-    def __init__(self, denoise_type: DenoiseType = DenoiseType.T2V, *args, **kwargs):
+    def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
         self.denoise_type = denoise_type
 
     def denoise(self, *args, **kwargs) -> torch.Tensor:
