@@ -80,6 +80,29 @@ class SkyReelsTransformerConverter(WanTransformerConverter):
         )
 
 
+class WanMultiTalkTransformerConverter(WanTransformerConverter):
+    def __init__(self):
+        super().__init__()
+        # Add audio-specific parameter mappings
+        self.rename_dict.update({
+            # Audio projection model mappings
+            "audio_proj.proj1": "audio_proj.proj1",
+            "audio_proj.proj1_vf": "audio_proj.proj1_vf", 
+            "audio_proj.proj2": "audio_proj.proj2",
+            "audio_proj.proj3": "audio_proj.proj3",
+            "audio_proj.norm": "audio_proj.norm",
+            # Audio cross-attention mappings
+            "audio_cross_attn.to_q": "audio_cross_attn.to_q",
+            "audio_cross_attn.to_k": "audio_cross_attn.to_k",
+            "audio_cross_attn.to_v": "audio_cross_attn.to_v",
+            "audio_cross_attn.to_out": "audio_cross_attn.to_out",
+            "audio_cross_attn.norm_q": "audio_cross_attn.norm_q",
+            "audio_cross_attn.norm_k": "audio_cross_attn.norm_k",
+            # Visual normalization
+            "norm_x": "norm_x",
+        })
+
+
 class WanVaceTransformerConverter(WanTransformerConverter):
     def __init__(self):
         self.rename_dict = {

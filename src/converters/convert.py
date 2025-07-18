@@ -13,6 +13,7 @@ from accelerate import init_empty_weights
 from src.converters.transformer_converters import (
     WanTransformerConverter,
     WanVaceTransformerConverter,
+    WanMultiTalkTransformerConverter,
     CogVideoXTransformerConverter,
     HunyuanTransformerConverter,
     MochiTransformerConverter,
@@ -41,6 +42,8 @@ def get_transformer_converter(model_type: str):
         return WanTransformerConverter()
     elif model_type == "wan.vace":
         return WanVaceTransformerConverter()
+    elif model_type == "wan.multitalk":
+        return WanMultiTalkTransformerConverter()
     elif model_type == "cogvideox.base":
         return CogVideoXTransformerConverter()
     elif model_type == "hunyuan.base":

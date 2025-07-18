@@ -1,13 +1,9 @@
-from typing import Any, Callable, Dict, List, Optional, Union
-
-import numpy as np
 import torch
-from diffusers.video_processor import VideoProcessor
-
-from src.engine.base_engine import BaseEngine
-from src.engine.denoise.mochi_denoise import MochiDenoise
+from typing import Dict, Any, Callable, List, Union, Optional
+from PIL import Image
+import numpy as np
+from .base import MochiBaseEngine
 from src.ui.nodes import UINode
-
 
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
@@ -32,22 +28,9 @@ def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=Non
     sigma_schedule = [1.0 - x for x in sigma_schedule]
     return np.array(sigma_schedule)
 
-
-class MochiEngine(BaseEngine, MochiDenoise):
-    def __init__(self, yaml_path: str, **kwargs):
-        super().__init__(yaml_path, **kwargs)
-        self.vae_spatial_scale_factor = (
-            self.vae.config.get("scaling_factor", 8) if self.vae else 8
-        )
-        self.vae_temporal_scale_factor = 6  # Mochi specific
-
-        self.video_processor = VideoProcessor(
-            vae_scale_factor=self.vae_spatial_scale_factor
-        )
-        self.num_channels_latents = (
-            self.transformer.config.in_channels if self.transformer else 12
-        )
-
+class MochiT2VEngine(MochiBaseEngine):
+    """Mochi Text-to-Video Engine Implementation"""
+    
     def run(
         self,
         prompt: Union[str, List[str]],
@@ -194,73 +177,4 @@ class MochiEngine(BaseEngine, MochiDenoise):
 
         video = self.vae_decode(latents, offload=offload, dtype=prompt_embeds.dtype)
         video = self._postprocess(video, output_type=output_type)
-        return video
-
-    def vae_decode(
-        self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype = None
-    ):
-        if self.vae is None:
-            self.load_component_by_type("vae")
-        self.to_device(self.vae)
-
-        # unscale/denormalize the latents
-        has_latents_mean = (
-            hasattr(self.vae.config, "latents_mean")
-            and self.vae.config.latents_mean is not None
-        )
-        has_latents_std = (
-            hasattr(self.vae.config, "latents_std")
-            and self.vae.config.latents_std is not None
-        )
-        if has_latents_mean and has_latents_std:
-            latents_mean = (
-                torch.tensor(self.vae.config.latents_mean)
-                .view(1, self.num_channels_latents, 1, 1, 1)
-                .to(latents.device, latents.dtype)
-            )
-            latents_std = (
-                torch.tensor(self.vae.config.latents_std)
-                .view(1, self.num_channels_latents, 1, 1, 1)
-                .to(latents.device, latents.dtype)
-            )
-            latents = (
-                latents * latents_std / self.vae.config.scaling_factor + latents_mean
-            )
-        else:
-            latents = latents / self.vae.config.scaling_factor
-
-        video = self.vae.decode(latents.to(self.vae.dtype), return_dict=False)[0]
-
-        if offload:
-            self._offload(self.vae)
-
-        return video.to(dtype=dtype)
-
-    def prepare_latents(
-        self,
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        num_frames,
-        dtype,
-        device,
-        generator,
-        latents=None,
-    ):
-        height = height // self.vae_spatial_scale_factor
-        width = width // self.vae_spatial_scale_factor
-        num_frames = (num_frames - 1) // self.vae_temporal_scale_factor + 1
-
-        shape = (batch_size, num_channels_latents, num_frames, height, width)
-
-        if latents is not None:
-            return latents.to(device=device, dtype=dtype)
-
-        from diffusers.utils.torch_utils import randn_tensor
-
-        latents = randn_tensor(
-            shape, generator=generator, device=device, dtype=torch.float32
-        )
-        latents = latents.to(dtype)
-        return latents
+        return video 

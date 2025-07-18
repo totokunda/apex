@@ -3,12 +3,13 @@ from .cogvideo.model import CogVideoXTransformer3DModel
 from .hunyuan.base.model import HunyuanVideoTransformer3DModel
 from .hunyuan.framepack.model import HunyuanVideoFramepackTransformer3DModel
 from .ltx.base.model import LTXVideoTransformer3DModel
-from .magi.model import MagiTransformer3DModel
+from .magi.base.model import MagiTransformer3DModel
 from .mochi.base.model import MochiTransformer3DModel
 from .stepvideo.base.model import StepVideoModel as StepVideoTransformer3DModel
 from .wan.base.model import WanTransformer3DModel
 from .wan.causal.model import CausalWanTransformer3DModel
 from .wan.vace.model import WanVACETransformer3DModel
+from .wan.multitalk.model import WanMultiTalkTransformer3DModel
 
 __all__ = [
     "TRANSFORMERS_REGISTRY",
@@ -22,4 +23,5 @@ __all__ = [
     "WanTransformer3DModel",
     "CausalWanTransformer3DModel",
     "WanVACETransformer3DModel",
+    "WanMultiTalkTransformer3DModel",
 ]

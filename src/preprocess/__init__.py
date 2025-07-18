@@ -33,6 +33,7 @@ from .composition import (
     ExpandAnythingPreprocessor,
     MoveAnythingPreprocessor
 )
+from .wan import MultiTalkPreprocessor
 
 __all__ = [
     "CLIPPreprocessor", 
@@ -71,5 +72,6 @@ __all__ = [
     "AnimateAnythingPreprocessor",
     "SwapAnythingPreprocessor",
     "ExpandAnythingPreprocessor",
-    "MoveAnythingPreprocessor"
+    "MoveAnythingPreprocessor",
+    "MultiTalkPreprocessor"
 ]
