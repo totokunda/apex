@@ -3,12 +3,12 @@ import torch.nn.functional as F
 from typing import Dict, Any, Optional
 from diffusers.models.autoencoders import AutoencoderKL
 from diffusers.pipelines.ltx.modeling_latent_upsampler import LTXLatentUpsamplerModel
-from src.postprocess.base import Postprocessor, postprocessor_registry
+from src.postprocess.base import BasePostprocessor, postprocessor_registry
 from src.utils.cache_utils import empty_cache
 
 
 @postprocessor_registry("ltx.latent_upsampler")
-class LatentUpsamplerPostprocessor(Postprocessor):
+class LatentUpsamplerPostprocessor(BasePostprocessor):
     def __init__(self, engine, **kwargs):
         super().__init__(engine, **kwargs)
         

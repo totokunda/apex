@@ -399,6 +399,8 @@ $CONDA_RUN pip install -r requirements.txt
 mkdir -p thirdparty
 cd thirdparty
 
+git submodule update --init --recursive
+
 # Function to clone and install a repository
 clone_and_install() {
     local repo_url=$1
@@ -424,6 +426,7 @@ if [[ ! -d "diffusers" ]]; then
     clone_and_install "https://github.com/huggingface/diffusers.git" "diffusers" "$CONDA_RUN pip install -e ."
 else
     cd diffusers
+    # git clone submodule
     $CONDA_RUN pip install -e .
     cd ..
 fi

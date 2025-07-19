@@ -1,16 +1,15 @@
-from src.preprocess.base import BasePreprocessor, preprocessor_registry
 from PIL import Image
 from typing import Union, List
 import numpy as np
 import torch
 from transformers import AutoProcessor
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_CONFIG_SAVE_PATH
 from src.utils.module_utils import find_class_recursive
 import importlib
 from typing import Dict, Any
 from transformers.image_processing_utils import ImageProcessingMixin
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
-from src.preprocess.base import PreprocessorType
+from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
 
 def _expand_input_ids_with_image_tokens(
     text_input_ids,
@@ -75,12 +74,28 @@ class LlamaPreprocessor(BasePreprocessor):
         config_path: str | None = None,
         config: Dict[str, Any] | None = None,
         save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
-        model_class: str = "AutoModel",
+        config_save_path: str = DEFAULT_CONFIG_SAVE_PATH,
+        tokenizer_name: str | None = None,
+        tokenizer_class: str | None = None,
+        tokenizer_kwargs: Dict[str, Any] | None = None,
         **kwargs,
     ):
         super().__init__(model_path=model_path, save_path=save_path, preprocessor_type=PreprocessorType.IMAGE_TEXT)
         # Default prompt template for HunyuanVideo
-        self.default_prompt_template = {
+        self.default_prompt_template_text = {
+            "template": (
+                "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+                "1. The main content and theme of the video."
+                "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+                "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+                "4. background environment, light, style and atmosphere."
+                "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+                "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
+            ),
+            "crop_start": 95,
+        }
+        
+        self.default_prompt_template_image = {
             "template": (
                 "<|start_header_id|>system<|end_header_id|>\n\n<image>\nDescribe the video by detailing the following aspects according to the reference image: "
                 "1. The main content and theme of the video."
@@ -97,28 +112,36 @@ class LlamaPreprocessor(BasePreprocessor):
             "image_emb_len": 576,
             "double_return_token_id": 271,
         }
-
+        
         self.model = self._load_model(
             {
-                "type": "llama",
-                "base": model_class,
+                "type": "hunyuan.llama",
+                "base": "LlamaModel",
                 "model_path": self.model_path,
                 "config_path": config_path,
                 "config": config,
             },
             module_name="transformers",
         )
+        self.config_save_path = config_save_path
+        
+        self.processor_class = "CLIPImageProcessor"
 
         if image_processor_path is not None:
             self.image_processor = self.load_processor(image_processor_path)
         else:
             self.image_processor = None
-
+        
+        if self._is_url(config_path):
+            config_path = self._check_config_for_url(config_path)
+            
         self.tokenizer = fetch_and_save_tokenizer_from_config(
             self.model_path,
-            config_path,
-            tokenizer_class="AutoTokenizer",
-            **kwargs.get("tokenizer_kwargs", {}),
+            config_path=config_path,
+            config=config,
+            tokenizer_name=tokenizer_name,
+            tokenizer_class=tokenizer_class,
+            **tokenizer_kwargs,
         )
 
     def load_processor(self, processor_path: Dict[str, Any] | str) -> AutoProcessor:
@@ -163,8 +186,8 @@ class LlamaPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
         prompt: Union[str, List[str]],
+        image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
         max_sequence_length: int = 256,
         image_embed_interleave: int = 2,
         num_hidden_layers_to_skip: int = 2,
@@ -174,20 +197,21 @@ class LlamaPreprocessor(BasePreprocessor):
         **kwargs,
     ):
         prompt = [prompt] if isinstance(prompt, str) else prompt
-        prompt = [self.default_prompt_template["template"].format(p) for p in prompt]
+        prompt_template = self.default_prompt_template_text if image is None else self.default_prompt_template_image
+        prompt = [prompt_template["template"].format(p) for p in prompt]
 
-        crop_start = self.default_prompt_template.get("crop_start", None)
+        crop_start = prompt_template.get("crop_start", None)
 
-        image_emb_len = self.default_prompt_template.get("image_emb_len", 576)
-        image_emb_start = self.default_prompt_template.get("image_emb_start", 5)
-        image_emb_end = self.default_prompt_template.get("image_emb_end", 581)
-        double_return_token_id = self.default_prompt_template.get(
+        image_emb_len = prompt_template.get("image_emb_len", 576)
+        image_emb_start = prompt_template.get("image_emb_start", 5)
+        image_emb_end = prompt_template.get("image_emb_end", 581)
+        double_return_token_id = prompt_template.get(
             "double_return_token_id", 271
         )
 
         if crop_start is None:
             prompt_template_input = self.tokenizer(
-                self.default_prompt_template["template"],
+                prompt_template["template"],
                 padding="max_length",
                 return_tensors="pt",
                 return_length=False,
@@ -199,6 +223,7 @@ class LlamaPreprocessor(BasePreprocessor):
             crop_start -= 5
 
         max_sequence_length += crop_start
+
         text_inputs = self.tokenizer(
             prompt,
             max_length=max_sequence_length,
@@ -236,10 +261,10 @@ class LlamaPreprocessor(BasePreprocessor):
             expanded_inputs["pixel_values"] = image_embeds
         else:
             expanded_inputs = {
-                "input_ids": text_input_ids,
-                "attention_mask": prompt_attention_mask,
+                "input_ids": text_input_ids.to(self.model.device),
+                "attention_mask": prompt_attention_mask.to(self.model.device),
             }
-
+            
         prompt_embeds = self.model(
             **expanded_inputs,
             output_hidden_states=True,

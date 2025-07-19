@@ -229,7 +229,6 @@ class HunyuanHyavatarEngine(HunyuanBaseEngine):
             face_masks=face_masks,
             negative_prompt_embeds=negative_prompt_embeds,
             prompt_embeds=prompt_embeds,
-            uncond_audio_prompts=uncond_audio_prompts,
             negative_prompt_attention_mask=negative_prompt_attention_mask,
             prompt_attention_mask=prompt_attention_mask,
             pooled_prompt_embeds=pooled_prompt_embeds,

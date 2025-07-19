@@ -597,6 +597,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(
             hidden_states, emb=temb
         )
+        
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
             self.norm1_context(encoder_hidden_states, emb=temb)
         )
@@ -1124,10 +1125,11 @@ class HunyuanVideoTransformer3DModel(
         image_rotary_emb = self.rope(hidden_states)
 
         # 2. Conditional embeddings
+        
         temb, token_replace_emb = self.time_text_embed(
             timestep, pooled_projections, guidance
         )
-
+        
         hidden_states = self.x_embedder(hidden_states)
         encoder_hidden_states = self.context_embedder(
             encoder_hidden_states, timestep, encoder_attention_mask
@@ -1152,6 +1154,7 @@ class HunyuanVideoTransformer3DModel(
         mask_indices = indices >= effective_sequence_length.unsqueeze(1)  # [B, N]
         attention_mask = attention_mask.masked_fill(mask_indices, False)
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # [B, 1, 1, N]
+        
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:

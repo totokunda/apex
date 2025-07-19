@@ -3,7 +3,7 @@ import torch
 from src.mixins import LoaderMixin
 from src.register import ClassRegister
 
-class Postprocessor(ABC, LoaderMixin):
+class BasePostprocessor(ABC, LoaderMixin):
     def __init__(self, engine, **kwargs):
         self.engine = engine
         self.device = engine.device

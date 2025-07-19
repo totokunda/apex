@@ -127,3 +127,5 @@ scripts/zip_branches.sh
 thirdparty/MAGI-1
 thirdparty/VACE
 thirdparty/MultiTalk
+thirdparty/flash-attention
+thirdparty/SageAttention

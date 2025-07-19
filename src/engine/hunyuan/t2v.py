@@ -1,6 +1,5 @@
 import torch
-from typing import Dict, Any, Callable, List, Union, Optional
-from PIL import Image
+from typing import Dict, Any, Callable, List, Union
 import numpy as np
 
 from .base import HunyuanBaseEngine
@@ -9,18 +8,19 @@ from .base import HunyuanBaseEngine
 class HunyuanT2VEngine(HunyuanBaseEngine):
     """Hunyuan Text-to-Video Engine Implementation"""
     
+    @torch.inference_mode()
     def run(
         self,
         prompt: Union[List[str], str],
-        prompt_2: Union[List[str], str] = None,
-        negative_prompt: Union[List[str], str] = None,
-        negative_prompt_2: Union[List[str], str] = None,
+        prompt_2: Union[List[str], str, None] = None,
+        negative_prompt: Union[List[str], str, None] = None,
+        negative_prompt_2: Union[List[str], str, None] = None,
         height: int = 720,
         width: int = 1280,
         duration: str | int = 10,
         num_inference_steps: int = 50,
         num_videos: int = 1,
-        seed: int = None,
+        seed: int | None = None,
         fps: int = 16,
         guidance_scale: float = 6.0,
         true_guidance_scale: float = 1.0,
@@ -28,17 +28,18 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
-        render_on_step_callback: Callable = None,
+        render_on_step_callback: Callable | None = None,
         offload: bool = True,
         render_on_step: bool = False,
-        generator: torch.Generator = None,
-        timesteps: List[int] = None,
+        generator: torch.Generator | None = None,
+        timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         max_sequence_length: int = 256,
-        sigmas: List[float] = None,
+        sigmas: List[float] | np.ndarray | None = None,
         **kwargs,
     ):
         """Text-to-video generation following HunyuanVideoPipeline"""
+        
 
         # 1. Encode prompts
         (
@@ -83,7 +84,7 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
             self.device, dtype=transformer_dtype
         )
 
-        if negative_prompt_embeds is not None:
+        if negative_prompt is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
@@ -127,13 +128,16 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
         guidance = (
             torch.tensor(
                 [guidance_scale] * latents.shape[0],
-                dtype=transformer_dtype,
                 device=self.device,
+                dtype=transformer_dtype,
             )
-            * 1000.0
+            #* 1000.0
         )
+      
+        guidance = guidance * 1000.0
+ 
         use_true_cfg_guidance = (
-            true_guidance_scale > 1.0 and negative_prompt_embeds is not None
+            true_guidance_scale > 1.0 and negative_prompt is not None
         )
 
         # 7. Denoising loop
@@ -143,22 +147,24 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
             scheduler=self.scheduler,
             true_guidance_scale=true_guidance_scale,
             use_true_cfg_guidance=use_true_cfg_guidance,
+            num_inference_steps=num_inference_steps,
             noise_pred_kwargs=dict(
-                encoder_hidden_states=prompt_embeds,
-                encoder_attention_mask=prompt_attention_mask,
-                pooled_projections=pooled_prompt_embeds,
-                guidance=guidance,
+                encoder_hidden_states=prompt_embeds.to(self.device),
+                encoder_attention_mask=prompt_attention_mask.to(self.device).to(transformer_dtype),
+                pooled_projections=pooled_prompt_embeds.to(self.device),
+                guidance=guidance.to(self.device),
                 attention_kwargs=attention_kwargs,
             ),
             unconditional_noise_pred_kwargs=dict(
-                encoder_hidden_states=negative_prompt_embeds,
-                encoder_attention_mask=negative_prompt_attention_mask,
-                pooled_projections=negative_pooled_prompt_embeds,
-                guidance=guidance,
+                encoder_hidden_states=negative_prompt_embeds.to(self.device),
+                encoder_attention_mask=negative_prompt_attention_mask.to(self.device).to(transformer_dtype),
+                pooled_projections=negative_pooled_prompt_embeds.to(self.device),
+                guidance=guidance.to(self.device),
                 attention_kwargs=attention_kwargs,
-            ),
+            ) if (negative_prompt is not None and true_guidance_scale > 1.0) else None,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            transformer_dtype=transformer_dtype,
             **kwargs,
         )
 
@@ -168,6 +174,10 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
         if return_latents:
             return latents
         else:
+            if self.vae is None:
+                self.load_component_by_type("vae")
+                self.to_device(self.vae)
+                
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            video = self._postprocess(video)
+            return video 

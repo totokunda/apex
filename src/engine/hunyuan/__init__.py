@@ -70,13 +70,13 @@ class HunyuanEngine(BaseEngine, HunyuanDenoise):
     @torch.inference_mode()
     def run(
         self,
-        input_nodes: List[UINode] = None,
+        input_nodes: List[UINode] | None = None,
         **kwargs,
     ):
         default_kwargs = self._get_default_kwargs("run")
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-        
+
         return self.implementation_engine.run(**final_kwargs)
 
     def __str__(self):

@@ -50,22 +50,26 @@ class HunyuanDenoise:
                     latent_model_input = latents.to(transformer_dtype)
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
+                
                 # Conditional forward pass
-                noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
-                    timestep=timestep,
-                    return_dict=False,
-                    **noise_pred_kwargs,
-                )[0]
-
-                # Unconditional forward pass for CFG
-                if use_true_cfg_guidance:
-                    neg_noise_pred = self.transformer(
+                with self.transformer.cache_context("cond"):
+                    noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         timestep=timestep,
                         return_dict=False,
-                        **unconditional_noise_pred_kwargs,
+                        **noise_pred_kwargs,
                     )[0]
+                
+
+                # Unconditional forward pass for CFG
+                if use_true_cfg_guidance:
+                    with self.transformer.cache_context("uncond"):
+                        neg_noise_pred = self.transformer(
+                            hidden_states=latent_model_input,
+                            timestep=timestep,
+                            return_dict=False,
+                            **unconditional_noise_pred_kwargs,
+                        )[0]
                     noise_pred = neg_noise_pred + true_guidance_scale * (
                         noise_pred - neg_noise_pred
                     )
@@ -75,6 +79,7 @@ class HunyuanDenoise:
                     latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
                         0
                     ]
+            
                 elif image_condition_type == "token_replace":
                     latents_step = scheduler.step(
                         noise_pred[:, :, 1:], t, latents[:, :, 1:], return_dict=False

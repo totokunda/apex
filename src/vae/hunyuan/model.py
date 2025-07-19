@@ -1244,6 +1244,12 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
             return (dec,)
         return DecoderOutput(sample=dec)
 
+    def normalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
+        return latents * self.config.scaling_factor
+
+    def denormalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
+        return latents / self.config.scaling_factor
+
     def forward(
         self,
         sample: torch.Tensor,

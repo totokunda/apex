@@ -16,6 +16,7 @@ from typing import Callable
 from logging import Logger
 from src.utils.module_utils import find_class_recursive
 import importlib
+import inspect
 from loguru import logger
 from src.utils.yaml_utils import LoaderWithInclude
 from PIL import Image
@@ -28,6 +29,10 @@ import tempfile
 from glob import glob
 import safetensors
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from transformers.modeling_utils import PreTrainedModel
+# Import pretrained config from transformers
+from transformers.configuration_utils import PretrainedConfig
+
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 
@@ -127,9 +132,32 @@ class LoaderMixin:
             # try to load from model_path directly
             model = model_class.from_pretrained(model_path, torch_dtype=load_dtype)
             return model
-
+        
+        
         with init_empty_weights():
-            model = model_class(**config)
+            # Check the constructor signature to determine what it expects
+            sig = inspect.signature(model_class.__init__)
+            params = list(sig.parameters.values())
+            
+            # Skip 'self' parameter
+            if params and params[0].name == 'self':
+                params = params[1:]
+            
+            # Check if the first parameter expects a PretrainedConfig object
+            expects_pretrained_config = False
+            if params:
+                first_param = params[0]
+                if (first_param.annotation == PretrainedConfig or
+                    (hasattr(first_param.annotation, '__name__') and 
+                     'Config' in first_param.annotation.__name__) or
+                    first_param.name in ['config'] and issubclass(model_class, PreTrainedModel)):
+                    expects_pretrained_config = True
+            
+            if expects_pretrained_config:
+                conf = PretrainedConfig(**config)
+                model = model_class(conf)
+            else:
+                model = model_class(**config)
 
         if os.path.isdir(model_path):
             self.logger.info(f"Loading model from {model_path}")
