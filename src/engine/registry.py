@@ -1,6 +1,5 @@
-from typing import Dict, Type, Any, Optional, List
+from typing import Dict, Type, Any, Optional, List, Literal
 from enum import Enum
-import importlib
 import torch
 from src.ui.nodes import UINode
 
@@ -151,7 +150,7 @@ class UniversalEngine:
         self.model_type = model_type
     
     @torch.inference_mode()
-    def run(self, input_nodes: List[UINode] = None, **kwargs):
+    def run(self, input_nodes: List[UINode] | None = None, **kwargs):
         """Run the engine with given parameters"""
         return self.engine.run(input_nodes=input_nodes, **kwargs)
     
@@ -189,7 +188,7 @@ def get_engine_registry() -> EngineRegistry:
     return _global_registry
 
 
-def create_engine(engine_type: str, yaml_path: str, model_type: Optional[str] = None, **kwargs) -> Any:
+def create_engine(engine_type: Literal["wan", "hunyuan", "ltx", "cogvideo", "magi", "stepvideo", "mochi", "skyreels"], yaml_path: str, model_type: str | None = None, **kwargs) -> UniversalEngine:
     """Convenience function to create an engine"""
     return _global_registry.create_engine(
         engine_type=engine_type,

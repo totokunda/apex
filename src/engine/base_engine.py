@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any, Optional, Union
+from diffusers.utils.dummy_pt_objects import SchedulerMixin
 import torch
 from loguru import logger
 import urllib3
@@ -44,6 +45,8 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms as TF
 import inspect
+from src.preprocess import preprocessor_registry
+from src.postprocess import postprocessor_registry
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -59,19 +62,22 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     postprocessors: Dict[str, Any] = {}
     offload_to_cpu: bool = False
     video_processor: VideoProcessor
-    config_save_path: str = None
+    config_save_path: str | None = None
     component_load_dtypes: Dict[str, torch.dtype] | None = None
     component_dtypes: Dict[str, torch.dtype] | None = None
     components_to_load: List[str] | None = None
     preprocessors_to_load: List[str] | None = None
     postprocessors_to_load: List[str] | None = None
     component_init_kwargs: Dict[str, Any] | None = None
-    save_path: str = None
+    save_path: str | None = None
     logger: Logger
     attention_type: str = "sdpa"
-    tag: str = None
+    tag: str | None = None
     check_weights: bool = True
     save_converted_weights: bool = True
+    vae_scale_factor_temporal: float = 1.0
+    vae_scale_factor_spatial: float = 1.0
+    num_channels_latents: int = 4
 
     def __init__(
         self,
@@ -193,11 +199,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         )
 
     @contextmanager
-    def _progress_bar(self, total: int, desc: str = None, **kwargs):
+    def _progress_bar(self, total: int, desc: str | None = None, **kwargs):
         with tqdm(total=total, desc=desc, **kwargs) as pbar:
             yield pbar
 
-    def _preprocess_kwargs(self, input_nodes: List[UINode] = None, **kwargs):
+    def _preprocess_kwargs(self, input_nodes: List[UINode] | None = None, **kwargs):
         if input_nodes:
             kwargs.update(self._parse_input_nodes(input_nodes))
         return kwargs
@@ -217,7 +223,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     @torch.inference_mode()
     def run(
         self,
-        input_nodes: List[UINode] = None,
+        input_nodes: List[UINode] | None = None,
         **kwargs,
     ):
         raise NotImplementedError("Subclasses must implement this method")
@@ -507,7 +513,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     @torch.inference_mode()
     def vae_decode(
-        self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype = None
+        self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype | None = None
     ):
         if self.vae is None:
             self.load_component_by_type("vae")
@@ -598,12 +604,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     def load_preprocessor(self, config: Dict[str, Any]):
         preprocessor_type = config.get("type")
-        if preprocessor_type == "clip":
-            return CLIPPreprocessor(**config)
-        elif preprocessor_type == "camera":
-            return CameraPreprocessor(**config)
-        else:
+        preprocessor_class = preprocessor_registry.get(preprocessor_type)
+        if preprocessor_class is None:
             raise ValueError(f"Preprocessor type {preprocessor_type} not supported")
+        return preprocessor_class(**config)
 
     def load_preprocessors(
         self,
@@ -615,9 +619,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 preprocessors_to_load is None
                 or preprocessor.get("type") in preprocessors_to_load
             ):
-                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
-                    preprocessor
-                )
+                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(preprocessor)
 
     def load_postprocessor_by_type(self, postprocessor_type: str):
         for postprocessor in self.config.get("postprocessors", []):
@@ -627,10 +629,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     def load_postprocessor(self, config: Dict[str, Any]):
         postprocessor_type = config.get("type")
-        if postprocessor_type == "latent_upsampler":
-            return LatentUpsamplerPostprocessor(self, **config)
-        else:
+        postprocessor_class = postprocessor_registry.get(postprocessor_type)
+        if postprocessor_class is None:
             raise ValueError(f"Postprocessor type {postprocessor_type} not supported")
+        return postprocessor_class(**config)
 
     def load_postprocessors(
         self,
@@ -764,7 +766,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         rendered_video = self._postprocess(video)
         render_on_step_callback(rendered_video)
 
-    def _postprocess(self, video: torch.Tensor, output_type: str = "pil"):
+    def _postprocess(self, video: torch.Tensor, output_type: str = "np"):
         postprocessed_video = self.video_processor.postprocess_video(
             video, output_type=output_type
         )
@@ -772,13 +774,14 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     def _get_timesteps(
         self,
+        scheduler: SchedulerMixin | None = None,
         num_inference_steps: Optional[int] = None,
         timesteps: Optional[List[int]] = None,
         sigmas: Optional[List[float]] = None,
         timesteps_as_indices: bool = False,
         **kwargs,
     ):
-        scheduler = self.scheduler
+        scheduler = scheduler or self.scheduler
         device = self.device
         if timesteps is not None and sigmas is not None:
             raise ValueError(
@@ -871,9 +874,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         b = base_shift - m * base_seq_len
         mu = image_seq_len * m + b
         return mu
-
-    def _render_step(self, latents: torch.Tensor, **kwargs):
-        raise NotImplementedError("Subclasses must implement this method")
 
     def __str__(self):
         return f"BaseEngine(config={self.config}, device={self.device})"

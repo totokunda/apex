@@ -1,0 +1,41 @@
+name: "Shared Hunyuan Components"
+description: "Shared Hunyuan Components"
+
+components:
+  - type: vae
+    name: "hunyuan/vae"
+    base: "hunyuan" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: hunyuanvideo-community/HunyuanVideo/vae
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/vae/config.json
+
+  - type: text_encoder
+    name: "hunyuan/text_encoder"
+    base: "CLIPTextModel"
+    model_path: hunyuanvideo-community/HunyuanVideo/text_encoder_2
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder_2/config.json
+    config:
+      torch_dtype: bfloat16
+    tokenizer_name: hunyuanvideo-community/HunyuanVideo
+    tokenizer_class: AutoTokenizer
+    tokenizer_kwargs:
+      subfolder: "tokenizer_2"
+
+preprocessors: 
+  - type: hunyuan.llama
+    name: "hunyuan/llama/i2v"
+    model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
+    image_processor_path: hunyuanvideo-community/HunyuanVideo/image_processor
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json
+    tokenizer_name: hunyuanvideo-community/HunyuanVideo
+    tokenizer_class: AutoTokenizer
+    tokenizer_kwargs:
+      subfolder: "tokenizer"
+
+  - type: hunyuan.llama
+    name: "hunyuan/llama/t2v"
+    model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json
+    tokenizer_name: hunyuanvideo-community/HunyuanVideo
+    tokenizer_class: AutoTokenizer
+    tokenizer_kwargs:
+      subfolder: "tokenizer"

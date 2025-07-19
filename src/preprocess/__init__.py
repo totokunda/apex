@@ -34,6 +34,8 @@ from .composition import (
     MoveAnythingPreprocessor
 )
 from .wan import MultiTalkPreprocessor
+from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
+from .base import BasePreprocessor, preprocessor_registry
 
 __all__ = [
     "CLIPPreprocessor", 
@@ -73,5 +75,9 @@ __all__ = [
     "SwapAnythingPreprocessor",
     "ExpandAnythingPreprocessor",
     "MoveAnythingPreprocessor",
-    "MultiTalkPreprocessor"
+    "MultiTalkPreprocessor",
+    "BasePreprocessor",
+    "preprocessor_registry",
+    "AvatarPreprocessor",
+    "LlamaPreprocessor"
 ]

@@ -28,3 +28,9 @@ tiktoken
 blobfile
 sentencepiece
 imageio-ffmpeg
+timm
+scipy
+scikit-image
+matplotlib
+onnxruntime
+librosa

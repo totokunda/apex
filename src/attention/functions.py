@@ -320,14 +320,19 @@ def flash_attention3(
     if v.dtype not in acceptable_dtypes:
         v = v.to(default_dtype)
 
-    out, lse = flash_attn_func_3(
+    out = flash_attn_func_3(
         q.transpose(1, 2),
         k.transpose(1, 2),
         v.transpose(1, 2),
         softmax_scale=softmax_scale,
         causal=is_causal,
     )
-    return out
+    
+    # check if out is a tuple of two tensors
+    if isinstance(out, tuple):
+        return out[0]
+    else:
+        return out
 
 
 @attention_register("sage")
@@ -365,9 +370,8 @@ def xla_flash_attention(q, k, v, attention_mask, softmax_scale, **kwargs):
         q, k, v, q_segment_indexes, attention_mask, softmax_scale
     )
 
-
 @attention_register("flex")
-def flex_attention_func(q, k, v, attention_mask, softmax_scale, **kwargs):
+def flex_attention_func(q, k, v, attn_mask=None, softmax_scale=None, **kwargs):
     if flex_attention is None:
         raise ImportError("flex_attention is not installed")
-    return flex_attention(q, k, v, attention_mask, softmax_scale, **kwargs)
+    return flex_attention(q, k, v, block_mask=attn_mask, scale=softmax_scale, **kwargs)

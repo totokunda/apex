@@ -136,9 +136,9 @@ class HunyuanBaseEngine:
     def _encode_prompt(
         self,
         prompt: Union[str, List[str]],
-        prompt_2: Union[str, List[str]] = None,
+        prompt_2: Union[str, List[str], None] = None,
         image: Union[
-            Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor
+            Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor, None
         ] = None,
         num_videos_per_prompt: int = 1,
         max_sequence_length: int = 256,
@@ -149,15 +149,16 @@ class HunyuanBaseEngine:
         """Encode prompts using both LLaMA and CLIP text encoders"""
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
+            
 
         self.to_device(self.text_encoder)
 
-        if not "llama" in self.preprocessors:
-            self.load_preprocessor_by_type("llama")
-        self.to_device(self.preprocessors["llama"])
+        if not "hunyuan.llama" in self.preprocessors:
+            self.load_preprocessor_by_type("hunyuan.llama")
+        self.to_device(self.preprocessors["hunyuan.llama"])
 
         if self.llama_text_encoder is None:
-            self.llama_text_encoder = self.preprocessors["llama"]
+            self.llama_text_encoder = self.preprocessors["hunyuan.llama"]
 
         if isinstance(prompt, str):
             prompt = [prompt]
@@ -165,6 +166,10 @@ class HunyuanBaseEngine:
         if isinstance(prompt_2, str):
             prompt_2 = [prompt_2]
 
+        if prompt_2 is None:
+            prompt_2 = prompt
+        
+        
         prompt_embeds, prompt_attention_mask = self.llama_text_encoder(
             prompt,
             image=image,
@@ -172,15 +177,18 @@ class HunyuanBaseEngine:
             pad_to_max_length=True,
             num_videos_per_prompt=num_videos_per_prompt,
             dtype=dtype,
-            image_embed_interleave=image_embed_interleave,
+            image_embed_interleave=image_embed_interleave
         )
 
         pooled_prompt_embeds = self.text_encoder.encode(
             prompt_2,
-            max_sequence_length=max_sequence_length,
+            max_sequence_length=77,
             pad_to_max_length=True,
+            use_mask_in_input=False,
+            use_position_ids=True,
             num_videos_per_prompt=num_videos_per_prompt,
             dtype=dtype,
+            **kwargs
         )
 
         return pooled_prompt_embeds, prompt_embeds, prompt_attention_mask
