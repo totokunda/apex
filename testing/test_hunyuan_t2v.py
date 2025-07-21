@@ -3,6 +3,7 @@ from diffusers.utils import export_to_video
 import torch
 
 engine = create_engine("hunyuan", "/workspace/apex/manifest/hunyuan_t2v_13b.yml", "t2v", save_path="/dev/shm/models", attention_type="sdpa")
+engine = create_engine("hunyuan", "/workspace/apex/manifest/hunyuan_t2v_13b.yml", "t2v", save_path="/dev/shm/models", attention_type="sdpa")
 
 prompt = "A beautiful woman in a flowing red dress walks through a dimly lit city street, neon lights reflecting off wet pavement, her silhouette glowing as the camera slowly tracks her from behind."
 

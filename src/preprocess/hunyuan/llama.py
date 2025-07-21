@@ -78,6 +78,7 @@ class LlamaPreprocessor(BasePreprocessor):
         tokenizer_name: str | None = None,
         tokenizer_class: str | None = None,
         tokenizer_kwargs: Dict[str, Any] | None = None,
+        base_model: str = "LlamaModel",
         **kwargs,
     ):
         super().__init__(model_path=model_path, save_path=save_path, preprocessor_type=PreprocessorType.IMAGE_TEXT)
@@ -116,13 +117,17 @@ class LlamaPreprocessor(BasePreprocessor):
         self.model = self._load_model(
             {
                 "type": "hunyuan.llama",
-                "base": "LlamaModel",
+                "base": base_model,
                 "model_path": self.model_path,
                 "config_path": config_path,
                 "config": config,
             },
             module_name="transformers",
         )
+        
+        if hasattr(self.model, "vision_tower"):
+            self.model.vision_tower.to(self.model.vision_tower.config.torch_dtype)
+        
         self.config_save_path = config_save_path
         
         self.processor_class = "CLIPImageProcessor"
@@ -239,8 +244,9 @@ class LlamaPreprocessor(BasePreprocessor):
         prompt_attention_mask = text_inputs.attention_mask.to(device=device)
 
         if self.image_processor is not None:
+            loaded_image = self._load_image(image)
             image_embeds = self.image_processor(
-                image, return_tensors="pt"
+                loaded_image, return_tensors="pt"
             ).pixel_values.to(device)
         else:
             image_embeds = image
@@ -258,13 +264,14 @@ class LlamaPreprocessor(BasePreprocessor):
                 image_emb_end,
                 pad_token_id,
             )
-            expanded_inputs["pixel_values"] = image_embeds
+            expanded_inputs["pixel_values"] = image_embeds.to(self.model.vision_tower.config.torch_dtype)
+            expanded_inputs  = {k: v.to(self.model.device) for k, v in expanded_inputs.items()}
         else:
             expanded_inputs = {
                 "input_ids": text_input_ids.to(self.model.device),
                 "attention_mask": prompt_attention_mask.to(self.model.device),
             }
-            
+        
         prompt_embeds = self.model(
             **expanded_inputs,
             output_hidden_states=True,
@@ -314,7 +321,7 @@ class LlamaPreprocessor(BasePreprocessor):
                             ],
                             prompt_embeds[i, assistant_crop_end[i].item() :],
                         ]
-                    )
+                    ).to(device)
                 )
 
                 prompt_attention_mask_list.append(
@@ -330,14 +337,14 @@ class LlamaPreprocessor(BasePreprocessor):
                                 i, attention_mask_assistant_crop_end[i].item() :
                             ],
                         ]
-                    )
+                    ).to(device)
                 )
 
-                image_embed_list.append(prompt_embeds[i, image_emb_start:image_emb_end])
+                image_embed_list.append(prompt_embeds[i, image_emb_start:image_emb_end].to(device))
                 image_attention_mask_list.append(
                     torch.ones(image_embed_list[-1].shape[0])
-                    .to(prompt_embeds.device)
                     .to(prompt_attention_mask.dtype)
+                    .to(device)
                 )
 
             prompt_embed_list = torch.stack(prompt_embed_list)
@@ -357,6 +364,7 @@ class LlamaPreprocessor(BasePreprocessor):
             )
 
             prompt_embeds = torch.cat([image_embed_list, prompt_embed_list], dim=1)
+
             prompt_attention_mask = torch.cat(
                 [image_attention_mask_list, prompt_attention_mask_list], dim=1
             )

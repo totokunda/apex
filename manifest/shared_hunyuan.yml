@@ -23,10 +23,11 @@ components:
 preprocessors: 
   - type: hunyuan.llama
     name: "hunyuan/llama/i2v"
-    model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
-    image_processor_path: hunyuanvideo-community/HunyuanVideo/image_processor
-    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json
-    tokenizer_name: hunyuanvideo-community/HunyuanVideo
+    base_model: "LlavaForConditionalGeneration"
+    model_path: hunyuanvideo-community/HunyuanVideo-I2V/text_encoder
+    image_processor_path: hunyuanvideo-community/HunyuanVideo-I2V/image_processor
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo-I2V/resolve/main/text_encoder/config.json
+    tokenizer_name: hunyuanvideo-community/HunyuanVideo-I2V
     tokenizer_class: AutoTokenizer
     tokenizer_kwargs:
       subfolder: "tokenizer"
