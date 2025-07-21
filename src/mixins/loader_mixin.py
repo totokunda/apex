@@ -154,7 +154,9 @@ class LoaderMixin:
                     expects_pretrained_config = True
             
             if expects_pretrained_config:
-                conf = PretrainedConfig(**config)
+                # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
+                config_class = getattr(model_class, 'config_class', PretrainedConfig)
+                conf = config_class(**config)
                 model = model_class(conf)
             else:
                 model = model_class(**config)

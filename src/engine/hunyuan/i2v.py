@@ -18,7 +18,7 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         negative_prompt_2: Union[List[str], str] = None,
         height: int = 720,
         width: int = 1280,
-        num_frames: int = 129,
+        duration: int = 61,
         num_inference_steps: int = 50,
         num_videos: int = 1,
         seed: int = None,
@@ -97,7 +97,8 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         pooled_prompt_embeds = pooled_prompt_embeds.to(
             self.device, dtype=transformer_dtype
         )
-        if negative_prompt_embeds is not None:
+        
+        if negative_prompt is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
@@ -124,12 +125,13 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         image_tensor_unsqueezed = image_tensor.unsqueeze(2)  # Add temporal dimension
         image_latents = self.vae_encode(
             image_tensor_unsqueezed,
-            offload=False,
-            sample_mode="argmax",
+            offload=offload,
+            sample_mode="mode",
             dtype=torch.float32,
         )
 
         # Repeat for all frames
+        num_frames = self._parse_num_frames(duration, fps)
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
         image_latents = image_latents.repeat(1, 1, num_latent_frames, 1, 1)
 
@@ -137,14 +139,16 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         latents = self._get_latents(
             height=height,
             width=width,
-            duration=num_frames,
+            duration=num_latent_frames,
             fps=fps,
             num_videos=num_videos,
             num_channels_latents=num_channels_latents,
             seed=seed,
             generator=generator,
             dtype=torch.float32,
+            parse_frames=False
         )
+
 
         # Mix latents with image latents
         t = torch.tensor([0.999]).to(device=self.device)
@@ -160,6 +164,8 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
                 image_latents.shape[0], 1, *image_latents.shape[2:]
             )
             mask[:, :, 1:] = 0
+        else:
+            mask = None
 
         # 6. Load scheduler
         if not self.scheduler:
@@ -192,7 +198,7 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             )
 
         use_true_cfg_guidance = (
-            true_guidance_scale > 1.0 and negative_prompt_embeds is not None
+            true_guidance_scale > 1.0 and negative_prompt is not None
         )
         # 9. Denoising loop
         latents = self.denoise(
@@ -202,23 +208,24 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             true_guidance_scale=true_guidance_scale,
             use_true_cfg_guidance=use_true_cfg_guidance,
             noise_pred_kwargs=dict(
-                encoder_hidden_states=prompt_embeds,
-                encoder_attention_mask=prompt_attention_mask,
-                pooled_projections=pooled_prompt_embeds,
-                guidance=guidance,
+                encoder_hidden_states=prompt_embeds.to(self.device),
+                encoder_attention_mask=prompt_attention_mask.to(self.device).to(transformer_dtype),
+                pooled_projections=pooled_prompt_embeds.to(self.device),
+                guidance=guidance.to(self.device),
                 attention_kwargs=attention_kwargs,
             ),
             unconditional_noise_pred_kwargs=dict(
-                encoder_hidden_states=negative_prompt_embeds,
-                encoder_attention_mask=negative_prompt_attention_mask,
-                pooled_projections=negative_pooled_prompt_embeds,
-                guidance=guidance,
+                encoder_hidden_states=negative_prompt_embeds.to(self.device),
+                encoder_attention_mask=negative_prompt_attention_mask.to(self.device).to(transformer_dtype),
+                pooled_projections=negative_pooled_prompt_embeds.to(self.device),
+                guidance=guidance.to(self.device),
                 attention_kwargs=attention_kwargs,
-            ),
+            ) if (negative_prompt is not None and true_guidance_scale > 1.0) else None,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             image_condition_type=image_condition_type,
             image_latents=image_latents,
+            transformer_dtype=transformer_dtype,
             mask=mask,
             **kwargs,
         )
