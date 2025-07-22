@@ -1,17 +1,20 @@
 from src.engine import create_engine
-from diffusers.utils import export_to_video
+from diffusers.utils import export_to_video, load_image
 import torch
 
 engine = create_engine("hunyuan", "/workspace/apex/manifest/hunyuan_i2v_13b.yml", "i2v", save_path="/dev/shm/models", attention_type="sdpa")
 
-prompt = "A young woman reclines on crisp white sheets, her eyes flashing playful disbelief before her lips curl into a knowing smile—and she offers a single, flirtatious wink as her braids fall softly across her shoulder.."
-image = "image.jpg"
+
+prompt = "A man with short gray hair plays a red electric guitar."
+image = load_image(
+    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/guitar-man.png"
+)
 
 video = engine.run(
     image=image,
     prompt=prompt,
-    height=832,
-    width=480,
+    height=480,
+    width=832,
     duration=61,
     num_videos=1,
     num_inference_steps=50,

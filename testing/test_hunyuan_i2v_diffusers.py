@@ -1,12 +1,12 @@
 import torch
 from diffusers import HunyuanVideoImageToVideoPipeline, HunyuanVideoTransformer3DModel
-from diffusers.utils import export_to_video
-from transformers import LlamaModel
-from PIL import Image
+from diffusers.utils import export_to_video, load_image
 
 model_id = "hunyuanvideo-community/HunyuanVideo-I2V"
+transformer_path = "/dev/shm/models/components/hunyuanvideo-community_HunyuanVideo-I2V_transformer"
+
 transformer = HunyuanVideoTransformer3DModel.from_pretrained(
-    model_id, subfolder="transformer", torch_dtype=torch.bfloat16
+    transformer_path, subfolder="transformer", torch_dtype=torch.bfloat16
 )
 
 pipe = HunyuanVideoImageToVideoPipeline.from_pretrained(model_id, transformer=transformer, torch_dtype=torch.bfloat16)
@@ -14,8 +14,10 @@ pipe = HunyuanVideoImageToVideoPipeline.from_pretrained(model_id, transformer=tr
 pipe.to("cuda")
 
 # Enable memory 
-prompt = "A young woman reclines on crisp white sheets, her eyes flashing playful disbelief before her lips curl into a knowing smile—and she offers a single, flirtatious wink as her braids fall softly across her shoulder.."
-image = Image.open("image.jpg")
+prompt = "A man with short gray hair plays a red electric guitar."
+image = load_image(
+    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/guitar-man.png"
+)
 
 output = pipe(
     image=image,

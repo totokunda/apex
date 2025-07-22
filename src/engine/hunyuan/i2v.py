@@ -37,20 +37,34 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         timesteps_as_indices: bool = True,
         max_sequence_length: int = 256,
         sigmas: List[float] = None,
-        image_embed_interleave: int = 2,
+        image_embed_interleave: Optional[int] = None,
+        image_condition_type: Optional[str] = None,
         **kwargs,
     ):
         """Image-to-video generation following HunyuanVideoImageToVideoPipeline"""
 
         # 1. Process input image
         loaded_image = self._load_image(image)
-        loaded_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width
-        )
 
         # Preprocess image
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
             self.device
+        )
+        
+        # 4. Prepare image latents
+        if self.transformer is not None:
+            image_condition_type = getattr(
+                self.transformer.config, "image_condition_type", "token_replace"
+            )
+        else:
+            image_condition_type = "token_replace" if image_condition_type is None else image_condition_type
+        
+        image_embed_interleave = (
+            image_embed_interleave
+            if image_embed_interleave is not None
+            else (
+                2 if image_condition_type == "latent_concat" else 4 if image_condition_type == "token_replace" else 1
+            )
         )
 
         # 2. Encode prompts with image context
@@ -109,17 +123,14 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
                 self.device, dtype=transformer_dtype
             )
 
-        # 4. Prepare image latents
-        image_condition_type = getattr(
-            self.transformer.config, "image_condition_type", "latent_concat"
-        )
+       
 
         if image_condition_type == "latent_concat":
             num_channels_latents = (
-                getattr(self.transformer.config, "in_channels", 32) - 1
+                getattr(self.transformer.config, "in_channels", 16) - 1
             ) // 2
-        else:
-            num_channels_latents = getattr(self.transformer.config, "in_channels", 32)
+        elif image_condition_type == "token_replace":
+            num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
 
         # Encode image to latents
         image_tensor_unsqueezed = image_tensor.unsqueeze(2)  # Add temporal dimension
@@ -127,6 +138,7 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             image_tensor_unsqueezed,
             offload=offload,
             sample_mode="mode",
+            normalize_latents_dtype=torch.float32,
             dtype=torch.float32,
         )
 
@@ -200,7 +212,8 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         use_true_cfg_guidance = (
             true_guidance_scale > 1.0 and negative_prompt is not None
         )
-        # 9. Denoising loop
+        
+
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,

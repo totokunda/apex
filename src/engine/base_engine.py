@@ -726,7 +726,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             )
         else:
             latent_num_frames = duration
-
+            
         latent_height = math.ceil(height / self.vae_scale_factor_spatial)
         latent_width = math.ceil(width / self.vae_scale_factor_spatial)
 

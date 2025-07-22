@@ -35,7 +35,7 @@ class HunyuanDenoise:
         )
 
         with self._progress_bar(
-            total=num_inference_steps, desc="Denoising T2V"
+            total=num_inference_steps, desc=f"Denoising {self.denoise_type}"
         ) as pbar:
             for i, t in enumerate(timesteps):
                 if image_condition_type == "latent_concat":
@@ -49,7 +49,7 @@ class HunyuanDenoise:
                 else:
                     latent_model_input = latents.to(transformer_dtype)
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-
+            
 
                 # Conditional forward pass
                 with self.transformer.cache_context("cond"):
