@@ -13,6 +13,7 @@ from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
 from src.preprocess.camera.camera import Camera
 import torch.nn.functional as F
 
+
 class ModelType(Enum):
     VACE = "vace"  # vace
     T2V = "t2v"  # text to video
@@ -81,15 +82,6 @@ class WanEngine(BaseEngine, WanDenoise):
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
-    
-        
-    
-    
-
-    
-
-    
-
     def _prepare_fun_control_latents(
         self, control, dtype=torch.float32, generator: torch.Generator | None = None
     ):
@@ -110,15 +102,8 @@ class WanEngine(BaseEngine, WanDenoise):
 
         return control
 
-    
-
-    
-
     def _apply_color_correction(
-        self, 
-        videos: torch.Tensor, 
-        reference_image: torch.Tensor, 
-        strength: float
+        self, videos: torch.Tensor, reference_image: torch.Tensor, strength: float
     ) -> torch.Tensor:
         """Apply color correction to match reference image."""
         # Simple color matching - can be enhanced with more sophisticated methods

@@ -37,7 +37,13 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             else 4
         )
         self.vae_scale_factor_spatial = (
-            2 ** (len(getattr(self.vae, "config", {}).get("block_out_channels", [1, 1, 1])) - 1)
+            2
+            ** (
+                len(
+                    getattr(self.vae, "config", {}).get("block_out_channels", [1, 1, 1])
+                )
+                - 1
+            )
             if getattr(self, "vae", None)
             else 8
         )
@@ -62,7 +68,7 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
         default_kwargs = self._get_default_kwargs("run")
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-        
+
         if self.model_type == ModelType.T2V:
             return self.t2v_run(**final_kwargs)
         elif self.model_type == ModelType.I2V:
@@ -73,18 +79,6 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             return self.control_run(**final_kwargs)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
 
     def __str__(self):
         return f"CogVideoEngine(config={self.config}, device={self.device}, model_type={self.model_type})"

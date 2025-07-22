@@ -28,7 +28,7 @@ from .model import (
 
 __all__ = [
     "TimestepEmbedder",
-    "CaptionEmbedder", 
+    "CaptionEmbedder",
     "LearnableRotaryEmbeddingCat",
     "FinalLinear",
     "AdaModulateLayer",

@@ -8,7 +8,7 @@ from .base import WanBaseEngine
 
 class WanCausalEngine(WanBaseEngine):
     """WAN Causal Engine Implementation"""
-    
+
     def run(
         self,
         prompt: List[str] | str,

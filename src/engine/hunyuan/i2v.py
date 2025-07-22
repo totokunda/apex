@@ -8,7 +8,7 @@ from .base import HunyuanBaseEngine
 
 class HunyuanI2VEngine(HunyuanBaseEngine):
     """Hunyuan Image-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
@@ -50,20 +50,26 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
             self.device
         )
-        
+
         # 4. Prepare image latents
         if self.transformer is not None:
             image_condition_type = getattr(
                 self.transformer.config, "image_condition_type", "token_replace"
             )
         else:
-            image_condition_type = "token_replace" if image_condition_type is None else image_condition_type
-        
+            image_condition_type = (
+                "token_replace"
+                if image_condition_type is None
+                else image_condition_type
+            )
+
         image_embed_interleave = (
             image_embed_interleave
             if image_embed_interleave is not None
             else (
-                2 if image_condition_type == "latent_concat" else 4 if image_condition_type == "token_replace" else 1
+                2
+                if image_condition_type == "latent_concat"
+                else 4 if image_condition_type == "token_replace" else 1
             )
         )
 
@@ -111,7 +117,7 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         pooled_prompt_embeds = pooled_prompt_embeds.to(
             self.device, dtype=transformer_dtype
         )
-        
+
         if negative_prompt is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
@@ -122,8 +128,6 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             negative_prompt_attention_mask = negative_prompt_attention_mask.to(
                 self.device, dtype=transformer_dtype
             )
-
-       
 
         if image_condition_type == "latent_concat":
             num_channels_latents = (
@@ -158,9 +162,8 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             seed=seed,
             generator=generator,
             dtype=torch.float32,
-            parse_frames=False
+            parse_frames=False,
         )
-
 
         # Mix latents with image latents
         t = torch.tensor([0.999]).to(device=self.device)
@@ -212,7 +215,6 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         use_true_cfg_guidance = (
             true_guidance_scale > 1.0 and negative_prompt is not None
         )
-        
 
         latents = self.denoise(
             latents=latents,
@@ -222,18 +224,26 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             use_true_cfg_guidance=use_true_cfg_guidance,
             noise_pred_kwargs=dict(
                 encoder_hidden_states=prompt_embeds.to(self.device),
-                encoder_attention_mask=prompt_attention_mask.to(self.device).to(transformer_dtype),
+                encoder_attention_mask=prompt_attention_mask.to(self.device).to(
+                    transformer_dtype
+                ),
                 pooled_projections=pooled_prompt_embeds.to(self.device),
                 guidance=guidance.to(self.device),
                 attention_kwargs=attention_kwargs,
             ),
-            unconditional_noise_pred_kwargs=dict(
-                encoder_hidden_states=negative_prompt_embeds.to(self.device),
-                encoder_attention_mask=negative_prompt_attention_mask.to(self.device).to(transformer_dtype),
-                pooled_projections=negative_pooled_prompt_embeds.to(self.device),
-                guidance=guidance.to(self.device),
-                attention_kwargs=attention_kwargs,
-            ) if (negative_prompt is not None and true_guidance_scale > 1.0) else None,
+            unconditional_noise_pred_kwargs=(
+                dict(
+                    encoder_hidden_states=negative_prompt_embeds.to(self.device),
+                    encoder_attention_mask=negative_prompt_attention_mask.to(
+                        self.device
+                    ).to(transformer_dtype),
+                    pooled_projections=negative_pooled_prompt_embeds.to(self.device),
+                    guidance=guidance.to(self.device),
+                    attention_kwargs=attention_kwargs,
+                )
+                if (negative_prompt is not None and true_guidance_scale > 1.0)
+                else None
+            ),
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             image_condition_type=image_condition_type,
@@ -259,4 +269,4 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
 
             video = self.vae_decode(video_latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

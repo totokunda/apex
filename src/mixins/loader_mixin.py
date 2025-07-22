@@ -30,6 +30,7 @@ from glob import glob
 import safetensors
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from transformers.modeling_utils import PreTrainedModel
+
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 
@@ -132,30 +133,34 @@ class LoaderMixin:
             # try to load from model_path directly
             model = model_class.from_pretrained(model_path, torch_dtype=load_dtype)
             return model
-        
-        
+
         with init_empty_weights():
             # Check the constructor signature to determine what it expects
             sig = inspect.signature(model_class.__init__)
             params = list(sig.parameters.values())
-            
+
             # Skip 'self' parameter
-            if params and params[0].name == 'self':
+            if params and params[0].name == "self":
                 params = params[1:]
-            
+
             # Check if the first parameter expects a PretrainedConfig object
             expects_pretrained_config = False
             if params:
                 first_param = params[0]
-                if (first_param.annotation == PretrainedConfig or
-                    (hasattr(first_param.annotation, '__name__') and 
-                     'Config' in first_param.annotation.__name__) or
-                    first_param.name in ['config'] and issubclass(model_class, PreTrainedModel)):
+                if (
+                    first_param.annotation == PretrainedConfig
+                    or (
+                        hasattr(first_param.annotation, "__name__")
+                        and "Config" in first_param.annotation.__name__
+                    )
+                    or first_param.name in ["config"]
+                    and issubclass(model_class, PreTrainedModel)
+                ):
                     expects_pretrained_config = True
-            
+
             if expects_pretrained_config:
                 # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
-                config_class = getattr(model_class, 'config_class', PretrainedConfig)
+                config_class = getattr(model_class, "config_class", PretrainedConfig)
                 conf = config_class(**config)
                 model = model_class(conf)
             else:
@@ -325,7 +330,11 @@ class LoaderMixin:
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
     ) -> List[Image.Image]:
         if isinstance(video_input, List):
-            if not video_input or isinstance(video_input[0], Image.Image) or isinstance(video_input[0], str):
+            if (
+                not video_input
+                or isinstance(video_input[0], Image.Image)
+                or isinstance(video_input[0], str)
+            ):
                 return video_input
             return [self._load_image(v) for v in video_input]
 

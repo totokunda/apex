@@ -2,4 +2,4 @@
 
 from .model import WanMultiTalkTransformer3DModel
 
-__all__ = ["WanMultiTalkTransformer3DModel"] 
+__all__ = ["WanMultiTalkTransformer3DModel"]

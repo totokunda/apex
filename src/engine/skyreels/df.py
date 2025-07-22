@@ -9,7 +9,7 @@ from .base import SkyReelsBaseEngine
 
 class SkyReelsDFEngine(SkyReelsBaseEngine):
     """SkyReels Diffusion Forcing Engine Implementation"""
-    
+
     def run(
         self,
         prompt: Union[str, List[str]],

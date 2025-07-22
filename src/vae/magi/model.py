@@ -101,28 +101,28 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         # Create encoder and decoder config
         ddconfig = {
-            'video_size': video_size,
-            'video_length': video_length,
-            'patch_size': patch_size,
-            'patch_length': patch_length,
-            'in_chans': in_chans,
-            'z_chans': z_chans,
-            'double_z': double_z,
-            'embed_dim': embed_dim,
-            'depth': depth,
-            'num_heads': num_heads,
-            'mlp_ratio': mlp_ratio,
-            'qkv_bias': qkv_bias,
-            'qk_scale': qk_scale,
-            'drop_rate': drop_rate,
-            'attn_drop_rate': attn_drop_rate,
-            'drop_path_rate': drop_path_rate,
-            'with_cls_token': with_cls_token,
-            'norm_code': norm_code,
-            'ln_in_attn': ln_in_attn,
-            'conv_last_layer': conv_last_layer,
-            'use_rope': use_rope,
-            'use_final_proj': use_final_proj,
+            "video_size": video_size,
+            "video_length": video_length,
+            "patch_size": patch_size,
+            "patch_length": patch_length,
+            "in_chans": in_chans,
+            "z_chans": z_chans,
+            "double_z": double_z,
+            "embed_dim": embed_dim,
+            "depth": depth,
+            "num_heads": num_heads,
+            "mlp_ratio": mlp_ratio,
+            "qkv_bias": qkv_bias,
+            "qk_scale": qk_scale,
+            "drop_rate": drop_rate,
+            "attn_drop_rate": attn_drop_rate,
+            "drop_path_rate": drop_path_rate,
+            "with_cls_token": with_cls_token,
+            "norm_code": norm_code,
+            "ln_in_attn": ln_in_attn,
+            "conv_last_layer": conv_last_layer,
+            "use_rope": use_rope,
+            "use_final_proj": use_final_proj,
         }
 
         self.encoder = ViTEncoder(**ddconfig)
@@ -132,10 +132,14 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         self._spatial_downsample_factor = patch_size
 
         self.spatial_compression_ratio = (
-            patch_size if spatial_compression_ratio is None else spatial_compression_ratio
+            patch_size
+            if spatial_compression_ratio is None
+            else spatial_compression_ratio
         )
         self.temporal_compression_ratio = (
-            patch_length if temporal_compression_ratio is None else temporal_compression_ratio
+            patch_length
+            if temporal_compression_ratio is None
+            else temporal_compression_ratio
         )
 
         # When decoding a batch of video latents at a time, one can save memory by slicing across the batch dimension
@@ -277,7 +281,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             h = torch.cat(encoded_slices)
         else:
             h = self._encode(x)
-        
+
         posterior = DiagonalGaussianDistribution(h)
 
         if not return_dict:
@@ -323,9 +327,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 returned.
         """
         if self.use_slicing and z.shape[0] > 1:
-            decoded_slices = [
-                self._decode(z_slice).sample for z_slice in z.split(1)
-            ]
+            decoded_slices = [self._decode(z_slice).sample for z_slice in z.split(1)]
             decoded = torch.cat(decoded_slices)
         else:
             decoded = self._decode(z).sample
@@ -376,11 +378,15 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         """
         Encodes the input tensor `x` using tiled encoding.
         """
-        allow_spatial_tiling = allow_spatial_tiling if allow_spatial_tiling is not None else self.allow_spatial_tiling
+        allow_spatial_tiling = (
+            allow_spatial_tiling
+            if allow_spatial_tiling is not None
+            else self.allow_spatial_tiling
+        )
         if not allow_spatial_tiling:
             tile_sample_min_height = 100000
             tile_sample_min_width = 100000
-        
+
         # For simplicity, just use regular encoding for now
         return self.encode(x).latent_dist.mode()
 
@@ -398,11 +404,15 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         """
         Decodes the input tensor using the tile autoencoder.
         """
-        allow_spatial_tiling = allow_spatial_tiling if allow_spatial_tiling is not None else self.allow_spatial_tiling
+        allow_spatial_tiling = (
+            allow_spatial_tiling
+            if allow_spatial_tiling is not None
+            else self.allow_spatial_tiling
+        )
         if not allow_spatial_tiling:
             tile_sample_min_height = 100000
             tile_sample_min_width = 100000
-        
+
         # For simplicity, just use regular decoding for now
         return self.decode(x).sample
 
@@ -410,6 +420,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 # Legacy compatibility
 class ViTVAE(AutoencoderKLMagi):
     """Legacy compatibility class"""
+
     pass
 
 
@@ -430,17 +441,21 @@ class AutoModel:
     def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
         import json
         import os
-        
-        config = os.path.join(pretrained_model_name_or_path, 'config.json')
+
+        config = os.path.join(pretrained_model_name_or_path, "config.json")
         if not os.path.exists(config):
             raise ValueError("Can't find a model config file at {}.".format(config))
-        
+
         # Load config
-        with open(config, 'r') as json_file:
+        with open(config, "r") as json_file:
             config_dict = json.load(json_file)
-        
-        class_name = config_dict.get('_class_name', 'AutoencoderKLMagi')
-        if class_name == 'ViTVAE':
-            return ViTVAE.from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
+
+        class_name = config_dict.get("_class_name", "AutoencoderKLMagi")
+        if class_name == "ViTVAE":
+            return ViTVAE.from_pretrained(
+                pretrained_model_name_or_path, *args, **kwargs
+            )
         else:
-            return AutoencoderKLMagi.from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
+            return AutoencoderKLMagi.from_pretrained(
+                pretrained_model_name_or_path, *args, **kwargs
+            )

@@ -15,7 +15,9 @@ class MagiDenoiseType(Enum):
 
 
 class MagiDenoise:
-    def __init__(self, denoise_type: MagiDenoiseType = MagiDenoiseType.T2V, *args, **kwargs):
+    def __init__(
+        self, denoise_type: MagiDenoiseType = MagiDenoiseType.T2V, *args, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
 
@@ -52,8 +54,12 @@ class MagiDenoise:
         latents = kwargs.get("latents", None)
         scheduler = kwargs.get("scheduler", None)
         timesteps = kwargs.get("timesteps", None)  # Preprocessed by engine
-        processed_caption_embs = kwargs.get("processed_caption_embs", None)  # Preprocessed by engine
-        processed_caption_masks = kwargs.get("processed_caption_masks", None)  # Preprocessed by engine
+        processed_caption_embs = kwargs.get(
+            "processed_caption_embs", None
+        )  # Preprocessed by engine
+        processed_caption_masks = kwargs.get(
+            "processed_caption_masks", None
+        )  # Preprocessed by engine
         prefix_video = kwargs.get("prefix_video", None)
         guidance_scale = kwargs.get("guidance_scale", 6.0)
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
@@ -95,14 +101,21 @@ class MagiDenoise:
         if prefix_video is not None:
             # Concatenate prefix video with latents
             latents = torch.cat([prefix_video, latents], dim=2)
-            self.logger.info(f"MAGI denoising with prefix video: prefix frames={prefix_video.shape[2]}, total chunks={infer_chunk_num}")
+            self.logger.info(
+                f"MAGI denoising with prefix video: prefix frames={prefix_video.shape[2]}, total chunks={infer_chunk_num}"
+            )
         else:
-            self.logger.info(f"MAGI {self.denoise_type.value} denoising: total frames={total_latent_frames}, chunks={infer_chunk_num}")
+            self.logger.info(
+                f"MAGI {self.denoise_type.value} denoising: total frames={total_latent_frames}, chunks={infer_chunk_num}"
+            )
 
         # Framepack-style chunk iteration
         generated_chunks = []
-        
-        with self._progress_bar(total=infer_chunk_num, desc=f"MAGI {self.denoise_type.value.upper()} Generation") as pbar:
+
+        with self._progress_bar(
+            total=infer_chunk_num,
+            desc=f"MAGI {self.denoise_type.value.upper()} Generation",
+        ) as pbar:
             for chunk_idx in range(infer_chunk_num):
                 # Calculate chunk boundaries
                 start_frame = chunk_idx * chunk_size
@@ -114,8 +127,14 @@ class MagiDenoise:
 
                 # Extract corresponding text embeddings for this chunk
                 # The processed embeddings are already in the right format [batch, chunk, seq_len, hidden_dim]
-                chunk_caption_embs = processed_caption_embs[:, chunk_idx:chunk_idx+1, :, :]  # Keep chunk dim
-                chunk_masks = processed_caption_masks[:, chunk_idx:chunk_idx+1, :] if processed_caption_masks is not None else None
+                chunk_caption_embs = processed_caption_embs[
+                    :, chunk_idx : chunk_idx + 1, :, :
+                ]  # Keep chunk dim
+                chunk_masks = (
+                    processed_caption_masks[:, chunk_idx : chunk_idx + 1, :]
+                    if processed_caption_masks is not None
+                    else None
+                )
 
                 # Skip denoising for clean chunks (from prefix video)
                 if chunk_idx < clean_chunk_num:
@@ -135,11 +154,11 @@ class MagiDenoise:
                     transformer_dtype=transformer_dtype,
                     attention_kwargs=attention_kwargs,
                     render_on_step=render_on_step,
-                    render_on_step_callback=render_on_step_callback
+                    render_on_step_callback=render_on_step_callback,
                 )
 
                 generated_chunks.append(denoised_chunk)
-                
+
                 # Memory cleanup
                 torch.cuda.empty_cache() if torch.cuda.is_available() else None
                 gc.collect()
@@ -151,7 +170,7 @@ class MagiDenoise:
 
         # Remove prefix video frames if they were added
         if prefix_video is not None:
-            final_latents = final_latents[:, :, prefix_video.shape[2]:]
+            final_latents = final_latents[:, :, prefix_video.shape[2] :]
 
         self.logger.info(f"MAGI {self.denoise_type.value} denoising completed.")
         return final_latents
@@ -168,10 +187,10 @@ class MagiDenoise:
         transformer_dtype: torch.dtype,
         attention_kwargs: Dict,
         render_on_step: bool,
-        render_on_step_callback: Optional[callable]
+        render_on_step_callback: Optional[callable],
     ) -> torch.Tensor:
         """Denoise a single chunk following the standard diffusion process"""
-        
+
         num_inference_steps = len(timesteps) - 1
         latents = chunk_latents.to(transformer_dtype)
 
@@ -181,10 +200,16 @@ class MagiDenoise:
             caption_embs_flat = chunk_caption_embs.squeeze(1)  # Remove chunk dimension
         else:
             caption_embs_flat = chunk_caption_embs
-            
-        mask_flat = chunk_masks.squeeze(1) if chunk_masks is not None and chunk_masks.dim() > 2 else chunk_masks
 
-        with self._progress_bar(total=num_inference_steps, desc="Denoising Chunk", leave=False) as pbar:
+        mask_flat = (
+            chunk_masks.squeeze(1)
+            if chunk_masks is not None and chunk_masks.dim() > 2
+            else chunk_masks
+        )
+
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising Chunk", leave=False
+        ) as pbar:
             for i, t in enumerate(timesteps[:-1]):
                 # Expand latents for CFG if needed
                 if use_cfg_guidance:
@@ -194,8 +219,10 @@ class MagiDenoise:
                         encoder_hidden_states = torch.cat([caption_embs_flat] * 2)
                     else:
                         encoder_hidden_states = caption_embs_flat
-                    
-                    encoder_attention_mask = torch.cat([mask_flat] * 2) if mask_flat is not None else None
+
+                    encoder_attention_mask = (
+                        torch.cat([mask_flat] * 2) if mask_flat is not None else None
+                    )
                 else:
                     latent_model_input = latents
                     encoder_hidden_states = caption_embs_flat
@@ -205,7 +232,9 @@ class MagiDenoise:
                 latent_model_input = scheduler.scale_model_input(latent_model_input, t)
 
                 # Expand timestep
-                timestep = t.expand(latent_model_input.shape[0]).to(latent_model_input.dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(
+                    latent_model_input.dtype
+                )
 
                 # Predict noise using the MAGI transformer
                 # The corrected model now handles the diffusers interface properly
@@ -235,6 +264,8 @@ class MagiDenoise:
 
         return latents.to(torch.float32)
 
-    def _calculate_time_interval(self, num_steps: int, device: torch.device) -> torch.Tensor:
+    def _calculate_time_interval(
+        self, num_steps: int, device: torch.device
+    ) -> torch.Tensor:
         """Calculate time intervals for integration (simplified version)"""
-        return torch.ones(num_steps, device=device) / num_steps 
+        return torch.ones(num_steps, device=device) / num_steps

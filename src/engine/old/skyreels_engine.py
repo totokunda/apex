@@ -144,8 +144,6 @@ class SkyReelsEngine(WanEngine):
 
         return step_matrix, step_index, step_update_mask, valid_interval
 
-    
-
 
 if __name__ == "__main__":
     from diffusers.utils import export_to_video

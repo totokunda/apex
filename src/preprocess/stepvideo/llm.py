@@ -19,7 +19,11 @@ import torch.nn.functional as F
 from accelerate import init_empty_weights
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 from einops import rearrange
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 from src.attention import attention_register
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -524,7 +528,7 @@ class Step1Model(PreTrainedModel):
         config,
     ):
         super().__init__(config)
-        with init_empty_weights():  
+        with init_empty_weights():
             self.tok_embeddings = LLaMaEmbedding(config)
             self.transformer = Transformer(config)
 
@@ -542,6 +546,7 @@ class Step1Model(PreTrainedModel):
         )
         return hidden_states
 
+
 @preprocessor_registry("stepvideo.llm")
 class Step1TextEncoderPreprocessor(BasePreprocessor):
     def __init__(
@@ -552,7 +557,9 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         dtype=torch.bfloat16,
         max_length=320,
     ):
-        super(Step1TextEncoderPreprocessor, self).__init__(model_path, save_path, preprocessor_type=PreprocessorType.TEXT)
+        super(Step1TextEncoderPreprocessor, self).__init__(
+            model_path, save_path, preprocessor_type=PreprocessorType.TEXT
+        )
         self.max_length = max_length
         self.save_path = save_path
         self.dtype = dtype

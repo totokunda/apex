@@ -9,7 +9,12 @@ import importlib
 from typing import Dict, Any
 from transformers.image_processing_utils import ImageProcessingMixin
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
+
 
 def _expand_input_ids_with_image_tokens(
     text_input_ids,
@@ -81,7 +86,11 @@ class LlamaPreprocessor(BasePreprocessor):
         base_model: str = "LlamaModel",
         **kwargs,
     ):
-        super().__init__(model_path=model_path, save_path=save_path, preprocessor_type=PreprocessorType.IMAGE_TEXT)
+        super().__init__(
+            model_path=model_path,
+            save_path=save_path,
+            preprocessor_type=PreprocessorType.IMAGE_TEXT,
+        )
         # Default prompt template for HunyuanVideo
         self.default_prompt_template_text = {
             "template": (
@@ -95,7 +104,7 @@ class LlamaPreprocessor(BasePreprocessor):
             ),
             "crop_start": 95,
         }
-        
+
         self.default_prompt_template_image = {
             "template": (
                 "<|start_header_id|>system<|end_header_id|>\n\n<image>\nDescribe the video by detailing the following aspects according to the reference image: "
@@ -113,7 +122,7 @@ class LlamaPreprocessor(BasePreprocessor):
             "image_emb_len": 576,
             "double_return_token_id": 271,
         }
-        
+
         self.model = self._load_model(
             {
                 "type": "hunyuan.llama",
@@ -124,22 +133,22 @@ class LlamaPreprocessor(BasePreprocessor):
             },
             module_name="transformers",
         )
-        
+
         if hasattr(self.model, "vision_tower"):
             self.model.vision_tower.to(self.model.vision_tower.config.torch_dtype)
-        
+
         self.config_save_path = config_save_path
-        
+
         self.processor_class = "CLIPImageProcessor"
 
         if image_processor_path is not None:
             self.image_processor = self.load_processor(image_processor_path)
         else:
             self.image_processor = None
-        
+
         if self._is_url(config_path):
             config_path = self._check_config_for_url(config_path)
-            
+
         self.tokenizer = fetch_and_save_tokenizer_from_config(
             self.model_path,
             config_path=config_path,
@@ -202,7 +211,11 @@ class LlamaPreprocessor(BasePreprocessor):
         **kwargs,
     ):
         prompt = [prompt] if isinstance(prompt, str) else prompt
-        prompt_template = self.default_prompt_template_text if image is None else self.default_prompt_template_image
+        prompt_template = (
+            self.default_prompt_template_text
+            if image is None
+            else self.default_prompt_template_image
+        )
         prompt = [prompt_template["template"].format(p) for p in prompt]
 
         crop_start = prompt_template.get("crop_start", None)
@@ -210,9 +223,7 @@ class LlamaPreprocessor(BasePreprocessor):
         image_emb_len = prompt_template.get("image_emb_len", 576)
         image_emb_start = prompt_template.get("image_emb_start", 5)
         image_emb_end = prompt_template.get("image_emb_end", 581)
-        double_return_token_id = prompt_template.get(
-            "double_return_token_id", 271
-        )
+        double_return_token_id = prompt_template.get("double_return_token_id", 271)
 
         if crop_start is None:
             prompt_template_input = self.tokenizer(
@@ -242,7 +253,6 @@ class LlamaPreprocessor(BasePreprocessor):
 
         text_input_ids = text_inputs.input_ids.to(device=device)
         prompt_attention_mask = text_inputs.attention_mask.to(device=device)
-        
 
         if self.image_processor is not None:
             loaded_image = self._load_image(image)
@@ -265,14 +275,18 @@ class LlamaPreprocessor(BasePreprocessor):
                 image_emb_end,
                 pad_token_id,
             )
-            expanded_inputs["pixel_values"] = image_embeds.to(self.model.vision_tower.config.torch_dtype)
-            expanded_inputs  = {k: v.to(self.model.device) for k, v in expanded_inputs.items()}
+            expanded_inputs["pixel_values"] = image_embeds.to(
+                self.model.vision_tower.config.torch_dtype
+            )
+            expanded_inputs = {
+                k: v.to(self.model.device) for k, v in expanded_inputs.items()
+            }
         else:
             expanded_inputs = {
                 "input_ids": text_input_ids.to(self.model.device),
                 "attention_mask": prompt_attention_mask.to(self.model.device),
             }
-        
+
         prompt_embeds = self.model(
             **expanded_inputs,
             output_hidden_states=True,
@@ -341,7 +355,9 @@ class LlamaPreprocessor(BasePreprocessor):
                     ).to(device)
                 )
 
-                image_embed_list.append(prompt_embeds[i, image_emb_start:image_emb_end].to(device))
+                image_embed_list.append(
+                    prompt_embeds[i, image_emb_start:image_emb_end].to(device)
+                )
                 image_attention_mask_list.append(
                     torch.ones(image_embed_list[-1].shape[0])
                     .to(prompt_attention_mask.dtype)

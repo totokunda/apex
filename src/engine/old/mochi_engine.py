@@ -1,8 +1,8 @@
-
 from diffusers.video_processor import VideoProcessor
 
 from src.engine.base_engine import BaseEngine
 from src.engine.denoise.mochi_denoise import MochiDenoise
+
 
 class MochiEngine(BaseEngine, MochiDenoise):
     def __init__(self, yaml_path: str, **kwargs):
@@ -18,7 +18,3 @@ class MochiEngine(BaseEngine, MochiDenoise):
         self.num_channels_latents = (
             self.transformer.config.in_channels if self.transformer else 12
         )
-
-    
-
-    

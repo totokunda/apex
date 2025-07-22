@@ -1,3 +1,3 @@
 from .clip import CLIPPreprocessor
 
-__all__ = ['CLIPPreprocessor']
+__all__ = ["CLIPPreprocessor"]

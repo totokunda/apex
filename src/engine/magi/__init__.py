@@ -16,6 +16,7 @@ class ModelType(Enum):
     I2V = "i2v"  # image to video
     V2V = "v2v"  # video to video
 
+
 class MagiEngine(BaseEngine, MagiDenoise):
     def __init__(
         self,
@@ -31,23 +32,25 @@ class MagiEngine(BaseEngine, MagiDenoise):
 
         # Set up VAE scale factors based on MAGI VAE configuration
         self.vae_scale_factor_temporal = (
-            getattr(self.vae, "temporal_compression_ratio", None) or 
-            getattr(self.vae, "patch_length", None) or 4
+            getattr(self.vae, "temporal_compression_ratio", None)
+            or getattr(self.vae, "patch_length", None)
+            or 4
             if getattr(self, "vae", None)
             else 4
         )
         self.vae_scale_factor_spatial = (
-            getattr(self.vae, "spatial_compression_ratio", None) or 
-            getattr(self.vae, "patch_size", None) or 8
+            getattr(self.vae, "spatial_compression_ratio", None)
+            or getattr(self.vae, "patch_size", None)
+            or 8
             if getattr(self, "vae", None)
             else 8
         )
-        
+
         # MAGI uses different channel configurations
         self.num_channels_latents = getattr(self.vae, "config", {}).get(
             "z_chans", 4  # MAGI default
         )
-        
+
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial
         )
@@ -76,11 +79,11 @@ class MagiEngine(BaseEngine, MagiDenoise):
         default_kwargs = self._get_default_kwargs("run")
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-        
+
         return self.implementation_engine.run(**final_kwargs)
 
     def __str__(self):
         return f"MagiEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()

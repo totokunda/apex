@@ -8,7 +8,7 @@ from .base import WanBaseEngine
 
 class WanApexFramepackEngine(WanBaseEngine):
     """WAN Apex Framepack Engine Implementation"""
-    
+
     def run(
         self,
         prompt: List[str] | str,
@@ -39,7 +39,7 @@ class WanApexFramepackEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
+
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
@@ -69,7 +69,7 @@ class WanApexFramepackEngine(WanBaseEngine):
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
-        
+
         framepack_schedule = self.transformer.framepack_schedule
 
         if not self.scheduler:
@@ -86,7 +86,7 @@ class WanApexFramepackEngine(WanBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-        
+
         num_frames = self._parse_num_frames(duration, fps)
 
         latents = self._get_latents(
@@ -99,36 +99,44 @@ class WanApexFramepackEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         total_latent_frames = latents.shape[2]
 
-        denoised_mask = torch.zeros(total_latent_frames, dtype=torch.bool, device=self.device)
+        denoised_mask = torch.zeros(
+            total_latent_frames, dtype=torch.bool, device=self.device
+        )
         sections_to_denoise = framepack_schedule.num_sections(num_frames)
-        
+
         if seed is not None:
             seeds = [seed] * sections_to_denoise
         elif generator is not None:
             seeds = [generator.seed() for _ in range(sections_to_denoise)]
         else:
             seeds = None
-        
-        with self._progress_bar(total=sections_to_denoise, desc="Denoising sections") as pbar:
+
+        with self._progress_bar(
+            total=sections_to_denoise, desc="Denoising sections"
+        ) as pbar:
             for section_idx in range(sections_to_denoise):
                 (
-                past_latents,
-                past_indices,
-                future_latents,
-                future_indices,
-                target_latents,
-                target_indices,
+                    past_latents,
+                    past_indices,
+                    future_latents,
+                    future_indices,
+                    target_latents,
+                    target_indices,
                 ) = framepack_schedule.get_inference_inputs(
-                latents, denoised_mask, reverse=reverse, seeds=seeds
-            )
-                
-                latent_context = self.transformer.get_latent_context(
-                    past_latents, past_indices, future_latents, future_indices, total_latent_frames
+                    latents, denoised_mask, reverse=reverse, seeds=seeds
                 )
-                
+
+                latent_context = self.transformer.get_latent_context(
+                    past_latents,
+                    past_indices,
+                    future_latents,
+                    future_indices,
+                    total_latent_frames,
+                )
+
                 denoised_latents = self.denoise(
                     timesteps=timesteps,
                     latents=target_latents,
@@ -155,14 +163,16 @@ class WanApexFramepackEngine(WanBaseEngine):
                     scheduler=scheduler,
                     guidance_scale=guidance_scale,
                 )
-                
+
                 denoised_mask[target_indices] = True
                 latents[:, :, target_indices, :, :] = denoised_latents.to(
                     latents.device, dtype=latents.dtype
                 )
-                
-                self.logger.info(f"Section {section_idx} denoised frames: {', '.join(str(i) for i in target_indices.cpu().tolist())}")
-                
+
+                self.logger.info(
+                    f"Section {section_idx} denoised frames: {', '.join(str(i) for i in target_indices.cpu().tolist())}"
+                )
+
         if offload:
             self._offload(self.transformer)
 
@@ -171,4 +181,4 @@ class WanApexFramepackEngine(WanBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

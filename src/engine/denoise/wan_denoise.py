@@ -38,7 +38,7 @@ class WanDenoise:
         if use_timestep_transform and shift is not None:
             timesteps = [self._transform_timestep(t, shift) for t in timesteps]
 
-        model_type_str = getattr(self, 'model_type', 'WAN')
+        model_type_str = getattr(self, "model_type", "WAN")
         with self._progress_bar(
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
@@ -55,40 +55,52 @@ class WanDenoise:
                 if audio_guidance_scale is not None and use_cfg_guidance:
                     # Get transformer kwargs for different branches
                     transformer_kwargs = kwargs.get("transformer_kwargs", {})
-                    unconditional_kwargs = kwargs.get("unconditional_transformer_kwargs", {})
-                    
+                    unconditional_kwargs = kwargs.get(
+                        "unconditional_transformer_kwargs", {}
+                    )
+
                     # Prepare inputs for all three branches
-                    batch_latent_input = torch.cat([latent_model_input] * 3)  # cond, drop_text, uncond
+                    batch_latent_input = torch.cat(
+                        [latent_model_input] * 3
+                    )  # cond, drop_text, uncond
                     batch_timestep = torch.cat([timestep] * 3)
-                    
+
                     # Prepare conditional kwargs
                     cond_kwargs = transformer_kwargs.copy()
-                    
+
                     # Prepare text-dropped kwargs (keep audio)
                     drop_text_kwargs = transformer_kwargs.copy()
-                    if "encoder_hidden_states" in drop_text_kwargs and unconditional_kwargs.get("encoder_hidden_states") is not None:
-                        drop_text_kwargs["encoder_hidden_states"] = unconditional_kwargs["encoder_hidden_states"]
-                    
+                    if (
+                        "encoder_hidden_states" in drop_text_kwargs
+                        and unconditional_kwargs.get("encoder_hidden_states")
+                        is not None
+                    ):
+                        drop_text_kwargs["encoder_hidden_states"] = (
+                            unconditional_kwargs["encoder_hidden_states"]
+                        )
+
                     # Prepare unconditional kwargs (no text, no audio)
                     uncond_kwargs = unconditional_kwargs.copy()
-                    
+
                     # Combine all kwargs for batch processing
                     combined_kwargs = {}
                     for key in cond_kwargs.keys():
                         if key == "attention_kwargs":
                             combined_kwargs[key] = cond_kwargs[key]
                             continue
-                            
+
                         cond_val = cond_kwargs.get(key)
                         drop_text_val = drop_text_kwargs.get(key)
                         uncond_val = uncond_kwargs.get(key)
-                        
+
                         if cond_val is not None:
                             if drop_text_val is not None and uncond_val is not None:
-                                combined_kwargs[key] = torch.cat([cond_val, drop_text_val, uncond_val], dim=0)
+                                combined_kwargs[key] = torch.cat(
+                                    [cond_val, drop_text_val, uncond_val], dim=0
+                                )
                             else:
                                 combined_kwargs[key] = torch.cat([cond_val] * 3, dim=0)
-                    
+
                     # Forward pass for all branches
                     try:
                         noise_pred = self.transformer(
@@ -97,28 +109,37 @@ class WanDenoise:
                             return_dict=False,
                             **combined_kwargs,
                         )[0]
-                        
+
                         # Split predictions
-                        noise_pred_cond, noise_pred_drop_text, noise_pred_uncond = noise_pred.chunk(3)
-                        
+                        noise_pred_cond, noise_pred_drop_text, noise_pred_uncond = (
+                            noise_pred.chunk(3)
+                        )
+
                         # Apply MultiTalk CFG
                         import math
+
                         if math.isclose(guidance_scale, 1.0):
                             # Only audio guidance
-                            noise_pred = noise_pred_drop_text + audio_guidance_scale * (noise_pred_cond - noise_pred_drop_text)
+                            noise_pred = noise_pred_drop_text + audio_guidance_scale * (
+                                noise_pred_cond - noise_pred_drop_text
+                            )
                         else:
                             # Both text and audio guidance
                             noise_pred = (
-                                noise_pred_uncond + 
-                                guidance_scale * (noise_pred_cond - noise_pred_drop_text) +
-                                audio_guidance_scale * (noise_pred_drop_text - noise_pred_uncond)
+                                noise_pred_uncond
+                                + guidance_scale
+                                * (noise_pred_cond - noise_pred_drop_text)
+                                + audio_guidance_scale
+                                * (noise_pred_drop_text - noise_pred_uncond)
                             )
-                        
+
                         # Apply flow matching direction
                         noise_pred = -noise_pred
-                        
+
                     except Exception as e:
-                        print(f"Warning: MultiTalk CFG failed, falling back to standard CFG: {e}")
+                        print(
+                            f"Warning: MultiTalk CFG failed, falling back to standard CFG: {e}"
+                        )
                         # Fallback to standard CFG
                         noise_pred = self.transformer(
                             hidden_states=latent_model_input,
@@ -126,7 +147,7 @@ class WanDenoise:
                             return_dict=False,
                             **transformer_kwargs,
                         )[0]
-                        
+
                         if unconditional_kwargs:
                             uncond_noise_pred = self.transformer(
                                 hidden_states=latent_model_input,
@@ -134,16 +155,22 @@ class WanDenoise:
                                 return_dict=False,
                                 **unconditional_kwargs,
                             )[0]
-                            noise_pred = uncond_noise_pred + guidance_scale * (noise_pred - uncond_noise_pred)
-                    
+                            noise_pred = uncond_noise_pred + guidance_scale * (
+                                noise_pred - uncond_noise_pred
+                            )
+
                     # Update latents for flow matching
                     if use_timestep_transform and shift is not None:
-                        dt = timesteps[i] - (timesteps[i + 1] if i < len(timesteps) - 1 else 0)
+                        dt = timesteps[i] - (
+                            timesteps[i + 1] if i < len(timesteps) - 1 else 0
+                        )
                         dt = dt / 1000.0  # Normalize to [0, 1]
                         latents = latents + noise_pred * dt
                     else:
-                        latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-                
+                        latents = scheduler.step(
+                            noise_pred, t, latents, return_dict=False
+                        )[0]
+
                 else:
                     # Standard denoising
                     noise_pred = self.transformer(
@@ -153,7 +180,9 @@ class WanDenoise:
                         **kwargs.get("transformer_kwargs", {}),
                     )[0]
 
-                    if use_cfg_guidance and kwargs.get("unconditional_transformer_kwargs", None):
+                    if use_cfg_guidance and kwargs.get(
+                        "unconditional_transformer_kwargs", None
+                    ):
                         uncond_noise_pred = self.transformer(
                             hidden_states=latent_model_input,
                             timestep=timestep,
@@ -165,7 +194,9 @@ class WanDenoise:
                             noise_pred - uncond_noise_pred
                         )
 
-                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
+                        0
+                    ]
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
@@ -175,7 +206,9 @@ class WanDenoise:
 
         return latents
 
-    def _transform_timestep(self, t: torch.Tensor, shift: float = 5.0, num_timesteps: int = 1000) -> torch.Tensor:
+    def _transform_timestep(
+        self, t: torch.Tensor, shift: float = 5.0, num_timesteps: int = 1000
+    ) -> torch.Tensor:
         """Apply timestep transformation for better generation dynamics."""
         t_normalized = t.float() / num_timesteps
         new_t = shift * t_normalized / (1 + (shift - 1) * t_normalized)
@@ -201,7 +234,8 @@ class WanDenoise:
         schedulers = kwargs.get("schedulers", None)
 
         with self._progress_bar(
-            total=len(step_matrix), desc=f"Sampling {getattr(self, 'model_type', 'WAN')}"
+            total=len(step_matrix),
+            desc=f"Sampling {getattr(self, 'model_type', 'WAN')}",
         ) as pbar:
             for i, timestep_i in enumerate(step_matrix):
                 update_mask_i = step_update_mask[i]

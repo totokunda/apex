@@ -8,9 +8,9 @@ from .base import SkyReelsBaseEngine
 
 class SkyReelsI2VEngine(SkyReelsBaseEngine):
     """SkyReels Image-to-Video Engine Implementation"""
-    
+
     def run(self, **kwargs):
         """Image-to-video generation for SkyReels model"""
-        # Override with fps=24 as per the original implementation  
+        # Override with fps=24 as per the original implementation
         kwargs["fps"] = kwargs.get("fps", 24)
-        return self.main_engine.i2v_run(**kwargs) 
+        return self.main_engine.i2v_run(**kwargs)

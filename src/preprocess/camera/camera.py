@@ -1,4 +1,8 @@
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 from typing import Union
 
 import numpy as np
@@ -7,7 +11,6 @@ from typing import Union, List
 import torch
 from packaging import version as pver
 from einops import rearrange
-
 
 
 class Camera(object):
@@ -90,7 +93,6 @@ def ray_condition(K, c2w, H, W, device):
 class CameraPreprocessor(BasePreprocessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs, preprocessor_type=PreprocessorType.POSE)
-        
 
     def read_camera_poses(self, path: str):
         with open(path, "r") as f:

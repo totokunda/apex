@@ -4,9 +4,10 @@ import torch
 import numpy as np
 from PIL import Image
 
+
 class LTXI2VEngine(LTXBaseEngine):
     """LTX Image-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, str, np.ndarray, torch.Tensor],

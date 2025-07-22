@@ -2,13 +2,13 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-import torch.nn.functional as F 
+import torch.nn.functional as F
 from .base import WanBaseEngine
 
 
 class WanVaceEngine(WanBaseEngine):
     """WAN VACE (Video Acceleration) Engine Implementation"""
-    
+
     def run(
         self,
         video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor],

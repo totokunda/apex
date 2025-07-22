@@ -3,9 +3,10 @@ from typing import Dict, Any, Callable, List, Union, Optional
 import torch
 import numpy as np
 
+
 class LTXT2VEngine(LTXBaseEngine):
     """LTX Text-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         prompt: List[str] | str,

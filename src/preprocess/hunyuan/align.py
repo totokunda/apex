@@ -9,6 +9,7 @@ from src.mixins.download_mixin import DownloadMixin
 from einops import rearrange
 from PIL import Image
 
+
 def get_facemask(ref_image, align_instance, area=1.25):
     # ref_image: (b f c h w)
     bsz, f, c, h, w = ref_image.shape

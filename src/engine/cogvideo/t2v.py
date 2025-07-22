@@ -4,19 +4,21 @@ from PIL import Image
 import numpy as np
 from .base import CogVideoBaseEngine
 
+
 class CogVideoT2VEngine(CogVideoBaseEngine):
     """CogVideo Text-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         prompt: Union[List[str], str],
-        negative_prompt: Union[List[str], str] = None,
+        negative_prompt: Union[List[str], str] = "",
         height: int = 480,
         width: int = 720,
-        num_frames: int = 49,
+        duration: int = 49,
         num_inference_steps: int = 50,
         num_videos: int = 1,
         seed: int = None,
+        fps: int = 8,
         guidance_scale: float = 6.0,
         use_dynamic_cfg: bool = False,
         return_latents: bool = False,
@@ -29,6 +31,7 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
         timesteps: List[int] = None,
         max_sequence_length: int = 226,
         sigmas: List[float] = None,
+        eta: float = 0.0,
         **kwargs,
     ):
         """Text-to-video generation following CogVideoXPipeline"""
@@ -54,7 +57,9 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
-            negative_prompt_embeds = negative_prompt_embeds.to(self.device, dtype=transformer_dtype)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
 
         # 3. Load scheduler
         if not self.scheduler:
@@ -68,6 +73,8 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
             sigmas=sigmas,
         )
 
+        num_frames = self._parse_num_frames(duration, fps)
+
         # 5. Prepare latents
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
@@ -78,28 +85,40 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
             additional_frames = patch_size_t - latent_frames % patch_size_t
             num_frames += additional_frames * self.vae_scale_factor_temporal
 
+        latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+
         num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
         latents = self._get_latents(
             height,
             width,
-            num_frames,
+            latent_num_frames,
             num_videos=num_videos,
             num_channels_latents=num_channels_latents,
             seed=seed,
             generator=generator,
-            dtype=torch.float32,
+            dtype=transformer_dtype,
+            parse_frames=False,
+            order="BFC",
         )
 
         # Scale initial noise by scheduler's init_noise_sigma
         latents = latents * self.scheduler.init_noise_sigma
 
         # 6. Prepare rotary embeddings
-        image_rotary_emb = self._prepare_rotary_positional_embeddings(
-            height, width, latents.size(1), self.device
+        image_rotary_emb = (
+            self._prepare_rotary_positional_embeddings(
+                height, width, latents.size(1), self.device
+            )
+            if getattr(
+                self.transformer.config, "use_rotary_positional_embeddings", False
+            )
+            else None
         )
 
         # 7. Prepare guidance
-        do_classifier_free_guidance = guidance_scale > 1.0 and negative_prompt_embeds is not None
+        do_classifier_free_guidance = (
+            guidance_scale > 1.0 and negative_prompt_embeds is not None
+        )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
 
@@ -120,6 +139,8 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
             render_on_step_callback=render_on_step_callback,
             num_inference_steps=num_inference_steps,
             additional_frames=additional_frames,
+            transformer_dtype=transformer_dtype,
+            extra_step_kwargs=self.prepare_extra_step_kwargs(generator, eta),
             **kwargs,
         )
 

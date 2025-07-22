@@ -1,4 +1,9 @@
-from .registry import EngineRegistry, UniversalEngine, create_engine, list_available_engines
+from .registry import (
+    EngineRegistry,
+    UniversalEngine,
+    create_engine,
+    list_available_engines,
+)
 from .wan import WanEngine, ModelType as WanModelType
 from .cogvideo import CogVideoEngine, ModelType as CogVideoModelType
 from .magi import MagiEngine, ModelType as MagiModelType

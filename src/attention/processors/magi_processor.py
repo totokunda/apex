@@ -9,10 +9,11 @@ from src.attention.functions import attention_register
 
 def apply_rotary_emb(x, cos_emb, sin_emb):
     """Apply rotary position embeddings"""
+
     def rotate_half(x):
         x1, x2 = x.chunk(2, dim=-1)
         return torch.cat((-x2, x1), dim=-1)
-    
+
     return x * cos_emb + rotate_half(x) * sin_emb
 
 
@@ -55,9 +56,9 @@ class MagiAttentionProcessor:
         value = attn.to_v(encoder_hidden_states)
 
         # Apply normalization if available
-        if hasattr(attn, 'norm_q') and attn.norm_q is not None:
+        if hasattr(attn, "norm_q") and attn.norm_q is not None:
             query = attn.norm_q(query)
-        if hasattr(attn, 'norm_k') and attn.norm_k is not None:
+        if hasattr(attn, "norm_k") and attn.norm_k is not None:
             key = attn.norm_k(key)
 
         # Reshape to multi-head format
@@ -71,7 +72,7 @@ class MagiAttentionProcessor:
             # Expand to match query/key dimensions
             cos_emb = cos_emb.unsqueeze(0).unsqueeze(0)  # (1, 1, seq_len, head_dim)
             sin_emb = sin_emb.unsqueeze(0).unsqueeze(0)  # (1, 1, seq_len, head_dim)
-            
+
             query = apply_rotary_emb(query, cos_emb, sin_emb)
             key = apply_rotary_emb(key, cos_emb, sin_emb)
 
@@ -79,7 +80,7 @@ class MagiAttentionProcessor:
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
-        
+
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
@@ -87,7 +88,7 @@ class MagiAttentionProcessor:
         hidden_states = attn.to_out[0](hidden_states)
         if len(attn.to_out) > 1:
             hidden_states = attn.to_out[1](hidden_states)
-        
+
         return hidden_states
 
 
@@ -109,7 +110,7 @@ class MagiCrossAttentionProcessor:
     ) -> torch.Tensor:
         batch_size = hidden_states.shape[0]
         sequence_length = hidden_states.shape[1]
-        
+
         if encoder_hidden_states is not None:
             encoder_sequence_length = encoder_hidden_states.shape[1]
         else:
@@ -129,9 +130,9 @@ class MagiCrossAttentionProcessor:
         value = attn.to_v(encoder_hidden_states)
 
         # Apply normalization if available
-        if hasattr(attn, 'norm_q') and attn.norm_q is not None:
+        if hasattr(attn, "norm_q") and attn.norm_q is not None:
             query = attn.norm_q(query)
-        if hasattr(attn, 'norm_k') and attn.norm_k is not None:
+        if hasattr(attn, "norm_k") and attn.norm_k is not None:
             key = attn.norm_k(key)
 
         # Reshape to multi-head format
@@ -143,7 +144,7 @@ class MagiCrossAttentionProcessor:
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         )
-        
+
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
@@ -151,5 +152,5 @@ class MagiCrossAttentionProcessor:
         hidden_states = attn.to_out[0](hidden_states)
         if len(attn.to_out) > 1:
             hidden_states = attn.to_out[1](hidden_states)
-        
+
         return hidden_states

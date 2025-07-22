@@ -31,7 +31,6 @@ import torch.nn.functional as F
 from src.transformer_models import TRANSFORMERS_REGISTRY
 
 
-
 class MoEFeedForward(nn.Module):
     """
     Drop-in replacement for a regular FFN that routes every token to one
@@ -746,18 +745,21 @@ class WanTimeTextImageEmbedding(nn.Module):
         self.time_embedder = TimestepEmbedding(
             in_channels=time_freq_dim, time_embed_dim=dim
         )
-        
+
         self.num_style_tokens = num_style_tokens
         self.style_names = style_names
-        
+
         if num_style_tokens is not None and num_style_tokens > 0:
             self.num_styles = len(style_names)
-            
+
             self.style_tokens = nn.Parameter(
                 torch.randn(self.num_styles, self.num_style_tokens, dim),
-                requires_grad=True
+                requires_grad=True,
             )
-            self.style_gate = nn.Parameter(torch.zeros(self.num_styles, self.num_style_tokens, 1), requires_grad=True)  
+            self.style_gate = nn.Parameter(
+                torch.zeros(self.num_styles, self.num_style_tokens, 1),
+                requires_grad=True,
+            )
 
         self.act_fn = nn.SiLU()
         self.time_proj = nn.Linear(dim, time_proj_dim)
@@ -786,31 +788,32 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         text_hidden_states = self.text_embedder(encoder_hidden_states)
-        
+
         if encoder_hidden_states_image is not None:
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image
             )
 
-        if self.num_style_tokens is not None and self.num_style_tokens > 0: 
+        if self.num_style_tokens is not None and self.num_style_tokens > 0:
             style_embeds = self.style_tokens[model_category]
             gate = torch.exp(self.style_gate[model_category])
             style_embeds = style_embeds * gate
             style_embeds = style_embeds.view(batch_size, self.num_style_tokens, -1)
         else:
             style_embeds = None
-            
+
         if style_embeds is not None:
             encoder_hidden_states = torch.cat([style_embeds, text_hidden_states], dim=1)
         else:
             encoder_hidden_states = text_hidden_states
-        
+
         return (
             temb,
             timestep_proj,
             encoder_hidden_states,
             encoder_hidden_states_image,
         )
+
 
 # --- Modified Compression Function ---
 TailHandlingMode = Literal["none", "delete", "compress", "append"]
@@ -1526,8 +1529,6 @@ class WanApexFramepackTransformer3DModel(
         ) = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image, model_category
         )
-        
-        
 
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
@@ -1535,7 +1536,7 @@ class WanApexFramepackTransformer3DModel(
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1
             )
-        
+
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.blocks:

@@ -516,6 +516,7 @@ class CogVideoXTransformer3DModel(
             emb = emb + ofs_emb
 
         # 2. Patch embedding
+
         hidden_states = self.patch_embed(encoder_hidden_states, hidden_states)
         hidden_states = self.embedding_dropout(hidden_states)
 

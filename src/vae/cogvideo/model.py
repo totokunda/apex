@@ -1424,6 +1424,16 @@ class AutoencoderKLCogVideoX(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             ) + b[:, :, :, :, x] * (x / blend_extent)
         return b
 
+    def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        latents = latents.permute(0, 2, 1, 3, 4)
+        latents = latents / self.config.scaling_factor
+        return latents
+
+    def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
+        latents = latents.permute(0, 2, 1, 3, 4)
+        latents = latents * self.config.scaling_factor
+        return latents
+
     def tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
         r"""Encode a batch of images using a tiled encoder.
 

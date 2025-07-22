@@ -3,20 +3,24 @@ from .camera import CameraPreprocessor
 from .frameref import FrameRefExtractPreprocessor, FrameRefExpandPreprocessor
 from .gdino import GDINOPreprocessor
 from .gray import GrayPreprocessor, GrayVideoPreprocessor
-from .layout import LayoutBboxPreprocessor, LayoutMaskPreprocessor, LayoutTrackPreprocessor
+from .layout import (
+    LayoutBboxPreprocessor,
+    LayoutMaskPreprocessor,
+    LayoutTrackPreprocessor,
+)
 from .mask import MaskDrawPreprocessor
 from .outpainting import (
-    OutpaintingPreprocessor, 
-    OutpaintingInnerPreprocessor, 
-    OutpaintingVideoPreprocessor, 
-    OutpaintingInnerVideoPreprocessor
+    OutpaintingPreprocessor,
+    OutpaintingInnerPreprocessor,
+    OutpaintingVideoPreprocessor,
+    OutpaintingInnerVideoPreprocessor,
 )
 from .pose import (
-    PosePreprocessor, 
-    PoseBodyFacePreprocessor, 
-    PoseBodyFaceVideoPreprocessor, 
-    PoseBodyPreprocessor, 
-    PoseBodyVideoPreprocessor
+    PosePreprocessor,
+    PoseBodyFacePreprocessor,
+    PoseBodyFaceVideoPreprocessor,
+    PoseBodyPreprocessor,
+    PoseBodyVideoPreprocessor,
 )
 from .ram import RAMPreprocessor
 from .salient import SalientPreprocessor, SalientVideoPreprocessor
@@ -31,32 +35,32 @@ from .composition import (
     AnimateAnythingPreprocessor,
     SwapAnythingPreprocessor,
     ExpandAnythingPreprocessor,
-    MoveAnythingPreprocessor
+    MoveAnythingPreprocessor,
 )
 from .wan import MultiTalkPreprocessor
 from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
 from .base import BasePreprocessor, preprocessor_registry
 
 __all__ = [
-    "CLIPPreprocessor", 
-    "CameraPreprocessor", 
-    "FrameRefExtractPreprocessor", 
-    "FrameRefExpandPreprocessor", 
-    "GDINOPreprocessor", 
-    "GrayPreprocessor", 
-    "GrayVideoPreprocessor", 
-    "LayoutBboxPreprocessor", 
-    "LayoutMaskPreprocessor", 
-    "LayoutTrackPreprocessor", 
+    "CLIPPreprocessor",
+    "CameraPreprocessor",
+    "FrameRefExtractPreprocessor",
+    "FrameRefExpandPreprocessor",
+    "GDINOPreprocessor",
+    "GrayPreprocessor",
+    "GrayVideoPreprocessor",
+    "LayoutBboxPreprocessor",
+    "LayoutMaskPreprocessor",
+    "LayoutTrackPreprocessor",
     "MaskDrawPreprocessor",
-    "OutpaintingPreprocessor", 
-    "OutpaintingInnerPreprocessor", 
-    "OutpaintingVideoPreprocessor", 
+    "OutpaintingPreprocessor",
+    "OutpaintingInnerPreprocessor",
+    "OutpaintingVideoPreprocessor",
     "OutpaintingInnerVideoPreprocessor",
-    "PosePreprocessor", 
-    "PoseBodyFacePreprocessor", 
-    "PoseBodyFaceVideoPreprocessor", 
-    "PoseBodyPreprocessor", 
+    "PosePreprocessor",
+    "PoseBodyFacePreprocessor",
+    "PoseBodyFaceVideoPreprocessor",
+    "PoseBodyPreprocessor",
     "PoseBodyVideoPreprocessor",
     "RAMPreprocessor",
     "SalientPreprocessor",
@@ -79,5 +83,5 @@ __all__ = [
     "BasePreprocessor",
     "preprocessor_registry",
     "AvatarPreprocessor",
-    "LlamaPreprocessor"
+    "LlamaPreprocessor",
 ]

@@ -327,7 +327,7 @@ def flash_attention3(
         softmax_scale=softmax_scale,
         causal=is_causal,
     )
-    
+
     # check if out is a tuple of two tensors
     if isinstance(out, tuple):
         return out[0]
@@ -369,6 +369,7 @@ def xla_flash_attention(q, k, v, attention_mask, softmax_scale, **kwargs):
     return xla_flash_attention_func(
         q, k, v, q_segment_indexes, attention_mask, softmax_scale
     )
+
 
 @attention_register("flex")
 def flex_attention_func(q, k, v, attn_mask=None, softmax_scale=None, **kwargs):

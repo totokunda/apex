@@ -26,18 +26,18 @@ except ImportError:
 
 class Attention(nn.Module):
     def __init__(
-            self,
-            dim: int,
-            num_heads: int = 8,
-            qkv_bias: bool = False,
-            proj_bias: bool = True,
-            attn_drop: float = 0.0,
-            proj_drop: float = 0.0,
+        self,
+        dim: int,
+        num_heads: int = 8,
+        qkv_bias: bool = False,
+        proj_bias: bool = True,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim**-0.5
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -46,7 +46,11 @@ class Attention(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
 
         q, k, v = qkv[0] * self.scale, qkv[1], qkv[2]
         attn = q @ k.transpose(-2, -1)

@@ -35,7 +35,10 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 
 from src.attention import attention_register
-from src.attention.processors.magi_processor import MagiAttentionProcessor, MagiCrossAttentionProcessor
+from src.attention.processors.magi_processor import (
+    MagiAttentionProcessor,
+    MagiCrossAttentionProcessor,
+)
 from src.transformer_models.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)
@@ -46,14 +49,25 @@ class TimestepEmbedder(nn.Module):
     Embeds scalar timesteps into vector representations.
     """
 
-    def __init__(self, hidden_size: int, cond_hidden_ratio: float = 1.0, frequency_embedding_size: int = 256):
+    def __init__(
+        self,
+        hidden_size: int,
+        cond_hidden_ratio: float = 1.0,
+        frequency_embedding_size: int = 256,
+    ):
         super().__init__()
 
         self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, int(hidden_size * cond_hidden_ratio), bias=True),
+            nn.Linear(
+                frequency_embedding_size,
+                int(hidden_size * cond_hidden_ratio),
+                bias=True,
+            ),
             nn.SiLU(),
             nn.Linear(
-                int(hidden_size * cond_hidden_ratio), int(hidden_size * cond_hidden_ratio), bias=True
+                int(hidden_size * cond_hidden_ratio),
+                int(hidden_size * cond_hidden_ratio),
+                bias=True,
             ),
         )
         self.frequency_embedding_size = frequency_embedding_size
@@ -65,19 +79,25 @@ class TimestepEmbedder(nn.Module):
         Create sinusoidal timestep embeddings.
         """
         half = dim // 2
-        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-            device=t.device
-        )
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(start=0, end=half, dtype=torch.float32)
+            / half
+        ).to(device=t.device)
         args = t[:, None].float() * freqs[None] * timestep_rescale_factor
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
-            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+            embedding = torch.cat(
+                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+            )
         return embedding
 
     def forward(self, t):
         t = t.to(torch.float32)
         t_freq = self.timestep_embedding(
-            t, self.frequency_embedding_size, timestep_rescale_factor=self.timestep_rescale_factor
+            t,
+            self.frequency_embedding_size,
+            timestep_rescale_factor=self.timestep_rescale_factor,
         )
         t_emb = self.mlp(t_freq)
         return t_emb
@@ -88,17 +108,30 @@ class CaptionEmbedder(nn.Module):
     Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
     """
 
-    def __init__(self, caption_channels: int, hidden_size: int, xattn_cond_hidden_ratio: float = 1.0, 
-                 cond_hidden_ratio: float = 1.0, caption_max_length: int = 256):
+    def __init__(
+        self,
+        caption_channels: int,
+        hidden_size: int,
+        xattn_cond_hidden_ratio: float = 1.0,
+        cond_hidden_ratio: float = 1.0,
+        caption_max_length: int = 256,
+    ):
         super().__init__()
 
         self.y_proj_xattn = nn.Sequential(
-            nn.Linear(caption_channels, int(hidden_size * xattn_cond_hidden_ratio), bias=True), nn.SiLU()
+            nn.Linear(
+                caption_channels, int(hidden_size * xattn_cond_hidden_ratio), bias=True
+            ),
+            nn.SiLU(),
         )
 
-        self.y_proj_adaln = nn.Sequential(nn.Linear(caption_channels, int(hidden_size * cond_hidden_ratio), bias=True))
+        self.y_proj_adaln = nn.Sequential(
+            nn.Linear(caption_channels, int(hidden_size * cond_hidden_ratio), bias=True)
+        )
 
-        self.null_caption_embedding = nn.Parameter(torch.empty(caption_max_length, caption_channels))
+        self.null_caption_embedding = nn.Parameter(
+            torch.empty(caption_max_length, caption_channels)
+        )
 
     def caption_drop(self, caption, caption_dropout_mask):
         """
@@ -133,7 +166,14 @@ class CaptionEmbedder(nn.Module):
 class LearnableRotaryEmbeddingCat(nn.Module):
     """Rotary position embedding w/ concatenated sin & cos"""
 
-    def __init__(self, dim, max_res=224, temperature=10000, in_pixels=True, linear_bands: bool = False):
+    def __init__(
+        self,
+        dim,
+        max_res=224,
+        temperature=10000,
+        in_pixels=True,
+        linear_bands: bool = False,
+    ):
         super().__init__()
         self.dim = dim
         self.max_res = max_res
@@ -151,15 +191,22 @@ class LearnableRotaryEmbeddingCat(nn.Module):
             bands = self.freq_bands(self.dim // 8, temperature=self.temperature, step=1)
         return bands
 
-    def pixel_freq_bands(self, num_bands: int, max_freq: float = 224.0, linear_bands: bool = True):
+    def pixel_freq_bands(
+        self, num_bands: int, max_freq: float = 224.0, linear_bands: bool = True
+    ):
         if linear_bands:
             bands = torch.linspace(1.0, max_freq / 2, num_bands, dtype=torch.float32)
         else:
-            bands = 2 ** torch.linspace(0, math.log(max_freq, 2) - 1, num_bands, dtype=torch.float32)
+            bands = 2 ** torch.linspace(
+                0, math.log(max_freq, 2) - 1, num_bands, dtype=torch.float32
+            )
         return bands * torch.pi
 
     def freq_bands(self, num_bands: int, temperature: float = 10000.0, step: int = 2):
-        exp = torch.arange(0, num_bands, step, dtype=torch.int64).to(torch.float32) / num_bands
+        exp = (
+            torch.arange(0, num_bands, step, dtype=torch.int64).to(torch.float32)
+            / num_bands
+        )
         bands = 1.0 / (temperature**exp)
         return bands
 
@@ -171,7 +218,7 @@ class LearnableRotaryEmbeddingCat(nn.Module):
             t = [torch.arange(s, dtype=torch.int64).to(torch.float32) for s in shape]
             t[1] = t[1] - (shape[1] - 1) / 2
             t[2] = t[2] - (shape[2] - 1) / 2
-        
+
         if ref_feat_shape is not None:
             t_rescaled = []
             for x, f, r in zip(t, shape, ref_feat_shape):
@@ -199,7 +246,11 @@ class FinalLinear(nn.Module):
 
     def __init__(self, hidden_size, patch_size, t_patch_size, out_channels):
         super().__init__()
-        self.linear = nn.Linear(hidden_size, patch_size * patch_size * t_patch_size * out_channels, bias=False)
+        self.linear = nn.Linear(
+            hidden_size,
+            patch_size * patch_size * t_patch_size * out_channels,
+            bias=False,
+        )
 
     def forward(self, x):
         x = self.linear(x)
@@ -207,7 +258,12 @@ class FinalLinear(nn.Module):
 
 
 class AdaModulateLayer(torch.nn.Module):
-    def __init__(self, hidden_size: int, cond_hidden_ratio: float = 1.0, cond_gating_ratio: float = 1.0):
+    def __init__(
+        self,
+        hidden_size: int,
+        cond_hidden_ratio: float = 1.0,
+        cond_gating_ratio: float = 1.0,
+    ):
         super().__init__()
         self.gate_num_chunks = 2
         self.act = nn.SiLU()
@@ -247,9 +303,9 @@ class MagiTransformerBlock(nn.Module):
         super().__init__()
 
         self.ada_modulate_layer = AdaModulateLayer(
-            hidden_size=dim, 
-            cond_hidden_ratio=cond_hidden_ratio, 
-            cond_gating_ratio=cond_gating_ratio
+            hidden_size=dim,
+            cond_hidden_ratio=cond_hidden_ratio,
+            cond_gating_ratio=cond_gating_ratio,
         )
 
         # Self attention
@@ -286,8 +342,12 @@ class MagiTransformerBlock(nn.Module):
         )
 
         # Post norms
-        self.self_attn_post_norm = nn.LayerNorm(dim, eps=eps, elementwise_affine=elementwise_affine)
-        self.mlp_post_norm = nn.LayerNorm(dim, eps=eps, elementwise_affine=elementwise_affine)
+        self.self_attn_post_norm = nn.LayerNorm(
+            dim, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.mlp_post_norm = nn.LayerNorm(
+            dim, eps=eps, elementwise_affine=elementwise_affine
+        )
 
     def forward(
         self,
@@ -302,11 +362,13 @@ class MagiTransformerBlock(nn.Module):
         # Use condition_map to select the right condition for each token
         batch_size = condition.shape[0]
         seq_len = hidden_states.shape[0]
-        
+
         # Handle condition mapping properly
         if condition_map.numel() == seq_len:
             # Simple case: one condition per token
-            selected_conditions = condition.view(-1, condition.shape[-1])[condition_map.long()]
+            selected_conditions = condition.view(-1, condition.shape[-1])[
+                condition_map.long()
+            ]
         else:
             # More complex case: need to handle chunking
             selected_conditions = condition.view(-1, condition.shape[-1])[:seq_len]
@@ -319,7 +381,7 @@ class MagiTransformerBlock(nn.Module):
 
         # Self attention with gating
         norm_hidden_states = self.norm1(hidden_states)
-        
+
         # Use the attention processor which handles rotary embeddings
         attn_output = self.attn1(
             norm_hidden_states,
@@ -340,11 +402,11 @@ class MagiTransformerBlock(nn.Module):
         hidden_states = hidden_states + attn_output
 
         residual = hidden_states
-        
+
         # MLP with gating
         norm_hidden_states = self.norm3(hidden_states)
         mlp_output = self.mlp(norm_hidden_states)
-        
+
         # Apply gating and post norm
         mlp_output = mlp_output * gate_mlp
         mlp_output = self.mlp_post_norm(mlp_output)
@@ -405,8 +467,7 @@ class MagiTransformer3DModel(
 
         # Time embedding
         self.t_embedder = TimestepEmbedder(
-            hidden_size=inner_dim, 
-            cond_hidden_ratio=cond_hidden_ratio
+            hidden_size=inner_dim, cond_hidden_ratio=cond_hidden_ratio
         )
 
         # Caption embedding
@@ -444,8 +505,12 @@ class MagiTransformer3DModel(
         )
 
         # Output layers
-        self.norm_out = nn.LayerNorm(inner_dim, eps=norm_eps, elementwise_affine=norm_elementwise_affine)
-        self.final_linear = FinalLinear(inner_dim, patch_size, t_patch_size, out_channels)
+        self.norm_out = nn.LayerNorm(
+            inner_dim, eps=norm_eps, elementwise_affine=norm_elementwise_affine
+        )
+        self.final_linear = FinalLinear(
+            inner_dim, patch_size, t_patch_size, out_channels
+        )
 
         self.gradient_checkpointing = False
 
@@ -484,37 +549,38 @@ class MagiTransformer3DModel(
 
         # Embed input
         hidden_states = self.x_embedder(hidden_states)  # [N, C, T, H, W]
-        
+
         # Rearrange to sequence format (following MAGI pattern)
-        hidden_states = rearrange(hidden_states, "N C T H W -> (T H W) N C").contiguous()
+        hidden_states = rearrange(
+            hidden_states, "N C T H W -> (T H W) N C"
+        ).contiguous()
 
         # Get rotary position embeddings (following MAGI pattern)
         rescale_factor = math.sqrt((H * W) / (16 * 16))
         rope = self.rope.get_embed(
-            shape=[T, H, W], 
-            ref_feat_shape=[T, H / rescale_factor, W / rescale_factor]
+            shape=[T, H, W], ref_feat_shape=[T, H / rescale_factor, W / rescale_factor]
         )
 
         # Time embedding
         t_emb = self.t_embedder(timestep.flatten())
-        
+
         # Caption embedding (following MAGI pattern)
         y_xattn, y_adaln = self.y_embedder(
-            encoder_hidden_states, 
-            train=self.training, 
-            caption_dropout_mask=caption_dropout_mask
+            encoder_hidden_states,
+            train=self.training,
+            caption_dropout_mask=caption_dropout_mask,
         )
 
         # Prepare condition (following MAGI's condition preparation)
         if y_adaln.dim() > 2:
             y_adaln = y_adaln.squeeze(1)
-        
+
         # Handle different timestep shapes for chunked processing
         if t_emb.dim() == 1:
             t_emb = t_emb.unsqueeze(0)
         if t_emb.shape[0] != batch_size:
             t_emb = t_emb.repeat(batch_size, 1)
-        
+
         condition = t_emb + y_adaln
 
         # Create condition map (simplified version of MAGI's complex condition mapping)
@@ -526,8 +592,7 @@ class MagiTransformer3DModel(
         if encoder_attention_mask is not None:
             encoder_attention_mask = encoder_attention_mask.squeeze()
             y_xattn_flat = torch.masked_select(
-                y_xattn.squeeze(1), 
-                encoder_attention_mask.unsqueeze(-1).bool()
+                y_xattn.squeeze(1), encoder_attention_mask.unsqueeze(-1).bool()
             ).reshape(-1, y_xattn.shape[-1])
         else:
             y_xattn_flat = y_xattn.squeeze(1).flatten(0, 1)
@@ -565,8 +630,14 @@ class MagiTransformer3DModel(
         _, _, T, H, W = hidden_states.shape
 
         # Prepare embeddings and conditions
-        hidden_states, condition, condition_map, y_xattn_flat, rope = self._prepare_embeddings_and_conditions(
-            hidden_states, timestep, encoder_hidden_states, caption_dropout_mask, encoder_attention_mask
+        hidden_states, condition, condition_map, y_xattn_flat, rope = (
+            self._prepare_embeddings_and_conditions(
+                hidden_states,
+                timestep,
+                encoder_hidden_states,
+                caption_dropout_mask,
+                encoder_attention_mask,
+            )
         )
 
         # Apply transformer blocks
@@ -616,11 +687,11 @@ class MagiTransformer3DModel(
     def forward_magi_original(
         self,
         x: torch.Tensor,
-        t: torch.Tensor, 
+        t: torch.Tensor,
         y: torch.Tensor,
         caption_dropout_mask: Optional[torch.Tensor] = None,
         xattn_mask: Optional[torch.Tensor] = None,
-        **kwargs
+        **kwargs,
     ) -> torch.Tensor:
         """
         Forward method that matches the original MAGI DiT interface.
@@ -631,7 +702,7 @@ class MagiTransformer3DModel(
         timestep = t.flatten() if t.dim() > 1 else t
         encoder_hidden_states = y
         encoder_attention_mask = xattn_mask
-        
+
         # Call the main forward method
         result = self.forward(
             hidden_states=hidden_states,
@@ -640,7 +711,7 @@ class MagiTransformer3DModel(
             encoder_attention_mask=encoder_attention_mask,
             caption_dropout_mask=caption_dropout_mask,
             return_dict=False,
-            **kwargs
+            **kwargs,
         )
-        
+
         return result[0]

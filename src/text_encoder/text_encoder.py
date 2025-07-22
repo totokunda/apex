@@ -54,7 +54,7 @@ class TextEncoder(torch.nn.Module):
 
         if "torch_dtype" in self.config:
             self.config["torch_dtype"] = getattr(torch, self.config["torch_dtype"])
-                
+
         if self.model_path and os.path.isdir(self.model_path):
             model = model_class.from_pretrained(self.model_path, **self.config)
         else:
@@ -112,20 +112,21 @@ class TextEncoder(torch.nn.Module):
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
         mask = mask.bool()
-        
-        inputs = {
-            "input_ids": text_input_ids.to(device=self.model.device)
-        }
+
+        inputs = {"input_ids": text_input_ids.to(device=self.model.device)}
         # check if model takes position ids as input
         if use_position_ids:
-            position_ids = torch.arange(text_input_ids.shape[1]).expand(batch_size, text_input_ids.shape[1])
+            position_ids = torch.arange(text_input_ids.shape[1]).expand(
+                batch_size, text_input_ids.shape[1]
+            )
             position_ids = position_ids.to(dtype=torch.long, device=self.model.device)
             inputs["position_ids"] = position_ids
         if use_mask_in_input:
             inputs["attention_mask"] = mask.to(device=self.model.device)
-            
-
-        result = self.model(**inputs, output_hidden_states=output_type == "hidden_states")
+    
+        result = self.model(
+            **inputs, output_hidden_states=output_type == "hidden_states"
+        )
 
         if output_type == "hidden_states":
             prompt_embeds = result.last_hidden_state
@@ -133,9 +134,9 @@ class TextEncoder(torch.nn.Module):
             prompt_embeds = result.pooler_output
         else:
             raise ValueError(f"Invalid output type: {output_type}")
-        
+
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        
+
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
             prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, -1)

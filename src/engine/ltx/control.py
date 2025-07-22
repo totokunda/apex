@@ -57,7 +57,7 @@ class LTXVideoCondition(LoaderMixin):
 
 class LTXControlEngine(LTXBaseEngine):
     """LTX Control Engine Implementation"""
-    
+
     def run(
         self,
         conditions: List[LTXVideoCondition] | LTXVideoCondition | None = None,

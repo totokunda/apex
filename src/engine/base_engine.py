@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Literal
 from diffusers.utils.dummy_pt_objects import SchedulerMixin
 import torch
 from loguru import logger
@@ -513,7 +513,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     @torch.inference_mode()
     def vae_decode(
-        self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype | None = None
+        self,
+        latents: torch.Tensor,
+        offload: bool = False,
+        dtype: torch.dtype | None = None,
     ):
         if self.vae is None:
             self.load_component_by_type("vae")
@@ -619,7 +622,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 preprocessors_to_load is None
                 or preprocessor.get("type") in preprocessors_to_load
             ):
-                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(preprocessor)
+                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
+                    preprocessor
+                )
 
     def load_postprocessor_by_type(self, postprocessor_type: str):
         for postprocessor in self.config.get("postprocessors", []):
@@ -718,6 +723,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         generator: torch.Generator | None = None,
         return_generator: bool = False,
         parse_frames: bool = True,
+        order: Literal["BCF", "BFC"] = "BCF",
     ):
         if parse_frames or isinstance(duration, str):
             num_frames = self._parse_num_frames(duration, fps)
@@ -726,7 +732,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             )
         else:
             latent_num_frames = duration
-            
+
         latent_height = math.ceil(height / self.vae_scale_factor_spatial)
         latent_width = math.ceil(width / self.vae_scale_factor_spatial)
 
@@ -742,14 +748,27 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         else:
             device = generator.device
 
-        noise = torch.randn(
-            (
+        if order == "BCF":
+            shape = (
                 num_videos,
                 num_channels_latents or self.num_channels_latents,
                 latent_num_frames,
                 latent_height,
                 latent_width,
-            ),
+            )
+        elif order == "BFC":
+            shape = (
+                num_videos,
+                latent_num_frames,
+                num_channels_latents or self.num_channels_latents,
+                latent_height,
+                latent_width,
+            )
+        else:
+            raise ValueError(f"Invalid order: {order}")
+
+        noise = torch.randn(
+            shape,
             device=device,
             dtype=dtype,
             generator=generator,

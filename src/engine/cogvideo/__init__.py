@@ -38,7 +38,13 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             else 4
         )
         self.vae_scale_factor_spatial = (
-            2 ** (len(getattr(self.vae, "config", {}).get("block_out_channels", [1, 1, 1])) - 1)
+            2
+            ** (
+                len(
+                    getattr(self.vae, "config", {}).get("block_out_channels", [1, 1, 1])
+                )
+                - 1
+            )
             if getattr(self, "vae", None)
             else 8
         )
@@ -79,11 +85,11 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
         default_kwargs = self._get_default_kwargs("run")
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-        
+
         return self.implementation_engine.run(**final_kwargs)
 
     def __str__(self):
         return f"CogVideoEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()

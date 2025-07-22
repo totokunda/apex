@@ -24,8 +24,6 @@ class ModelType(Enum):
     CONTROL = "control"
 
 
-
-
 class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
     def __init__(
         self,
@@ -90,14 +88,6 @@ class LTXEngine(BaseEngine, OffloadMixin, LTXDenoise):
             return self.control_run(**final_kwargs)
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
-
-
-
-    
-
-    
-
-    
 
 
 if __name__ == "__main__":

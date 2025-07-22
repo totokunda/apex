@@ -10,6 +10,7 @@ from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 from src.register import ClassRegister
 from enum import Enum
 
+
 class PreprocessorType(Enum):
     IMAGE = "image"
     IMAGE_TEXT = "image_text"
@@ -19,10 +20,17 @@ class PreprocessorType(Enum):
     OTHER = "other"
     POSE = "pose"
 
+
 class BasePreprocessor(DownloadMixin, LoaderMixin, ToMixin, nn.Module):
-    def __init__(self, model_path: str = None, save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH, preprocessor_type: PreprocessorType = PreprocessorType.IMAGE, **kwargs):
+    def __init__(
+        self,
+        model_path: str = None,
+        save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
+        preprocessor_type: PreprocessorType = PreprocessorType.IMAGE,
+        **kwargs
+    ):
         super().__init__()
-        if model_path:  
+        if model_path:
             self.model_path = self._download(model_path, save_path)
         else:
             self.model_path = model_path
@@ -60,7 +68,7 @@ class BasePreprocessor(DownloadMixin, LoaderMixin, ToMixin, nn.Module):
                     importlib.import_module("transformers"), self.processor_class
                 )
             return processor_class(**processor_config)
-        
+
     def __call__(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement this method")
 

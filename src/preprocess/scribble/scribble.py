@@ -7,7 +7,11 @@ from einops import rearrange
 from typing import Union, List, Optional
 from PIL import Image
 
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 
 norm_layer = nn.InstanceNorm2d
 
@@ -23,7 +27,7 @@ class ResidualBlock(nn.Module):
             nn.ReLU(inplace=True),
             nn.ReflectionPad2d(1),
             nn.Conv2d(in_features, in_features, 3),
-            norm_layer(in_features)
+            norm_layer(in_features),
         ]
 
         self.conv_block = nn.Sequential(*conv_block)
@@ -41,7 +45,7 @@ class ContourInference(nn.Module):
             nn.ReflectionPad2d(3),
             nn.Conv2d(input_nc, 64, 7),
             norm_layer(64),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
         ]
         self.model0 = nn.Sequential(*model0)
 
@@ -53,7 +57,7 @@ class ContourInference(nn.Module):
             model1 += [
                 nn.Conv2d(in_features, out_features, 3, stride=2, padding=1),
                 norm_layer(out_features),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             ]
             in_features = out_features
             out_features = in_features * 2
@@ -70,14 +74,11 @@ class ContourInference(nn.Module):
         out_features = in_features // 2
         for _ in range(2):
             model3 += [
-                nn.ConvTranspose2d(in_features,
-                                   out_features,
-                                   3,
-                                   stride=2,
-                                   padding=1,
-                                   output_padding=1),
+                nn.ConvTranspose2d(
+                    in_features, out_features, 3, stride=2, padding=1, output_padding=1
+                ),
                 norm_layer(out_features),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             ]
             in_features = out_features
             out_features = in_features // 2
@@ -102,18 +103,34 @@ class ContourInference(nn.Module):
 
 @preprocessor_registry("scribble")
 class ScribblePreprocessor(BasePreprocessor):
-    def __init__(self, model_path: str, input_nc: int = 3, output_nc: int = 1, 
-                 n_residual_blocks: int = 3, sigmoid: bool = True, device: str = 'cuda', **kwargs):
-        super().__init__(model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs)
-        
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == 'cuda' else torch.device(device)
+    def __init__(
+        self,
+        model_path: str,
+        input_nc: int = 3,
+        output_nc: int = 1,
+        n_residual_blocks: int = 3,
+        sigmoid: bool = True,
+        device: str = "cuda",
+        **kwargs
+    ):
+        super().__init__(
+            model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs
+        )
+
+        self.device = (
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device == "cuda"
+            else torch.device(device)
+        )
         self.model = ContourInference(input_nc, output_nc, n_residual_blocks, sigmoid)
-        self.model.load_state_dict(torch.load(self.model_path, weights_only=True, map_location='cpu'))
+        self.model.load_state_dict(
+            torch.load(self.model_path, weights_only=True, map_location="cpu")
+        )
         self.model = self.model.eval().requires_grad_(False).to(self.device)
 
     @torch.no_grad()
     @torch.inference_mode()
-    @torch.autocast('cuda', enabled=False)
+    @torch.autocast("cuda", enabled=False)
     def __call__(self, image: Union[Image.Image, np.ndarray, str, List]):
         # Handle batch vs single image
         is_batch = False
@@ -129,25 +146,37 @@ class ScribblePreprocessor(BasePreprocessor):
         # Convert to torch tensor
         if not is_batch and len(image_arrays[0].shape) == 3:
             # Single image case
-            image_tensor = torch.from_numpy(image_arrays[0]).permute(2, 0, 1).unsqueeze(0)  # H,W,C -> 1,C,H,W
+            image_tensor = (
+                torch.from_numpy(image_arrays[0]).permute(2, 0, 1).unsqueeze(0)
+            )  # H,W,C -> 1,C,H,W
         else:
             # Batch case
             if len(image_arrays[0].shape) == 3:
                 # List of single images
-                image_tensor = torch.stack([torch.from_numpy(img).permute(2, 0, 1) for img in image_arrays])
+                image_tensor = torch.stack(
+                    [torch.from_numpy(img).permute(2, 0, 1) for img in image_arrays]
+                )
             else:
                 # Already batched
-                image_tensor = torch.from_numpy(image_arrays[0]).permute(0, 3, 1, 2)  # B,H,W,C -> B,C,H,W
+                image_tensor = torch.from_numpy(image_arrays[0]).permute(
+                    0, 3, 1, 2
+                )  # B,H,W,C -> B,C,H,W
             is_batch = True
 
         image_tensor = image_tensor.float().div(255).to(self.device)
         contour_map = self.model(image_tensor)
-        contour_map = (contour_map.squeeze(dim=1) * 255.0).clip(0, 255).cpu().numpy().astype(np.uint8)
+        contour_map = (
+            (contour_map.squeeze(dim=1) * 255.0)
+            .clip(0, 255)
+            .cpu()
+            .numpy()
+            .astype(np.uint8)
+        )
         contour_map = contour_map[..., None].repeat(3, -1)
-        
+
         if not is_batch:
             contour_map = contour_map.squeeze()
-        
+
         return contour_map
 
     def __str__(self):
@@ -175,4 +204,4 @@ class ScribbleVideoPreprocessor(ScribblePreprocessor, BasePreprocessor):
         return "ScribbleVideoPreprocessor()"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()
