@@ -69,16 +69,7 @@ class HunyuanEngine(BaseEngine, HunyuanDenoise):
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
-    
-
-    
-
-    
-
-    
-
     ### REQUIRES FIXING FOR CORRECTNESS!!!!
-    
 
     def _soft_append(
         self, history: torch.Tensor, current: torch.Tensor, overlap: int = 0

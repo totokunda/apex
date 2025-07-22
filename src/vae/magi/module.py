@@ -46,7 +46,7 @@ def ndgrid(*tensors) -> Tuple[torch.Tensor, ...]:
 
     """
     try:
-        return torch.meshgrid(*tensors, indexing='ij')
+        return torch.meshgrid(*tensors, indexing="ij")
     except TypeError:
         # old PyTorch < 1.10 will follow this path as it does not have indexing arg,
         # the old behaviour of meshgrid was 'ij'
@@ -54,20 +54,35 @@ def ndgrid(*tensors) -> Tuple[torch.Tensor, ...]:
 
 
 def freq_bands(
-    num_bands: int, temperature: float = 10000.0, step: int = 2, device: Optional[torch.device] = None
+    num_bands: int,
+    temperature: float = 10000.0,
+    step: int = 2,
+    device: Optional[torch.device] = None,
 ) -> torch.Tensor:
-    exp = torch.arange(0, num_bands, step, dtype=torch.int64, device=device).to(torch.float32) / num_bands
+    exp = (
+        torch.arange(0, num_bands, step, dtype=torch.int64, device=device).to(
+            torch.float32
+        )
+        / num_bands
+    )
     bands = 1.0 / (temperature**exp)
     return bands
 
 
 def pixel_freq_bands(
-    num_bands: int, max_freq: float = 224.0, linear_bands: bool = True, device: Optional[torch.device] = None
+    num_bands: int,
+    max_freq: float = 224.0,
+    linear_bands: bool = True,
+    device: Optional[torch.device] = None,
 ):
     if linear_bands:
-        bands = torch.linspace(1.0, max_freq / 2, num_bands, dtype=torch.float32, device=device)
+        bands = torch.linspace(
+            1.0, max_freq / 2, num_bands, dtype=torch.float32, device=device
+        )
     else:
-        bands = 2 ** torch.linspace(0, math.log(max_freq, 2) - 1, num_bands, dtype=torch.float32, device=device)
+        bands = 2 ** torch.linspace(
+            0, math.log(max_freq, 2) - 1, num_bands, dtype=torch.float32, device=device
+        )
     return bands * torch.pi
 
 
@@ -105,9 +120,13 @@ def build_fourier_pos_embed(
     """
     if bands is None:
         if in_pixels:
-            bands = pixel_freq_bands(num_bands, float(max_res), linear_bands=linear_bands, device=device)
+            bands = pixel_freq_bands(
+                num_bands, float(max_res), linear_bands=linear_bands, device=device
+            )
         else:
-            bands = freq_bands(num_bands, temperature=temperature, step=1, device=device)
+            bands = freq_bands(
+                num_bands, temperature=temperature, step=1, device=device
+            )
     else:
         if device is None:
             device = bands.device
@@ -115,20 +134,31 @@ def build_fourier_pos_embed(
             dtype = bands.dtype
 
     if in_pixels:
-        t = [torch.linspace(-1.0, 1.0, steps=s, device=device, dtype=torch.float32) for s in feat_shape]
+        t = [
+            torch.linspace(-1.0, 1.0, steps=s, device=device, dtype=torch.float32)
+            for s in feat_shape
+        ]
     else:
         if center_imgidx:
             t = [
-                torch.arange(s, device=device, dtype=torch.int64).to(torch.float32) - (s - 1) / 2
-                if len(feat_shape) == 2 or i != 0
-                else torch.arange(s, device=device, dtype=torch.int64).to(torch.float32)
+                (
+                    torch.arange(s, device=device, dtype=torch.int64).to(torch.float32)
+                    - (s - 1) / 2
+                    if len(feat_shape) == 2 or i != 0
+                    else torch.arange(s, device=device, dtype=torch.int64).to(
+                        torch.float32
+                    )
+                )
                 for i, s in enumerate(feat_shape)
             ]
         else:
-            t = [torch.arange(s, device=device, dtype=torch.int64).to(torch.float32) for s in feat_shape]
+            t = [
+                torch.arange(s, device=device, dtype=torch.int64).to(torch.float32)
+                for s in feat_shape
+            ]
 
     if ref_feat_shape is not None:
-        assert len(feat_shape) == len(ref_feat_shape), 'shape must be in same dimension'
+        assert len(feat_shape) == len(ref_feat_shape), "shape must be in same dimension"
         # eva's scheme for resizing rope embeddings (ref shape = pretrain)
         t = [x / f * r for x, f, r in zip(t, feat_shape, ref_feat_shape)]
 
@@ -146,7 +176,9 @@ def rot(x):
 
 def apply_rot_embed(x: torch.Tensor, sin_emb, cos_emb):
     if sin_emb.ndim == 3:
-        return x * cos_emb.unsqueeze(1).expand_as(x) + rot(x) * sin_emb.unsqueeze(1).expand_as(x)
+        return x * cos_emb.unsqueeze(1).expand_as(x) + rot(x) * sin_emb.unsqueeze(
+            1
+        ).expand_as(x)
     # import ipdb; ipdb.set_trace()
     return x * cos_emb + rot(x) * sin_emb
 
@@ -206,7 +238,14 @@ def build_rotary_pos_embed(
 # Mlp
 ###################################################
 class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.0):
+    def __init__(
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.GELU,
+        drop=0.0,
+    ):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -247,7 +286,14 @@ class ManualLayerNorm(nn.Module):
 # Attention
 ###################################################
 @lru_cache(maxsize=50)
-def cache_rotary_emb(feat_shape, device='cuda', dim=64, dtype=torch.bfloat16, max_res=512, ref_feat_shape=(4, 16, 16)):
+def cache_rotary_emb(
+    feat_shape,
+    device="cuda",
+    dim=64,
+    dtype=torch.bfloat16,
+    max_res=512,
+    ref_feat_shape=(4, 16, 16),
+):
     return build_rotary_pos_embed(
         feat_shape=feat_shape,
         dim=dim,
@@ -261,7 +307,15 @@ def cache_rotary_emb(feat_shape, device='cuda', dim=64, dtype=torch.bfloat16, ma
 
 class Attention(nn.Module):
     def __init__(
-        self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.0, proj_drop=0.0, ln_in_attn=False, use_rope=False
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        ln_in_attn=False,
+        use_rope=False,
     ):
         super().__init__()
         self.num_heads = num_heads
@@ -283,15 +337,20 @@ class Attention(nn.Module):
 
         qkv = self.qkv_norm(qkv)
         q, k, v = qkv.chunk(3, dim=2)
-        
+
         if self.use_rope:
             assert feat_shape is not None
-            rope_emb = cache_rotary_emb(feat_shape=feat_shape, dim=C // self.num_heads, device=x.device, dtype=x.dtype)
+            rope_emb = cache_rotary_emb(
+                feat_shape=feat_shape,
+                dim=C // self.num_heads,
+                device=x.device,
+                dtype=x.dtype,
+            )
             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
             q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
             k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
-            
+
             # Use registered attention function
             attn_fn = attention_register.get("flash")
             if attn_fn is not None:
@@ -303,8 +362,10 @@ class Attention(nn.Module):
             else:
                 # Fallback to standard attention
                 x = torch.nn.functional.scaled_dot_product_attention(
-                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), 
-                    dropout_p=self.attn_drop_rate if self.training else 0.0
+                    q.transpose(1, 2),
+                    k.transpose(1, 2),
+                    v.transpose(1, 2),
+                    dropout_p=self.attn_drop_rate if self.training else 0.0,
                 )
         else:
             # Use registered attention function for packed QKV
@@ -318,10 +379,12 @@ class Attention(nn.Module):
             else:
                 # Fallback to standard attention
                 x = torch.nn.functional.scaled_dot_product_attention(
-                    q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), 
-                    dropout_p=self.attn_drop_rate if self.training else 0.0
+                    q.transpose(1, 2),
+                    k.transpose(1, 2),
+                    v.transpose(1, 2),
+                    dropout_p=self.attn_drop_rate if self.training else 0.0,
                 )
-        
+
         x = x.reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -365,7 +428,12 @@ class Block(nn.Module):
         self.drop_path = nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+        )
 
     def forward(self, x, feat_shape=None):
         x = x + self.drop_path(self.attn(self.norm1(x), feat_shape=feat_shape))
@@ -379,12 +447,24 @@ class Block(nn.Module):
 class PatchEmbed(nn.Module):
     """Image to Patch Embedding"""
 
-    def __init__(self, video_size=224, video_length=16, patch_size=16, patch_length=1, in_chans=3, embed_dim=768):
+    def __init__(
+        self,
+        video_size=224,
+        video_length=16,
+        patch_size=16,
+        patch_length=1,
+        in_chans=3,
+        embed_dim=768,
+    ):
         super().__init__()
         video_size = to_2tuple(video_size)
         patch_size = to_2tuple(patch_size)
 
-        num_patches = (video_length // patch_length) * (video_size[1] // patch_size[1]) * (video_size[0] // patch_size[0])
+        num_patches = (
+            (video_length // patch_length)
+            * (video_size[1] // patch_size[1])
+            * (video_size[0] // patch_size[0])
+        )
 
         self.video_size = video_size
         self.patch_size = patch_size
@@ -427,7 +507,9 @@ class PatchEmbed(nn.Module):
 def resize_pos_embed(posemb, src_shape, target_shape):
     posemb = posemb.reshape(1, src_shape[0], src_shape[1], src_shape[2], -1)
     posemb = posemb.permute(0, 4, 1, 2, 3)
-    posemb = nn.functional.interpolate(posemb, size=target_shape, mode='trilinear', align_corners=False)
+    posemb = nn.functional.interpolate(
+        posemb, size=target_shape, mode="trilinear", align_corners=False
+    )
     posemb = posemb.permute(0, 2, 3, 4, 1)
     posemb = posemb.reshape(1, target_shape[0] * target_shape[1] * target_shape[2], -1)
     return posemb
@@ -467,7 +549,9 @@ class ViTEncoder(nn.Module):
         conv_last_layer = False  # duplicate argument
 
         # self.num_classes = num_classes
-        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_features = self.embed_dim = (
+            embed_dim  # num_features for consistency with other models
+        )
 
         self.latent_size = video_size // patch_size
         self.latent_length = video_length // patch_length
@@ -489,10 +573,14 @@ class ViTEncoder(nn.Module):
         else:
             self.cls_token_nums = 0
             self.cls_token = None
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.cls_token_nums, embed_dim))
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, num_patches + self.cls_token_nums, embed_dim)
+        )
         self.pos_drop = nn.Dropout(p=drop_rate)
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        dpr = [
+            x.item() for x in torch.linspace(0, drop_path_rate, depth)
+        ]  # stochastic depth decay rule
         self.blocks = nn.ModuleList(
             [
                 Block(
@@ -536,7 +624,7 @@ class ViTEncoder(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed', 'cls_token'}
+        return {"pos_embed", "cls_token"}
 
     def forward(self, x):
         B = x.shape[0]
@@ -547,10 +635,16 @@ class ViTEncoder(nn.Module):
         x = x.flatten(2).transpose(1, 2)
 
         if self.with_cls_token:
-            cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+            cls_tokens = self.cls_token.expand(
+                B, -1, -1
+            )  # stole cls_tokens impl from Phil Wang, thanks
             x = torch.cat((cls_tokens, x), dim=1)
 
-        if latentT != self.latent_length or latentH != self.latent_size or latentW != self.latent_size:
+        if (
+            latentT != self.latent_length
+            or latentH != self.latent_size
+            or latentW != self.latent_size
+        ):
             pos_embed = resize_pos_embed(
                 self.pos_embed[:, 1:, :],
                 src_shape=(self.latent_length, self.latent_size, self.latent_size),
@@ -624,7 +718,9 @@ class ViTDecoder(nn.Module):
     ):
         super().__init__()
 
-        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_features = self.embed_dim = (
+            embed_dim  # num_features for consistency with other models
+        )
 
         self.latent_size = video_size // patch_size
         self.latent_length = video_length // patch_length
@@ -643,10 +739,14 @@ class ViTDecoder(nn.Module):
             self.cls_token_nums = 0
             self.cls_token = None
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.cls_token_nums, embed_dim))
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, num_patches + self.cls_token_nums, embed_dim)
+        )
         self.pos_drop = nn.Dropout(p=drop_rate)
 
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        dpr = [
+            x.item() for x in torch.linspace(0, drop_path_rate, depth)
+        ]  # stochastic depth decay rule
         self.blocks = nn.ModuleList(
             [
                 Block(
@@ -676,10 +776,22 @@ class ViTDecoder(nn.Module):
         self.use_final_proj = use_final_proj
         if self.use_final_proj:
             self.unpatch_channels = 4
-            self.final_proj = nn.Linear(embed_dim, self.unpatch_channels * (patch_size * patch_size * patch_length), bias=True)
-            self.final_norm = norm_layer(self.unpatch_channels * (patch_size * patch_size * patch_length))
+            self.final_proj = nn.Linear(
+                embed_dim,
+                self.unpatch_channels * (patch_size * patch_size * patch_length),
+                bias=True,
+            )
+            self.final_norm = norm_layer(
+                self.unpatch_channels * (patch_size * patch_size * patch_length)
+            )
 
-        self.last_layer = nn.Conv3d(in_channels=self.unpatch_channels, out_channels=3, kernel_size=3, stride=1, padding=1)
+        self.last_layer = nn.Conv3d(
+            in_channels=self.unpatch_channels,
+            out_channels=3,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
 
         trunc_normal_(self.pos_embed, std=0.02)
 
@@ -698,7 +810,7 @@ class ViTDecoder(nn.Module):
 
     @torch.jit.ignore
     def no_weight_decay(self):
-        return {'pos_embed', 'cls_token'}
+        return {"pos_embed", "cls_token"}
 
     def forward(self, x):
         B, C, latentT, latentH, latentW = x.shape  # x: (B, C, latentT, latentH, latenW)
@@ -709,10 +821,16 @@ class ViTDecoder(nn.Module):
         x = self.proj_in(x)
 
         if self.with_cls_token:
-            cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+            cls_tokens = self.cls_token.expand(
+                B, -1, -1
+            )  # stole cls_tokens impl from Phil Wang, thanks
             x = torch.cat((cls_tokens, x), dim=1)
 
-        if latentT != self.latent_length or latentH != self.latent_size or latentW != self.latent_size:
+        if (
+            latentT != self.latent_length
+            or latentH != self.latent_size
+            or latentW != self.latent_size
+        ):
             pos_embed = resize_pos_embed(
                 self.pos_embed[:, 1:, :],
                 src_shape=(self.latent_length, self.latent_size, self.latent_size),
@@ -736,8 +854,21 @@ class ViTDecoder(nn.Module):
         if self.use_final_proj:
             x = self.final_proj(x)
             x = self.final_norm(x)
-        x = x.reshape(B, latentT, latentH, latentW, self.patch_length, self.patch_size, self.patch_size, self.unpatch_channels)
-        x = rearrange(x, 'B lT lH lW pT pH pW C -> B C (lT pT) (lH pH) (lW pW)', C=self.unpatch_channels)
+        x = x.reshape(
+            B,
+            latentT,
+            latentH,
+            latentW,
+            self.patch_length,
+            self.patch_size,
+            self.patch_size,
+            self.unpatch_channels,
+        )
+        x = rearrange(
+            x,
+            "B lT lH lW pT pH pW C -> B C (lT pT) (lH pH) (lW pW)",
+            C=self.unpatch_channels,
+        )
 
         x = self.last_layer(x)
         return x
@@ -755,10 +886,14 @@ class DiagonalGaussianDistribution(object):
         self.std = torch.exp(0.5 * self.logvar)
         self.var = torch.exp(self.logvar)
         if self.deterministic:
-            self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
+            self.var = self.std = torch.zeros_like(self.mean).to(
+                device=self.parameters.device
+            )
 
     def sample(self):
-        x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
+        x = self.mean + self.std * torch.randn(self.mean.shape).to(
+            device=self.parameters.device
+        )
         return x
 
     def kl(self, other=None):
@@ -766,10 +901,17 @@ class DiagonalGaussianDistribution(object):
             return torch.Tensor([0.0])
         else:
             if other is None:
-                return 0.5 * torch.sum(torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar, dim=[1, 2, 3])
+                return 0.5 * torch.sum(
+                    torch.pow(self.mean, 2) + self.var - 1.0 - self.logvar,
+                    dim=[1, 2, 3],
+                )
             else:
                 return 0.5 * torch.sum(
-                    torch.pow(self.mean - other.mean, 2) / other.var + self.var / other.var - 1.0 - self.logvar + other.logvar,
+                    torch.pow(self.mean - other.mean, 2) / other.var
+                    + self.var / other.var
+                    - 1.0
+                    - self.logvar
+                    + other.logvar,
                     dim=[1, 2, 3],
                 )
 
@@ -777,7 +919,10 @@ class DiagonalGaussianDistribution(object):
         if self.deterministic:
             return torch.Tensor([0.0])
         logtwopi = np.log(2.0 * np.pi)
-        return 0.5 * torch.sum(logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var, dim=dims)
+        return 0.5 * torch.sum(
+            logtwopi + self.logvar + torch.pow(sample - self.mean, 2) / self.var,
+            dim=dims,
+        )
 
     def mode(self):
         return self.mean

@@ -6,6 +6,7 @@ import torch.nn as nn
 from .blocks import FeatureFusionBlock_custom, Interpolate, _make_encoder
 from .vit import forward_vit
 
+
 def _make_fusion_block(features, use_bn):
     return FeatureFusionBlock_custom(
         features,
@@ -22,8 +23,8 @@ class DPT(nn.Module):
         self,
         head,
         features=256,
-        backbone='vitb_rn50_384',
-        readout='project',
+        backbone="vitb_rn50_384",
+        readout="project",
         channels_last=False,
         use_bn=False,
     ):
@@ -33,9 +34,9 @@ class DPT(nn.Module):
         self.channels_last = channels_last
 
         hooks = {
-            'vitb_rn50_384': [0, 1, 8, 11],
-            'vitb16_384': [2, 5, 8, 11],
-            'vitl16_384': [5, 11, 17, 23],
+            "vitb_rn50_384": [0, 1, 8, 11],
+            "vitb16_384": [2, 5, 8, 11],
+            "vitl16_384": [5, 11, 17, 23],
         }
 
         # Instantiate backbone and reassemble blocks
@@ -80,15 +81,11 @@ class DPT(nn.Module):
 
 class DPTDepthModel(DPT):
     def __init__(self, path=None, non_negative=True, **kwargs):
-        features = kwargs['features'] if 'features' in kwargs else 256
+        features = kwargs["features"] if "features" in kwargs else 256
 
         head = nn.Sequential(
-            nn.Conv2d(features,
-                      features // 2,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1),
-            Interpolate(scale_factor=2, mode='bilinear', align_corners=True),
+            nn.Conv2d(features, features // 2, kernel_size=3, stride=1, padding=1),
+            Interpolate(scale_factor=2, mode="bilinear", align_corners=True),
             nn.Conv2d(features // 2, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(True),
             nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0),
@@ -103,6 +100,3 @@ class DPTDepthModel(DPT):
 
     def forward(self, x):
         return super().forward(x).squeeze(dim=1)
-
-
-

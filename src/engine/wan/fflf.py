@@ -8,7 +8,7 @@ from .base import WanBaseEngine
 
 class WanFFLFEngine(WanBaseEngine):
     """WAN First-Frame-Last-Frame Engine Implementation"""
-    
+
     def run(
         self,
         first_frame: Union[

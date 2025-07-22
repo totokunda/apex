@@ -8,7 +8,7 @@ from .base import CogVideoBaseEngine
 
 class CogVideoI2VEngine(CogVideoBaseEngine):
     """CogVideo Image-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
@@ -68,7 +68,9 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
-            negative_prompt_embeds = negative_prompt_embeds.to(self.device, dtype=transformer_dtype)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
 
         # 4. Load scheduler
         if not self.scheduler:
@@ -100,20 +102,20 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         if isinstance(generator, list):
             image_latents = [
                 self.vae_encode(
-                    image_tensor_unsqueezed[i].unsqueeze(0), 
-                    sample_mode="sample", 
+                    image_tensor_unsqueezed[i].unsqueeze(0),
+                    sample_mode="sample",
                     sample_generator=generator[i],
-                    dtype=prompt_embeds.dtype
+                    dtype=prompt_embeds.dtype,
                 )
                 for i in range(image_tensor_unsqueezed.shape[0])
             ]
         else:
             image_latents = [
                 self.vae_encode(
-                    img.unsqueeze(0), 
-                    sample_mode="sample", 
+                    img.unsqueeze(0),
+                    sample_mode="sample",
                     sample_generator=generator,
-                    dtype=prompt_embeds.dtype
+                    dtype=prompt_embeds.dtype,
                 )
                 for img in image_tensor_unsqueezed
             ]
@@ -129,7 +131,9 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             width // self.vae_scale_factor_spatial,
         )
 
-        latent_padding = torch.zeros(padding_shape, device=self.device, dtype=prompt_embeds.dtype)
+        latent_padding = torch.zeros(
+            padding_shape, device=self.device, dtype=prompt_embeds.dtype
+        )
         image_latents = torch.cat([image_latents, latent_padding], dim=1)
 
         # Handle CogVideoX 1.5 padding
@@ -164,7 +168,9 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             ofs_emb = latents.new_full((1,), fill_value=2.0)
 
         # 9. Prepare guidance
-        do_classifier_free_guidance = guidance_scale > 1.0 and negative_prompt_embeds is not None
+        do_classifier_free_guidance = (
+            guidance_scale > 1.0 and negative_prompt_embeds is not None
+        )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
 

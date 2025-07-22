@@ -9,7 +9,7 @@ from .base import MagiBaseEngine
 
 class MagiI2VEngine(MagiBaseEngine):
     """Magi Image-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
@@ -53,18 +53,18 @@ class MagiI2VEngine(MagiBaseEngine):
         # 2. Encode prompts
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
-        
+
         self.to_device(self.text_encoder)
-        
+
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         prompt_attention_mask = None
-        
+
         negative_prompt_embeds = None
         negative_prompt_attention_mask = None
         if negative_prompt is not None and use_cfg_guidance:
@@ -103,7 +103,7 @@ class MagiI2VEngine(MagiBaseEngine):
         # 5. Prepare latents for generation
         num_frames = self._parse_num_frames(duration, fps)
         latent_num_frames = math.ceil(num_frames / self.vae_scale_factor_temporal)
-        
+
         latents = self._get_latents(
             height=height,
             width=width,
@@ -121,7 +121,6 @@ class MagiI2VEngine(MagiBaseEngine):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-
 
         # 8. MAGI chunk-based denoising with prefix video
         latents = self.denoise(

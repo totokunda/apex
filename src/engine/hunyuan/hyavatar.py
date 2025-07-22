@@ -8,7 +8,7 @@ from .base import HunyuanBaseEngine
 
 class HunyuanHyavatarEngine(HunyuanBaseEngine):
     """Hunyuan Hyavatar Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],

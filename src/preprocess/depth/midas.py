@@ -7,12 +7,18 @@ https://github.com/thomasjpfan/pytorch_refinenet/blob/master/pytorch_refinenet/r
 import torch
 import torch.nn as nn
 
-from .blocks import FeatureFusionBlock, Interpolate, _make_encoder, FeatureFusionBlock_custom
+from .blocks import (
+    FeatureFusionBlock,
+    Interpolate,
+    _make_encoder,
+    FeatureFusionBlock_custom,
+)
 from .load import load_model
 
+
 class MidasNet(nn.Module):
-    """Network for monocular depth estimation.
-    """
+    """Network for monocular depth estimation."""
+
     def __init__(self, path=None, features=256, non_negative=True):
         """Init.
 
@@ -21,16 +27,15 @@ class MidasNet(nn.Module):
             features (int, optional): Number of features. Defaults to 256.
             backbone (str, optional): Backbone network for encoder. Defaults to resnet50
         """
-        print('Loading weights: ', path)
+        print("Loading weights: ", path)
 
         super(MidasNet, self).__init__()
 
         use_pretrained = False if path is None else True
 
         self.pretrained, self.scratch = _make_encoder(
-            backbone='resnext101_wsl',
-            features=features,
-            use_pretrained=use_pretrained)
+            backbone="resnext101_wsl", features=features, use_pretrained=use_pretrained
+        )
 
         self.scratch.refinenet4 = FeatureFusionBlock(features)
         self.scratch.refinenet3 = FeatureFusionBlock(features)
@@ -39,7 +44,7 @@ class MidasNet(nn.Module):
 
         self.scratch.output_conv = nn.Sequential(
             nn.Conv2d(features, 128, kernel_size=3, stride=1, padding=1),
-            Interpolate(scale_factor=2, mode='bilinear'),
+            Interpolate(scale_factor=2, mode="bilinear"),
             nn.Conv2d(128, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(True),
             nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0),
@@ -79,19 +84,20 @@ class MidasNet(nn.Module):
         return torch.squeeze(out, dim=1)
 
 
-
 class MidasNet_small(nn.Module):
-    """Network for monocular depth estimation.
-    """
-    def __init__(self,
-                 path=None,
-                 features=64,
-                 backbone='efficientnet_lite3',
-                 non_negative=True,
-                 exportable=True,
-                 channels_last=False,
-                 align_corners=True,
-                 blocks={'expand': True}):
+    """Network for monocular depth estimation."""
+
+    def __init__(
+        self,
+        path=None,
+        features=64,
+        backbone="efficientnet_lite3",
+        non_negative=True,
+        exportable=True,
+        channels_last=False,
+        align_corners=True,
+        blocks={"expand": True},
+    ):
         """Init.
 
         Args:
@@ -99,7 +105,7 @@ class MidasNet_small(nn.Module):
             features (int, optional): Number of features. Defaults to 256.
             backbone (str, optional): Backbone network for encoder. Defaults to resnet50
         """
-        print('Loading weights: ', path)
+        print("Loading weights: ", path)
 
         super(MidasNet_small, self).__init__()
 
@@ -116,19 +122,21 @@ class MidasNet_small(nn.Module):
         features3 = features
         features4 = features
         self.expand = False
-        if 'expand' in self.blocks and self.blocks['expand'] is True:
+        if "expand" in self.blocks and self.blocks["expand"] is True:
             self.expand = True
             features1 = features
             features2 = features * 2
             features3 = features * 4
             features4 = features * 8
 
-        self.pretrained, self.scratch = _make_encoder(self.backbone,
-                                                      features,
-                                                      use_pretrained,
-                                                      groups=self.groups,
-                                                      expand=self.expand,
-                                                      exportable=exportable)
+        self.pretrained, self.scratch = _make_encoder(
+            self.backbone,
+            features,
+            use_pretrained,
+            groups=self.groups,
+            expand=self.expand,
+            exportable=exportable,
+        )
 
         self.scratch.activation = nn.ReLU(False)
 
@@ -138,36 +146,42 @@ class MidasNet_small(nn.Module):
             deconv=False,
             bn=False,
             expand=self.expand,
-            align_corners=align_corners)
+            align_corners=align_corners,
+        )
         self.scratch.refinenet3 = FeatureFusionBlock_custom(
             features3,
             self.scratch.activation,
             deconv=False,
             bn=False,
             expand=self.expand,
-            align_corners=align_corners)
+            align_corners=align_corners,
+        )
         self.scratch.refinenet2 = FeatureFusionBlock_custom(
             features2,
             self.scratch.activation,
             deconv=False,
             bn=False,
             expand=self.expand,
-            align_corners=align_corners)
+            align_corners=align_corners,
+        )
         self.scratch.refinenet1 = FeatureFusionBlock_custom(
             features1,
             self.scratch.activation,
             deconv=False,
             bn=False,
-            align_corners=align_corners)
+            align_corners=align_corners,
+        )
 
         self.scratch.output_conv = nn.Sequential(
-            nn.Conv2d(features,
-                      features // 2,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1,
-                      groups=self.groups),
-            Interpolate(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(
+                features,
+                features // 2,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                groups=self.groups,
+            ),
+            Interpolate(scale_factor=2, mode="bilinear"),
             nn.Conv2d(features // 2, 32, kernel_size=3, stride=1, padding=1),
             self.scratch.activation,
             nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0),
@@ -188,7 +202,7 @@ class MidasNet_small(nn.Module):
             tensor: depth
         """
         if self.channels_last is True:
-            print('self.channels_last = ', self.channels_last)
+            print("self.channels_last = ", self.channels_last)
             x.contiguous(memory_format=torch.channels_last)
 
         layer_1 = self.pretrained.layer1(x)
@@ -213,19 +227,24 @@ class MidasNet_small(nn.Module):
 
 def fuse_model(m):
     prev_previous_type = nn.Identity()
-    prev_previous_name = ''
+    prev_previous_name = ""
     previous_type = nn.Identity()
-    previous_name = ''
+    previous_name = ""
     for name, module in m.named_modules():
-        if prev_previous_type == nn.Conv2d and previous_type == nn.BatchNorm2d and type(
-                module) == nn.ReLU:
+        if (
+            prev_previous_type == nn.Conv2d
+            and previous_type == nn.BatchNorm2d
+            and type(module) == nn.ReLU
+        ):
             # print("FUSED ", prev_previous_name, previous_name, name)
             torch.quantization.fuse_modules(
-                m, [prev_previous_name, previous_name, name], inplace=True)
+                m, [prev_previous_name, previous_name, name], inplace=True
+            )
         elif prev_previous_type == nn.Conv2d and previous_type == nn.BatchNorm2d:
             # print("FUSED ", prev_previous_name, previous_name)
             torch.quantization.fuse_modules(
-                m, [prev_previous_name, previous_name], inplace=True)
+                m, [prev_previous_name, previous_name], inplace=True
+            )
         # elif previous_type == nn.Conv2d and type(module) == nn.ReLU:
         #    print("FUSED ", previous_name, name)
         #    torch.quantization.fuse_modules(m, [previous_name, name], inplace=True)
@@ -236,19 +255,18 @@ def fuse_model(m):
         previous_name = name
 
 
-
 class MiDaSInference(nn.Module):
-    MODEL_TYPES_TORCH_HUB = ['DPT_Large', 'DPT_Hybrid', 'MiDaS_small']
+    MODEL_TYPES_TORCH_HUB = ["DPT_Large", "DPT_Hybrid", "MiDaS_small"]
     MODEL_TYPES_ISL = [
-        'dpt_large',
-        'dpt_hybrid',
-        'midas_v21',
-        'midas_v21_small',
+        "dpt_large",
+        "dpt_hybrid",
+        "midas_v21",
+        "midas_v21_small",
     ]
 
     def __init__(self, model_type, model_path):
         super().__init__()
-        assert (model_type in self.MODEL_TYPES_ISL)
+        assert model_type in self.MODEL_TYPES_ISL
         model, _ = load_model(model_type, model_path)
         self.model = model
 

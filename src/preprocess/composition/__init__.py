@@ -4,14 +4,14 @@ from .composition import (
     AnimateAnythingPreprocessor,
     SwapAnythingPreprocessor,
     ExpandAnythingPreprocessor,
-    MoveAnythingPreprocessor
+    MoveAnythingPreprocessor,
 )
 
 __all__ = [
-    'CompositionPreprocessor',
-    'ReferenceAnythingPreprocessor', 
-    'AnimateAnythingPreprocessor',
-    'SwapAnythingPreprocessor',
-    'ExpandAnythingPreprocessor',
-    'MoveAnythingPreprocessor'
-] 
+    "CompositionPreprocessor",
+    "ReferenceAnythingPreprocessor",
+    "AnimateAnythingPreprocessor",
+    "SwapAnythingPreprocessor",
+    "ExpandAnythingPreprocessor",
+    "MoveAnythingPreprocessor",
+]

@@ -8,7 +8,7 @@ from .base import CogVideoBaseEngine
 
 class CogVideoV2VEngine(CogVideoBaseEngine):
     """CogVideo Video-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         video: Union[List[Image.Image], torch.Tensor],
@@ -38,7 +38,9 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
 
         # 1. Process input video
         if latents is None:
-            video = self.video_processor.preprocess_video(video, height=height, width=width)
+            video = self.video_processor.preprocess_video(
+                video, height=height, width=width
+            )
             video = video.to(device=self.device)
 
         num_frames = len(video) if latents is None else latents.size(1)
@@ -64,7 +66,9 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
-            negative_prompt_embeds = negative_prompt_embeds.to(self.device, dtype=transformer_dtype)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
 
         # 4. Load scheduler
         if not self.scheduler:
@@ -100,7 +104,9 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
             latents = self._prepare_v2v_latents(
                 video=video,
                 batch_size=num_videos,
-                num_channels_latents=getattr(self.transformer.config, "in_channels", 16),
+                num_channels_latents=getattr(
+                    self.transformer.config, "in_channels", 16
+                ),
                 height=height,
                 width=width,
                 dtype=prompt_embeds.dtype,
@@ -115,7 +121,9 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
         )
 
         # 8. Prepare guidance
-        do_classifier_free_guidance = guidance_scale > 1.0 and negative_prompt_embeds is not None
+        do_classifier_free_guidance = (
+            guidance_scale > 1.0 and negative_prompt_embeds is not None
+        )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
 
@@ -146,4 +154,4 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

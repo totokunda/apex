@@ -6,7 +6,7 @@ from .base import MagiBaseEngine
 
 class MagiT2VEngine(MagiBaseEngine):
     """Magi Text-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         prompt: Union[List[str], str],
@@ -38,9 +38,9 @@ class MagiT2VEngine(MagiBaseEngine):
         # 1. Encode prompts
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
-        
+
         self.to_device(self.text_encoder)
-        
+
         # MAGI uses a different text encoder (T5-based)
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -48,9 +48,9 @@ class MagiT2VEngine(MagiBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         prompt_attention_mask = None  # MAGI handles masking differently
-        
+
         negative_prompt_embeds = None
         negative_prompt_attention_mask = None
         if negative_prompt is not None and use_cfg_guidance:
@@ -79,10 +79,10 @@ class MagiT2VEngine(MagiBaseEngine):
 
         # 3. Prepare latents
         num_frames = self._parse_num_frames(duration, fps)
-        
+
         # MAGI uses latent frames corresponding to chunks
         latent_num_frames = math.ceil(num_frames / self.vae_scale_factor_temporal)
-        
+
         latents = self._get_latents(
             height=height,
             width=width,
@@ -106,7 +106,7 @@ class MagiT2VEngine(MagiBaseEngine):
             num_steps=num_inference_steps,
             device=self.device,
             transform_type=timestep_transform,
-            shift=timestep_shift
+            shift=timestep_shift,
         )
 
         # 6. Process text embeddings for chunk-based generation
@@ -122,7 +122,7 @@ class MagiT2VEngine(MagiBaseEngine):
             negative_prompt_attention_mask=negative_prompt_attention_mask,
             infer_chunk_num=infer_chunk_num,
             clean_chunk_num=clean_chunk_num,
-            special_token_kwargs=special_token_kwargs
+            special_token_kwargs=special_token_kwargs,
         )
 
         # 7. MAGI chunk-based denoising

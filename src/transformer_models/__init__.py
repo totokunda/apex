@@ -1,5 +1,5 @@
 from .base import TRANSFORMERS_REGISTRY
-from .cogvideo.model import CogVideoXTransformer3DModel
+from .cogvideo.base.model import CogVideoXTransformer3DModel
 from .hunyuan.base.model import HunyuanVideoTransformer3DModel
 from .hunyuan.framepack.model import HunyuanVideoFramepackTransformer3DModel
 from .ltx.base.model import LTXVideoTransformer3DModel

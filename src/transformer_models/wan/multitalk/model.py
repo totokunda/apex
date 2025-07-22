@@ -67,6 +67,7 @@ class WanRMSNorm(nn.Module):
 
 class SingleStreamMutiAttention(nn.Module):
     """Audio cross-attention module for MultiTalk"""
+
     def __init__(
         self,
         dim: int,
@@ -86,13 +87,13 @@ class SingleStreamMutiAttention(nn.Module):
         self.encoder_hidden_states_dim = encoder_hidden_states_dim
         self.class_range = class_range
         self.class_interval = class_interval
-        
+
         # Linear projections
         self.to_q = nn.Linear(dim, dim, bias=qkv_bias)
         self.to_k = nn.Linear(encoder_hidden_states_dim, dim, bias=qkv_bias)
         self.to_v = nn.Linear(encoder_hidden_states_dim, dim, bias=qkv_bias)
         self.to_out = nn.Linear(dim, dim)
-        
+
         # Normalization
         if qk_norm:
             self.norm_q = norm_layer(dim, eps=eps)
@@ -102,38 +103,41 @@ class SingleStreamMutiAttention(nn.Module):
             self.norm_k = nn.Identity()
 
     def forward(
-        self, 
-        hidden_states: torch.Tensor, 
+        self,
+        hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         shape: torch.Tensor,
         x_ref_attn_map: Optional[torch.Tensor] = None,
         human_num: Optional[int] = None,
     ) -> torch.Tensor:
         batch_size, seq_len, _ = hidden_states.shape
-        
+
         # Project to query, key, value
         q = self.norm_q(self.to_q(hidden_states))
         k = self.norm_k(self.to_k(encoder_hidden_states))
         v = self.to_v(encoder_hidden_states)
-        
+
         # Reshape for multi-head attention
         q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        
+
         # Compute attention
-        scale = self.head_dim ** -0.5
+        scale = self.head_dim**-0.5
         attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
         attn_weights = F.softmax(attn_weights, dim=-1)
-        
+
         attn_output = torch.matmul(attn_weights, v)
-        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.dim)
-        
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.dim)
+        )
+
         return self.to_out(attn_output)
 
 
 class AudioProjModel(nn.Module):
     """Audio projection model for MultiTalk"""
+
     def __init__(
         self,
         seq_len: int = 5,
@@ -175,7 +179,9 @@ class AudioProjModel(nn.Module):
         # Process audio of latter frames
         audio_embeds_vf = rearrange(audio_embeds_vf, "bz f w b c -> (bz f) w b c")
         batch_size_vf, window_size_vf, blocks_vf, channels_vf = audio_embeds_vf.shape
-        audio_embeds_vf = audio_embeds_vf.view(batch_size_vf, window_size_vf * blocks_vf * channels_vf)
+        audio_embeds_vf = audio_embeds_vf.view(
+            batch_size_vf, window_size_vf * blocks_vf * channels_vf
+        )
 
         # First projection
         audio_embeds = torch.relu(self.proj1(audio_embeds))
@@ -189,11 +195,15 @@ class AudioProjModel(nn.Module):
         # Second projection
         audio_embeds_c = torch.relu(self.proj2(audio_embeds_c))
 
-        context_tokens = self.proj3(audio_embeds_c).reshape(batch_size_c * N_t, self.context_tokens, self.output_dim)
+        context_tokens = self.proj3(audio_embeds_c).reshape(
+            batch_size_c * N_t, self.context_tokens, self.output_dim
+        )
 
         # Normalization and reshape
         context_tokens = self.norm(context_tokens)
-        context_tokens = rearrange(context_tokens, "(bz f) m c -> bz f m c", f=video_length)
+        context_tokens = rearrange(
+            context_tokens, "(bz f) m c -> bz f m c", f=video_length
+        )
 
         return context_tokens
 
@@ -217,15 +227,21 @@ class WanImageEmbedding(torch.nn.Module):
             batch_size, seq_len, embed_dim = encoder_hidden_states_image.shape
             # Only add positional embedding if sequence length matches
             if seq_len == self.pos_embed.shape[1]:
-                encoder_hidden_states_image = encoder_hidden_states_image + self.pos_embed
+                encoder_hidden_states_image = (
+                    encoder_hidden_states_image + self.pos_embed
+                )
             else:
                 # If sequence length doesn't match, interpolate or truncate pos_embed
                 if seq_len < self.pos_embed.shape[1]:
                     pos_embed = self.pos_embed[:, :seq_len, :]
                 else:
                     # Simple duplication for longer sequences (can be improved with interpolation)
-                    repeat_factor = (seq_len + self.pos_embed.shape[1] - 1) // self.pos_embed.shape[1]
-                    pos_embed = self.pos_embed.repeat(1, repeat_factor, 1)[:, :seq_len, :]
+                    repeat_factor = (
+                        seq_len + self.pos_embed.shape[1] - 1
+                    ) // self.pos_embed.shape[1]
+                    pos_embed = self.pos_embed.repeat(1, repeat_factor, 1)[
+                        :, :seq_len, :
+                    ]
                 encoder_hidden_states_image = encoder_hidden_states_image + pos_embed
 
         hidden_states = self.norm1(encoder_hidden_states_image)
@@ -408,9 +424,13 @@ class WanMultiTalkTransformerBlock(nn.Module):
             eps=eps,
             norm_layer=WanRMSNorm,
             class_range=class_range,
-            class_interval=class_interval
+            class_interval=class_interval,
         )
-        self.norm_x = FP32LayerNorm(dim, eps, elementwise_affine=True) if norm_input_visual else nn.Identity()
+        self.norm_x = (
+            FP32LayerNorm(dim, eps, elementwise_affine=True)
+            if norm_input_visual
+            else nn.Identity()
+        )
 
         # 4. Feed-forward
         self.ffn = FeedForward(dim, inner_dim=ffn_dim, activation_fn="gelu-approximate")
@@ -459,11 +479,11 @@ class WanMultiTalkTransformerBlock(nn.Module):
         # 3. Audio cross-attention
         if encoder_hidden_states_audio is not None:
             x_a = self.audio_cross_attn(
-                self.norm_x(hidden_states), 
+                self.norm_x(hidden_states),
                 encoder_hidden_states=encoder_hidden_states_audio,
                 shape=grid_sizes[0] if grid_sizes is not None else None,
                 x_ref_attn_map=None,  # TODO: Implement attention map if needed
-                human_num=human_num
+                human_num=human_num,
             )
             hidden_states = hidden_states + x_a
 
@@ -666,7 +686,10 @@ class WanMultiTalkTransformer3DModel(
         post_patch_width = width // p_w
 
         # Calculate grid sizes for audio processing
-        grid_sizes = torch.tensor([[post_patch_num_frames, post_patch_height, post_patch_width]], dtype=torch.long)
+        grid_sizes = torch.tensor(
+            [[post_patch_num_frames, post_patch_height, post_patch_width]],
+            dtype=torch.long,
+        )
 
         rotary_emb = self.rope(hidden_states)
 
@@ -689,12 +712,12 @@ class WanMultiTalkTransformer3DModel(
         # Process audio embeddings if provided
         if encoder_hidden_states_audio is not None:
             # Audio embeddings are expected in format: [batch, frames, window, blocks, channels]
-            first_frame_audio = encoder_hidden_states_audio[:, :1, ...]  
-            latter_frame_audio = encoder_hidden_states_audio[:, 1:, ...]  
-            
+            first_frame_audio = encoder_hidden_states_audio[:, :1, ...]
+            latter_frame_audio = encoder_hidden_states_audio[:, 1:, ...]
+
             # Process with audio projection model
             audio_embedding = self.audio_proj(first_frame_audio, latter_frame_audio)
-            
+
             # Combine audio embeddings if multiple humans
             if len(audio_embedding) > 1:
                 audio_embedding = torch.concat(audio_embedding.split(1), dim=2)
@@ -719,9 +742,9 @@ class WanMultiTalkTransformer3DModel(
         else:
             for block in self.blocks:
                 hidden_states = block(
-                    hidden_states, 
-                    encoder_hidden_states, 
-                    timestep_proj, 
+                    hidden_states,
+                    encoder_hidden_states,
+                    timestep_proj,
                     rotary_emb,
                     encoder_hidden_states_audio=audio_embedding,
                     ref_target_masks=ref_target_masks,
@@ -761,4 +784,4 @@ class WanMultiTalkTransformer3DModel(
         if not return_dict:
             return (output,)
 
-        return Transformer2DModelOutput(sample=output) 
+        return Transformer2DModelOutput(sample=output)

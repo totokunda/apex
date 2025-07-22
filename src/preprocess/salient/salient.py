@@ -10,14 +10,19 @@ from torchvision import transforms
 from typing import Union, List, Optional
 from PIL import Image
 
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 
 
 class REBNCONV(nn.Module):
     def __init__(self, in_ch=3, out_ch=3, dirate=1):
         super(REBNCONV, self).__init__()
         self.conv_s1 = nn.Conv2d(
-            in_ch, out_ch, 3, padding=1 * dirate, dilation=1 * dirate)
+            in_ch, out_ch, 3, padding=1 * dirate, dilation=1 * dirate
+        )
         self.bn_s1 = nn.BatchNorm2d(out_ch)
         self.relu_s1 = nn.ReLU(inplace=True)
 
@@ -29,7 +34,7 @@ class REBNCONV(nn.Module):
 
 def _upsample_like(src, tar):
     """upsample tensor 'src' to have the same spatial size with tensor 'tar'."""
-    src = F.upsample(src, size=tar.shape[2:], mode='bilinear')
+    src = F.upsample(src, size=tar.shape[2:], mode="bilinear")
     return src
 
 
@@ -294,61 +299,90 @@ class U2NET(nn.Module):
         d6 = self.side6(hx6)
         d6 = _upsample_like(d6, d1)
         d0 = self.outconv(torch.cat((d1, d2, d3, d4, d5, d6), 1))
-        return torch.sigmoid(d0), torch.sigmoid(d1), torch.sigmoid(
-            d2), torch.sigmoid(d3), torch.sigmoid(d4), torch.sigmoid(
-                d5), torch.sigmoid(d6)
+        return (
+            torch.sigmoid(d0),
+            torch.sigmoid(d1),
+            torch.sigmoid(d2),
+            torch.sigmoid(d3),
+            torch.sigmoid(d4),
+            torch.sigmoid(d5),
+            torch.sigmoid(d6),
+        )
 
 
 @preprocessor_registry("salient")
 class SalientPreprocessor(BasePreprocessor):
-    def __init__(self, model_path: str, return_image: bool = False, use_crop: bool = False, 
-                 norm_size: List[int] = None, device: str = 'cuda', **kwargs):
-        super().__init__(model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs)
-        
+    def __init__(
+        self,
+        model_path: str,
+        return_image: bool = False,
+        use_crop: bool = False,
+        norm_size: List[int] = None,
+        device: str = "cuda",
+        **kwargs,
+    ):
+        super().__init__(
+            model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs
+        )
+
         self.return_image = return_image
         self.use_crop = use_crop
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == 'cuda' else torch.device(device)
+        self.device = (
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device == "cuda"
+            else torch.device(device)
+        )
         self.norm_mean = [0.485, 0.456, 0.406]
         self.norm_std = [0.229, 0.224, 0.225]
         self.norm_size = norm_size if norm_size is not None else [320, 320]
-        
-        self.model = U2NET(3, 1)
-        self.model.load_state_dict(torch.load(self.model_path, map_location='cpu', weights_only=True))
-        self.model = self.model.to(self.device).eval()
-        
-        self.transform_input = transforms.Compose([
-            transforms.Resize(self.norm_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=self.norm_mean, std=self.norm_std)
-        ])
 
-    def __call__(self, image: Union[Image.Image, np.ndarray, str], return_image: Optional[bool] = None):
+        self.model = U2NET(3, 1)
+        self.model.load_state_dict(
+            torch.load(self.model_path, map_location="cpu", weights_only=True)
+        )
+        self.model = self.model.to(self.device).eval()
+
+        self.transform_input = transforms.Compose(
+            [
+                transforms.Resize(self.norm_size),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=self.norm_mean, std=self.norm_std),
+            ]
+        )
+
+    def __call__(
+        self,
+        image: Union[Image.Image, np.ndarray, str],
+        return_image: Optional[bool] = None,
+    ):
         return_image = return_image if return_image is not None else self.return_image
         image = self._load_image(image)
         img_w, img_h = image.size
-        
+
         input_image = self.transform_input(image).float().unsqueeze(0).to(self.device)
-        
+
         with torch.no_grad():
             results = self.model(input_image)
-        
+
         data = results[0][0, 0, :, :]
         data_norm = (data - torch.min(data)) / (torch.max(data) - torch.min(data))
-        data_norm_np = (data_norm.cpu().numpy() * 255).astype('uint8')
+        data_norm_np = (data_norm.cpu().numpy() * 255).astype("uint8")
         data_norm_rst = cv2.resize(data_norm_np, (img_w, img_h))
-        
+
         if return_image:
             image_np = np.array(image)
             _, binary_mask = cv2.threshold(data_norm_rst, 1, 255, cv2.THRESH_BINARY)
             white_bg = np.ones_like(image_np) * 255
-            ret_image = np.where(binary_mask[:, :, np.newaxis] == 255, image_np, white_bg).astype(np.uint8)
+            ret_image = np.where(
+                binary_mask[:, :, np.newaxis] == 255, image_np, white_bg
+            ).astype(np.uint8)
             ret_mask = np.where(binary_mask, 255, 0).astype(np.uint8)
-            
+
             if self.use_crop:
                 x, y, w, h = cv2.boundingRect(binary_mask)
-                ret_image = ret_image[y:y + h, x:x + w]
-                ret_mask = ret_mask[y:y + h, x:x + w]
-            
+                ret_image = ret_image[y : y + h, x : x + w]
+                ret_mask = ret_mask[y : y + h, x : x + w]
+
             return {"image": ret_image, "mask": ret_mask}
         else:
             return data_norm_rst
@@ -365,8 +399,12 @@ class SalientVideoPreprocessor(SalientPreprocessor, BasePreprocessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.preprocessor_type = PreprocessorType.VIDEO
-    
-    def __call__(self, frames: Union[List[Image.Image], List[str], str], return_image: Optional[bool] = None):
+
+    def __call__(
+        self,
+        frames: Union[List[Image.Image], List[str], str],
+        return_image: Optional[bool] = None,
+    ):
         frames = self._load_video(frames)
         ret_frames = []
         for frame in frames:
@@ -378,4 +416,4 @@ class SalientVideoPreprocessor(SalientPreprocessor, BasePreprocessor):
         return f"SalientVideoPreprocessor(return_image={self.return_image}, use_crop={self.use_crop})"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()

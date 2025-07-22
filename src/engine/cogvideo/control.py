@@ -8,7 +8,7 @@ from .base import CogVideoBaseEngine
 
 class CogVideoControlEngine(CogVideoBaseEngine):
     """CogVideo Control Engine Implementation"""
-    
+
     def run(
         self,
         prompt: Union[List[str], str],
@@ -37,7 +37,7 @@ class CogVideoControlEngine(CogVideoBaseEngine):
         # 1. Process control video
         if isinstance(control_video[0], Image.Image):
             control_video = [control_video]
-        
+
         control_video = self.video_processor.preprocess_video(
             control_video, height=height, width=width
         )
@@ -66,7 +66,9 @@ class CogVideoControlEngine(CogVideoBaseEngine):
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
-            negative_prompt_embeds = negative_prompt_embeds.to(self.device, dtype=transformer_dtype)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
 
         # 4. Load scheduler
         if not self.scheduler:
@@ -93,9 +95,7 @@ class CogVideoControlEngine(CogVideoBaseEngine):
         # Prepare control video latents using vae_encode
         control_video = control_video.to(device=self.device, dtype=prompt_embeds.dtype)
         control_video_latents = self.vae_encode(
-            control_video,
-            sample_mode="mode",
-            dtype=prompt_embeds.dtype
+            control_video, sample_mode="mode", dtype=prompt_embeds.dtype
         )
         control_video_latents = control_video_latents.permute(0, 2, 1, 3, 4)
 
@@ -121,7 +121,9 @@ class CogVideoControlEngine(CogVideoBaseEngine):
         )
 
         # 8. Prepare guidance
-        do_classifier_free_guidance = guidance_scale > 1.0 and negative_prompt_embeds is not None
+        do_classifier_free_guidance = (
+            guidance_scale > 1.0 and negative_prompt_embeds is not None
+        )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
 
@@ -153,4 +155,4 @@ class CogVideoControlEngine(CogVideoBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

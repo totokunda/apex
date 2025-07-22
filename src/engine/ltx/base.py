@@ -3,18 +3,28 @@ import math
 from typing import Dict, Any, Callable, List, Union, Optional
 from diffusers.utils.torch_utils import randn_tensor
 
+
 class LTXBaseEngine:
     """Base class for LTX engine implementations"""
-    
+
     def __init__(self, main_engine):
         self.main_engine = main_engine
         # Delegate properties to main engine
-        for attr in ['device', 'logger', 'text_encoder', 'transformer', 'scheduler', 'vae', 'preprocessors', 'component_dtypes']:
+        for attr in [
+            "device",
+            "logger",
+            "text_encoder",
+            "transformer",
+            "scheduler",
+            "vae",
+            "preprocessors",
+            "component_dtypes",
+        ]:
             setattr(self, attr, getattr(main_engine, attr, None))
-    
+
     def __getattr__(self, name):
         """Delegate any missing attributes to main engine"""
-        return getattr(self.main_engine, name) 
+        return getattr(self.main_engine, name)
 
     def _get_latents(
         self,

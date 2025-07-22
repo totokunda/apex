@@ -14,7 +14,12 @@ from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 from einops import rearrange
 from src.preprocess.hunyuan.align import get_facemask
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
+
 
 @preprocessor_registry("hunyuan.avatar")
 class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
@@ -25,7 +30,9 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         align_pt_path: str = None,
         device: str = "cuda",
     ):
-        super().__init__(model_path, save_path, preprocessor_type=PreprocessorType.AUDIO)
+        super().__init__(
+            model_path, save_path, preprocessor_type=PreprocessorType.AUDIO
+        )
         self.model_path = model_path
         self.save_path = save_path
         self.wav2vec_model = WhisperModel.from_pretrained(

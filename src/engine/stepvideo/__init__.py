@@ -67,4 +67,4 @@ class StepVideoEngine(BaseEngine, StepVideoDenoise):
         return f"StepVideoEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()

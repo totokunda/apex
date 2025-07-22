@@ -8,7 +8,7 @@ from .base import HunyuanBaseEngine
 
 class HunyuanFramepackEngine(HunyuanBaseEngine):
     """Hunyuan Framepack Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],

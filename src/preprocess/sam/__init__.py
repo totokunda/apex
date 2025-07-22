@@ -1,3 +1,3 @@
 from .sam import SAMPreprocessor
 
-__all__ = ['SAMPreprocessor'] 
+__all__ = ["SAMPreprocessor"]

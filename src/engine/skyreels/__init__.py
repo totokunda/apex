@@ -12,6 +12,7 @@ from .i2v import SkyReelsI2VEngine
 from .df import SkyReelsDFEngine
 from src.engine.wan import WanEngine
 
+
 class ModelType(Enum):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
@@ -58,4 +59,4 @@ class SkyReelsEngine(WanEngine):
         return f"SkyReelsEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
-        return self.__str__() 
+        return self.__str__()

@@ -3,9 +3,14 @@
 
 import cv2
 import numpy as np
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 from typing import Union, List
 from PIL import Image
+
 
 @preprocessor_registry("gray.image")
 class GrayPreprocessor(BasePreprocessor):
@@ -24,12 +29,15 @@ class GrayPreprocessor(BasePreprocessor):
     def __repr__(self):
         return self.__str__()
 
+
 @preprocessor_registry("gray.video")
 class GrayVideoPreprocessor(BasePreprocessor):
     def __init__(self, **kwargs):
         super().__init__(preprocessor_type=PreprocessorType.VIDEO, **kwargs)
 
-    def __call__(self, frames: Union[List[Image.Image], List[str], List[np.ndarray], str]):
+    def __call__(
+        self, frames: Union[List[Image.Image], List[str], List[np.ndarray], str]
+    ):
         frames = self._load_video(frames)
         ret_frames = []
         for frame in frames:

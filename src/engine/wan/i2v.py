@@ -8,7 +8,7 @@ from .base import WanBaseEngine
 
 class WanI2VEngine(WanBaseEngine):
     """WAN Image-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         image: Union[

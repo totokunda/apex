@@ -9,6 +9,7 @@ import numpy as np
 from src.engine.denoise import MagiDenoise, MagiDenoiseType
 import math
 
+
 class ModelType(Enum):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
@@ -30,28 +31,28 @@ class MagiEngine(BaseEngine, MagiDenoise):
 
         # Set up VAE scale factors based on MAGI VAE configuration
         self.vae_scale_factor_temporal = (
-            getattr(self.vae, "temporal_compression_ratio", None) or 
-            getattr(self.vae, "patch_length", None) or 4
+            getattr(self.vae, "temporal_compression_ratio", None)
+            or getattr(self.vae, "patch_length", None)
+            or 4
             if getattr(self, "vae", None)
             else 4
         )
         self.vae_scale_factor_spatial = (
-            getattr(self.vae, "spatial_compression_ratio", None) or 
-            getattr(self.vae, "patch_size", None) or 8
+            getattr(self.vae, "spatial_compression_ratio", None)
+            or getattr(self.vae, "patch_size", None)
+            or 8
             if getattr(self, "vae", None)
             else 8
         )
-        
+
         # MAGI uses different channel configurations
         self.num_channels_latents = getattr(self.vae, "config", {}).get(
             "z_chans", 4  # MAGI default
         )
-        
+
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial
         )
-
-    
 
     @torch.inference_mode()
     def run(
@@ -63,7 +64,7 @@ class MagiEngine(BaseEngine, MagiDenoise):
         default_kwargs = self._get_default_kwargs("run")
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-        
+
         if self.model_type == ModelType.T2V:
             return self.t2v_run(**final_kwargs)
         elif self.model_type == ModelType.I2V:
@@ -72,12 +73,6 @@ class MagiEngine(BaseEngine, MagiDenoise):
             return self.v2v_run(**final_kwargs)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
-
-    
-
-    
-
-    
 
     def _load_video(self, video):
         """Load video from various input formats"""
@@ -131,4 +126,4 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    export_to_video(video[0], "magi_t2v_output.mp4", fps=24) 
+    export_to_video(video[0], "magi_t2v_output.mp4", fps=24)

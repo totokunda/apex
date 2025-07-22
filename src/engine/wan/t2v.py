@@ -8,7 +8,7 @@ from .base import WanBaseEngine
 
 class WanT2VEngine(WanBaseEngine):
     """WAN Text-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         prompt: List[str] | str,

@@ -3,6 +3,7 @@ from typing import Optional, Tuple, List, Dict
 import random
 import math
 
+
 class BaseSchedule:
     def __init__(
         self,
@@ -105,6 +106,7 @@ class BaseSchedule:
         self.timesteps = timestep - 1
         self.decay_no_context()
 
+
 ##########################
 class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
     def __init__(
@@ -180,7 +182,7 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
             future_indices = torch.arange(
                 max_target_index, T, device=latent.device, dtype=torch.long
             )
-            
+
             past_indices = torch.arange(2, device=latent.device, dtype=torch.long)
 
             if past_indices is None or past_indices.shape[0] == 0:
@@ -221,12 +223,21 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
         if not denoising_mask.any():
             target_indices = latent_indices[:2]
             seeds = kwargs.get("seeds", [None])
-            generators = [torch.Generator(device=latent.device) for _ in range(len(seeds))]
+            generators = [
+                torch.Generator(device=latent.device) for _ in range(len(seeds))
+            ]
             targets = []
             for i, seed in enumerate(seeds):
                 if seed is not None:
                     generators[i].manual_seed(seed)
-                targets.append(torch.randn(latent[0:1, :, target_indices, :, :].size(), device=latent.device, dtype=latent.dtype, generator=generators[i]))
+                targets.append(
+                    torch.randn(
+                        latent[0:1, :, target_indices, :, :].size(),
+                        device=latent.device,
+                        dtype=latent.dtype,
+                        generator=generators[i],
+                    )
+                )
             target_latents = torch.cat(targets, dim=0)
             past_indices = None
             future_indices = None
@@ -335,7 +346,6 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
         return self._split_tensor(frames, reverse=False, limits=limits, keys=keys)
 
 
-
 class Schedule_F2K1_G9_F1K1F2K2F16K4(Schedule_F2K1_G9_F1K1F2K2F16K4F32K8):
     def __init__(
         self,
@@ -366,7 +376,9 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4(Schedule_F2K1_G9_F1K1F2K2F16K4F32K8):
             )
 
         if future_latents is not None and future_indices is not None:
-            future_indices_dict = self.split_tensor_future(future_indices, limits=[1, 2, 16], keys=["F_1", "F_2", "F_4"])
+            future_indices_dict = self.split_tensor_future(
+                future_indices, limits=[1, 2, 16], keys=["F_1", "F_2", "F_4"]
+            )
             max_future_index = future_indices[-1]
             for key in future_indices_dict:
                 if future_indices_dict[key] is not None:
@@ -381,7 +393,7 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4(Schedule_F2K1_G9_F1K1F2K2F16K4F32K8):
                     )
         else:
             return past_context
-        
+
         context = (past_context + future_context)[::-1]
         # swap the second last and last elements
         context[-2], context[-1] = context[-1], context[-2]

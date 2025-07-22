@@ -2,14 +2,14 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-import torch.nn.functional as F 
+import torch.nn.functional as F
 from src.preprocess.camera.camera import Camera
 from .base import WanBaseEngine
 
 
 class WanFunEngine(WanBaseEngine):
     """WAN FUN (Controllable) Engine Implementation"""
-    
+
     def run(
         self,
         reference_image: Union[
@@ -460,4 +460,4 @@ class WanFunEngine(WanBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

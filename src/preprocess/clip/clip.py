@@ -1,5 +1,9 @@
 from PIL import Image
-from src.preprocess.base import BasePreprocessor, preprocessor_registry, PreprocessorType
+from src.preprocess.base import (
+    BasePreprocessor,
+    preprocessor_registry,
+    PreprocessorType,
+)
 from typing import Union
 from src.utils.defaults import (
     DEFAULT_CONFIG_SAVE_PATH,
@@ -27,7 +31,9 @@ class CLIPPreprocessor(BasePreprocessor):
         dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
-        super().__init__(model_path=model_path, preprocessor_type=PreprocessorType.IMAGE)
+        super().__init__(
+            model_path=model_path, preprocessor_type=PreprocessorType.IMAGE
+        )
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
@@ -44,7 +50,6 @@ class CLIPPreprocessor(BasePreprocessor):
             },
             module_name="transformers",
         )
-        
 
     def find_key_with_type(self, config: Dict[str, Any]) -> str:
         for key, value in config.items():

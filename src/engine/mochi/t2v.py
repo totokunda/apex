@@ -5,6 +5,7 @@ import numpy as np
 from .base import MochiBaseEngine
 from src.ui.nodes import UINode
 
+
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
         linear_steps = num_steps // 2
@@ -28,9 +29,10 @@ def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=Non
     sigma_schedule = [1.0 - x for x in sigma_schedule]
     return np.array(sigma_schedule)
 
+
 class MochiT2VEngine(MochiBaseEngine):
     """Mochi Text-to-Video Engine Implementation"""
-    
+
     def run(
         self,
         prompt: Union[str, List[str]],
@@ -177,4 +179,4 @@ class MochiT2VEngine(MochiBaseEngine):
 
         video = self.vae_decode(latents, offload=offload, dtype=prompt_embeds.dtype)
         video = self._postprocess(video, output_type=output_type)
-        return video 
+        return video

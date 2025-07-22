@@ -1,6 +1,7 @@
 import torch
 from enum import Enum
 
+
 class DenoiseType(Enum):
     BASE = "base"
     HYAVATAR = "hyavatar"
@@ -49,7 +50,6 @@ class HunyuanDenoise:
                 else:
                     latent_model_input = latents.to(transformer_dtype)
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-            
 
                 # Conditional forward pass
                 with self.transformer.cache_context("cond"):
@@ -59,7 +59,6 @@ class HunyuanDenoise:
                         return_dict=False,
                         **noise_pred_kwargs,
                     )[0]
-                
 
                 # Unconditional forward pass for CFG
                 if use_true_cfg_guidance:
@@ -79,7 +78,7 @@ class HunyuanDenoise:
                     latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
                         0
                     ]
-            
+
                 elif image_condition_type == "token_replace":
                     latents_step = scheduler.step(
                         noise_pred[:, :, 1:], t, latents[:, :, 1:], return_dict=False
@@ -107,10 +106,14 @@ class HunyuanDenoise:
         face_masks = kwargs.get("face_masks", None)
         negative_prompt_embeds = kwargs.get("negative_prompt_embeds", None)
         prompt_embeds = kwargs.get("prompt_embeds", None)
-        negative_prompt_attention_mask = kwargs.get("negative_prompt_attention_mask", None)
+        negative_prompt_attention_mask = kwargs.get(
+            "negative_prompt_attention_mask", None
+        )
         prompt_attention_mask = kwargs.get("prompt_attention_mask", None)
         pooled_prompt_embeds = kwargs.get("pooled_prompt_embeds", None)
-        negative_pooled_prompt_embeds = kwargs.get("negative_pooled_prompt_embeds", None)
+        negative_pooled_prompt_embeds = kwargs.get(
+            "negative_pooled_prompt_embeds", None
+        )
         ref_latents = kwargs.get("ref_latents", None)
         uncond_ref_latents = kwargs.get("uncond_ref_latents", None)
         timesteps = kwargs.get("timesteps", None)
@@ -121,8 +124,7 @@ class HunyuanDenoise:
         fps_tensor = kwargs.get("fps_tensor", None)
         freqs_cis = kwargs.get("freqs_cis", None)
         num_videos = kwargs.get("num_videos", 1)
-        
-        
+
         frames_per_batch = 33  # From the reference implementation
         shift = 0
         shift_offset = 10  # From the reference implementation
@@ -130,9 +132,15 @@ class HunyuanDenoise:
         if infer_length <= frames_per_batch:
             shift_offset = 0
 
-        no_cache_steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] + list(range(15, 42, 5)) + [41, 42, 43, 44, 45, 46, 47, 48, 49]
+        no_cache_steps = (
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+            + list(range(15, 42, 5))
+            + [41, 42, 43, 44, 45, 46, 47, 48, 49]
+        )
         cache_tensor = {}
-        with self._progress_bar(total=num_inference_steps, desc="Denoising HyAvatar") as progress_bar:
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising HyAvatar"
+        ) as progress_bar:
             for i, t in enumerate(timesteps):
 
                 pred_latents = torch.zeros_like(latents_all, dtype=latents_all.dtype)
@@ -213,10 +221,17 @@ class HunyuanDenoise:
                     motion_pose_input = torch.cat([motion_pose] * 2)
                     fps_input = torch.cat([fps_tensor] * 2)
 
-                    
-                    latent_input_len = (latent_model_input.shape[-1] // 2)  * (latent_model_input.shape[-2] // 2) * latent_model_input.shape[-3]
-                    latent_ref_len = (latent_model_input.shape[-1] // 2)  * (latent_model_input.shape[-2] // 2) * (latent_model_input.shape[-3]+1) 
-                    
+                    latent_input_len = (
+                        (latent_model_input.shape[-1] // 2)
+                        * (latent_model_input.shape[-2] // 2)
+                        * latent_model_input.shape[-3]
+                    )
+                    latent_ref_len = (
+                        (latent_model_input.shape[-1] // 2)
+                        * (latent_model_input.shape[-2] // 2)
+                        * (latent_model_input.shape[-3] + 1)
+                    )
+
                     if i in no_cache_steps:
                         use_cache = False
 
@@ -240,20 +255,82 @@ class HunyuanDenoise:
 
                         if not cache_tensor:
                             cache_tensor = {
-                                "reference_latent": torch.zeros([latent_model_input.shape[0], latents_all.shape[-3], (latent_model_input.shape[-1] // 2)  * (latent_model_input.shape[-2] // 2), 3072]).to(self.transformer.latent_cache.dtype).to(latent_model_input.device).clone(),
-                                "input_latent": torch.zeros([latent_model_input.shape[0], latents_all.shape[-3], (latent_model_input.shape[-1] // 2)  * (latent_model_input.shape[-2] // 2), 3072]).to(self.transformer.latent_cache.dtype).to(latent_model_input.device).clone(),
-                                "text_embeds": torch.zeros([latent_model_input.shape[0], latents_all.shape[-3], text_embeds_input.shape[1], 3072]).to(self.transformer.latent_cache.dtype).to(latent_model_input.device).clone(),
+                                "reference_latent": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        (latent_model_input.shape[-1] // 2)
+                                        * (latent_model_input.shape[-2] // 2),
+                                        3072,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
+                                "input_latent": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        (latent_model_input.shape[-1] // 2)
+                                        * (latent_model_input.shape[-2] // 2),
+                                        3072,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
+                                "text_embeds": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        text_embeds_input.shape[1],
+                                        3072,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
                             }
 
-                        cache_tensor["reference_latent"][:, idx_list] = self.transformer.latent_cache[:, :latent_ref_len-latent_input_len].reshape(latent_model_input.shape[0], 1, -1, 3072).repeat(1, len(idx_list), 1, 1).to(latent_model_input.device)
-                        cache_tensor["input_latent"][:, idx_list] = self.transformer.latent_cache[:, latent_ref_len-latent_input_len:latent_ref_len].reshape(latent_model_input.shape[0], len(idx_list), -1, 3072).to(latent_model_input.device)
-                        cache_tensor["text_embeds"][:, idx_list] = self.transformer.latent_cache[:, latent_ref_len:].unsqueeze(1).repeat(1, len(idx_list), 1, 1).to(latent_model_input.device)
+                        cache_tensor["reference_latent"][:, idx_list] = (
+                            self.transformer.latent_cache[
+                                :, : latent_ref_len - latent_input_len
+                            ]
+                            .reshape(latent_model_input.shape[0], 1, -1, 3072)
+                            .repeat(1, len(idx_list), 1, 1)
+                            .to(latent_model_input.device)
+                        )
+                        cache_tensor["input_latent"][:, idx_list] = (
+                            self.transformer.latent_cache[
+                                :, latent_ref_len - latent_input_len : latent_ref_len
+                            ]
+                            .reshape(
+                                latent_model_input.shape[0], len(idx_list), -1, 3072
+                            )
+                            .to(latent_model_input.device)
+                        )
+                        cache_tensor["text_embeds"][:, idx_list] = (
+                            self.transformer.latent_cache[:, latent_ref_len:]
+                            .unsqueeze(1)
+                            .repeat(1, len(idx_list), 1, 1)
+                            .to(latent_model_input.device)
+                        )
                     else:
                         use_cache = True
-                        self.transformer.latent_cache[:, :latent_ref_len-latent_input_len] = cache_tensor["reference_latent"][:, idx_list][:, 0].clone()
-                        self.transformer.latent_cache[:, latent_ref_len-latent_input_len:latent_ref_len] = cache_tensor["input_latent"][:, idx_list].reshape(-1, latent_input_len, 3072).clone()
-                        self.transformer.latent_cache[:, latent_ref_len:] = cache_tensor["text_embeds"][:, idx_list][:, 0].clone()
-                    
+                        self.transformer.latent_cache[
+                            :, : latent_ref_len - latent_input_len
+                        ] = cache_tensor["reference_latent"][:, idx_list][:, 0].clone()
+                        self.transformer.latent_cache[
+                            :, latent_ref_len - latent_input_len : latent_ref_len
+                        ] = (
+                            cache_tensor["input_latent"][:, idx_list]
+                            .reshape(-1, latent_input_len, 3072)
+                            .clone()
+                        )
+                        self.transformer.latent_cache[:, latent_ref_len:] = (
+                            cache_tensor["text_embeds"][:, idx_list][:, 0].clone()
+                        )
+
                     # Perform guidance
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + current_guidance_scale * (
@@ -276,6 +353,6 @@ class HunyuanDenoise:
                 latents_all = pred_latents / counter.clamp(min=1)
 
                 progress_bar.update()
-        
+
         self.logger.info("Denoising completed.")
         return latents_all
