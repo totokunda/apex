@@ -242,6 +242,7 @@ class LlamaPreprocessor(BasePreprocessor):
 
         text_input_ids = text_inputs.input_ids.to(device=device)
         prompt_attention_mask = text_inputs.attention_mask.to(device=device)
+        
 
         if self.image_processor is not None:
             loaded_image = self._load_image(image)
@@ -249,7 +250,7 @@ class LlamaPreprocessor(BasePreprocessor):
                 loaded_image, return_tensors="pt"
             ).pixel_values.to(device)
         else:
-            image_embeds = image
+            image_embeds = None
 
         if image_embeds is not None:
             image_token_index = self.model.config.image_token_index
