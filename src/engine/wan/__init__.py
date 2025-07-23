@@ -12,6 +12,9 @@ from .vace import WanVaceEngine
 from .fflf import WanFFLFEngine
 from .causal import WanCausalEngine
 from .fun import WanFunEngine
+from .control import WanControlEngine
+from .inp import WanInpEngine
+from .phantom import WanPhantomEngine
 from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
 
@@ -22,7 +25,10 @@ class ModelType(Enum):
     I2V = "i2v"  # image to video
     FFLF = "fflf"  # first frame last frame
     CAUSAL = "causal"  # causal
-    FUN = "fun"  # fun
+    FUN = "fun"  # fun (combined)
+    CONTROL = "control"  # control (camera poses/video control)
+    INP = "inp"  # inpainting (video + mask)
+    PHANTOM = "phantom"  # phantom (subject reference images)
     APEX_FRAMEPACK = "apex_framepack"  # apex framepack
     MULTITALK = "multitalk"  # multitalk audio-driven video
 
@@ -72,6 +78,12 @@ class WanEngine(BaseEngine, WanDenoise):
             self.implementation_engine = WanCausalEngine(self)
         elif self.model_type == ModelType.FUN:
             self.implementation_engine = WanFunEngine(self)
+        elif self.model_type == ModelType.CONTROL:
+            self.implementation_engine = WanControlEngine(self)
+        elif self.model_type == ModelType.INP:
+            self.implementation_engine = WanInpEngine(self)
+        elif self.model_type == ModelType.PHANTOM:
+            self.implementation_engine = WanPhantomEngine(self)
         elif self.model_type == ModelType.APEX_FRAMEPACK:
             self.implementation_engine = WanApexFramepackEngine(self)
         elif self.model_type == ModelType.MULTITALK:
