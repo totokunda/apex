@@ -1,0 +1,27 @@
+name: "CogVideo 5B Fun Control"
+description: "CogVideo 5B is a 5B parameter model for fun control generation."
+engine: cogvideo
+type: fun
+
+shared: 
+  - shared_cogvideo.yml 
+
+components:
+  - type: scheduler
+    base: "diffusers.CogVideoXDDIMScheduler"
+    config_path: https://huggingface.co/alibaba-pai/CogVideoX-Fun-V1.1-5b-Control/resolve/main/scheduler/scheduler_config.json
+
+  - !include shared:cogvideo/vae
+  - !include shared:cogvideo/text_encoder
+  
+  - type: transformer
+    base: "cogvideo.fun" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: alibaba-pai/CogVideoX-Fun-V1.1-5b-Control/transformer
+    config_path: https://huggingface.co/alibaba-pai/CogVideoX-Fun-V1.1-5b-Control/resolve/main/transformer/config.json
+    tag: "cogvideo_1.5_fun_5b"
+
+defaults:
+  run:
+    num_inference_steps: 50
+    return_latents: false
+    attention_kwargs: {}

@@ -332,12 +332,16 @@ class LoaderMixin:
     def _load_video(
         self,
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
+        fps: int = None,
     ) -> List[Image.Image]:
+        
         if isinstance(video_input, List):
             if (
                 not video_input
                 or isinstance(video_input[0], Image.Image)
                 or isinstance(video_input[0], str)
+                or isinstance(video_input[0], np.ndarray)
+                or isinstance(video_input[0], torch.Tensor)
             ):
                 return video_input
             return [self._load_image(v) for v in video_input]
@@ -370,13 +374,19 @@ class LoaderMixin:
                 if not cap.isOpened():
                     raise IOError(f"Cannot open video file: {video_path}")
 
+                original_fps = cap.get(cv2.CAP_PROP_FPS)
+                frame_skip = 1 if fps is None else max(1, int(original_fps // fps))
+
                 frames = []
+                frame_count = 0
                 while True:
                     ret, frame = cap.read()
                     if not ret:
                         break
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frames.append(Image.fromarray(frame_rgb))
+                    if frame_count % frame_skip == 0:
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frames.append(Image.fromarray(frame_rgb))
+                    frame_count += 1
                 return frames
             finally:
                 if "cap" in locals() and cap.isOpened():
@@ -389,13 +399,37 @@ class LoaderMixin:
 
         if isinstance(video_input, torch.Tensor):
             tensor = video_input.cpu()
-            if tensor.ndim == 4 and tensor.shape[1] == 3:  # NCHW to NHWC
+            if tensor.ndim == 5:
+                if tensor.shape[1] == 3 or tensor.shape[1] == 1:
+                    # Means shape is (B, C, F, H, W)
+                    tensor = tensor.permute(0, 2, 1, 3, 4).squeeze(0)
+                    frames = []
+                elif tensor.shape[2] == 1 or tensor.shape[2] == 3:
+                    # Means shape is (B, C, F, H, W)
+                    tensor = tensor.squeeze(0)
+                    frames = []
+                else:
+                    raise ValueError(f"Invalid tensor shape: {tensor.shape}")
+
+                for frame in tensor:
+                    frame = frame.permute(1, 2, 0).numpy()
+                    # check if frame is between 0 and 1
+                    if frame.mean() <= 1:
+                        frame = (frame * 255).clip(0, 255).astype(np.uint8)
+                    # check if frame is grayscale if so then don't convert to RGB
+                    if frame.shape[2] == 1:
+                        frames.append(Image.fromarray(frame.squeeze(2)))
+                    else:
+                        frames.append(Image.fromarray(frame).convert("RGB"))
+                return frames
+        
+            if tensor.ndim == 4 and (tensor.shape[1] == 3 or tensor.shape[1] == 1):  # NCHW to NHWC
                 tensor = tensor.permute(0, 2, 3, 1)
 
             numpy_array = tensor.numpy()
-            if numpy_array.dtype in [np.float16, np.float32, np.float64]:
+            if numpy_array.mean() <= 1:
                 numpy_array = (numpy_array * 255).clip(0, 255).astype(np.uint8)
 
-            return [Image.fromarray(frame).convert("RGB") for frame in numpy_array]
+            return [Image.fromarray(frame).convert("RGB") if frame.shape[2] == 3 else Image.fromarray(frame) for frame in numpy_array]
 
         raise ValueError(f"Invalid video type: {type(video_input)}")

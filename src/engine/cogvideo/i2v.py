@@ -40,7 +40,6 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         # 1. Process input image
         loaded_image = self._load_image(image)
 
-
         # Preprocess image
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
             self.device
@@ -58,11 +57,10 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        # 3. Load transformer
-        if not self.transformer:
-            self.load_component_by_type("transformer")
+        transformer_config = self.load_config_by_type("transformer")
 
-        self.to_device(self.transformer)
+        # 3. Load transformer
+
         transformer_dtype = self.component_dtypes["transformer"]
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -88,7 +86,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
         # For CogVideoX 1.5, pad latent frames to be divisible by patch_size_t
-        patch_size_t = getattr(self.transformer.config, "patch_size_t", None)
+        patch_size_t = transformer_config.get("patch_size_t", None)
         additional_frames = 0
         if patch_size_t is not None and latent_frames % patch_size_t != 0:
             additional_frames = patch_size_t - latent_frames % patch_size_t
@@ -126,7 +124,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         padding_shape = (
             num_videos,
             latent_frames - 1,
-            self.transformer.config.in_channels // 2,
+            transformer_config.get("in_channels", 16) // 2,
             height // self.vae_scale_factor_spatial,
             width // self.vae_scale_factor_spatial,
         )
@@ -134,7 +132,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         latent_padding = torch.zeros(
             padding_shape, device=self.device, dtype=prompt_embeds.dtype
         )
-        
+
         image_latents = torch.cat([image_latents, latent_padding], dim=1)
 
         # Handle CogVideoX 1.5 padding
@@ -143,9 +141,9 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             image_latents = torch.cat([first_frame, image_latents], dim=1)
 
         latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
-        
+
         # Prepare noise latents
-        latent_channels = self.transformer.config.in_channels // 2
+        latent_channels = transformer_config.get("in_channels", 16) // 2
         latents = self._get_latents(
             height,
             width,
@@ -164,12 +162,16 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
 
         # 7. Prepare rotary embeddings
         image_rotary_emb = self._prepare_rotary_positional_embeddings(
-            height, width, latents.size(1), self.device
+            height,
+            width,
+            latents.size(1),
+            self.device,
+            transformer_config=transformer_config,
         )
 
         # 8. Prepare ofs embeddings (for CogVideoX 1.5)
         ofs_emb = None
-        if getattr(self.transformer.config, "ofs_embed_dim", None) is not None:
+        if transformer_config.get("ofs_embed_dim", None) is not None:
             ofs_emb = latents.new_full((1,), fill_value=2.0)
 
         # 9. Prepare guidance
@@ -178,8 +180,11 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
-        
 
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+
+        self.to_device(self.transformer)
 
         # 10. Denoising loop
         latents = self.denoise(

@@ -2,12 +2,15 @@ import torch
 import math
 from enum import Enum
 from diffusers.schedulers import CogVideoXDPMScheduler
+from contextlib import nullcontext
+
 
 class CogVideoDenoiseType(Enum):
     T2V = "t2v"
     I2V = "i2v"
     V2V = "v2v"
     FUN = "fun"
+
 
 class CogVideoDenoise:
     def __init__(
@@ -32,12 +35,9 @@ class CogVideoDenoise:
         num_inference_steps = kwargs.get("num_inference_steps", 50)
         transformer_dtype = kwargs.get("transformer_dtype", None)
         extra_step_kwargs = kwargs.get("extra_step_kwargs", {})
-        
 
         # Mode-specific inputs
         image_latents = kwargs.get("image_latents", None)
-        control_latents = kwargs.get("control_latents", None)
-        inpaint_latents = kwargs.get("inpaint_latents", None)
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * scheduler.order, 0
@@ -50,7 +50,7 @@ class CogVideoDenoise:
             CogVideoDenoiseType.V2V: "V2V",
             CogVideoDenoiseType.FUN: "Fun",
         }.get(self.denoise_type, "CogVideo")
-        
+
         with self._progress_bar(
             total=num_inference_steps, desc=f"Denoising {mode_desc}"
         ) as pbar:
@@ -78,36 +78,20 @@ class CogVideoDenoise:
                     latent_model_input = torch.cat(
                         [latent_model_input, latent_image_input], dim=2
                     ).to(transformer_dtype)
-                    
-                elif (
-                    self.denoise_type == CogVideoDenoiseType.FUN
-                    and control_latents is not None
-                ):
-                    # Concatenate with control video latents for Control
-                    latent_control_input = (
-                        torch.cat([control_latents] * 2)
-                        if do_classifier_free_guidance
-                        else control_latents
-                    )
-                    noise_pred_kwargs["control_latents"] = latent_control_input
-                elif (
-                    self.denoise_type == CogVideoDenoiseType.FUN
-                    and inpaint_latents is not None
-                ):
-                    latent_inpaint_input = (
-                        torch.cat([inpaint_latents] * 2)
-                        if do_classifier_free_guidance
-                        else inpaint_latents
-                    )
-                    noise_pred_kwargs["inpaint_latents"] = latent_inpaint_input
 
                 # Broadcast timestep to batch dimension
                 timestep = t.expand(latent_model_input.shape[0])
 
                 # Predict noise
-                with self.transformer.cache_context(
-                    "cond_uncond" if do_classifier_free_guidance else None
-                ):
+                if hasattr(self.transformer, "cache_context"):
+                    cache_context = self.transformer.cache_context(
+                        "cond_uncond" if do_classifier_free_guidance else None
+                    )
+                else:
+                    cache_context = nullcontext()
+                    
+                
+                with cache_context:
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         timestep=timestep,
@@ -142,10 +126,12 @@ class CogVideoDenoise:
                     noise_pred = noise_pred_uncond + dynamic_guidance_scale * (
                         noise_pred_text - noise_pred_uncond
                     )
-                
+
                 # Scheduler step - handle different scheduler types
                 if not isinstance(self.scheduler, CogVideoXDPMScheduler):
-                    latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                    latents = self.scheduler.step(
+                        noise_pred, t, latents, **extra_step_kwargs, return_dict=False
+                    )[0]
                 else:
                     latents, old_pred_original_sample = self.scheduler.step(
                         noise_pred,
@@ -156,7 +142,7 @@ class CogVideoDenoise:
                         **extra_step_kwargs,
                         return_dict=False,
                     )
-                
+
                 latents = latents.to(transformer_dtype)
 
                 if render_on_step and render_on_step_callback:

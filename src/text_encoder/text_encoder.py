@@ -13,7 +13,9 @@ import html
 
 
 class TextEncoder(torch.nn.Module):
-    def __init__(self, config: Dict[str, Any], no_weights: bool = False, *args, **kwargs):
+    def __init__(
+        self, config: Dict[str, Any], no_weights: bool = False, *args, **kwargs
+    ):
         super().__init__()
         self.base = config.get("base")
         # check if base has transformers in it if so remove it
@@ -64,7 +66,7 @@ class TextEncoder(torch.nn.Module):
         else:
             with init_empty_weights():
                 model = model_class(**self.config)
-            
+
             if no_weights:
                 return model
 
@@ -130,7 +132,7 @@ class TextEncoder(torch.nn.Module):
             inputs["position_ids"] = position_ids
         if use_mask_in_input:
             inputs["attention_mask"] = mask.to(device=self.model.device)
-    
+
         result = self.model(
             **inputs, output_hidden_states=output_type == "hidden_states"
         )
