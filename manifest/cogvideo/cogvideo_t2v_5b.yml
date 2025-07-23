@@ -18,7 +18,7 @@ components:
     base: "cogvideo.base" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
     model_path: THUDM/CogVideoX1.5-5B/transformer
     config_path: https://huggingface.co/THUDM/CogVideoX1.5-5B/resolve/main/transformer/config.json
-    tag: "cogvideo_t2v_5b"
+    tag: "cogvideo_1.5_t2v_5b"
 
 defaults:
   run:

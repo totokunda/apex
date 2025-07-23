@@ -13,7 +13,7 @@ import html
 
 
 class TextEncoder(torch.nn.Module):
-    def __init__(self, config: Dict[str, Any], *args, **kwargs):
+    def __init__(self, config: Dict[str, Any], no_weights: bool = False, *args, **kwargs):
         super().__init__()
         self.base = config.get("base")
         # check if base has transformers in it if so remove it
@@ -30,7 +30,7 @@ class TextEncoder(torch.nn.Module):
             tokenizer_name=config.get("tokenizer_name", None),
             **config.get("tokenizer_kwargs", {}),
         )
-        self.model = self._load_model()
+        self.model = self._load_model(no_weights)
 
     def basic_clean(self, text):
         text = ftfy.fix_text(text)
@@ -46,7 +46,7 @@ class TextEncoder(torch.nn.Module):
         text = self.whitespace_clean(self.basic_clean(text))
         return text
 
-    def _load_model(self):
+    def _load_model(self, no_weights: bool = False):
         # get model class from recursively search transformers
         model_class = find_class_recursive(transformers, self.base)
         if model_class is None:
@@ -56,10 +56,17 @@ class TextEncoder(torch.nn.Module):
             self.config["torch_dtype"] = getattr(torch, self.config["torch_dtype"])
 
         if self.model_path and os.path.isdir(self.model_path):
-            model = model_class.from_pretrained(self.model_path, **self.config)
+            if no_weights:
+                with init_empty_weights():
+                    model = model_class.from_pretrained(self.model_path, **self.config)
+            else:
+                model = model_class.from_pretrained(self.model_path, **self.config)
         else:
             with init_empty_weights():
                 model = model_class(**self.config)
+            
+            if no_weights:
+                return model
 
             if self.model_path:
                 if not os.path.exists(self.model_path):

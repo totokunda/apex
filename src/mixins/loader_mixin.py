@@ -110,6 +110,7 @@ class LoaderMixin:
         getter_fn: Callable | None = None,
         module_name: str = "diffusers",
         load_dtype: torch.dtype | None = None,
+        no_weights: bool = False,
     ) -> ModelMixin:
         model_base = component.get("base")
         if getter_fn:
@@ -165,6 +166,9 @@ class LoaderMixin:
                 model = model_class(conf)
             else:
                 model = model_class(**config)
+
+        if no_weights:
+            return model
 
         if os.path.isdir(model_path):
             self.logger.info(f"Loading model from {model_path}")

@@ -1,0 +1,27 @@
+name: "CogVideo 5B Image to Video"
+description: "CogVideo 5B is a 5B parameter model for image-to-video generation."
+engine: cogvideo
+type: i2v
+
+shared: 
+  - shared_cogvideo.yml 
+
+components:
+  - type: scheduler
+    base: "diffusers.CogVideoXDDIMScheduler"
+    config_path: https://huggingface.co/THUDM/CogVideoX1.5-5B-I2V/resolve/main/scheduler/scheduler_config.json
+
+  - !include shared:cogvideo/vae
+  - !include shared:cogvideo/text_encoder
+  
+  - type: transformer
+    base: "cogvideo.base" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: THUDM/CogVideoX1.5-5B-I2V/transformer
+    config_path: https://huggingface.co/THUDM/CogVideoX1.5-5B-I2V/resolve/main/transformer/config.json
+    tag: "cogvideo_1.5_i2v_5b"
+
+defaults:
+  run:
+    num_inference_steps: 50
+    return_latents: false
+    attention_kwargs: {}

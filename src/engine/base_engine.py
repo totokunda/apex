@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import math
 import shutil
+import accelerate   
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -228,16 +229,16 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     ):
         raise NotImplementedError("Subclasses must implement this method")
 
-    def load_component(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
+    def load_component(self, component: Dict[str, Any], load_dtype: torch.dtype | None, no_weights: bool = False):
         component_type = component.get("type")
         if component_type == "scheduler":
             self.load_scheduler(component)
         elif component_type == "vae":
-            self.load_vae(component, load_dtype)
+            self.load_vae(component, load_dtype, no_weights)
         elif component_type == "text_encoder":
-            self.load_text_encoder(component)
+            self.load_text_encoder(component, no_weights)
         elif component_type == "transformer":
-            self.load_transformer(component, load_dtype)
+            self.load_transformer(component, load_dtype, no_weights)
         else:
             raise ValueError(f"Component type {component_type} not supported")
         empty_cache()
@@ -287,7 +288,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info(f"Converted vae weights to diffusers format")
                 empty_cache()
         else:
-            self.vae = self._load_model(component, get_vae, "VAE", load_dtype)
+            self.vae = self._load_model(component, get_vae, "VAE", load_dtype, no_weights)
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(self.vae, self.component_dtypes["vae"])
             vae_init_kwargs = self.component_init_kwargs.get("vae", {})
@@ -303,17 +304,33 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 and hasattr(self.vae, "enable_tiling")
             ):
                 self.vae.enable_tiling()
+    
+    def load_config_by_type(self, component_type: str):
+        with accelerate.init_empty_weights():
+            for component in self.config.get("components", []):
+                if component.get("type") == component_type:
+                    self.load_component(
+                        component,
+                        (
+                            self.component_load_dtypes.get(component.get("type"))
+                            if self.component_load_dtypes
+                            else None
+                        ),
+                        no_weights=True,
+                    )
+                    return getattr(getattr(self, component_type), "config", {})
+            raise ValueError(f"Component type {component_type} not found")
 
-    def load_text_encoder(self, component: Dict[str, Any]):
+    def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
         if self._is_url(component.get("config_path")):
             config_path = self._check_config_for_url(component.get("config_path"))
             component["config_path"] = config_path
-        self.text_encoder = TextEncoder(component)
+        self.text_encoder = TextEncoder(component, no_weights)
         if self.component_dtypes and "text_encoder" in self.component_dtypes:
             self.to_dtype(self.text_encoder, self.component_dtypes["text_encoder"])
 
     def load_transformer(
-        self, component: Dict[str, Any], load_dtype: torch.dtype | None
+        self, component: Dict[str, Any], load_dtype: torch.dtype | None, no_weights: bool = False
     ):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
@@ -360,7 +377,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 empty_cache()
         else:
             self.transformer = self._load_model(
-                component, TRANSFORMERS_REGISTRY.get, "Transformer", load_dtype
+                component, TRANSFORMERS_REGISTRY.get, "Transformer", load_dtype, no_weights
             )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
