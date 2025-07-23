@@ -87,7 +87,7 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
 
         latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
-        num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
+        num_channels_latents = self.transformer.config.get("in_channels", 16)
         latents = self._get_latents(
             height,
             width,
@@ -109,9 +109,7 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
             self._prepare_rotary_positional_embeddings(
                 height, width, latents.size(1), self.device
             )
-            if getattr(
-                self.transformer.config, "use_rotary_positional_embeddings", False
-            )
+            if self.transformer.config.get("use_rotary_positional_embeddings", False)
             else None
         )
 

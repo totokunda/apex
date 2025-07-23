@@ -1,6 +1,6 @@
 from src.engine.base_engine import BaseEngine
 import torch
-from typing import Dict, Any, Callable, List, Union, Optional
+from typing import List
 from enum import Enum
 from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
@@ -8,15 +8,15 @@ from src.engine.denoise import CogVideoDenoise, CogVideoDenoiseType
 
 from .t2v import CogVideoT2VEngine
 from .i2v import CogVideoI2VEngine
-from .v2v import CogVideoV2VEngine
-from .fun import CogVideoFunEngine
+from .fun_control import CogVideoFunControlEngine
+from .fun_inp import CogVideoFunInpEngine
 
 
 class ModelType(Enum):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
-    V2V = "v2v"  # video to video
-    FUN = "fun"  # fun video
+    FUN_CONTROL = "fun_control"  # fun control video
+    FUN_INP = "fun_inp"  # fun inpainting video
 
 
 class CogVideoEngine(BaseEngine, CogVideoDenoise):
@@ -32,13 +32,12 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
 
         if self.model_type == ModelType.I2V:
             self.denoise_type = CogVideoDenoiseType.I2V
-        elif self.model_type == ModelType.V2V:
-            self.denoise_type = CogVideoDenoiseType.V2V
-        elif self.model_type == ModelType.FUN:
+        elif self.model_type == ModelType.FUN_CONTROL:
+            self.denoise_type = CogVideoDenoiseType.FUN
+        elif self.model_type == ModelType.FUN_INP:
             self.denoise_type = CogVideoDenoiseType.FUN
         else:
             self.denoise_type = CogVideoDenoiseType.T2V
-
 
         self.vae_scale_factor_temporal = (
             getattr(self.vae, "config", {}).get("temporal_compression_ratio", None) or 4
@@ -77,10 +76,10 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             self.implementation_engine = CogVideoT2VEngine(self)
         elif self.model_type == ModelType.I2V:
             self.implementation_engine = CogVideoI2VEngine(self)
-        elif self.model_type == ModelType.V2V:
-            self.implementation_engine = CogVideoV2VEngine(self)
-        elif self.model_type == ModelType.FUN:
-            self.implementation_engine = CogVideoFunEngine(self)
+        elif self.model_type == ModelType.FUN_CONTROL:
+            self.implementation_engine = CogVideoFunControlEngine(self)
+        elif self.model_type == ModelType.FUN_INP:
+            self.implementation_engine = CogVideoFunInpEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

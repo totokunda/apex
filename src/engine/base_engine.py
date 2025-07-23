@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import math
 import shutil
-import accelerate   
+import accelerate
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -229,7 +229,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     ):
         raise NotImplementedError("Subclasses must implement this method")
 
-    def load_component(self, component: Dict[str, Any], load_dtype: torch.dtype | None, no_weights: bool = False):
+    def load_component(
+        self,
+        component: Dict[str, Any],
+        load_dtype: torch.dtype | None,
+        no_weights: bool = False,
+    ):
         component_type = component.get("type")
         if component_type == "scheduler":
             self.load_scheduler(component)
@@ -246,7 +251,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_scheduler(self, component: Dict[str, Any]):
         self.scheduler = self._load_component(component)
 
-    def load_vae(self, component: Dict[str, Any], load_dtype: torch.dtype | None):
+    def load_vae(
+        self,
+        component: Dict[str, Any],
+        load_dtype: torch.dtype | None,
+        no_weights: bool = False,
+    ):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
@@ -288,7 +298,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info(f"Converted vae weights to diffusers format")
                 empty_cache()
         else:
-            self.vae = self._load_model(component, get_vae, "VAE", load_dtype, no_weights)
+            self.vae = self._load_model(
+                component, get_vae, "VAE", load_dtype, no_weights=no_weights
+            )
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(self.vae, self.component_dtypes["vae"])
             vae_init_kwargs = self.component_init_kwargs.get("vae", {})
@@ -304,9 +316,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 and hasattr(self.vae, "enable_tiling")
             ):
                 self.vae.enable_tiling()
-    
+
     def load_config_by_type(self, component_type: str):
         with accelerate.init_empty_weights():
+            # check if the component is already loaded
+            if getattr(self, component_type, None) is not None:
+                return getattr(self, component_type).config
             for component in self.config.get("components", []):
                 if component.get("type") == component_type:
                     self.load_component(
@@ -318,7 +333,13 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                         ),
                         no_weights=True,
                     )
-                    return getattr(getattr(self, component_type), "config", {})
+                    config = getattr(getattr(self, component_type), "config", {})
+                    setattr(self, f"{component_type}", None)
+
+                    if config:
+                        return config
+                    else:
+                        return {}
             raise ValueError(f"Component type {component_type} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
@@ -330,7 +351,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             self.to_dtype(self.text_encoder, self.component_dtypes["text_encoder"])
 
     def load_transformer(
-        self, component: Dict[str, Any], load_dtype: torch.dtype | None, no_weights: bool = False
+        self,
+        component: Dict[str, Any],
+        load_dtype: torch.dtype | None,
+        no_weights: bool = False,
     ):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
@@ -377,7 +401,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 empty_cache()
         else:
             self.transformer = self._load_model(
-                component, TRANSFORMERS_REGISTRY.get, "Transformer", load_dtype, no_weights
+                component,
+                TRANSFORMERS_REGISTRY.get,
+                "Transformer",
+                load_dtype,
+                no_weights,
             )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
@@ -815,6 +843,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         timesteps: Optional[List[int]] = None,
         sigmas: Optional[List[float]] = None,
         timesteps_as_indices: bool = False,
+        strength: float = 1.0,
         **kwargs,
     ):
         scheduler = scheduler or self.scheduler
@@ -867,6 +896,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         else:
             scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
             timesteps = scheduler.timesteps
+        
+        if strength != 1.0:
+            init_timestep = min(int(num_inference_steps * strength), num_inference_steps)
+            t_start = max(num_inference_steps - init_timestep, 0)
+            timesteps = timesteps[t_start * self.scheduler.order :]
+            num_inference_steps = len(timesteps)
 
         return timesteps, num_inference_steps
 

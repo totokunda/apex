@@ -6,6 +6,7 @@ from diffusers.models.embeddings import get_3d_rotary_pos_embed
 import inspect
 import torch.nn.functional as F
 
+
 class CogVideoBaseEngine:
     """Base class for CogVideo engine implementations containing common functionality"""
 
@@ -125,8 +126,6 @@ class CogVideoBaseEngine:
 
         if isinstance(prompt, str):
             prompt = [prompt]
-            
-        
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -137,7 +136,6 @@ class CogVideoBaseEngine:
             pad_with_zero=False,
             dtype=dtype,
         )
-        
 
         # Handle negative prompt
         negative_prompt_embeds = None
@@ -160,25 +158,24 @@ class CogVideoBaseEngine:
         width: int,
         num_frames: int,
         device: torch.device,
+        transformer_config: Dict[str, Any] = None,
     ):
         """Prepare rotary positional embeddings for CogVideoX"""
-        if not getattr(
-            self.transformer.config, "use_rotary_positional_embeddings", False
-        ):
-            return None
+        if transformer_config is None:
+            transformer_config = self.load_config_by_type("transformer")
 
         grid_height = height // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
+            self.vae_scale_factor_spatial * transformer_config.get("patch_size", 16)
         )
         grid_width = width // (
-            self.vae_scale_factor_spatial * self.transformer.config.patch_size
+            self.vae_scale_factor_spatial * transformer_config.get("patch_size", 16)
         )
 
-        p = self.transformer.config.patch_size
-        p_t = getattr(self.transformer.config, "patch_size_t", None)
+        p = transformer_config.get("patch_size", 16)
+        p_t = transformer_config.get("patch_size_t", None)
 
-        base_size_width = self.transformer.config.sample_width // p
-        base_size_height = self.transformer.config.sample_height // p
+        base_size_width = transformer_config.get("sample_width", 1024) // p
+        base_size_height = transformer_config.get("sample_height", 1024) // p
 
         if p_t is None:
             # CogVideoX 1.0
@@ -190,7 +187,7 @@ class CogVideoBaseEngine:
                 (grid_height, grid_width), base_size_width, base_size_height
             )
             freqs_cos, freqs_sin = get_3d_rotary_pos_embed(
-                embed_dim=self.transformer.config.attention_head_dim,
+                embed_dim=transformer_config.get("attention_head_dim", 128),
                 crops_coords=grid_crops_coords,
                 grid_size=(grid_height, grid_width),
                 temporal_size=num_frames,
@@ -201,7 +198,7 @@ class CogVideoBaseEngine:
             base_num_frames = (num_frames + p_t - 1) // p_t
 
             freqs_cos, freqs_sin = get_3d_rotary_pos_embed(
-                embed_dim=self.transformer.config.attention_head_dim,
+                embed_dim=transformer_config.get("attention_head_dim", 128),
                 crops_coords=None,
                 grid_size=(grid_height, grid_width),
                 temporal_size=base_num_frames,
@@ -211,8 +208,6 @@ class CogVideoBaseEngine:
             )
 
         return freqs_cos, freqs_sin
-    
-    
 
     def _get_v2v_timesteps(
         self, num_inference_steps: int, timesteps: List[int], strength: float
@@ -260,7 +255,7 @@ class CogVideoBaseEngine:
             init_latents = [
                 self.vae_encode(
                     video[i].unsqueeze(0),
-                    sample_mode="sample",
+                    sample_mode="mode",
                     sample_generator=generator[i],
                     dtype=dtype,
                 )
@@ -270,17 +265,14 @@ class CogVideoBaseEngine:
             init_latents = [
                 self.vae_encode(
                     vid.unsqueeze(0),
-                    sample_mode="sample",
+                    sample_mode="mode",
                     sample_generator=generator,
                     dtype=dtype,
                 )
                 for vid in video
             ]
 
-        init_latents = torch.cat(init_latents, dim=0).permute(
-            0, 2, 1, 3, 4
-        )  # [B, F, C, H, W]
-
+        init_latents = torch.cat(init_latents, dim=0)
         # Add noise to the initial latents
         from diffusers.utils.torch_utils import randn_tensor
 
@@ -290,20 +282,24 @@ class CogVideoBaseEngine:
         # Scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
         return latents
-    
+
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
         # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
         # and should be between [0, 1]
 
-        accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
+        accepts_eta = "eta" in set(
+            inspect.signature(self.scheduler.step).parameters.keys()
+        )
         extra_step_kwargs = {}
         if accepts_eta:
             extra_step_kwargs["eta"] = eta
 
         # check if the scheduler accepts generator
-        accepts_generator = "generator" in set(inspect.signature(self.scheduler.step).parameters.keys())
+        accepts_generator = "generator" in set(
+            inspect.signature(self.scheduler.step).parameters.keys()
+        )
         if accepts_generator:
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
@@ -334,61 +330,47 @@ class CogVideoBaseEngine:
             masks = []
             for i in range(mask.size(0)):
                 current_mask = mask[i].unsqueeze(0)
-                current_mask = self.vae.encode(current_mask)[0]
-                current_mask = current_mask.mode()
+                current_mask = self.vae_encode(current_mask, sample_mode="mode")
                 masks.append(current_mask)
             mask = torch.cat(masks, dim=0)
-            mask = mask * self.vae.config.scaling_factor
 
         if masked_image is not None:
             mask_pixel_values = []
             for i in range(masked_image.size(0)):
                 mask_pixel_value = masked_image[i].unsqueeze(0)
-                mask_pixel_value = self.vae.encode(mask_pixel_value)[0]
-                mask_pixel_value = mask_pixel_value.mode()
+                mask_pixel_value = self.vae_encode(mask_pixel_value, sample_mode="mode")
                 mask_pixel_values.append(mask_pixel_value)
             masked_image_latents = torch.cat(mask_pixel_values, dim=0)
-            masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
         else:
             masked_image_latents = None
 
         return mask, masked_image_latents
-    
+
     def _add_noise_to_reference_video(self, image, ratio=None):
         if ratio is None:
-            sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(image.device)
+            sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(
+                image.device
+            )
             sigma = torch.exp(sigma).to(image.dtype)
         else:
             sigma = torch.ones((image.shape[0],)).to(image.device, image.dtype) * ratio
 
         image_noise = torch.randn_like(image) * sigma[:, None, None, None, None]
-        image_noise = torch.where(image==-1, torch.zeros_like(image), image_noise)
+        image_noise = torch.where(image == -1, torch.zeros_like(image), image_noise)
         image = image + image_noise
         return image
-    
+
     def _prepare_mask_latents(
-        self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance, noise_aug_strength
+        self, masked_image, noise_aug_strength, transformer_config
     ):
         # resize the mask to latents shape as we concatenate the mask to the latents
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
         # and half precision
 
-        if mask is not None:
-            mask = mask.to(device=device, dtype=self.vae.dtype)
-            bs = 1
-            new_mask = []
-            for i in range(0, mask.shape[0], bs):
-                mask_bs = mask[i : i + bs]
-                mask_bs = self.vae.encode(mask_bs)[0]
-                mask_bs = mask_bs.mode()
-                new_mask.append(mask_bs)
-            mask = torch.cat(new_mask, dim = 0)
-            mask = mask * self.vae.config.scaling_factor
-
         if masked_image is not None:
-            if self.transformer.config.add_noise_in_inpaint_model:
+            if transformer_config.get("add_noise_in_inpaint_model", False):
                 masked_image = self._add_noise_to_reference_video(masked_image, ratio=noise_aug_strength)
-            masked_image = masked_image.to(device=device, dtype=self.vae.dtype)
+            masked_image = masked_image.to(device=self.device, dtype=self.vae.dtype)
             bs = 1
             new_mask_pixel_values = []
             for i in range(0, masked_image.shape[0], bs):
@@ -398,10 +380,8 @@ class CogVideoBaseEngine:
                 new_mask_pixel_values.append(mask_pixel_values_bs)
             masked_image_latents = torch.cat(new_mask_pixel_values, dim = 0)
             masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
-        else:
-            masked_image_latents = None
 
-        return mask, masked_image_latents
+        return masked_image_latents
 
     def _resize_mask(self, mask, latent, process_first_frame_only=True):
         latent_size = latent.size()
@@ -413,8 +393,8 @@ class CogVideoBaseEngine:
             first_frame_resized = F.interpolate(
                 mask[:, :, 0:1, :, :],
                 size=target_size,
-                mode='trilinear',
-                align_corners=False
+                mode="trilinear",
+                align_corners=False,
             )
 
             target_size = list(latent_size[2:])
@@ -423,18 +403,17 @@ class CogVideoBaseEngine:
                 remaining_frames_resized = F.interpolate(
                     mask[:, :, 1:, :, :],
                     size=target_size,
-                    mode='trilinear',
-                    align_corners=False
+                    mode="trilinear",
+                    align_corners=False,
                 )
-                resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
+                resized_mask = torch.cat(
+                    [first_frame_resized, remaining_frames_resized], dim=2
+                )
             else:
                 resized_mask = first_frame_resized
         else:
             target_size = list(latent_size[2:])
             resized_mask = F.interpolate(
-                mask,
-                size=target_size,
-                mode='trilinear',
-                align_corners=False
+                mask, size=target_size, mode="trilinear", align_corners=False
             )
         return resized_mask

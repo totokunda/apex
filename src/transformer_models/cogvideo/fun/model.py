@@ -22,10 +22,16 @@ import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention import Attention, FeedForward
-from src.attention.processors.cogvideo_processor import CogVideoXAttnProcessor2_0, FusedCogVideoXAttnProcessor2_0
-from diffusers.models.embeddings import (CogVideoXPatchEmbed,
-                                         TimestepEmbedding, Timesteps,
-                                         get_3d_sincos_pos_embed)
+from src.attention.processors.cogvideo_processor import (
+    CogVideoXAttnProcessor2_0,
+    FusedCogVideoXAttnProcessor2_0,
+)
+from diffusers.models.embeddings import (
+    CogVideoXPatchEmbed,
+    TimestepEmbedding,
+    Timesteps,
+    get_3d_sincos_pos_embed,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNorm, CogVideoXLayerNormZero
@@ -33,7 +39,6 @@ from diffusers.utils import is_torch_version, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from torch import nn
 from src.transformer_models.base import TRANSFORMERS_REGISTRY
-
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -62,8 +67,12 @@ class CogVideoXPatchEmbed(nn.Module):
 
         post_patch_height = sample_height // patch_size
         post_patch_width = sample_width // patch_size
-        post_time_compression_frames = (sample_frames - 1) // temporal_compression_ratio + 1
-        self.num_patches = post_patch_height * post_patch_width * post_time_compression_frames
+        post_time_compression_frames = (
+            sample_frames - 1
+        ) // temporal_compression_ratio + 1
+        self.num_patches = (
+            post_patch_height * post_patch_width * post_time_compression_frames
+        )
         self.post_patch_height = post_patch_height
         self.post_patch_width = post_patch_width
         self.post_time_compression_frames = post_time_compression_frames
@@ -83,24 +92,38 @@ class CogVideoXPatchEmbed(nn.Module):
         if patch_size_t is None:
             # CogVideoX 1.0 checkpoints
             self.proj = nn.Conv2d(
-                in_channels, embed_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=bias
+                in_channels,
+                embed_dim,
+                kernel_size=(patch_size, patch_size),
+                stride=patch_size,
+                bias=bias,
             )
         else:
             # CogVideoX 1.5 checkpoints
-            self.proj = nn.Linear(in_channels * patch_size * patch_size * patch_size_t, embed_dim)
+            self.proj = nn.Linear(
+                in_channels * patch_size * patch_size * patch_size_t, embed_dim
+            )
 
         self.text_proj = nn.Linear(text_embed_dim, embed_dim)
 
         if use_positional_embeddings or use_learned_positional_embeddings:
             persistent = use_learned_positional_embeddings
-            pos_embedding = self._get_positional_embeddings(sample_height, sample_width, sample_frames)
+            pos_embedding = self._get_positional_embeddings(
+                sample_height, sample_width, sample_frames
+            )
             self.register_buffer("pos_embedding", pos_embedding, persistent=persistent)
 
-    def _get_positional_embeddings(self, sample_height: int, sample_width: int, sample_frames: int) -> torch.Tensor:
+    def _get_positional_embeddings(
+        self, sample_height: int, sample_width: int, sample_frames: int
+    ) -> torch.Tensor:
         post_patch_height = sample_height // self.patch_size
         post_patch_width = sample_width // self.patch_size
-        post_time_compression_frames = (sample_frames - 1) // self.temporal_compression_ratio + 1
-        num_patches = post_patch_height * post_patch_width * post_time_compression_frames
+        post_time_compression_frames = (
+            sample_frames - 1
+        ) // self.temporal_compression_ratio + 1
+        num_patches = (
+            post_patch_height * post_patch_width * post_time_compression_frames
+        )
 
         pos_embedding = get_3d_sincos_pos_embed(
             self.embed_dim,
@@ -111,7 +134,10 @@ class CogVideoXPatchEmbed(nn.Module):
         )
         pos_embedding = torch.from_numpy(pos_embedding).flatten(0, 1)
         joint_pos_embedding = torch.zeros(
-            1, self.max_text_seq_length + num_patches, self.embed_dim, requires_grad=False
+            1,
+            self.max_text_seq_length + num_patches,
+            self.embed_dim,
+            requires_grad=False,
         )
         joint_pos_embedding.data[:, self.max_text_seq_length :].copy_(pos_embedding)
 
@@ -133,9 +159,15 @@ class CogVideoXPatchEmbed(nn.Module):
         if self.patch_size_t is None:
             image_embeds = image_embeds.reshape(-1, channels, height, width)
             image_embeds = self.proj(image_embeds)
-            image_embeds = image_embeds.view(batch_size, num_frames, *image_embeds.shape[1:])
-            image_embeds = image_embeds.flatten(3).transpose(2, 3)  # [batch, num_frames, height x width, channels]
-            image_embeds = image_embeds.flatten(1, 2)  # [batch, num_frames x height x width, channels]
+            image_embeds = image_embeds.view(
+                batch_size, num_frames, *image_embeds.shape[1:]
+            )
+            image_embeds = image_embeds.flatten(3).transpose(
+                2, 3
+            )  # [batch, num_frames, height x width, channels]
+            image_embeds = image_embeds.flatten(
+                1, 2
+            )  # [batch, num_frames x height x width, channels]
         else:
             p = self.patch_size
             p_t = self.patch_size_t
@@ -143,10 +175,19 @@ class CogVideoXPatchEmbed(nn.Module):
             image_embeds = image_embeds.permute(0, 1, 3, 4, 2)
             # b, f, h, w, c => b, f // 2, 2, h // 2, 2, w // 2, 2, c
             image_embeds = image_embeds.reshape(
-                batch_size, num_frames // p_t, p_t, height // p, p, width // p, p, channels
+                batch_size,
+                num_frames // p_t,
+                p_t,
+                height // p,
+                p,
+                width // p,
+                p,
+                channels,
             )
             # b, f // 2, 2, h // 2, 2, w // 2, 2, c => b, f // 2, h // 2, w // 2, c, 2, 2, 2
-            image_embeds = image_embeds.permute(0, 1, 3, 5, 7, 2, 4, 6).flatten(4, 7).flatten(1, 3)
+            image_embeds = (
+                image_embeds.permute(0, 1, 3, 5, 7, 2, 4, 6).flatten(4, 7).flatten(1, 3)
+            )
             image_embeds = self.proj(image_embeds)
 
         embeds = torch.cat(
@@ -158,15 +199,35 @@ class CogVideoXPatchEmbed(nn.Module):
             # pos_embeds = self.pos_embedding[:, : text_seq_length + seq_length]
             pos_embeds = self.pos_embedding
             emb_size = embeds.size()[-1]
-            pos_embeds_without_text = pos_embeds[:, text_seq_length: ].view(1, self.post_time_compression_frames, self.post_patch_height, self.post_patch_width, emb_size)
+            pos_embeds_without_text = pos_embeds[:, text_seq_length:].view(
+                1,
+                self.post_time_compression_frames,
+                self.post_patch_height,
+                self.post_patch_width,
+                emb_size,
+            )
             pos_embeds_without_text = pos_embeds_without_text.permute([0, 4, 1, 2, 3])
-            pos_embeds_without_text = F.interpolate(pos_embeds_without_text,size=[self.post_time_compression_frames, height // self.patch_size, width // self.patch_size], mode='trilinear', align_corners=False)
-            pos_embeds_without_text = pos_embeds_without_text.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
-            pos_embeds = torch.cat([pos_embeds[:, :text_seq_length], pos_embeds_without_text], dim = 1)
+            pos_embeds_without_text = F.interpolate(
+                pos_embeds_without_text,
+                size=[
+                    self.post_time_compression_frames,
+                    height // self.patch_size,
+                    width // self.patch_size,
+                ],
+                mode="trilinear",
+                align_corners=False,
+            )
+            pos_embeds_without_text = pos_embeds_without_text.permute(
+                [0, 2, 3, 4, 1]
+            ).view(1, -1, emb_size)
+            pos_embeds = torch.cat(
+                [pos_embeds[:, :text_seq_length], pos_embeds_without_text], dim=1
+            )
             pos_embeds = pos_embeds[:, : text_seq_length + seq_length]
             embeds = embeds + pos_embeds
 
         return embeds
+
 
 @maybe_allow_in_graph
 class CogVideoXBlock(nn.Module):
@@ -224,7 +285,9 @@ class CogVideoXBlock(nn.Module):
         super().__init__()
 
         # 1. Self Attention
-        self.norm1 = CogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm1 = CogVideoXLayerNormZero(
+            time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True
+        )
 
         self.attn1 = Attention(
             query_dim=dim,
@@ -238,7 +301,9 @@ class CogVideoXBlock(nn.Module):
         )
 
         # 2. Feed Forward
-        self.norm2 = CogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm2 = CogVideoXLayerNormZero(
+            time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True
+        )
 
         self.ff = FeedForward(
             dim,
@@ -259,8 +324,8 @@ class CogVideoXBlock(nn.Module):
         text_seq_length = encoder_hidden_states.size(1)
 
         # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa = self.norm1(
-            hidden_states, encoder_hidden_states, temb
+        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa = (
+            self.norm1(hidden_states, encoder_hidden_states, temb)
         )
 
         # attention
@@ -271,19 +336,25 @@ class CogVideoXBlock(nn.Module):
         )
 
         hidden_states = hidden_states + gate_msa * attn_hidden_states
-        encoder_hidden_states = encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
+        encoder_hidden_states = (
+            encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
+        )
 
         # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff = self.norm2(
-            hidden_states, encoder_hidden_states, temb
+        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff = (
+            self.norm2(hidden_states, encoder_hidden_states, temb)
         )
 
         # feed-forward
-        norm_hidden_states = torch.cat([norm_encoder_hidden_states, norm_hidden_states], dim=1)
+        norm_hidden_states = torch.cat(
+            [norm_encoder_hidden_states, norm_hidden_states], dim=1
+        )
         ff_output = self.ff(norm_hidden_states)
 
         hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length:]
-        encoder_hidden_states = encoder_hidden_states + enc_gate_ff * ff_output[:, :text_seq_length]
+        encoder_hidden_states = (
+            encoder_hidden_states + enc_gate_ff * ff_output[:, :text_seq_length]
+        )
 
         return hidden_states, encoder_hidden_states
 
@@ -409,7 +480,9 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
         # 2. Time embeddings
         self.time_proj = Timesteps(inner_dim, flip_sin_to_cos, freq_shift)
-        self.time_embedding = TimestepEmbedding(inner_dim, time_embed_dim, timestep_activation_fn)
+        self.time_embedding = TimestepEmbedding(
+            inner_dim, time_embed_dim, timestep_activation_fn
+        )
 
         # 3. Define spatio-temporal transformers blocks
         self.transformer_blocks = nn.ModuleList(
@@ -471,7 +544,9 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
         for _, attn_processor in self.attn_processors.items():
             if "Added" in str(attn_processor.__class__.__name__):
-                raise ValueError("`fuse_qkv_projections()` is not supported for models having added KV projections.")
+                raise ValueError(
+                    "`fuse_qkv_projections()` is not supported for models having added KV projections."
+                )
 
         self.original_attn_processors = self.attn_processors
 
@@ -508,11 +583,17 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
     ):
         batch_size, num_frames, channels, height, width = hidden_states.shape
         if num_frames == 1 and self.patch_size_t is not None:
-            hidden_states = torch.cat([hidden_states, torch.zeros_like(hidden_states)], dim=1)
+            hidden_states = torch.cat(
+                [hidden_states, torch.zeros_like(hidden_states)], dim=1
+            )
             if inpaint_latents is not None:
-                inpaint_latents = torch.concat([inpaint_latents, torch.zeros_like(inpaint_latents)], dim=1)
+                inpaint_latents = torch.concat(
+                    [inpaint_latents, torch.zeros_like(inpaint_latents)], dim=1
+                )
             if control_latents is not None:
-                control_latents = torch.concat([control_latents, torch.zeros_like(control_latents)], dim=1)
+                control_latents = torch.concat(
+                    [control_latents, torch.zeros_like(control_latents)], dim=1
+                )
             local_num_frames = num_frames + 1
         else:
             local_num_frames = num_frames
@@ -526,6 +607,7 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
         # there might be better ways to encapsulate this.
         t_emb = t_emb.to(dtype=hidden_states.dtype)
         emb = self.time_embedding(t_emb, timestep_cond)
+        
 
         # 2. Patch embedding
         if inpaint_latents is not None:
@@ -541,11 +623,17 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
         # Context Parallel
         if self.sp_world_size > 1:
-            hidden_states = torch.chunk(hidden_states, self.sp_world_size, dim=1)[self.sp_world_rank]
+            hidden_states = torch.chunk(hidden_states, self.sp_world_size, dim=1)[
+                self.sp_world_rank
+            ]
             if image_rotary_emb is not None:
                 image_rotary_emb = (
-                    torch.chunk(image_rotary_emb[0], self.sp_world_size, dim=0)[self.sp_world_rank],
-                    torch.chunk(image_rotary_emb[1], self.sp_world_size, dim=0)[self.sp_world_rank]
+                    torch.chunk(image_rotary_emb[0], self.sp_world_size, dim=0)[
+                        self.sp_world_rank
+                    ],
+                    torch.chunk(image_rotary_emb[1], self.sp_world_size, dim=0)[
+                        self.sp_world_rank
+                    ],
                 )
 
         # 3. Transformer blocks
@@ -558,14 +646,18 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
                     return custom_forward
 
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                hidden_states, encoder_hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    emb,
-                    image_rotary_emb,
-                    **ckpt_kwargs,
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
+                hidden_states, encoder_hidden_states = (
+                    torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        encoder_hidden_states,
+                        emb,
+                        image_rotary_emb,
+                        **ckpt_kwargs,
+                    )
                 )
             else:
                 hidden_states, encoder_hidden_states = block(
@@ -588,20 +680,33 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
         hidden_states = self.norm_out(hidden_states, temb=emb)
         hidden_states = self.proj_out(hidden_states)
 
-
         # 5. Unpatchify
         p = self.config.patch_size
         p_t = self.config.patch_size_t
 
         if p_t is None:
-            output = hidden_states.reshape(batch_size, local_num_frames, height // p, width // p, -1, p, p)
+            output = hidden_states.reshape(
+                batch_size, local_num_frames, height // p, width // p, -1, p, p
+            )
             output = output.permute(0, 1, 4, 2, 5, 3, 6).flatten(5, 6).flatten(3, 4)
         else:
             output = hidden_states.reshape(
-                batch_size, (local_num_frames + p_t - 1) // p_t, height // p, width // p, -1, p_t, p, p
+                batch_size,
+                (local_num_frames + p_t - 1) // p_t,
+                height // p,
+                width // p,
+                -1,
+                p_t,
+                p,
+                p,
             )
-            output = output.permute(0, 1, 5, 4, 2, 6, 3, 7).flatten(6, 7).flatten(4, 5).flatten(1, 2)
-        
+            output = (
+                output.permute(0, 1, 5, 4, 2, 6, 3, 7)
+                .flatten(6, 7)
+                .flatten(4, 5)
+                .flatten(1, 2)
+            )
+
         if num_frames == 1:
             output = output[:, :num_frames, :]
 
@@ -611,38 +716,47 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
     @classmethod
     def from_pretrained(
-        cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={},
-        low_cpu_mem_usage=False, torch_dtype=torch.bfloat16
+        cls,
+        pretrained_model_path,
+        subfolder=None,
+        transformer_additional_kwargs={},
+        low_cpu_mem_usage=False,
+        torch_dtype=torch.bfloat16,
     ):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
-        print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
+        print(
+            f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ..."
+        )
 
-        config_file = os.path.join(pretrained_model_path, 'config.json')
+        config_file = os.path.join(pretrained_model_path, "config.json")
         if not os.path.isfile(config_file):
             raise RuntimeError(f"{config_file} does not exist")
         with open(config_file, "r") as f:
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
 
         if "dict_mapping" in transformer_additional_kwargs.keys():
             for key in transformer_additional_kwargs["dict_mapping"]:
-                transformer_additional_kwargs[transformer_additional_kwargs["dict_mapping"][key]] = config[key]
+                transformer_additional_kwargs[
+                    transformer_additional_kwargs["dict_mapping"][key]
+                ] = config[key]
 
         if low_cpu_mem_usage:
             try:
                 import re
 
                 from diffusers import __version__ as diffusers_version
-                from diffusers.models.modeling_utils import \
-                    load_model_dict_into_meta
+                from diffusers.models.modeling_utils import load_model_dict_into_meta
                 from diffusers.utils import is_accelerate_available
+
                 if is_accelerate_available():
                     import accelerate
-                
+
                 # Instantiate model with empty weights
                 with accelerate.init_empty_weights():
                     model = cls.from_config(config, **transformer_additional_kwargs)
@@ -652,10 +766,14 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
                     state_dict = torch.load(model_file, map_location="cpu")
                 elif os.path.exists(model_file_safetensors):
                     from safetensors.torch import load_file, safe_open
+
                     state_dict = load_file(model_file_safetensors)
                 else:
                     from safetensors.torch import load_file, safe_open
-                    model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+                    model_files_safetensors = glob.glob(
+                        os.path.join(pretrained_model_path, "*.safetensors")
+                    )
                     state_dict = {}
                     for _model_file_safetensors in model_files_safetensors:
                         _state_dict = load_file(_model_file_safetensors)
@@ -674,7 +792,9 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
                     )
                 else:
                     # move the params from meta device to cpu
-                    missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
+                    missing_keys = set(model.state_dict().keys()) - set(
+                        state_dict.keys()
+                    )
                     if len(missing_keys) > 0:
                         raise ValueError(
                             f"Cannot load {cls} from {pretrained_model_path} because the following keys are"
@@ -693,74 +813,124 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
 
                     if cls._keys_to_ignore_on_load_unexpected is not None:
                         for pat in cls._keys_to_ignore_on_load_unexpected:
-                            unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+                            unexpected_keys = [
+                                k for k in unexpected_keys if re.search(pat, k) is None
+                            ]
 
                     if len(unexpected_keys) > 0:
                         print(
                             f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}"
                         )
-                
+
                 return model
             except Exception as e:
                 print(
                     f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead."
                 )
-        
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         if os.path.exists(model_file):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             from safetensors.torch import load_file, safe_open
-            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+            model_files_safetensors = glob.glob(
+                os.path.join(pretrained_model_path, "*.safetensors")
+            )
             state_dict = {}
             for _model_file_safetensors in model_files_safetensors:
                 _state_dict = load_file(_model_file_safetensors)
                 for key in _state_dict:
                     state_dict[key] = _state_dict[key]
-        
-        if model.state_dict()['patch_embed.proj.weight'].size() != state_dict['patch_embed.proj.weight'].size():
-            new_shape   = model.state_dict()['patch_embed.proj.weight'].size()
-            if len(new_shape) == 5:
-                state_dict['patch_embed.proj.weight'] = state_dict['patch_embed.proj.weight'].unsqueeze(2).expand(new_shape).clone()
-                state_dict['patch_embed.proj.weight'][:, :, :-1] = 0
-            elif len(new_shape) == 2:
-                if model.state_dict()['patch_embed.proj.weight'].size()[1] > state_dict['patch_embed.proj.weight'].size()[1]:
-                    model.state_dict()['patch_embed.proj.weight'][:, :state_dict['patch_embed.proj.weight'].size()[1]] = state_dict['patch_embed.proj.weight']
-                    model.state_dict()['patch_embed.proj.weight'][:, state_dict['patch_embed.proj.weight'].size()[1]:] = 0
-                    state_dict['patch_embed.proj.weight'] = model.state_dict()['patch_embed.proj.weight']
-                else:
-                    model.state_dict()['patch_embed.proj.weight'][:, :] = state_dict['patch_embed.proj.weight'][:, :model.state_dict()['patch_embed.proj.weight'].size()[1]]
-                    state_dict['patch_embed.proj.weight'] = model.state_dict()['patch_embed.proj.weight']
-            else:
-                if model.state_dict()['patch_embed.proj.weight'].size()[1] > state_dict['patch_embed.proj.weight'].size()[1]:
-                    model.state_dict()['patch_embed.proj.weight'][:, :state_dict['patch_embed.proj.weight'].size()[1], :, :] = state_dict['patch_embed.proj.weight']
-                    model.state_dict()['patch_embed.proj.weight'][:, state_dict['patch_embed.proj.weight'].size()[1]:, :, :] = 0
-                    state_dict['patch_embed.proj.weight'] = model.state_dict()['patch_embed.proj.weight']
-                else:
-                    model.state_dict()['patch_embed.proj.weight'][:, :, :, :] = state_dict['patch_embed.proj.weight'][:, :model.state_dict()['patch_embed.proj.weight'].size()[1], :, :]
-                    state_dict['patch_embed.proj.weight'] = model.state_dict()['patch_embed.proj.weight']
 
-        tmp_state_dict = {} 
+        if (
+            model.state_dict()["patch_embed.proj.weight"].size()
+            != state_dict["patch_embed.proj.weight"].size()
+        ):
+            new_shape = model.state_dict()["patch_embed.proj.weight"].size()
+            if len(new_shape) == 5:
+                state_dict["patch_embed.proj.weight"] = (
+                    state_dict["patch_embed.proj.weight"]
+                    .unsqueeze(2)
+                    .expand(new_shape)
+                    .clone()
+                )
+                state_dict["patch_embed.proj.weight"][:, :, :-1] = 0
+            elif len(new_shape) == 2:
+                if (
+                    model.state_dict()["patch_embed.proj.weight"].size()[1]
+                    > state_dict["patch_embed.proj.weight"].size()[1]
+                ):
+                    model.state_dict()["patch_embed.proj.weight"][
+                        :, : state_dict["patch_embed.proj.weight"].size()[1]
+                    ] = state_dict["patch_embed.proj.weight"]
+                    model.state_dict()["patch_embed.proj.weight"][
+                        :, state_dict["patch_embed.proj.weight"].size()[1] :
+                    ] = 0
+                    state_dict["patch_embed.proj.weight"] = model.state_dict()[
+                        "patch_embed.proj.weight"
+                    ]
+                else:
+                    model.state_dict()["patch_embed.proj.weight"][:, :] = state_dict[
+                        "patch_embed.proj.weight"
+                    ][:, : model.state_dict()["patch_embed.proj.weight"].size()[1]]
+                    state_dict["patch_embed.proj.weight"] = model.state_dict()[
+                        "patch_embed.proj.weight"
+                    ]
+            else:
+                if (
+                    model.state_dict()["patch_embed.proj.weight"].size()[1]
+                    > state_dict["patch_embed.proj.weight"].size()[1]
+                ):
+                    model.state_dict()["patch_embed.proj.weight"][
+                        :, : state_dict["patch_embed.proj.weight"].size()[1], :, :
+                    ] = state_dict["patch_embed.proj.weight"]
+                    model.state_dict()["patch_embed.proj.weight"][
+                        :, state_dict["patch_embed.proj.weight"].size()[1] :, :, :
+                    ] = 0
+                    state_dict["patch_embed.proj.weight"] = model.state_dict()[
+                        "patch_embed.proj.weight"
+                    ]
+                else:
+                    model.state_dict()["patch_embed.proj.weight"][
+                        :, :, :, :
+                    ] = state_dict["patch_embed.proj.weight"][
+                        :,
+                        : model.state_dict()["patch_embed.proj.weight"].size()[1],
+                        :,
+                        :,
+                    ]
+                    state_dict["patch_embed.proj.weight"] = model.state_dict()[
+                        "patch_embed.proj.weight"
+                    ]
+
+        tmp_state_dict = {}
         for key in state_dict:
-            if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
+            if (
+                key in model.state_dict().keys()
+                and model.state_dict()[key].size() == state_dict[key].size()
+            ):
                 tmp_state_dict[key] = state_dict[key]
             else:
                 print(key, "Size don't match, skip")
-                
+
         state_dict = tmp_state_dict
 
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
-        
+
         params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
         print(f"### All Parameters: {sum(params) / 1e6} M")
 
-        params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+        params = [
+            p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()
+        ]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
-        
+
         model = model.to(torch_dtype)
         return model
