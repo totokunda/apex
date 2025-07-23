@@ -9,14 +9,14 @@ from src.engine.denoise import CogVideoDenoise, CogVideoDenoiseType
 from .t2v import CogVideoT2VEngine
 from .i2v import CogVideoI2VEngine
 from .v2v import CogVideoV2VEngine
-from .control import CogVideoControlEngine
+from .fun import CogVideoFunEngine
 
 
 class ModelType(Enum):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     V2V = "v2v"  # video to video
-    CONTROL = "control"  # control video
+    FUN = "fun"  # fun video
 
 
 class CogVideoEngine(BaseEngine, CogVideoDenoise):
@@ -24,13 +24,21 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
         self,
         yaml_path: str,
         model_type: ModelType = ModelType.T2V,
-        denoise_type: CogVideoDenoiseType = CogVideoDenoiseType.T2V,
         **kwargs,
     ):
         super().__init__(yaml_path, **kwargs)
 
         self.model_type = model_type
-        self.denoise_type = denoise_type
+
+        if self.model_type == ModelType.I2V:
+            self.denoise_type = CogVideoDenoiseType.I2V
+        elif self.model_type == ModelType.V2V:
+            self.denoise_type = CogVideoDenoiseType.V2V
+        elif self.model_type == ModelType.FUN:
+            self.denoise_type = CogVideoDenoiseType.FUN
+        else:
+            self.denoise_type = CogVideoDenoiseType.T2V
+
 
         self.vae_scale_factor_temporal = (
             getattr(self.vae, "config", {}).get("temporal_compression_ratio", None) or 4
@@ -71,8 +79,8 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             self.implementation_engine = CogVideoI2VEngine(self)
         elif self.model_type == ModelType.V2V:
             self.implementation_engine = CogVideoV2VEngine(self)
-        elif self.model_type == ModelType.CONTROL:
-            self.implementation_engine = CogVideoControlEngine(self)
+        elif self.model_type == ModelType.FUN:
+            self.implementation_engine = CogVideoFunEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

@@ -13,7 +13,7 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
         self,
         video: Union[List[Image.Image], torch.Tensor],
         prompt: Union[List[str], str],
-        negative_prompt: Union[List[str], str] = None,
+        negative_prompt: Union[List[str], str] = "",
         height: int = 480,
         width: int = 720,
         num_inference_steps: int = 50,
@@ -32,18 +32,23 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
         timesteps: List[int] = None,
         max_sequence_length: int = 226,
         latents: torch.Tensor = None,
+        eta: float = 0.0,
         **kwargs,
     ):
         """Video-to-video generation following CogVideoXVideoToVideoPipeline"""
 
         # 1. Process input video
         if latents is None:
+            video = self._load_video(video) 
+            video = video.to(device=self.device)
             video = self.video_processor.preprocess_video(
                 video, height=height, width=width
             )
-            video = video.to(device=self.device)
 
         num_frames = len(video) if latents is None else latents.size(1)
+        
+        if seed and generator is None:
+            generator = torch.Generator(device=self.device).manual_seed(seed)
 
         # 2. Encode prompts
         prompt_embeds, negative_prompt_embeds = self._encode_prompt(
@@ -143,6 +148,8 @@ class CogVideoV2VEngine(CogVideoBaseEngine):
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             num_inference_steps=num_inference_steps,
+            transformer_dtype=transformer_dtype,
+            extra_step_kwargs=self.prepare_extra_step_kwargs(generator, eta),
             **kwargs,
         )
 

@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 import inspect
+import torch.nn.functional as F
 
 class CogVideoBaseEngine:
     """Base class for CogVideo engine implementations containing common functionality"""
@@ -46,6 +47,10 @@ class CogVideoBaseEngine:
     def load_component_by_type(self, component_type: str):
         """Load a component by type"""
         return self.main_engine.load_component_by_type(component_type)
+
+    def load_config_by_type(self, component_type: str):
+        """Load a config by type"""
+        return self.main_engine.load_config_by_type(component_type)
 
     def load_preprocessor_by_type(self, preprocessor_type: str):
         """Load a preprocessor by type"""
@@ -348,3 +353,88 @@ class CogVideoBaseEngine:
             masked_image_latents = None
 
         return mask, masked_image_latents
+    
+    def _add_noise_to_reference_video(self, image, ratio=None):
+        if ratio is None:
+            sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(image.device)
+            sigma = torch.exp(sigma).to(image.dtype)
+        else:
+            sigma = torch.ones((image.shape[0],)).to(image.device, image.dtype) * ratio
+
+        image_noise = torch.randn_like(image) * sigma[:, None, None, None, None]
+        image_noise = torch.where(image==-1, torch.zeros_like(image), image_noise)
+        image = image + image_noise
+        return image
+    
+    def _prepare_mask_latents(
+        self, mask, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance, noise_aug_strength
+    ):
+        # resize the mask to latents shape as we concatenate the mask to the latents
+        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
+        # and half precision
+
+        if mask is not None:
+            mask = mask.to(device=device, dtype=self.vae.dtype)
+            bs = 1
+            new_mask = []
+            for i in range(0, mask.shape[0], bs):
+                mask_bs = mask[i : i + bs]
+                mask_bs = self.vae.encode(mask_bs)[0]
+                mask_bs = mask_bs.mode()
+                new_mask.append(mask_bs)
+            mask = torch.cat(new_mask, dim = 0)
+            mask = mask * self.vae.config.scaling_factor
+
+        if masked_image is not None:
+            if self.transformer.config.add_noise_in_inpaint_model:
+                masked_image = self._add_noise_to_reference_video(masked_image, ratio=noise_aug_strength)
+            masked_image = masked_image.to(device=device, dtype=self.vae.dtype)
+            bs = 1
+            new_mask_pixel_values = []
+            for i in range(0, masked_image.shape[0], bs):
+                mask_pixel_values_bs = masked_image[i : i + bs]
+                mask_pixel_values_bs = self.vae.encode(mask_pixel_values_bs)[0]
+                mask_pixel_values_bs = mask_pixel_values_bs.mode()
+                new_mask_pixel_values.append(mask_pixel_values_bs)
+            masked_image_latents = torch.cat(new_mask_pixel_values, dim = 0)
+            masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
+        else:
+            masked_image_latents = None
+
+        return mask, masked_image_latents
+
+    def _resize_mask(self, mask, latent, process_first_frame_only=True):
+        latent_size = latent.size()
+        batch_size, channels, num_frames, height, width = mask.shape
+
+        if process_first_frame_only:
+            target_size = list(latent_size[2:])
+            target_size[0] = 1
+            first_frame_resized = F.interpolate(
+                mask[:, :, 0:1, :, :],
+                size=target_size,
+                mode='trilinear',
+                align_corners=False
+            )
+
+            target_size = list(latent_size[2:])
+            target_size[0] = target_size[0] - 1
+            if target_size[0] != 0:
+                remaining_frames_resized = F.interpolate(
+                    mask[:, :, 1:, :, :],
+                    size=target_size,
+                    mode='trilinear',
+                    align_corners=False
+                )
+                resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
+            else:
+                resized_mask = first_frame_resized
+        else:
+            target_size = list(latent_size[2:])
+            resized_mask = F.interpolate(
+                mask,
+                size=target_size,
+                mode='trilinear',
+                align_corners=False
+            )
+        return resized_mask

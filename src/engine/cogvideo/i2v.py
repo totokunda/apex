@@ -13,10 +13,10 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
         prompt: Union[List[str], str],
-        negative_prompt: Union[List[str], str] = None,
+        negative_prompt: Union[List[str], str] = "",
         height: int = 480,
         width: int = 720,
-        num_frames: int = 49,
+        duration: int | str = 49,
         num_inference_steps: int = 50,
         num_videos: int = 1,
         seed: int = None,
@@ -32,15 +32,14 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         timesteps: List[int] = None,
         max_sequence_length: int = 226,
         sigmas: List[float] = None,
+        eta: float = 0.0,
         **kwargs,
     ):
         """Image-to-video generation following CogVideoXImageToVideoPipeline"""
 
         # 1. Process input image
         loaded_image = self._load_image(image)
-        loaded_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width
-        )
+
 
         # Preprocess image
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
@@ -85,6 +84,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         )
 
         # 6. Prepare latents
+        num_frames = self._parse_num_frames(duration)
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
         # For CogVideoX 1.5, pad latent frames to be divisible by patch_size_t
@@ -120,7 +120,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
                 for img in image_tensor_unsqueezed
             ]
 
-        image_latents = torch.cat(image_latents, dim=0).permute(0, 2, 1, 3, 4)
+        image_latents = torch.cat(image_latents, dim=0)
 
         # Create padding for remaining frames
         padding_shape = (
@@ -134,6 +134,7 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         latent_padding = torch.zeros(
             padding_shape, device=self.device, dtype=prompt_embeds.dtype
         )
+        
         image_latents = torch.cat([image_latents, latent_padding], dim=1)
 
         # Handle CogVideoX 1.5 padding
@@ -141,17 +142,21 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             first_frame = image_latents[:, : image_latents.size(1) % patch_size_t, ...]
             image_latents = torch.cat([first_frame, image_latents], dim=1)
 
+        latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+        
         # Prepare noise latents
         latent_channels = self.transformer.config.in_channels // 2
         latents = self._get_latents(
             height,
             width,
-            num_frames,
+            latent_num_frames,
             num_videos=num_videos,
             num_channels_latents=latent_channels,
             seed=seed,
             generator=generator,
-            dtype=prompt_embeds.dtype,
+            dtype=transformer_dtype,
+            parse_frames=False,
+            order="BFC",
         )
 
         # Scale initial noise by scheduler's init_noise_sigma
@@ -173,6 +178,8 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
         )
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+        
+
 
         # 10. Denoising loop
         latents = self.denoise(
@@ -193,6 +200,8 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             render_on_step_callback=render_on_step_callback,
             num_inference_steps=num_inference_steps,
             additional_frames=additional_frames,
+            transformer_dtype=transformer_dtype,
+            extra_step_kwargs=self.prepare_extra_step_kwargs(generator, eta),
             **kwargs,
         )
 
