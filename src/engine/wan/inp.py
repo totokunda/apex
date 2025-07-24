@@ -131,15 +131,11 @@ class WanInpEngine(WanBaseEngine):
             preprocessed_mask = self.video_processor.preprocess_video(
                 loaded_mask, video_height, video_width
             )
-            preprocessed_mask = torch.clamp(
-                (preprocessed_mask + 1) / 2, min=0, max=1
-            )
+            preprocessed_mask = torch.clamp((preprocessed_mask + 1) / 2, min=0, max=1)
 
             if (preprocessed_mask == 0).all():
                 mask_latents = torch.tile(
-                    torch.zeros_like(latents)[:, :1].to(
-                        self.device, transformer_dtype
-                    ),
+                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype),
                     [1, 4, 1, 1, 1],
                 )
                 masked_video_latents = torch.zeros_like(latents).to(
@@ -205,9 +201,7 @@ class WanInpEngine(WanBaseEngine):
                     )
                 mask_latents = resized_mask
 
-            control_latents = torch.concat(
-                [mask_latents, masked_video_latents], dim=1
-            )
+            control_latents = torch.concat([mask_latents, masked_video_latents], dim=1)
         else:
             control_latents = torch.zeros_like(latents)
 
@@ -318,4 +312,4 @@ class WanInpEngine(WanBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
-            return postprocessed_video 
+            return postprocessed_video

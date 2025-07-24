@@ -28,15 +28,16 @@ class StepVideoEngine(BaseEngine, StepVideoDenoise):
         self.vae_scale_factor_temporal = (
             2 ** sum(self.vae.temporal_compression_ratio)
             if getattr(self.vae, "temporal_compression_ratio", None)
-            else 4
+            else 8
         )
 
         self.vae_scale_factor_spatial = (
             2 ** len(self.vae.spatial_compression_ratio)
             if getattr(self.vae, "spatial_compression_ratio", None)
-            else 8
+            else 16
         )
-        self.num_channels_latents = getattr(self.vae, "config", {}).get("z_dim", 16)
+        
+        self.num_channels_latents = getattr(self.vae, "config", {}).get("z_channels", 16)
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial
         )

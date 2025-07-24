@@ -127,7 +127,7 @@ class CogVideoFunControlEngine(CogVideoBaseEngine):
                 device=self.device, dtype=prompt_embeds.dtype
             )
             control_video_latents = self._prepare_control_latents(
-                mask=None, 
+                mask=None,
                 masked_image=control_video,
             )[1]
         else:
@@ -183,9 +183,9 @@ class CogVideoFunControlEngine(CogVideoBaseEngine):
         )
 
         noise_pred_kwargs = dict(
-            encoder_hidden_states=prompt_embeds, 
-            image_rotary_emb=image_rotary_emb, 
-            control_latents=latent_control_input
+            encoder_hidden_states=prompt_embeds,
+            image_rotary_emb=image_rotary_emb,
+            control_latents=latent_control_input,
         )
 
         # 9. Denoising loop

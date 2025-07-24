@@ -274,6 +274,7 @@ def flash_attention(
     is_causal=False,
     **kwargs,
 ):
+
     if cu_seqlens_q is None or cu_seqlens_k is None:
         return flash_attention_padded(
             q,

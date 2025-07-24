@@ -20,7 +20,6 @@ class StepVideoDenoise:
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps", None)
         latents = kwargs.get("latents", None)
-        latent_condition = kwargs.get("latent_condition", None)
         transformer_dtype = kwargs.get("transformer_dtype", None)
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         render_on_step = kwargs.get("render_on_step", False)
@@ -32,14 +31,10 @@ class StepVideoDenoise:
             len(timesteps), desc=f"Sampling {self.model_type}"
         ) as pbar:
             for t in timesteps:
-                timestep = t.expand(latents.shape[0])
-                if latent_condition is not None:
-                    latent_model_input = torch.cat(
-                        [latents, latent_condition], dim=1
-                    ).to(transformer_dtype)
-                else:
-                    latent_model_input = latents.to(transformer_dtype)
-
+                latent_model_input = torch.cat([latents] * 2) if use_cfg_guidance else latents
+                latent_model_input = latent_model_input.to(transformer_dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(transformer_dtype)
+                
                 # Forward pass with both text and image conditioning
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -48,18 +43,10 @@ class StepVideoDenoise:
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
 
-                if use_cfg_guidance and kwargs.get(
-                    "unconditional_transformer_kwargs", None
-                ):
-                    uncond_noise_pred = self.transformer(
-                        hidden_states=latent_model_input,
-                        timestep=timestep,
-                        return_dict=False,
-                        **kwargs.get("unconditional_transformer_kwargs", {}),
-                    )[0]
-
-                    noise_pred = uncond_noise_pred + guidance_scale * (
-                        noise_pred - uncond_noise_pred
+                if use_cfg_guidance:
+                    noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
                     )
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]

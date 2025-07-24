@@ -111,6 +111,8 @@ class LoaderMixin:
         module_name: str = "diffusers",
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
+        key_map: Dict[str, str] | None = None,
+        extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
         model_base = component.get("base")
         if getter_fn:
@@ -132,7 +134,9 @@ class LoaderMixin:
 
         if not config:
             # try to load from model_path directly
-            model = model_class.from_pretrained(model_path, torch_dtype=load_dtype)
+            model = model_class.from_pretrained(
+                model_path, torch_dtype=load_dtype, **extra_kwargs
+            )
             return model
 
         with init_empty_weights():
@@ -163,20 +167,24 @@ class LoaderMixin:
                 # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
                 config_class = getattr(model_class, "config_class", PretrainedConfig)
                 conf = config_class(**config)
-                model = model_class(conf)
+                model = model_class(conf, **extra_kwargs)
             else:
-                model = model_class(**config)
+                model = model_class(**config, **extra_kwargs)
 
         if no_weights:
             return model
 
         if os.path.isdir(model_path):
             self.logger.info(f"Loading model from {model_path}")
-            file_pattern = component.get("file_pattern", "*.safetensors")
-            files_to_load = glob(os.path.join(model_path, file_pattern))
+            file_pattern = component.get("file_pattern", "**/*.safetensors")
+            bin_pattern = component.get("bin_pattern", "**/*.bin")
+            pt_pattern = component.get("pt_pattern", "**/*.pt")
+            files_to_load = glob(os.path.join(model_path, file_pattern), recursive=True)
+            files_to_load += glob(os.path.join(model_path, bin_pattern), recursive=True)
+            files_to_load += glob(os.path.join(model_path, pt_pattern), recursive=True)
             if not files_to_load:
                 self.logger.warning(
-                    f"No model files found in {model_path} with pattern {file_pattern}"
+                    f"No model files found in {model_path}"
                 )
         else:
             if not os.path.exists(model_path):
@@ -193,10 +201,21 @@ class LoaderMixin:
                 if load_dtype:
                     for k, v in state_dict.items():
                         state_dict[k] = v.to(load_dtype)
+            # remap keys if key_map is provided replace part of existing key with new key
+            if key_map:
+                new_state_dict = {}
+                for k, v in key_map.items():
+                    for k2, v2 in state_dict.items():
+                        if k in k2:
+                            new_state_dict[k2.replace(k, v)] = v2
+                        else:
+                            new_state_dict[k2] = v2
+
+                state_dict = new_state_dict
+
             model.load_state_dict(
                 state_dict, strict=False, assign=True
             )  # must be false as we are iteratively loading the state dict
-
         # Assert no parameters are on meta device
         for name, param in model.named_parameters():
             if param.device.type == "meta":
@@ -334,7 +353,7 @@ class LoaderMixin:
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
         fps: int = None,
     ) -> List[Image.Image]:
-        
+
         if isinstance(video_input, List):
             if (
                 not video_input
@@ -422,14 +441,23 @@ class LoaderMixin:
                     else:
                         frames.append(Image.fromarray(frame).convert("RGB"))
                 return frames
-        
-            if tensor.ndim == 4 and (tensor.shape[1] == 3 or tensor.shape[1] == 1):  # NCHW to NHWC
+
+            if tensor.ndim == 4 and (
+                tensor.shape[1] == 3 or tensor.shape[1] == 1
+            ):  # NCHW to NHWC
                 tensor = tensor.permute(0, 2, 3, 1)
 
             numpy_array = tensor.numpy()
             if numpy_array.mean() <= 1:
                 numpy_array = (numpy_array * 255).clip(0, 255).astype(np.uint8)
 
-            return [Image.fromarray(frame).convert("RGB") if frame.shape[2] == 3 else Image.fromarray(frame) for frame in numpy_array]
+            return [
+                (
+                    Image.fromarray(frame).convert("RGB")
+                    if frame.shape[2] == 3
+                    else Image.fromarray(frame)
+                )
+                for frame in numpy_array
+            ]
 
         raise ValueError(f"Invalid video type: {type(video_input)}")

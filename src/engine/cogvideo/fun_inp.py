@@ -51,8 +51,17 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
 
         video = video.to(device=self.device)
         video_length = video.shape[2]
-        video_length = int((video_length - 1) // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal) + 1 if video_length != 1 else 1
-        
+        video_length = (
+            int(
+                (video_length - 1)
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
+            )
+            + 1
+            if video_length != 1
+            else 1
+        )
+
         is_strength_max = strength == 1.0
 
         if mask_video is not None:
@@ -134,7 +143,7 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
 
         if not self.vae:
             self.load_component_by_type("vae")
-        
+
         self.to_device(self.vae)
 
         # Prepare control video latents using vae_encode
@@ -147,10 +156,14 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
                 video_bs = self.vae.encode(video_bs)[0]
                 video_bs = video_bs.mode()
                 new_video.append(video_bs)
-            new_video = torch.cat(new_video, dim = 0)
+            new_video = torch.cat(new_video, dim=0)
             new_video = new_video * self.vae.config.scaling_factor
-            video_latents = new_video.repeat(batch_size // new_video.shape[0], 1, 1, 1, 1)
-            video_latents = video_latents.to(device=self.device, dtype=transformer_dtype)
+            video_latents = new_video.repeat(
+                batch_size // new_video.shape[0], 1, 1, 1, 1
+            )
+            video_latents = video_latents.to(
+                device=self.device, dtype=transformer_dtype
+            )
             video_latents = rearrange(video_latents, "b c f h w -> b f c h w")
         else:
             video_latents = None
@@ -170,8 +183,7 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
             parse_frames=False,
             order="BFC",
         )
-        
-   
+
         latent_timestep = timesteps[:1].repeat(batch_size * num_videos)
         if not is_strength_max:
             latents = self.scheduler.add_noise(video_latents, latents, latent_timestep)
@@ -223,7 +235,9 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
                 mask_condition = mask_video.to(torch.float32)
 
                 if num_channels_transformer != num_channels_latents:
-                    mask_condition_tile = torch.tile(mask_condition, [1, 3, 1, 1, 1]).to(video)
+                    mask_condition_tile = torch.tile(
+                        mask_condition, [1, 3, 1, 1, 1]
+                    ).to(video)
                     masked_video = (
                         video * (mask_condition_tile < 0.5)
                         + torch.ones_like(video) * (mask_condition_tile > 0.5) * -1
@@ -234,11 +248,11 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
                         noise_aug_strength=noise_aug_strength,
                         transformer_config=transformer_config,
                     )
-                    
+
                     mask_latents = self._resize_mask(
                         1 - mask_condition, masked_video_latents
                     )
-                    
+
                     mask_latents = (
                         mask_latents.to(masked_video_latents.device)
                         * self.vae.config.scaling_factor
@@ -264,13 +278,13 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
                         if do_classifier_free_guidance
                         else masked_video_latents
                     )
-                    
+
                     mask = rearrange(mask, "b c f h w -> b f c h w")
                     mask_input = rearrange(mask_input, "b c f h w -> b f c h w")
                     masked_video_latents_input = rearrange(
                         masked_video_latents_input, "b c f h w -> b f c h w"
                     )
-                    
+
                     inpaint_latents = torch.cat(
                         [mask_input, masked_video_latents_input], dim=2
                     ).to(latents.dtype)
@@ -328,7 +342,6 @@ class CogVideoFunInpEngine(CogVideoBaseEngine):
             encoder_hidden_states=prompt_embeds,
             image_rotary_emb=image_rotary_emb,
         )
-
 
         # 9. Denoising loop
         latents = self.denoise(

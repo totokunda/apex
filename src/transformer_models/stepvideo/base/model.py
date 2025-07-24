@@ -388,7 +388,7 @@ class RoPE3D(RoPE1D):
             * tokens after applying RoPE2D (batch_size x ntokens x nheads x dim)
         """
         assert sum(ch_split) == tokens.size(-1)
-
+    
         mesh_grid = self.get_mesh_3d(rope_positions, bsz=tokens.shape[0])
         out = []
         for i, (D, x) in enumerate(
@@ -397,11 +397,7 @@ class RoPE3D(RoPE1D):
             cos, sin = self.get_cos_sin(
                 D, int(mesh_grid.max()) + 1, tokens.device, tokens.dtype
             )
-
-            if parallel:
-                pass
-            else:
-                mesh = mesh_grid[:, :, i].clone()
+            mesh = mesh_grid[:, :, i].clone()
             x = self.apply_rope1d(x, mesh.to(tokens.device), cos, sin)
             out.append(x)
 
@@ -417,7 +413,7 @@ class SelfAttention(torch.nn.Module):
         bias=False,
         with_rope=True,
         with_qk_norm=True,
-        attn_type="torch",
+        **kwargs,
     ):
         super().__init__()
         self.head_dim = head_dim
@@ -437,9 +433,9 @@ class SelfAttention(torch.nn.Module):
             self.rope_ch_split = [64, 32, 32]
 
         self.core_attention = StepVideoAttnProcessor()
-        self.parallel = attn_type == "parallel"
+        self.parallel = False
 
-    def apply_rope3d(self, x, fhw_positions, rope_ch_split, parallel=True):
+    def apply_rope3d(self, x, fhw_positions, rope_ch_split, parallel=False):
         x = self.rope_3d(x, fhw_positions, rope_ch_split, parallel)
         return x
 
@@ -464,6 +460,7 @@ class CrossAttention(torch.nn.Module):
         head_dim,
         bias=False,
         with_qk_norm=True,
+        **kwargs,
     ):
         super().__init__()
         self.head_dim = head_dim
@@ -474,9 +471,11 @@ class CrossAttention(torch.nn.Module):
         self.wo = nn.Linear(hidden_dim, hidden_dim, bias=bias)
 
         self.with_qk_norm = with_qk_norm
+        
         if self.with_qk_norm:
             self.q_norm = RMSNorm(head_dim, elementwise_affine=True)
             self.k_norm = RMSNorm(head_dim, elementwise_affine=True)
+        
 
         self.core_attention = StepVideoAttnProcessor()
 
@@ -611,7 +610,6 @@ class RMSNorm(nn.Module):
             output = output * self.weight
         return output
 
-
 class SelfAttention(torch.nn.Module):
     def __init__(
         self,
@@ -650,7 +648,8 @@ class SelfAttention(torch.nn.Module):
         self, x, cu_seqlens=None, max_seqlen=None, rope_positions=None, attn_mask=None
     ):
         output = self.core_attention(
-            x,
+            attn=self,
+            hidden_states=x,
             cu_seqlens=cu_seqlens,
             max_seqlen=max_seqlen,
             rope_positions=rope_positions,
@@ -687,8 +686,9 @@ class CrossAttention(torch.nn.Module):
         self, x: torch.Tensor, encoder_hidden_states: torch.Tensor, attn_mask=None
     ):
         output = self.core_attention(
-            x,
-            encoder_hidden_states,
+            attn=self,
+            hidden_states=x,
+            encoder_hidden_states=encoder_hidden_states,
             attn_mask=attn_mask,
         )
 
@@ -753,7 +753,7 @@ class StepVideoTransformerBlock(nn.Module):
 
         self.norm2 = nn.LayerNorm(dim, eps=norm_eps)
         self.attn2 = CrossAttention(
-            dim, attention_head_dim, bias=False, with_qk_norm=True, attn_type="torch"
+            dim, attention_head_dim, bias=False, with_qk_norm=True
         )
 
         self.ff = FeedForward(
@@ -862,7 +862,7 @@ class StepVideoModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalMode
 
         self.pos_embed = PatchEmbed(
             patch_size=patch_size,
-            in_channels=in_channels,
+            in_channels=in_channels * (2 if use_additional_conditions else 1),
             embed_dim=self.inner_dim,
         )
 
@@ -909,8 +909,11 @@ class StepVideoModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalMode
 
         self.parallel = attention_type == "parallel"
 
-    def patchfy(self, hidden_states):
-        hidden_states = rearrange(hidden_states, "b f c h w -> (b f) c h w")
+    def patchfy(self, hidden_states, condition_hidden_states=None):
+        if condition_hidden_states is not None:
+            hidden_states = torch.cat([hidden_states, condition_hidden_states], dim=2)
+
+        hidden_states = rearrange(hidden_states, 'b f c h w -> (b f) c h w')
         hidden_states = self.pos_embed(hidden_states)
         return hidden_states
 
@@ -957,7 +960,9 @@ class StepVideoModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalMode
         timestep: Optional[torch.LongTensor] = None,
         added_cond_kwargs: Dict[str, torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
-        fps: torch.Tensor = None,
+        condition_hidden_states: Optional[torch.Tensor] = None,
+        fps: Optional[torch.Tensor] = None,
+        motion_score: Optional[torch.Tensor] = None,
         return_dict: bool = False,
     ):
         assert hidden_states.ndim == 5
@@ -966,10 +971,11 @@ class StepVideoModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalMode
         bsz, frame, _, height, width = hidden_states.shape
         height, width = height // self.patch_size, width // self.patch_size
 
-        hidden_states = self.patchfy(hidden_states)
+
+        hidden_states = self.patchfy(hidden_states, condition_hidden_states)
         len_frame = hidden_states.shape[1]
 
-        if self.use_additional_conditions:
+        if self.use_additional_conditions and condition_hidden_states is None:
             added_cond_kwargs = {
                 "resolution": torch.tensor(
                     [(height, width)] * bsz,
@@ -983,6 +989,10 @@ class StepVideoModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalMode
                 ),
                 "fps": fps,
             }
+        elif self.use_additional_conditions and condition_hidden_states is not None:
+            added_cond_kwargs = {
+                "motion_score": torch.tensor([motion_score], device=hidden_states.device, dtype=hidden_states.dtype).repeat(bsz),
+            } 
         else:
             added_cond_kwargs = {}
 

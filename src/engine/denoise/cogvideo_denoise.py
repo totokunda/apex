@@ -89,8 +89,7 @@ class CogVideoDenoise:
                     )
                 else:
                     cache_context = nullcontext()
-                    
-                
+
                 with cache_context:
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,

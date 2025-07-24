@@ -1,16 +1,18 @@
 import torch
 from typing import Dict, Any, Callable, List
-
+from PIL import Image
 from .base import StepVideoBaseEngine
 
 
-class StepVideoT2VEngine(StepVideoBaseEngine):
-    """StepVideo Text-to-Video Engine Implementation"""
+class StepVideoI2VEngine(StepVideoBaseEngine):
+    """StepVideo Image-to-Video Engine Implementation"""
 
     def run(
         self,
         prompt: List[str] | str,
+        image: str | Image.Image | torch.Tensor,
         negative_prompt: List[str] | str = None,
+        
         height: int = 480,
         width: int = 832,
         duration: int | str = 16,
@@ -30,6 +32,12 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
         timesteps_as_indices: bool = True,
         **kwargs,
     ):
+        
+        
+        
+        loaded_image = self._load_image(image)
+        preprocessed_image, height, width = self._aspect_ratio_resize(loaded_image, height*width)
+        preprocessed_image = self.video_processor.preprocess(preprocessed_image, height, width)
         
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -112,12 +120,13 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        num_channels_latents = self.transformer.config.in_channels
 
         latents = self._get_latents(
             height,
             width,
             latent_num_frames,
-            num_channels_latents=self.transformer.config.in_channels,
+            num_channels_latents=num_channels_latents,
             fps=fps,
             num_videos=num_videos,
             seed=seed,
@@ -126,6 +135,11 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             parse_frames=False,
             order="BFC"
         )
+        
+        img_emb = self.vae_encode(preprocessed_image).repeat(num_videos, 1,1,1,1)
+        padding_tensor = torch.zeros((num_videos, max(num_frames//17*3, 1)-1, num_channels_latents, int(height) // self.vae_scale_factor_spatial, int(width) // self.vae_scale_factor_spatial,), device=self.device)
+        condition_hidden_states = torch.cat([img_emb, padding_tensor], dim=1) 
+        condition_hidden_states = condition_hidden_states.repeat(2 if use_cfg_guidance else 1, 1,1,1,1).to(self.device, dtype=transformer_dtype)
         
         if use_cfg_guidance:
             encoder_hidden_states = torch.cat([llm_prompt_embeds, llm_negative_prompt_embeds], dim=0)
@@ -143,6 +157,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
                 encoder_hidden_states=encoder_hidden_states.to(self.device, dtype=transformer_dtype),
                 encoder_hidden_states_2=encoder_hidden_states_2.to(self.device, dtype=transformer_dtype),
                 encoder_attention_mask=encoder_attention_mask.to(self.device),
+                condition_hidden_states=condition_hidden_states,
             ),
             transformer_dtype=transformer_dtype,
             use_cfg_guidance=use_cfg_guidance,

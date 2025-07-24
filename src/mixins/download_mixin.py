@@ -214,9 +214,10 @@ class DownloadMixin:
             if hasattr(self, "logger"):
                 self.logger.info(f"Downloading from Hugging Face Hub: {repo_id}")
             split_path = repo_id.split("/")
-            subfolder = [f"{split_path[-1]}/*"] if len(split_path) > 2 else None
-
-            repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:-1])
+            subfolder = (
+                [f"{'/'.join(split_path[2:])}/*"] if len(split_path) > 2 else None
+            )
+            repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:2])
 
             dest_path = huggingface_hub.snapshot_download(
                 repo_id,

@@ -393,7 +393,7 @@ class MultiQueryAttention(nn.Module):
         output = attention_register.call(
             xq, xk, xv, cu_seqlens=cu_seqlens, max_seq_len=max_seq_len
         )
-        output = rearrange(output, "b s h d -> s b (h d)").contiguous()
+        output = rearrange(output, "b h s d -> s b (h d)").contiguous()
         output = self.wo(output)
         return output
 
@@ -469,6 +469,7 @@ class TransformerBlock(nn.Module):
         cu_seqlens: Optional[torch.Tensor],
         max_seq_len: Optional[torch.Tensor],
     ):
+
         residual = self.attention.forward(
             self.attention_norm(x), mask, cu_seqlens, max_seq_len
         )
@@ -556,6 +557,7 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         save_path=DEFAULT_PREPROCESSOR_SAVE_PATH,
         dtype=torch.bfloat16,
         max_length=320,
+        **kwargs,
     ):
         super(Step1TextEncoderPreprocessor, self).__init__(
             model_path, save_path, preprocessor_type=PreprocessorType.TEXT
