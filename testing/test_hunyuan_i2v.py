@@ -2,7 +2,7 @@ from src.engine import create_engine
 from diffusers.utils import export_to_video, load_image
 import torch
 
-engine = create_engine("hunyuan", "/workspace/apex/manifest/hunyuan_i2v_13b.yml", "i2v", save_path="/dev/shm/models", attention_type="sdpa")
+engine = create_engine("hunyuan", "manifest/hunyuan_i2v_13b.yml", "i2v", save_path="/dev/shm/models", attention_type="sdpa")
 
 
 prompt = "A man with short gray hair plays a red electric guitar."

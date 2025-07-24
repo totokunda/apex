@@ -299,7 +299,13 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 empty_cache()
         else:
             self.vae = self._load_model(
-                component, get_vae, "VAE", load_dtype, no_weights=no_weights
+                component,
+                get_vae,
+                "VAE",
+                load_dtype,
+                no_weights=no_weights,
+                key_map=component.get("key_map", {}),
+                extra_kwargs=component.get("extra_kwargs", {}),
             )
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(self.vae, self.component_dtypes["vae"])
@@ -406,6 +412,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 "Transformer",
                 load_dtype,
                 no_weights,
+                key_map=component.get("key_map", {}),
+                extra_kwargs=component.get("extra_kwargs", {}),
             )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
@@ -727,8 +735,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
         os.makedirs(save_path, exist_ok=True)
         for component in self.config.get("components", []):
+            save_path = component.get("save_path", components_path)
             if model_path := component.get("model_path"):
-                downloaded_model_path = self._download(model_path, components_path)
+                downloaded_model_path = self._download(model_path, save_path)
                 if downloaded_model_path:
                     component["model_path"] = downloaded_model_path
 
@@ -737,8 +746,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             self.logger.info(f"Downloading {len(preprocessors)} preprocessors")
         for preprocessor in preprocessors:
             if preprocessor_path := preprocessor.get("model_path"):
+                save_path = preprocessor.get("save_path", preprocessors_path)
                 downloaded_preprocessor_path = self._download(
-                    preprocessor_path, preprocessors_path
+                    preprocessor_path, save_path
                 )
                 if downloaded_preprocessor_path:
                     preprocessor["model_path"] = downloaded_preprocessor_path
@@ -896,9 +906,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         else:
             scheduler.set_timesteps(num_inference_steps, device=device, **kwargs)
             timesteps = scheduler.timesteps
-        
+
         if strength != 1.0:
-            init_timestep = min(int(num_inference_steps * strength), num_inference_steps)
+            init_timestep = min(
+                int(num_inference_steps * strength), num_inference_steps
+            )
             t_start = max(num_inference_steps - init_timestep, 0)
             timesteps = timesteps[t_start * self.scheduler.order :]
             num_inference_steps = len(timesteps)

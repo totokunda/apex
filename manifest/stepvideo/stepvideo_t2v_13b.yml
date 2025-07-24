@@ -1,0 +1,50 @@
+name: "StepVideo 13B Text to Video"
+description: "StepVideo 13B is a 13B parameter model for text-to-video generation."
+engine: stepvideo
+type: t2v
+
+
+components:
+  - type: scheduler
+    base: "src.scheduler.euler.FlowMatchScheduler"
+    config:
+      num_inference_steps: 50
+      num_train_timesteps: 1000
+      shift: 13.0
+      
+  - type: vae
+    base: "stepvideo"
+    model_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/vae/vae_v2.safetensors
+    config_path: vae_configs/stepvideo/stepvideo_v2.json
+    key_map:
+      decoder.conv_out.: decoder.conv_out.conv.
+
+  - type: text_encoder
+    base: "BertModel"
+    model_path: stepfun-ai/stepvideo-t2v/hunyuan_clip/clip_text_encoder
+    config_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/hunyuan_clip/clip_text_encoder/config.json
+    extra_kwargs:
+      add_pooling_layer: false
+    key_map:
+      bert.: ""
+  
+  - type: transformer
+    base: "stepvideo.base" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: stepfun-ai/stepvideo-t2v/transformer
+    tag: "stepvideo_t2v"
+
+preprocessors: 
+  - type: stepvideo.llm
+    config_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/step_llm/config.json
+    model_path: stepfun-ai/stepvideo-t2v/step_llm
+    tokenizer_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/step_llm/step1_chat_tokenizer.model
+    save_path: /workspace/.hf_home
+
+defaults:
+  run:
+    num_inference_steps: 50
+    return_latents: false
+    text_encoder_kwargs:
+      use_token_type_ids: true
+      use_position_ids: true
+      max_sequence_length: 77

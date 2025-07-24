@@ -39,7 +39,9 @@ from .composition import (
 )
 from .wan import MultiTalkPreprocessor
 from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
+from .stepvideo import Step1TextEncoderPreprocessor
 from .base import BasePreprocessor, preprocessor_registry
+
 
 __all__ = [
     "CLIPPreprocessor",
@@ -84,4 +86,5 @@ __all__ = [
     "preprocessor_registry",
     "AvatarPreprocessor",
     "LlamaPreprocessor",
+    "Step1TextEncoderPreprocessor",
 ]

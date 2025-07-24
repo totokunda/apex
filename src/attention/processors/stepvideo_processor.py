@@ -25,7 +25,7 @@ class StepVideoAttnProcessor:
         max_seqlen: Optional[int] = None,
         **kwargs,
     ) -> torch.Tensor:
-
+        
         if hasattr(attn, "wqkv"):
             xqkv = attn.wqkv(hidden_states)
             xqkv = xqkv.view(*hidden_states.shape[:-1], attn.n_heads, 3 * attn.head_dim)
@@ -60,16 +60,19 @@ class StepVideoAttnProcessor:
                 xk = attn.k_norm(xk)
         else:
             raise ValueError(f"Unsupported attention type: {type(attn)}")
+        
 
         output = attention_register.call(
-            xq,
-            xk,
-            xv,
-            cu_seqlens=cu_seqlens,
-            max_seqlen=max_seqlen,
+            xq.transpose(1, 2),
+            xk.transpose(1, 2),
+            xv.transpose(1, 2),
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            max_seqlen_q=max_seqlen,
+            max_seqlen_k=max_seqlen,
             attn_mask=attention_mask,
         )
-
+        
         output = rearrange(output, "b s h d -> b s (h d)")
         output = attn.wo(output)
         return output

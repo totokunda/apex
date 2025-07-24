@@ -607,7 +607,6 @@ class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
         # there might be better ways to encapsulate this.
         t_emb = t_emb.to(dtype=hidden_states.dtype)
         emb = self.time_embedding(t_emb, timestep_cond)
-        
 
         # 2. Patch embedding
         if inpaint_latents is not None:

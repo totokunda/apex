@@ -15,7 +15,10 @@ from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
 from functools import wraps
-
+from diffusers import ModelMixin
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from typing import Any
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKLOutput, DecoderOutput
 
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
     def __init__(self, device=None):
@@ -35,15 +38,6 @@ class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
         ):
             kwargs["device"] = self.device
         return func(*args, **kwargs)
-
-
-def with_empty_init(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        with EmptyInitOnDevice("cpu"):
-            return func(*args, **kwargs)
-
-    return wrapper
 
 
 def base_group_norm(x, norm_layer, act_silu=False, channel_last=False):
@@ -1119,66 +1113,65 @@ class DiagonalGaussianDistribution(object):
             return x
 
 
-class AutoencoderKL(nn.Module):
-    @with_empty_init
+class AutoencoderKL(ModelMixin, ConfigMixin):
+    _supports_gradient_checkpointing = False
+
+    @register_to_config
     def __init__(
         self,
-        in_channels=3,
-        out_channels=3,
-        z_channels=16,
-        num_res_blocks=2,
-        model_path=None,
-        weight_dict={},
-        world_size=1,
-        version=1,
+        in_channels: int = 3,
+        out_channels: int = 3,
+        z_channels: int = 16,
+        encoder_ch: int = 32,
+        encoder_ch_mult: Any = (4, 8, 16, 16),
+        encoder_num_res_blocks: int = 2,
+        encoder_in_channels: int = 3,
+        encoder_z_channels: int = 16,
+        encoder_double_z: bool = True,
+        encoder_down_sampling_layer: Any = [1, 2],
+        encoder_resamp_with_conv: bool = True,
+        decoder_ch: int = 128,
+        decoder_ch_mult: Any = (1, 2, 4, 4),
+        decoder_num_res_blocks: int = 2,
+        decoder_temporal_up_layers: Any = [2, 3],
+        decoder_temporal_downsample: int = 4,
+        decoder_resamp_with_conv: bool = True,
+        scaling_factor: float = 1.0,
+        version: int = 1,
     ):
         super().__init__()
 
         self.frame_len = 17
         self.latent_len = 3 if version == 2 else 5
+        self.world_size = 1
+        self.scaling_factor = scaling_factor
+        self.version = version
 
         base_group_norm.spatial = True if version == 2 else False
 
         self.encoder = VideoEncoder(
             in_channels=in_channels,
             z_channels=z_channels,
-            num_res_blocks=num_res_blocks,
+            num_res_blocks=encoder_num_res_blocks,
+            double_z=encoder_double_z,
+            down_sampling_layer=encoder_down_sampling_layer,
+            resamp_with_conv=encoder_resamp_with_conv,
+            ch=encoder_ch,
+            ch_mult=encoder_ch_mult,
             version=version,
         )
 
         self.decoder = VideoDecoder(
             z_channels=z_channels,
             out_channels=out_channels,
-            num_res_blocks=num_res_blocks,
+            num_res_blocks=decoder_num_res_blocks,
+            ch=decoder_ch,
+            ch_mult=decoder_ch_mult,
+            temporal_up_layers=decoder_temporal_up_layers,
+            temporal_downsample=decoder_temporal_downsample,
+            resamp_with_conv=decoder_resamp_with_conv,
             version=version,
         )
-
-        if model_path is not None:
-            weight_dict = self.init_from_ckpt(model_path)
-        if len(weight_dict) != 0:
-            self.load_from_dict(weight_dict)
-        self.convert_channel_last()
-
-        self.world_size = world_size
-
-    def init_from_ckpt(self, model_path):
-        from safetensors import safe_open
-
-        p = {}
-        with safe_open(model_path, framework="pt", device="cpu") as f:
-            for k in f.keys():
-                tensor = f.get_tensor(k)
-                if k.startswith("decoder.conv_out."):
-                    k = k.replace("decoder.conv_out.", "decoder.conv_out.conv.")
-                p[k] = tensor
-        return p
-
-    def load_from_dict(self, p):
-        self.load_state_dict(p)
-
-    def convert_channel_last(self):
-        # Conv2d NCHW->NHWC
-        pass
 
     def naive_encode(self, x, is_init_image=True):
         b, l, c, h, w = x.size()
@@ -1187,7 +1180,7 @@ class AutoencoderKL(nn.Module):
         return z
 
     @torch.inference_mode()
-    def encode(self, x):
+    def encode(self, x, return_dict=False):
         # b (nc cf) c h w -> (b nc) cf c h w -> encode -> (b nc) cf c h w -> b (nc cf) c h w
         chunks = list(x.split(self.frame_len, dim=1))
         for i in range(len(chunks)):
@@ -1195,15 +1188,24 @@ class AutoencoderKL(nn.Module):
         z = torch.cat(chunks, dim=1)
 
         posterior = DiagonalGaussianDistribution(z)
-        return posterior.sample()
+        if return_dict:
+            return AutoencoderKLOutput(latent_dist=posterior)
+        else:
+            return (posterior,)
 
     def decode_naive(self, z, is_init=True):
         z = z.to(next(self.decoder.parameters()).dtype)
         dec = self.decoder(z, is_init)
         return dec
+    
+    def normalize_latents(self, z):
+        return z * self.scaling_factor
+
+    def denormalize_latents(self, z):
+        return z / self.scaling_factor
 
     @torch.inference_mode()
-    def decode(self, z):
+    def decode(self, z, return_dict=False):
         # b (nc cf) c h w -> (b nc) cf c h w -> decode -> (b nc) c cf h w -> b (nc cf) c h w
         chunks = list(z.split(self.latent_len, dim=1))
 
@@ -1236,7 +1238,10 @@ class AutoencoderKL(nn.Module):
             x = x_[:, : chunks_total_num * self.frame_len]
 
         x = self.mix(x)
-        return x
+        if return_dict:
+            return DecoderOutput(sample=x)
+        else:
+            return (x,)
 
     def mix(self, x):
         remain_scale = 0.6

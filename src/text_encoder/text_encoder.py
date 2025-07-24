@@ -2,17 +2,14 @@ import transformers
 from typing import Dict, Any, List, Literal
 import torch
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
-from types import ModuleType
-from src.utils.module_utils import find_class_recursive
-from accelerate import init_empty_weights
-import os
-from safetensors.torch import load_model
+from src.mixins.loader_mixin import LoaderMixin
 import ftfy
 import re
+from transformers import BertModel
 import html
 
 
-class TextEncoder(torch.nn.Module):
+class TextEncoder(torch.nn.Module, LoaderMixin):
     def __init__(
         self, config: Dict[str, Any], no_weights: bool = False, *args, **kwargs
     ):
@@ -32,7 +29,18 @@ class TextEncoder(torch.nn.Module):
             tokenizer_name=config.get("tokenizer_name", None),
             **config.get("tokenizer_kwargs", {}),
         )
-        self.model = self._load_model(no_weights)
+        self.model = self._load_model(
+            {
+                "config": self.config,
+                "config_path": self.config_path,
+                "model_path": self.model_path,
+                "base": self.base,
+            },
+            module_name="transformers",
+            no_weights=no_weights,
+            key_map=config.get("key_map", {}),
+            extra_kwargs=config.get("extra_kwargs", {}),
+        )
 
     def basic_clean(self, text):
         text = ftfy.fix_text(text)
@@ -48,46 +56,6 @@ class TextEncoder(torch.nn.Module):
         text = self.whitespace_clean(self.basic_clean(text))
         return text
 
-    def _load_model(self, no_weights: bool = False):
-        # get model class from recursively search transformers
-        model_class = find_class_recursive(transformers, self.base)
-        if model_class is None:
-            raise ValueError(f"Model class {self.base} not found in transformers")
-
-        if "torch_dtype" in self.config:
-            self.config["torch_dtype"] = getattr(torch, self.config["torch_dtype"])
-
-        if self.model_path and os.path.isdir(self.model_path):
-            if no_weights:
-                with init_empty_weights():
-                    model = model_class.from_pretrained(self.model_path, **self.config)
-            else:
-                model = model_class.from_pretrained(self.model_path, **self.config)
-        else:
-            with init_empty_weights():
-                model = model_class(**self.config)
-
-            if no_weights:
-                return model
-
-            if self.model_path:
-                if not os.path.exists(self.model_path):
-                    raise FileNotFoundError(
-                        f"Model file not found at {self.model_path}"
-                    )
-
-                if self.model_path.endswith(".safetensors"):
-                    load_model(model, self.model_path)
-                else:
-                    state_dict = torch.load(
-                        self.model_path,
-                        map_location="cpu",
-                        weights_only=True,
-                        mmap=True,
-                    )
-                    model.load_state_dict(state_dict, strict=True)
-        return model
-
     @torch.inference_mode()
     def encode(
         self,
@@ -101,6 +69,7 @@ class TextEncoder(torch.nn.Module):
         return_attention_mask: bool = False,
         use_mask_in_input: bool = True,
         use_position_ids: bool = False,
+        use_token_type_ids: bool = True,
         pad_with_zero: bool = True,
         clean_text: bool = True,
         output_type: Literal["hidden_states", "pooler_output"] = "hidden_states",
@@ -130,8 +99,11 @@ class TextEncoder(torch.nn.Module):
             )
             position_ids = position_ids.to(dtype=torch.long, device=self.model.device)
             inputs["position_ids"] = position_ids
+        if use_token_type_ids:
+            inputs["token_type_ids"] = torch.zeros_like(text_input_ids).to(device=self.model.device)
         if use_mask_in_input:
             inputs["attention_mask"] = mask.to(device=self.model.device)
+        
 
         result = self.model(
             **inputs, output_hidden_states=output_type == "hidden_states"
