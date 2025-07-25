@@ -354,7 +354,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             component["config_path"] = config_path
         self.text_encoder = TextEncoder(component, no_weights)
         if self.component_dtypes and "text_encoder" in self.component_dtypes:
-            self.to_dtype(self.text_encoder, self.component_dtypes["text_encoder"])
+            self.to_dtype(self.text_encoder, self.component_dtypes["text_encoder"], cast_buffers=False)
 
     def load_transformer(
         self,
@@ -840,7 +840,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         rendered_video = self._postprocess(video)
         render_on_step_callback(rendered_video)
 
-    def _postprocess(self, video: torch.Tensor, output_type: str = "np"):
+    def _postprocess(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
             video, output_type=output_type
         )

@@ -22,7 +22,8 @@ components:
   - type: text_encoder
     base: "BertModel"
     model_path: stepfun-ai/stepvideo-t2v/hunyuan_clip/clip_text_encoder
-    config_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/hunyuan_clip/clip_text_encoder/config.json
+    tokenizer_class: "BertTokenizer"
+    tokenizer_name: "hfl/chinese-roberta-wwm-ext-large"
     extra_kwargs:
       add_pooling_layer: false
     key_map:
@@ -45,6 +46,9 @@ defaults:
     num_inference_steps: 50
     return_latents: false
     text_encoder_kwargs:
-      use_token_type_ids: true
-      use_position_ids: true
+      use_token_type_ids: false
+      use_position_ids: false
       max_sequence_length: 77
+      use_mask_in_input: true
+      pad_with_zero: false
+      clean_text: false

@@ -69,16 +69,19 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             prompt, with_mask=True, max_length=320
         )
         
+        len_clip = prompt_embeds.shape[1]
+        llm_mask = torch.nn.functional.pad(llm_mask, (len_clip, 0), value=1)
+        
         if use_cfg_guidance:
             llm_negative_prompt_embeds, llm_negative_mask = llm_preprocessor(
                 negative_prompt, with_mask=True, max_length=320
             )
+            len_clip = negative_prompt_embeds.shape[1]
+            llm_negative_mask = torch.nn.functional.pad(llm_negative_mask, (len_clip, 0), value=1)
         
         if offload:
             self._offload(llm_preprocessor)
 
-       
-        
         transformer_dtype = self.component_dtypes["transformer"]
         
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -107,7 +110,6 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
         num_frames = self._parse_num_frames(duration, fps)
         ## ensure its divisible by 17
         latent_num_frames = max(num_frames // 17 * 3, 1)
-        
         if not self.transformer:
             self.load_component_by_type("transformer")
 
@@ -125,7 +127,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             generator=generator,
             parse_frames=False,
             order="BFC"
-        )
+        )        
         
         if use_cfg_guidance:
             encoder_hidden_states = torch.cat([llm_prompt_embeds, llm_negative_prompt_embeds], dim=0)
@@ -135,6 +137,8 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             encoder_hidden_states = llm_prompt_embeds
             encoder_attention_mask = llm_mask
             encoder_hidden_states_2 = prompt_embeds
+            
+        
 
         latents = self.denoise(
             timesteps=timesteps,
@@ -154,10 +158,10 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
 
         if offload:
             self._offload(self.transformer)
-
         if return_latents:
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            video = video.permute(0, 2, 1, 3, 4)
             postprocessed_video = self._postprocess(video)
             return postprocessed_video

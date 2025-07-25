@@ -389,11 +389,15 @@ class MultiQueryAttention(nn.Module):
                 xv = torch.index_select(
                     xv.repeat(1, 1, q_per_kv, 1), 2, idx
                 ).contiguous()
-
+        
         output = attention_register.call(
-            xq, xk, xv, cu_seqlens=cu_seqlens, max_seq_len=max_seq_len
+            xq, xk, xv, 
+            cu_seqlens_q=cu_seqlens,
+            cu_seqlens_k=cu_seqlens,
+            is_causal=True,
         )
-        output = rearrange(output, "b h s d -> s b (h d)").contiguous()
+        
+        output = rearrange(output, "b s h d -> s b (h d)").contiguous()
         output = self.wo(output)
         return output
 
@@ -587,8 +591,48 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         y = self.text_encoder(
             txt_tokens.input_ids.to(self.device),
             attention_mask=(
-                txt_tokens.attention_mask.to(self.device) if with_mask else None
+                txt_tokens.attention_mask.to(self.device).bool() if with_mask else None
             ),
         )
         y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask
+
+
+def analyze_differences(output1, output2, name1="output1", name2="output2"):
+    print(f"\n=== Comparing {name1} vs {name2} ===")
+    
+    # Basic info
+    print(f"Shapes: {output1.shape} vs {output2.shape}")
+    print(f"Dtypes: {output1.dtype} vs {output2.dtype}")
+    print(f"Devices: {output1.device} vs {output2.device}")
+    
+    # Differences
+    abs_diff = torch.abs(output1 - output2)
+    rel_diff = abs_diff / (torch.abs(output1) + 1e-8)
+    
+    print(f"\nAbsolute differences:")
+    print(f"  Max: {abs_diff.max():.2e}")
+    print(f"  Mean: {abs_diff.mean():.2e}")
+    print(f"  Median: {abs_diff.median():.2e}")
+    print(f"  Std: {abs_diff.std():.2e}")
+    
+    print(f"\nRelative differences:")
+    print(f"  Max: {rel_diff.max():.2e}")
+    print(f"  Mean: {rel_diff.mean():.2e}")
+    print(f"  Median: {rel_diff.median():.2e}")
+    
+    # L2 norms
+    l2_diff = torch.norm(output1 - output2)
+    l2_norm1 = torch.norm(output1)
+    print(f"\nL2 norms:")
+    print(f"  Difference norm: {l2_diff:.2e}")
+    print(f"  Relative norm: {l2_diff / l2_norm1:.2e}")
+    
+    # Tolerance tests
+    print(f"\nTolerance tests:")
+    tolerances = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
+    for tol in tolerances:
+        is_close = torch.allclose(output1, output2, atol=tol, rtol=tol)
+        print(f"  {tol:.0e}: {is_close}")
+    
+    return abs_diff, rel_diff

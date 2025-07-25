@@ -1,5 +1,6 @@
 import re
 import torch
+from typing import List
 from src.utils.cache_utils import empty_cache
 from diffusers import ModelMixin
 
@@ -38,6 +39,7 @@ class ToMixin:
         layerwise: bool = False,
         storage_dtype: torch.dtype | None = None,
         compute_dtype: torch.dtype | None = None,
+        cast_buffers: bool = True,
     ) -> ModelMixin:
         """
         Cast *either* uniformly (like `from_pretrained(torch_dtype=…)`)
@@ -107,14 +109,15 @@ class ToMixin:
                 param.grad.data = param.grad.data.to(wanted_dtype)
 
         # c) cast buffers
-        for name, buf in module.named_buffers(recurse=True):
-            if any(name == p or name.startswith(p + ".") for p in frozen_prefixes):
-                continue
-            wanted_dtype = (
-                torch.float32 if _matches(keep_fp32_patterns, name) else target_dtype
-            )
-            buf.data = buf.data.to(wanted_dtype)
-
+        if cast_buffers:
+            for name, buf in module.named_buffers(recurse=True):
+                if any(name == p or name.startswith(p + ".") for p in frozen_prefixes):
+                    continue
+                wanted_dtype = (
+                    torch.float32 if _matches(keep_fp32_patterns, name) else target_dtype
+                )
+                buf.data = buf.data.to(wanted_dtype)
+    
         # d) propagate ignore-lists for state-dict loading
         if hasattr(module, "_keys_to_ignore_on_load_unexpected"):
             module._keys_to_ignore_on_load_unexpected = getattr(

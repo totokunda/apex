@@ -1,6 +1,6 @@
 import torch 
-file1 = torch.load(f"/workspace/VideoX-Fun/debug_diffusers.pt", weights_only=False)
-file2 = torch.load(f"/workspace/apex/debug_denoise.pt", weights_only=False)
+file1 = torch.load(f"/workspace/Step-Video-T2V/emb3.pt", weights_only=False)
+file2 = torch.load(f"/workspace/apex/emb3.pt", weights_only=False)
 
 def compare_func(key1, value1, value2):
     if isinstance(value1, torch.Tensor):
@@ -9,7 +9,8 @@ def compare_func(key1, value1, value2):
         value1 = value1.to(dtype).cpu()
         value2 = value2.to(dtype).cpu()
         try:
-            return torch.allclose(value1, value2)
+            torch.testing.assert_close(value1, value2, atol=1e-4, rtol=1e-4)
+            return True
         except Exception as e:
             print(e)
             return False

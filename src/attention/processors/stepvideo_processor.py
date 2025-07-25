@@ -60,19 +60,24 @@ class StepVideoAttnProcessor:
                 xk = attn.k_norm(xk)
         else:
             raise ValueError(f"Unsupported attention type: {type(attn)}")
+
+        if attention_mask is not None and attention_mask.dtype != torch.bool:
+            attention_mask = attention_mask.to(xq.dtype)
+
+        if attention_mask is not None and attention_mask.ndim == 3:
+            n_heads = xq.shape[2]
+            attention_mask = attention_mask.unsqueeze(1).repeat(1, n_heads, 1, 1)
         
+        xq, xk, xv = map(lambda x: rearrange(x, 'b s h d -> b h s d'), (xq, xk, xv))
 
         output = attention_register.call(
-            xq.transpose(1, 2),
-            xk.transpose(1, 2),
-            xv.transpose(1, 2),
-            cu_seqlens_q=cu_seqlens,
-            cu_seqlens_k=cu_seqlens,
-            max_seqlen_q=max_seqlen,
-            max_seqlen_k=max_seqlen,
+            xq,
+            xk,
+            xv,
             attn_mask=attention_mask,
+            key="sdpa"
         )
-        
+        output = rearrange(output, 'b h s d -> b s h d')
         output = rearrange(output, "b s h d -> b s (h d)")
         output = attn.wo(output)
         return output

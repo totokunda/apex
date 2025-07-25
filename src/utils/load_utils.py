@@ -1,4 +1,5 @@
-from typing import Dict, Union
+from typing import Dict, Union, List
+
 import torch
 import os
 from safetensors.torch import safe_open
@@ -7,7 +8,7 @@ from safetensors.torch import safe_open
 def load_safetensors(
     filename: Union[str, os.PathLike],
     device: Union[str, int] = "cpu",
-    dtype: torch.dtype = None,
+    dtype: torch.dtype = None
 ) -> Dict[str, torch.Tensor]:
     """
     Loads a safetensors file into torch format.
