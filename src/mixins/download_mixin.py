@@ -226,7 +226,7 @@ class DownloadMixin:
                 allow_patterns=subfolder,
             )
             if subfolder:
-                dest_path = os.path.join(dest_path, subfolder[0].split("/")[0])
+                dest_path = os.path.join(dest_path, *subfolder[0].split("/")[:-1])
             if hasattr(self, "logger"):
                 self.logger.info(
                     f"Successfully downloaded from Hugging Face Hub: {repo_id}"

@@ -63,9 +63,32 @@ class StepVideoBaseEngine:
         """Get timesteps"""
         return self.main_engine._get_timesteps(*args, **kwargs)
 
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
+    def _parse_num_frames(self, duration: int | str, fps: int = 16):
+        """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
+
+        Args:
+            duration (int | str): duration in seconds or a string like "16" or "16s"
+
+        Returns:
+            int: number of frames
+        """
+
+        if isinstance(duration, str):
+            if duration.endswith("s"):
+                duration = int(duration[:-1]) * fps + 1
+            elif duration.endswith("f"):
+                duration = int(duration[:-1])
+            else:
+                duration = int(duration)
+        
+        if duration % 17 != 0:
+            duration = (
+                duration
+                // 17
+                * 17
+            )
+        duration = max(duration, 1)
+        return duration
 
     def _aspect_ratio_resize(self, *args, **kwargs):
         """Aspect ratio resize"""

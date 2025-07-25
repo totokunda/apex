@@ -112,7 +112,7 @@ class LoaderMixin:
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
         key_map: Dict[str, str] | None = None,
-        extra_kwargs: Dict[str, Any] | None = None,
+        extra_kwargs: Dict[str, Any] | None = None
     ) -> ModelMixin:
         model_base = component.get("base")
         if getter_fn:
@@ -138,6 +138,8 @@ class LoaderMixin:
                 model_path, torch_dtype=load_dtype, **extra_kwargs
             )
             return model
+        
+        print(load_dtype)
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects

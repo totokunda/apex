@@ -41,7 +41,7 @@ attention_register = FunctionRegister()
 def sdpa_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, **kwargs):
     return torch.nn.functional.scaled_dot_product_attention(
         q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal
-    ).transpose(1, 2)
+    )
 
 
 def flash_attention_padded(
@@ -135,7 +135,7 @@ def flash_attention_padded(
     )
 
     # Back to (B, H, Sq, D) and caller’s dtype
-    return out.permute(0, 2, 1, 3).to(q.dtype).transpose(1, 2)
+    return out.permute(0, 2, 1, 3).to(q.dtype)
 
 
 def flash_attention_varlen(
@@ -257,7 +257,7 @@ def flash_attention_varlen(
         .permute(0, 2, 1, 3)  # (Bq, H, Sq, D)
         .to(q.dtype)  # preserve caller’s dtype
     )
-    return out.transpose(1, 2)
+    return out
 
 
 @attention_register("flash")
@@ -331,9 +331,9 @@ def flash_attention3(
 
     # check if out is a tuple of two tensors
     if isinstance(out, tuple):
-        return out[0]
+        return out[0].permute(0, 2, 1, 3)
     else:
-        return out
+        return out.permute(0, 2, 1, 3)
 
 
 @attention_register("sage")
