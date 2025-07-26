@@ -15,6 +15,11 @@ components:
   - type: text_encoder
     base: "T5EncoderModel"
     model_path: genmo/mochi-1-preview/text_encoder
+    tokenizer_class: "T5Tokenizer"
+    tokenizer_name: "genmo/mochi-1-preview"
+    tokenizer_kwargs:
+      subfolder: tokenizer
+
 
   - type: transformer
     base: "mochi.base"
@@ -25,12 +30,10 @@ preprocessors: null
 
 defaults:
   run:
-    num_inference_steps: 30
-    return_latents: false
     text_encoder_kwargs:
       use_token_type_ids: false
       use_position_ids: false
-      max_sequence_length: 77
+      max_sequence_length: 256
       use_mask_in_input: true
       pad_with_zero: false
       clean_text: false

@@ -99,10 +99,10 @@ class MochiAttnProcessor2_0:
             valid_query = torch.cat([query[idx : idx + 1], valid_encoder_query], dim=2)
             valid_key = torch.cat([key[idx : idx + 1], valid_encoder_key], dim=2)
             valid_value = torch.cat([value[idx : idx + 1], valid_encoder_value], dim=2)
-
+            
             attn_output = attention_register.call(
                 valid_query, valid_key, valid_value, dropout_p=0.0, is_causal=False
-            ).transpose(1, 2)
+            )
             
             valid_sequence_length = attn_output.size(2)
             attn_output = F.pad(

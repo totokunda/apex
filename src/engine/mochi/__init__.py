@@ -16,13 +16,13 @@ class ModelType(Enum):
 class MochiEngine(BaseEngine, MochiDenoise):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2V, **kwargs):
         super().__init__(yaml_path, model_type=ModelType.T2V, **kwargs)
-        self.vae_spatial_scale_factor = (
+        self.vae_scale_factor_spatial = (
             self.vae.config.get("scaling_factor", 8) if self.vae else 8
         )
-        self.vae_temporal_scale_factor = 6  # Mochi specific
+        self.vae_scale_factor_temporal = 6  # Mochi specific
 
         self.video_processor = VideoProcessor(
-            vae_scale_factor=self.vae_spatial_scale_factor
+            vae_scale_factor=self.vae_scale_factor_spatial
         )
         self.num_channels_latents = (
             self.transformer.config.in_channels if self.transformer else 12

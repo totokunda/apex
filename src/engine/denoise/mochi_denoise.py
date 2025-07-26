@@ -1,5 +1,5 @@
 import torch
-
+from contextlib import nullcontext
 
 class MochiDenoise:
     def denoise(self, *args, **kwargs) -> torch.Tensor:
@@ -22,14 +22,20 @@ class MochiDenoise:
         ) as pbar:
             for i, t in enumerate(timesteps):
                 if use_cfg_guidance:
-                    latent_model_input = torch.cat([latents] * 2)
+                    latent_model_input = torch.cat([latents] * 2).to(transformer_dtype)
                 else:
-                    latent_model_input = latents
+                    latent_model_input = latents.to(transformer_dtype)
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(self.device).to(transformer_dtype)
+                
+                
+                if hasattr(self.transformer, "cache_context"):
+                    cache_context = self.transformer.cache_context("cond_uncond")
+                else:
+                    cache_context = nullcontext()
 
-                with self.transformer.cache_context("cond_uncond"):
+                with cache_context:
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         encoder_hidden_states=prompt_embeds,
@@ -47,11 +53,9 @@ class MochiDenoise:
                         noise_pred_text - noise_pred_uncond
                     )
 
-                latents_dtype = latents.dtype
                 latents = scheduler.step(
                     noise_pred, t, latents.to(torch.float32), return_dict=False
-                )[0]
-                latents = latents.to(latents_dtype)
+                )[0].to(transformer_dtype)
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)

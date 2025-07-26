@@ -1,10 +1,7 @@
 import torch
 from typing import Dict, Any, Callable, List, Union, Optional
-from PIL import Image
 import numpy as np
 from .base import MochiBaseEngine
-from src.ui.nodes import UINode
-
 
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
@@ -39,9 +36,9 @@ class MochiT2VEngine(MochiBaseEngine):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         height: int = 480,
         width: int = 848,
-        num_frames: int = 19,
-        num_inference_steps: int = 28,
-        guidance_scale: float = 3.5,
+        duration: int = 97,
+        num_inference_steps: int = 64,
+        guidance_scale: float = 4.5,
         num_videos_per_prompt: int = 1,
         seed: Optional[int] = None,
         generator: Optional[torch.Generator] = None,
@@ -53,43 +50,15 @@ class MochiT2VEngine(MochiBaseEngine):
         render_on_step_callback: Optional[Callable] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         max_sequence_length: int = 256,
-        input_nodes: List[UINode] = None,
+        threshold_noise: float = 0.025,
+        fps: int = 30,
         **kwargs,
     ):
-        default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-
-        height = final_kwargs.get("height", height)
-        width = final_kwargs.get("width", width)
-        num_frames = final_kwargs.get("num_frames", num_frames)
-        num_inference_steps = final_kwargs.get(
-            "num_inference_steps", num_inference_steps
-        )
-        guidance_scale = final_kwargs.get("guidance_scale", guidance_scale)
-        num_videos_per_prompt = final_kwargs.get(
-            "num_videos_per_prompt", num_videos_per_prompt
-        )
-        seed = final_kwargs.get("seed", seed)
-        generator = final_kwargs.get("generator", generator)
-        latents = final_kwargs.get("latents", latents)
-        output_type = final_kwargs.get("output_type", output_type)
-        return_latents = final_kwargs.get("return_latents", return_latents)
-        offload = final_kwargs.get("offload", offload)
-        render_on_step = final_kwargs.get("render_on_step", render_on_step)
-        render_on_step_callback = final_kwargs.get(
-            "render_on_step_callback", render_on_step_callback
-        )
-        attention_kwargs = final_kwargs.get("attention_kwargs", attention_kwargs)
-        max_sequence_length = final_kwargs.get(
-            "max_sequence_length", max_sequence_length
-        )
-        prompt = final_kwargs.get("prompt", prompt)
-        negative_prompt = final_kwargs.get("negative_prompt", negative_prompt)
-
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
         self.to_device(self.text_encoder)
+        
+        transformer_dtype = self.component_dtypes.get("transformer")
 
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
             prompt,
@@ -112,10 +81,13 @@ class MochiT2VEngine(MochiBaseEngine):
                     return_attention_mask=True,
                 )
             )
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0).to(self.device).to(transformer_dtype)
             prompt_attention_mask = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask], dim=0
-            )
+            ).to(self.device)
+        else:
+            prompt_embeds = prompt_embeds.to(self.device).to(transformer_dtype)
+            prompt_attention_mask = prompt_attention_mask.to(self.device)
 
         if offload:
             self._offload(self.text_encoder)
@@ -130,25 +102,27 @@ class MochiT2VEngine(MochiBaseEngine):
 
         if generator is None and seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
+        
+        num_frames = self._parse_num_frames(duration, fps=fps)
+        latent_num_frames =  int((num_frames - 1) // self.vae_scale_factor_temporal + 1)
 
         if latents is None:
-            latents = self.prepare_latents(
-                num_videos_per_prompt,
-                self.num_channels_latents,
-                height,
-                width,
-                num_frames,
-                prompt_embeds.dtype,
-                self.device,
-                generator,
+            latents = self._get_latents(
+                height=height,
+                width=width,
+                duration=latent_num_frames,
+                num_videos=num_videos_per_prompt,
+                num_channels_latents=self.num_channels_latents,
+                dtype=torch.float32,
+                generator=generator,
+                seed=seed,
+                parse_frames=False,
             )
 
-        threshold_noise = 0.025
         sigmas = linear_quadratic_schedule(num_inference_steps, threshold_noise)
 
         timesteps, num_inference_steps = self._get_timesteps(
             num_inference_steps=num_inference_steps,
-            device=self.device,
             sigmas=sigmas,
         )
         num_warmup_steps = max(
@@ -167,7 +141,7 @@ class MochiT2VEngine(MochiBaseEngine):
             guidance_scale=guidance_scale,
             render_on_step=render_on_step,
             scheduler=self.scheduler,
-            transformer_dtype=self.component_dtypes.get("transformer", torch.float16),
+            transformer_dtype=transformer_dtype,
             render_on_step_callback=render_on_step_callback,
         )
 

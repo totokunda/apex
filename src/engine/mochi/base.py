@@ -9,8 +9,8 @@ class MochiBaseEngine:
         # Delegate common properties to the main engine
         self.device = main_engine.device
         self.logger = main_engine.logger
-        self.vae_spatial_scale_factor = main_engine.vae_spatial_scale_factor
-        self.vae_temporal_scale_factor = main_engine.vae_temporal_scale_factor
+        self.vae_scale_factor_spatial = main_engine.vae_scale_factor_spatial
+        self.vae_scale_factor_temporal = main_engine.vae_scale_factor_temporal
         self.num_channels_latents = main_engine.num_channels_latents
         self.video_processor = main_engine.video_processor
 
@@ -133,32 +133,3 @@ class MochiBaseEngine:
             self._offload(self.vae)
 
         return video.to(dtype=dtype)
-
-    def prepare_latents(
-        self,
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        num_frames,
-        dtype,
-        device,
-        generator,
-        latents=None,
-    ):
-        height = height // self.vae_spatial_scale_factor
-        width = width // self.vae_spatial_scale_factor
-        num_frames = (num_frames - 1) // self.vae_temporal_scale_factor + 1
-
-        shape = (batch_size, num_channels_latents, num_frames, height, width)
-
-        if latents is not None:
-            return latents.to(device=device, dtype=dtype)
-
-        from diffusers.utils.torch_utils import randn_tensor
-
-        latents = randn_tensor(
-            shape, generator=generator, device=device, dtype=torch.float32
-        )
-        latents = latents.to(dtype)
-        return latents
