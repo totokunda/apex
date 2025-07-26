@@ -1,8 +1,8 @@
 import torch
 import os
 import packaging.version as pver
-from typing import Dict, Any, Callable, List, Union, Optional
-
+import numpy as np
+from torchvision import transforms
 
 
 OPTIMUS_LOAD_LIBRARIES = {
@@ -253,3 +253,43 @@ class StepVideoBaseEngine:
     def denoise(self, *args, **kwargs):
         """Denoise function"""
         return self.main_engine.denoise(*args, **kwargs)
+    
+    def resize_to_desired_aspect_ratio(self, video, aspect_size):
+        ## video is in shape [f, c, h, w]
+        height, width = video.shape[-2:]
+        
+        aspect_ratio = [w/h for h, w in aspect_size]
+        # # resize
+        aspect_ratio_fact = width / height
+        bucket_idx = np.argmin(np.abs(aspect_ratio_fact - np.array(aspect_ratio)))
+        aspect_ratio = aspect_ratio[bucket_idx]
+        target_size_height, target_size_width = aspect_size[bucket_idx]
+        
+        if aspect_ratio_fact < aspect_ratio:
+            scale = target_size_width / width
+        else:
+            scale = target_size_height / height
+
+        width_scale = int(round(width * scale))
+        height_scale = int(round(height * scale))
+
+
+        # # crop
+        delta_h = height_scale - target_size_height
+        delta_w = width_scale - target_size_width
+        assert delta_w>=0
+        assert delta_h>=0
+        assert not all(
+            [delta_h, delta_w]
+        )  
+        top = delta_h//2
+        left = delta_w//2
+
+        ## resize image and crop
+        resize_crop_transform = transforms.Compose([
+            transforms.Resize((height_scale, width_scale)),
+            lambda x: transforms.functional.crop(x, top, left, target_size_height, target_size_width),
+        ])
+
+        video = torch.stack([resize_crop_transform(frame.contiguous()) for frame in video], dim=0)
+        return video

@@ -20,9 +20,8 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from typing import Any
 from diffusers.models.autoencoders.autoencoder_kl import (
     AutoencoderKLOutput,
-    DecoderOutput,
+    DecoderOutput
 )
-
 
 
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
@@ -1082,6 +1081,7 @@ def rms_norm(input, normalized_shape, eps=1e-6):
     return input.to(dtype)
 
 
+
 class DiagonalGaussianDistribution(object):
     def __init__(
         self,
@@ -1116,6 +1116,9 @@ class DiagonalGaussianDistribution(object):
             return self.mean
         else:
             return x
+    
+    def mode(self) -> torch.Tensor:
+        return self.mean
 
 
 class AutoencoderKL(ModelMixin, ConfigMixin):
@@ -1331,7 +1334,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin):
             video = self.single_decode(hidden_states, device)
         video = self.mix(video, smooth_scale=smooth_scale)
         if return_dict:
-            return AutoencoderKLOutput(sample=video)
+            return DecoderOutput(sample=video)
         else:
             return (video,)
 

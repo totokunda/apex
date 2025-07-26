@@ -20,7 +20,8 @@ from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.models.modeling_utils import ModelMixin
 from src.transformer_models.stepvideo.base.modules import (
     PixArtAlphaTextProjection,
-    AdaLayerNormSingle,
+    AdaLayerNormSingleText,
+    AdaLayerNormSingleImage,
     StepVideoTransformerBlock,
     PatchEmbed,
 )
@@ -47,9 +48,10 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
         use_additional_conditions: Optional[bool] = False,
         caption_channels: Optional[int] | list | tuple = [6144, 1024],
         attention_type: Optional[str] = "parallel",
+        model_type: Optional[str] = "t2v",
     ):
         super().__init__()
-
+        self.model_type = model_type
         # Set some common variables used across the board.
         self.inner_dim = (
             self.config.num_attention_heads * self.config.attention_head_dim
@@ -60,7 +62,7 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
 
         self.pos_embed = PatchEmbed(
             patch_size=patch_size,
-            in_channels=self.config.in_channels,
+            in_channels=self.config.in_channels if model_type == "t2v" else self.config.in_channels*2,
             embed_dim=self.inner_dim,
         )
 
@@ -85,8 +87,10 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
             self.inner_dim, patch_size * patch_size * self.out_channels
         )
         self.patch_size = patch_size
+        
+        adaln_singe_cls = AdaLayerNormSingleText if model_type == "t2v" else AdaLayerNormSingleImage
 
-        self.adaln_single = AdaLayerNormSingle(
+        self.adaln_single = adaln_singe_cls(
             self.inner_dim, use_additional_conditions=self.use_additional_conditions
         )
 
@@ -160,6 +164,7 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
         condition_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         fps: torch.Tensor = None,
+        motion_score: Optional[torch.Tensor] = None,
         return_dict: bool = True,
     ):
         assert hidden_states.ndim == 5
@@ -171,7 +176,7 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
         hidden_states = self.patchfy(hidden_states, condition_hidden_states)
         len_frame = hidden_states.shape[1]
 
-        if self.use_additional_conditions:
+        if self.use_additional_conditions and self.model_type == "t2v":
             added_cond_kwargs = {
                 "resolution": torch.tensor(
                     [(height, width)] * bsz,
@@ -185,6 +190,10 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
                 ),
                 "fps": fps,
             }
+        elif self.use_additional_conditions and self.model_type == "i2v":
+            added_cond_kwargs = {
+                "motion_score": torch.tensor([motion_score], device=hidden_states.device, dtype=hidden_states.dtype).repeat(bsz),
+            } 
         else:
             added_cond_kwargs = {}
 

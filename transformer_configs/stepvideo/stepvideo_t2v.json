@@ -16,5 +16,6 @@
   "num_layers": 48,
   "out_channels": 64,
   "patch_size": 1,
-  "use_additional_conditions": false
+  "use_additional_conditions": false,
+  "model_type": "t2v"
 }

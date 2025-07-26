@@ -6,10 +6,11 @@ from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise.stepvideo_denoise import StepVideoDenoise, DenoiseType
 from .t2v import StepVideoT2VEngine
-
+from .i2v import StepVideoI2VEngine
 
 class ModelType(Enum):
     T2V = "t2v"  # text to video
+    I2V = "i2v"  # image to video
 
 
 class StepVideoEngine(BaseEngine, StepVideoDenoise):
@@ -51,6 +52,8 @@ class StepVideoEngine(BaseEngine, StepVideoDenoise):
         """Initialize the specific implementation engine based on model type"""
         if self.model_type == ModelType.T2V:
             self.implementation_engine = StepVideoT2VEngine(self)
+        elif self.model_type == ModelType.I2V:
+            self.implementation_engine = StepVideoI2VEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

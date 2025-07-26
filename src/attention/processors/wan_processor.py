@@ -80,13 +80,13 @@ class WanAttnProcessor2_0:
                 attn_mask=None,
                 dropout_p=0.0,
                 is_causal=False,
-            )
+            ).transpose(1, 2)
             hidden_states_img = hidden_states_img.flatten(2, 3)
             hidden_states_img = hidden_states_img.type_as(query)
 
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        ).transpose(1, 2)
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
 

@@ -117,7 +117,7 @@ class CausalWanAttnProcessor2_0:
                 attn_mask=attention_mask,
                 dropout_p=0.0,
                 is_causal=False,
-            )
+            ).transpose(1, 2)
 
             hidden_states = hidden_states.flatten(2, 3)
 
@@ -213,7 +213,7 @@ class CausalWanAttnProcessor2_0:
                     :,
                     max(0, local_end_index - max_attention_size) : local_end_index,
                 ].transpose(1, 2),
-            )
+            ).transpose(1, 2)
 
             hidden_states = hidden_states.flatten(2, 3)
 
@@ -266,7 +266,7 @@ class CausalWanAttnProcessor2_0:
                 attn_mask=attention_mask,
                 dropout_p=0.0,
                 is_causal=False,
-            )
+            ).transpose(1, 2)
 
             hidden_states = hidden_states.flatten(2, 3)
             hidden_states = hidden_states.type_as(query)
