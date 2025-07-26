@@ -3,24 +3,30 @@ description: "StepVideo 13B is a 13B parameter model for text-to-video generatio
 engine: stepvideo
 type: t2v
 
-
 components:
   - type: scheduler
-    base: "src.scheduler.stepvideo.FlowMatchDiscreteScheduler"
-    config_path: https://huggingface.co/stepfun-ai/stepvideo-ti2v/resolve/main/scheduler/scheduler_config.json
+    base: "src.scheduler.FlowMatchScheduler"
+    config:
+      sigma_min: 0.0
+      extra_one_step: true
+      shift: 13.0
+      reverse_sigmas: true
+      num_train_timesteps: 1
       
   - type: vae
     base: "stepvideo"
-    model_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/vae/vae_v2.safetensors
+    model_path: /workspace/stepvideo/vae/vae_v2.safetensors
     config_path: vae_configs/stepvideo/stepvideo_v2.json
     key_map:
       decoder.conv_out.: decoder.conv_out.conv.
 
   - type: text_encoder
     base: "BertModel"
-    model_path: stepfun-ai/stepvideo-t2v/hunyuan_clip/clip_text_encoder
+    model_path: /workspace/stepvideo/hunyuan_clip/clip_text_encoder
     tokenizer_class: "BertTokenizer"
-    tokenizer_name: "hfl/chinese-roberta-wwm-ext-large"
+    tokenizer_name: "stepfun-ai/stepvideo-t2v"
+    tokenizer_kwargs:
+      subfolder: hunyuan_clip/tokenizer
     extra_kwargs:
       add_pooling_layer: false
     key_map:
@@ -28,19 +34,19 @@ components:
   
   - type: transformer
     base: "stepvideo.base" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
-    model_path: stepfun-ai/stepvideo-t2v/transformer
+    model_path: /workspace/stepvideo/transformer
     tag: "stepvideo_t2v"
 
 preprocessors: 
   - type: stepvideo.llm
     config_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/step_llm/config.json
-    model_path: stepfun-ai/stepvideo-t2v/step_llm
+    model_path: /workspace/stepvideo/step_llm
     tokenizer_path: https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/step_llm/step1_chat_tokenizer.model
     save_path: /workspace/.hf_home
 
 defaults:
   run:
-    num_inference_steps: 50
+    num_inference_steps: 30
     return_latents: false
     text_encoder_kwargs:
       use_token_type_ids: false

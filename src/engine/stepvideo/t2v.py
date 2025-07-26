@@ -108,7 +108,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-
+        
         num_frames = self._parse_num_frames(duration, fps)
         ## ensure its divisible by 17
         latent_num_frames = max(num_frames // 17 * 3, 1)
@@ -144,10 +144,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             encoder_attention_mask = llm_mask
             encoder_hidden_states_2 = prompt_embeds
 
-        module = torch.load("/workspace/Step-Video-T2V/emb.pt")
-        encoder_hidden_states = module["y"]
-        encoder_hidden_states_2 = module["clip_embedding"]
-        encoder_attention_mask = module["y_mask"]
+        
         encoder_hidden_states = encoder_hidden_states.to(
             self.device, dtype=transformer_dtype
         )
@@ -155,6 +152,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             self.device, dtype=transformer_dtype
         )
         encoder_attention_mask = encoder_attention_mask.to(self.device)
+        
 
         latents = self.denoise(
             timesteps=timesteps,

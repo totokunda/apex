@@ -25,14 +25,13 @@ from src.preprocess.base import (
     PreprocessorType,
 )
 from src.attention import attention_register
+import warnings
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
-
 
 def safediv(n, d):
     q, r = divmod(n, d)
     assert r == 0
     return q
-
 
 class RMSNorm(nn.Module):
     def __init__(
@@ -308,6 +307,31 @@ class Wrapped_StepChatTokenizer(StepChatTokenizer):
         max_seq_len = max(seqlen)
         return Tokens(out_tokens, cu_out_tokens, attn_mask, cu_seqlens, max_seq_len)
 
+def attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=True,
+                    return_attn_probs=False, tp_group_rank=0, tp_group_size=1):
+    softmax_scale = q.size(-1) ** (-0.5) if softmax_scale is None else softmax_scale
+    if hasattr(torch.ops.Optimus, "fwd"):
+        results = torch.ops.Optimus.fwd(q, k, v, None, dropout_p, softmax_scale, causal, return_attn_probs, None, tp_group_rank, tp_group_size)[0]
+    else:
+        warnings.warn("Cannot load `torch.ops.Optimus.fwd`. Using `torch.nn.functional.scaled_dot_product_attention` instead.")
+        results = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True, scale=softmax_scale).transpose(1, 2)
+    return results
+
+class FlashSelfAttention(torch.nn.Module):
+    def __init__(
+        self,
+        attention_dropout=0.0,
+    ):
+        super().__init__()
+        self.dropout_p = attention_dropout
+
+    def forward(self, q, k, v, cu_seqlens=None, max_seq_len=None):
+        if cu_seqlens is None:
+            output = attn_func(q, k, v, dropout_p=self.dropout_p)
+        else:
+            raise ValueError('cu_seqlens is not supported!')
+
+        return output
 
 class MultiQueryAttention(nn.Module):
     def __init__(self, cfg, layer_id=None):
@@ -316,7 +340,7 @@ class MultiQueryAttention(nn.Module):
         self.head_dim = cfg.hidden_size // cfg.num_attention_heads
         self.max_seq_len = cfg.seq_length
         self.use_flash_attention = cfg.use_flash_attn
-        assert self.use_flash_attention, "FlashAttention is required!"
+        assert self.use_flash_attention, 'FlashAttention is required!'
 
         self.n_groups = cfg.num_attention_groups
         self.tp_size = 1
@@ -334,8 +358,9 @@ class MultiQueryAttention(nn.Module):
             bias=False,
         )
 
-        assert self.use_flash_attention, "non-Flash attention not supported yet."
-
+        assert self.use_flash_attention, 'non-Flash attention not supported yet.'
+        self.core_attention = FlashSelfAttention(attention_dropout=cfg.attention_dropout)
+        
         self.layer_id = layer_id
 
     def forward(
@@ -350,7 +375,9 @@ class MultiQueryAttention(nn.Module):
 
         xq, xkv = torch.split(
             xqkv,
-            (dim // self.tp_size, self.head_dim * 2 * self.n_groups // self.tp_size),
+            (dim // self.tp_size,
+             self.head_dim*2*self.n_groups // self.tp_size
+            ),
             dim=-1,
         )
 
@@ -371,35 +398,28 @@ class MultiQueryAttention(nn.Module):
                 xk = xk.expand(b, s, q_per_kv, d)
                 xv = xv.expand(b, s, q_per_kv, d)
             else:
-                """To cover the cases where h > 1, we have
-                the following implementation, which is equivalent to:
-                    xk = xk.repeat_interleave(q_per_kv, dim=-2)
-                    xv = xv.repeat_interleave(q_per_kv, dim=-2)
-                but can avoid calling aten::item() that involves cpu.
-                """
-                idx = (
-                    torch.arange(q_per_kv * h, device=xk.device)
-                    .reshape(q_per_kv, -1)
-                    .permute(1, 0)
-                    .flatten()
-                )
-                xk = torch.index_select(
-                    xk.repeat(1, 1, q_per_kv, 1), 2, idx
-                ).contiguous()
-                xv = torch.index_select(
-                    xv.repeat(1, 1, q_per_kv, 1), 2, idx
-                ).contiguous()
+                ''' To cover the cases where h > 1, we have
+                    the following implementation, which is equivalent to:
+                        xk = xk.repeat_interleave(q_per_kv, dim=-2)
+                        xv = xv.repeat_interleave(q_per_kv, dim=-2)
+                    but can avoid calling aten::item() that involves cpu.
+                '''
+                idx = torch.arange(q_per_kv * h, device=xk.device).reshape(q_per_kv, -1).permute(1, 0).flatten()
+                xk = torch.index_select(xk.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
+                xv = torch.index_select(xv.repeat(1, 1, q_per_kv, 1), 2, idx).contiguous()
 
-        output = attention_register.call(
-            xq,
-            xk,
-            xv,
-            cu_seqlens_q=cu_seqlens,
-            cu_seqlens_k=cu_seqlens,
-            is_causal=True,
-        )
-
-        output = rearrange(output, "b s h d -> s b (h d)").contiguous()
+        if self.use_flash_attention:
+            output = self.core_attention(xq, xk, xv,
+                                      cu_seqlens=cu_seqlens,
+                                      max_seq_len=max_seq_len)
+            # reduce-scatter only support first dimension now
+            output = rearrange(output, "b s h d -> s b (h d)").contiguous()
+        else:
+            xq, xk, xv = [
+                rearrange(x, "b s ... -> s b ...").contiguous()
+                for x in (xq, xk, xv)
+            ]
+            output = self.core_attention(xq, xk, xv, mask)
         output = self.wo(output)
         return output
 
@@ -590,51 +610,14 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
             truncation=True,
             return_tensors="pt",
         )
+        
         y = self.text_encoder(
             txt_tokens.input_ids.to(self.device),
             attention_mask=(
-                txt_tokens.attention_mask.to(self.device).bool() if with_mask else None
+                txt_tokens.attention_mask.to(self.device) if with_mask else None
             ),
         )
+
         y_mask = txt_tokens.attention_mask
         return y.transpose(0, 1), y_mask
 
-
-def analyze_differences(output1, output2, name1="output1", name2="output2"):
-    print(f"\n=== Comparing {name1} vs {name2} ===")
-
-    # Basic info
-    print(f"Shapes: {output1.shape} vs {output2.shape}")
-    print(f"Dtypes: {output1.dtype} vs {output2.dtype}")
-    print(f"Devices: {output1.device} vs {output2.device}")
-
-    # Differences
-    abs_diff = torch.abs(output1 - output2)
-    rel_diff = abs_diff / (torch.abs(output1) + 1e-8)
-
-    print(f"\nAbsolute differences:")
-    print(f"  Max: {abs_diff.max():.2e}")
-    print(f"  Mean: {abs_diff.mean():.2e}")
-    print(f"  Median: {abs_diff.median():.2e}")
-    print(f"  Std: {abs_diff.std():.2e}")
-
-    print(f"\nRelative differences:")
-    print(f"  Max: {rel_diff.max():.2e}")
-    print(f"  Mean: {rel_diff.mean():.2e}")
-    print(f"  Median: {rel_diff.median():.2e}")
-
-    # L2 norms
-    l2_diff = torch.norm(output1 - output2)
-    l2_norm1 = torch.norm(output1)
-    print(f"\nL2 norms:")
-    print(f"  Difference norm: {l2_diff:.2e}")
-    print(f"  Relative norm: {l2_diff / l2_norm1:.2e}")
-
-    # Tolerance tests
-    print(f"\nTolerance tests:")
-    tolerances = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7]
-    for tol in tolerances:
-        is_close = torch.allclose(output1, output2, atol=tol, rtol=tol)
-        print(f"  {tol:.0e}: {is_close}")
-
-    return abs_diff, rel_diff

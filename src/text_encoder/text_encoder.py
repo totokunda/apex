@@ -5,7 +5,6 @@ from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
 from src.mixins.loader_mixin import LoaderMixin
 import ftfy
 import re
-from transformers import BertModel
 import html
 
 

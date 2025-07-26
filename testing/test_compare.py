@@ -1,6 +1,6 @@
 import torch 
-file1 = torch.load(f"/workspace/Step-Video-T2V/blocks_0.pt", weights_only=False)
-file2 = torch.load(f"/workspace/apex/blocks_0.pt", weights_only=False)
+file1 = torch.load(f"/workspace/emb_diff.pt", weights_only=False)
+file2 = torch.load(f"/workspace/emb.pt", weights_only=False)
 
 def compare_func(key1, value1, value2):
     if isinstance(value1, torch.Tensor):

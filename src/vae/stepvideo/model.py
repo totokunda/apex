@@ -11,7 +11,7 @@
 # copies or substantial portions of the Software.
 # ==============================================================================
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from torch import nn
 from torch.nn import functional as F
 from functools import wraps
@@ -22,6 +22,7 @@ from diffusers.models.autoencoders.autoencoder_kl import (
     AutoencoderKLOutput,
     DecoderOutput,
 )
+
 
 
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
@@ -1177,14 +1178,20 @@ class AutoencoderKL(ModelMixin, ConfigMixin):
             version=version,
         )
 
+    def normalize_latents(self, z):
+        return z * self.scaling_factor
+
+    def denormalize_latents(self, z):
+        return z / self.scaling_factor
+    
     def naive_encode(self, x, is_init_image=True):
         b, l, c, h, w = x.size()
-        x = rearrange(x, "b l c h w -> b c l h w").contiguous()
-        z = self.encoder(x, l, True)  # 下采样[1, 4, 8, 16, 16]
+        x = rearrange(x, 'b l c h w -> b c l h w').contiguous()
+        z = self.encoder(x, l, True) # 下采样[1, 4, 8, 16, 16]
         return z
 
     @torch.inference_mode()
-    def encode(self, x, return_dict=False):
+    def encode(self, x , return_dict=False):
         # b (nc cf) c h w -> (b nc) cf c h w -> encode -> (b nc) cf c h w -> b (nc cf) c h w
         chunks = list(x.split(self.frame_len, dim=1))
         for i in range(len(chunks)):
@@ -1202,56 +1209,130 @@ class AutoencoderKL(ModelMixin, ConfigMixin):
         dec = self.decoder(z, is_init)
         return dec
 
-    def normalize_latents(self, z):
-        return z * self.scaling_factor
-
-    def denormalize_latents(self, z):
-        return z / self.scaling_factor
-
     @torch.inference_mode()
-    def decode(self, z, return_dict=False):
+    def decode_original(self, z):
         # b (nc cf) c h w -> (b nc) cf c h w -> decode -> (b nc) c cf h w -> b (nc cf) c h w
         chunks = list(z.split(self.latent_len, dim=1))
 
         if self.world_size > 1:
             chunks_total_num = len(chunks)
-            max_num_per_rank = (
-                chunks_total_num + self.world_size - 1
-            ) // self.world_size
+            max_num_per_rank = (chunks_total_num + self.world_size - 1) // self.world_size
             rank = torch.distributed.get_rank()
             chunks_ = chunks[max_num_per_rank * rank : max_num_per_rank * (rank + 1)]
             if len(chunks_) < max_num_per_rank:
-                chunks_.extend(chunks[: max_num_per_rank - len(chunks_)])
+                chunks_.extend(chunks[:max_num_per_rank-len(chunks_)])
             chunks = chunks_
 
         for i in range(len(chunks)):
-            chunks[i] = self.decode_naive(chunks[i], True).permute(0, 2, 1, 3, 4)
+            chunks[i] = self.decode_naive(chunks[i], True).permute(0,2,1,3,4)
         x = torch.cat(chunks, dim=1)
 
         if self.world_size > 1:
-            x_ = torch.empty(
-                [
-                    x.size(0),
-                    (self.world_size * max_num_per_rank) * self.frame_len,
-                    *x.shape[2:],
-                ],
-                dtype=x.dtype,
-                device=x.device,
-            )
+            x_ = torch.empty([x.size(0), (self.world_size * max_num_per_rank) * self.frame_len, *x.shape[2:]], dtype=x.dtype, device=x.device)
             torch.distributed.all_gather_into_tensor(x_, x)
             x = x_[:, : chunks_total_num * self.frame_len]
 
         x = self.mix(x)
-        if return_dict:
-            return DecoderOutput(sample=x)
-        else:
-            return (x,)
+        return x
 
-    def mix(self, x):
-        remain_scale = 0.6
-        mix_scale = 1.0 - remain_scale
+    def mix(self, x, smooth_scale = 0.6):
+        remain_scale = smooth_scale
+        mix_scale = 1. - remain_scale
         front = slice(self.frame_len - 1, x.size(1) - 1, self.frame_len)
         back = slice(self.frame_len, x.size(1), self.frame_len)
-        x[:, back] = x[:, back] * remain_scale + x[:, front] * mix_scale
-        x[:, front] = x[:, front] * remain_scale + x[:, back] * mix_scale
+        x[:, front], x[:, back] = (
+            x[:, front] * remain_scale + x[:, back] * mix_scale,
+            x[:, back] * remain_scale + x[:, front] * mix_scale
+        )
         return x
+    
+    def single_decode(self, hidden_states, device):
+        chunks = list(hidden_states.split(self.latent_len, dim=1))
+        for i in range(len(chunks)):
+            chunks[i] = self.decode_naive(chunks[i].to(device), True).permute(0,2,1,3,4).cpu()
+        x = torch.cat(chunks, dim=1)
+        return x
+    
+    def build_1d_mask(self, length, left_bound, right_bound, border_width):
+        x = torch.ones((length,))
+        if not left_bound:
+            x[:border_width] = (torch.arange(border_width) + 1) / border_width
+        if not right_bound:
+            x[-border_width:] = torch.flip((torch.arange(border_width) + 1) / border_width, dims=(0,))
+        return x
+    
+    def build_mask(self, data, is_bound, border_width):
+        _, _, _, H, W = data.shape
+        h = self.build_1d_mask(H, is_bound[0], is_bound[1], border_width[0])
+        w = self.build_1d_mask(W, is_bound[2], is_bound[3], border_width[1])
+
+        h = repeat(h, "H -> H W", H=H, W=W)
+        w = repeat(w, "W -> H W", H=H, W=W)
+
+        mask = torch.stack([h, w]).min(dim=0).values
+        mask = rearrange(mask, "H W -> 1 1 1 H W")
+        return mask
+    
+    def tiled_decode(self, hidden_states, device, tile_size=(34, 34), tile_stride=(16, 16)):
+        B, T, C, H, W = hidden_states.shape
+        size_h, size_w = tile_size
+        stride_h, stride_w = tile_stride
+
+        # Split tasks
+        tasks = []
+        for t in range(0, T, 3):
+            for h in range(0, H, stride_h):
+                if (h-stride_h >= 0 and h-stride_h+size_h >= H): continue
+                for w in range(0, W, stride_w):
+                    if (w-stride_w >= 0 and w-stride_w+size_w >= W): continue
+                    t_, h_, w_ = t + 3, h + size_h, w + size_w
+                    tasks.append((t, t_, h, h_, w, w_))
+
+        # Run
+        data_device = "cpu"
+        computation_device = device
+
+        weight = torch.zeros((1, 1, T//3*17, H * 16, W * 16), dtype=hidden_states.dtype, device=data_device)
+        values = torch.zeros((B, 3, T//3*17, H * 16, W * 16), dtype=hidden_states.dtype, device=data_device)
+
+        for t, t_, h, h_, w, w_ in tasks:
+            hidden_states_batch = hidden_states[:, t:t_, :, h:h_, w:w_].to(computation_device)
+            hidden_states_batch = self.decode_naive(hidden_states_batch, True).to(data_device)
+
+            mask = self.build_mask(
+                hidden_states_batch,
+                is_bound=(h==0, h_>=H, w==0, w_>=W),
+                border_width=((size_h - stride_h) * 16, (size_w - stride_w) * 16)
+            ).to(dtype=hidden_states.dtype, device=data_device)
+
+            target_t = t // 3 * 17
+            target_h = h * 16
+            target_w = w * 16
+            values[
+                :,
+                :,
+                target_t: target_t + hidden_states_batch.shape[2],
+                target_h: target_h + hidden_states_batch.shape[3],
+                target_w: target_w + hidden_states_batch.shape[4],
+            ] += hidden_states_batch * mask
+            weight[
+                :,
+                :,
+                target_t: target_t + hidden_states_batch.shape[2],
+                target_h: target_h + hidden_states_batch.shape[3],
+                target_w: target_w + hidden_states_batch.shape[4],
+            ] += mask
+        return values / weight
+    
+    def decode(self, hidden_states, device, tiled=False, tile_size=(34, 34), tile_stride=(16, 16), smooth_scale=0.6, return_dict=False):
+        if tiled:
+            video = self.tiled_decode(hidden_states, device, tile_size, tile_stride)
+        else:
+            video = self.single_decode(hidden_states, device)
+        video = self.mix(video, smooth_scale=smooth_scale)
+        if return_dict:
+            return AutoencoderKLOutput(sample=video)
+        else:
+            return (video,)
+
+    

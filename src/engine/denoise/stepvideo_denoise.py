@@ -51,7 +51,7 @@ class StepVideoDenoise:
                         noise_pred_text - noise_pred_uncond
                     )
 
-                latents = scheduler.step(noise_pred, t, latents)
+                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
