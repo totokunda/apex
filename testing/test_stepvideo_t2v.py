@@ -2,9 +2,9 @@ from src.engine import create_engine
 from diffusers.utils import export_to_video
 import torch
 
-engine = create_engine("stepvideo", "manifest/stepvideo/stepvideo_t2v_13b.yml", "t2v", save_path="/workspace/models", attention_type="sdpa", component_dtypes={"text_encoder": torch.float32})
+engine = create_engine("stepvideo", "manifest/stepvideo/stepvideo_t2v_30b.yml", "t2v", save_path="/workspace/models", attention_type="sdpa", component_dtypes={"text_encoder": torch.float32})
 
-prompt="A curly‑haired, middle‑aged clerk in a blue sleeveless sweater-vest pores over paperwork at her desk, briefly lowers her glasses to scold or question the young man standing in front of her. He’s seen only from behind—messy blond hair, a backpack slung over one shoulder—waiting while she points at the forms. In the background, rows of olive filing cabinets, a large potted plant, and another woman typing on a vintage typewriter set the workplace vibe."
+prompt = "A beautiful woman in a flowing red dress walks through a dimly lit city street, neon lights reflecting off wet pavement, her silhouette glowing as the camera slowly tracks her from behind."
 negative_prompt="画面暗、低分辨率、不良手、文本、缺少手指、多余的手指、裁剪、低质量、颗粒状、签名、水印、用户名、模糊。"
 
 video = engine.run(

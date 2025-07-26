@@ -102,7 +102,8 @@ class MochiAttnProcessor2_0:
 
             attn_output = attention_register.call(
                 valid_query, valid_key, valid_value, dropout_p=0.0, is_causal=False
-            )
+            ).transpose(1, 2)
+            
             valid_sequence_length = attn_output.size(2)
             attn_output = F.pad(
                 attn_output, (0, 0, 0, total_length - valid_sequence_length)

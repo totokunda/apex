@@ -79,7 +79,7 @@ class MagiAttentionProcessor:
         # Use registered attention function
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        ).transpose(1, 2)
 
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
@@ -143,7 +143,7 @@ class MagiCrossAttentionProcessor:
         # Use registered attention function
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        ).transpose(1, 2)
 
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)

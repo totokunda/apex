@@ -70,7 +70,7 @@ class CogVideoXAttnProcessor2_0:
 
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        ).transpose(1, 2)
 
         hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
 
@@ -151,9 +151,9 @@ class FusedCogVideoXAttnProcessor2_0:
                     key[:, :, text_seq_length:], image_rotary_emb
                 )
 
-        hidden_states = attention_register.call()(
+        hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        ).transpose(1, 2)
 
         hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
 

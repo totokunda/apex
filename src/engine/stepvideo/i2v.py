@@ -1,6 +1,7 @@
 import torch
 from typing import Dict, Any, Callable, List
 from PIL import Image
+from torchvision import transforms as T
 from .base import StepVideoBaseEngine
 
 
@@ -12,14 +13,14 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         prompt: List[str] | str,
         image: str | Image.Image | torch.Tensor,
         negative_prompt: List[str] | str = None,
-        height: int = 480,
-        width: int = 832,
-        duration: int | str = 16,
+        height: int = 550,
+        width: int = 992,
+        duration: int | str = 34,
         num_inference_steps: int = 30,
         num_videos: int = 1,
         seed: int | None = None,
         fps: int = 24,
-        guidance_scale: float = 1.0,
+        guidance_scale: float = 9.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -29,17 +30,11 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        motion_score: float = 5.0,
         **kwargs,
     ):
 
-        loaded_image = self._load_image(image)
-        preprocessed_image, height, width = self._aspect_ratio_resize(
-            loaded_image, height * width
-        )
-        preprocessed_image = self.video_processor.preprocess(
-            preprocessed_image, height, width
-        )
-
+        
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -77,10 +72,16 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         llm_prompt_embeds, llm_mask = llm_preprocessor(
             prompt, with_mask=True, max_length=320
         )
+        len_clip = prompt_embeds.shape[1]
+        llm_mask = torch.nn.functional.pad(llm_mask, (len_clip, 0), value=1)
 
         if use_cfg_guidance:
             llm_negative_prompt_embeds, llm_negative_mask = llm_preprocessor(
                 negative_prompt, with_mask=True, max_length=320
+            )
+            len_clip = negative_prompt_embeds.shape[1]
+            llm_negative_mask = torch.nn.functional.pad(
+                llm_negative_mask, (len_clip, 0), value=1
             )
 
         if offload:
@@ -134,7 +135,12 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             parse_frames=False,
             order="BFC",
         )
-
+        
+        
+        loaded_image = self._load_image(image)
+        preprocessed_image = T.ToTensor()(loaded_image)*2-1
+        preprocessed_image = self.resize_to_desired_aspect_ratio(preprocessed_image[None], aspect_size=[(height, width)])[None]
+        
         img_emb = self.vae_encode(preprocessed_image).repeat(num_videos, 1, 1, 1, 1)
         padding_tensor = torch.zeros(
             (
@@ -176,6 +182,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
                 ),
                 encoder_attention_mask=encoder_attention_mask.to(self.device),
                 condition_hidden_states=condition_hidden_states,
+                motion_score=motion_score,
             ),
             transformer_dtype=transformer_dtype,
             use_cfg_guidance=use_cfg_guidance,
@@ -192,5 +199,6 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            video = video.permute(0, 2, 1, 3, 4)
             postprocessed_video = self._postprocess(video)
             return postprocessed_video

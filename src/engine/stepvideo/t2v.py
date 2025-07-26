@@ -11,14 +11,14 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
         self,
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
-        height: int = 480,
-        width: int = 832,
-        duration: int | str = 16,
+        height: int = 550,
+        width: int = 992,
+        duration: int | str = 34,
         num_inference_steps: int = 30,
         num_videos: int = 1,
         seed: int | None = None,
         fps: int = 24,
-        guidance_scale: float = 1.0,
+        guidance_scale: float = 9.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -116,12 +116,13 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        num_channels_latents = self.transformer.config.in_channels
 
         latents = self._get_latents(
             height,
             width,
             latent_num_frames,
-            num_channels_latents=self.transformer.config.in_channels,
+            num_channels_latents=num_channels_latents,
             fps=fps,
             num_videos=num_videos,
             seed=seed,
@@ -176,6 +177,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
 
         if offload:
             self._offload(self.transformer)
+            
         if return_latents:
             return latents
         else:
