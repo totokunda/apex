@@ -18,7 +18,11 @@ from functools import wraps
 from diffusers import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from typing import Any
-from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKLOutput, DecoderOutput
+from diffusers.models.autoencoders.autoencoder_kl import (
+    AutoencoderKLOutput,
+    DecoderOutput,
+)
+
 
 class EmptyInitOnDevice(torch.overrides.TorchFunctionMode):
     def __init__(self, device=None):
@@ -1197,7 +1201,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin):
         z = z.to(next(self.decoder.parameters()).dtype)
         dec = self.decoder(z, is_init)
         return dec
-    
+
     def normalize_latents(self, z):
         return z * self.scaling_factor
 

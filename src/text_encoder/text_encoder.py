@@ -102,10 +102,12 @@ class TextEncoder(torch.nn.Module, LoaderMixin):
             position_ids = position_ids.to(dtype=torch.long, device=self.model.device)
             inputs["position_ids"] = position_ids
         if use_token_type_ids:
-            inputs["token_type_ids"] = torch.zeros_like(text_input_ids).to(device=self.model.device)
+            inputs["token_type_ids"] = torch.zeros_like(text_input_ids).to(
+                device=self.model.device
+            )
         if use_mask_in_input:
             inputs["attention_mask"] = mask.to(device=self.model.device)
- 
+
         result = self.model(
             **inputs, output_hidden_states=output_type == "hidden_states"
         )
@@ -118,7 +120,6 @@ class TextEncoder(torch.nn.Module, LoaderMixin):
             raise ValueError(f"Invalid output type: {output_type}")
 
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        
 
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)

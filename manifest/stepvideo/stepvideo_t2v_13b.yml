@@ -6,11 +6,8 @@ type: t2v
 
 components:
   - type: scheduler
-    base: "src.scheduler.euler.FlowMatchScheduler"
-    config:
-      num_inference_steps: 50
-      num_train_timesteps: 1000
-      shift: 13.0
+    base: "src.scheduler.stepvideo.FlowMatchDiscreteScheduler"
+    config_path: https://huggingface.co/stepfun-ai/stepvideo-ti2v/resolve/main/scheduler/scheduler_config.json
       
   - type: vae
     base: "stepvideo"

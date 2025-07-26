@@ -19,6 +19,7 @@ import cv2
 from .transforms import NormalizeImage, PrepareForNet, Resize
 from .dpt_midas import DPTDepthModel
 
+
 def load_midas_transform(model_type):
     # https://github.com/isl-org/MiDaS/blob/master/run.py
     # load transform only
@@ -138,7 +139,6 @@ def load_model(model_type, model_path):
     )
 
     return model.eval(), transform
-
 
 
 class MidasNet(nn.Module):

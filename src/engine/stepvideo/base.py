@@ -80,13 +80,9 @@ class StepVideoBaseEngine:
                 duration = int(duration[:-1])
             else:
                 duration = int(duration)
-        
+
         if duration % 17 != 0:
-            duration = (
-                duration
-                // 17
-                * 17
-            )
+            duration = duration // 17 * 17
         duration = max(duration, 1)
         return duration
 
