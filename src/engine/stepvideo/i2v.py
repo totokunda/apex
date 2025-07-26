@@ -12,7 +12,6 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         prompt: List[str] | str,
         image: str | Image.Image | torch.Tensor,
         negative_prompt: List[str] | str = None,
-        
         height: int = 480,
         width: int = 832,
         duration: int | str = 16,
@@ -32,13 +31,15 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         timesteps_as_indices: bool = True,
         **kwargs,
     ):
-        
-        
-        
+
         loaded_image = self._load_image(image)
-        preprocessed_image, height, width = self._aspect_ratio_resize(loaded_image, height*width)
-        preprocessed_image = self.video_processor.preprocess(preprocessed_image, height, width)
-        
+        preprocessed_image, height, width = self._aspect_ratio_resize(
+            loaded_image, height * width
+        )
+        preprocessed_image = self.video_processor.preprocess(
+            preprocessed_image, height, width
+        )
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -70,25 +71,23 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
 
         if "stepvideo.llm" not in self.preprocessors:
             self.load_preprocessor_by_type("stepvideo.llm")
-        
+
         llm_preprocessor = self.preprocessors["stepvideo.llm"]
         self.to_device(llm_preprocessor)
         llm_prompt_embeds, llm_mask = llm_preprocessor(
             prompt, with_mask=True, max_length=320
         )
-        
+
         if use_cfg_guidance:
             llm_negative_prompt_embeds, llm_negative_mask = llm_preprocessor(
                 negative_prompt, with_mask=True, max_length=320
             )
-        
+
         if offload:
             self._offload(llm_preprocessor)
 
-       
-        
         transformer_dtype = self.component_dtypes["transformer"]
-        
+
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -115,7 +114,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         num_frames = self._parse_num_frames(duration, fps)
         ## ensure its divisible by 17
         latent_num_frames = max(num_frames // 17 * 3, 1)
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
 
@@ -133,18 +132,33 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             dtype=torch.float32,
             generator=generator,
             parse_frames=False,
-            order="BFC"
+            order="BFC",
         )
-        
-        img_emb = self.vae_encode(preprocessed_image).repeat(num_videos, 1,1,1,1)
-        padding_tensor = torch.zeros((num_videos, max(num_frames//17*3, 1)-1, num_channels_latents, int(height) // self.vae_scale_factor_spatial, int(width) // self.vae_scale_factor_spatial,), device=self.device)
-        condition_hidden_states = torch.cat([img_emb, padding_tensor], dim=1) 
-        condition_hidden_states = condition_hidden_states.repeat(2 if use_cfg_guidance else 1, 1,1,1,1).to(self.device, dtype=transformer_dtype)
-        
+
+        img_emb = self.vae_encode(preprocessed_image).repeat(num_videos, 1, 1, 1, 1)
+        padding_tensor = torch.zeros(
+            (
+                num_videos,
+                max(num_frames // 17 * 3, 1) - 1,
+                num_channels_latents,
+                int(height) // self.vae_scale_factor_spatial,
+                int(width) // self.vae_scale_factor_spatial,
+            ),
+            device=self.device,
+        )
+        condition_hidden_states = torch.cat([img_emb, padding_tensor], dim=1)
+        condition_hidden_states = condition_hidden_states.repeat(
+            2 if use_cfg_guidance else 1, 1, 1, 1, 1
+        ).to(self.device, dtype=transformer_dtype)
+
         if use_cfg_guidance:
-            encoder_hidden_states = torch.cat([llm_prompt_embeds, llm_negative_prompt_embeds], dim=0)
+            encoder_hidden_states = torch.cat(
+                [llm_prompt_embeds, llm_negative_prompt_embeds], dim=0
+            )
             encoder_attention_mask = torch.cat([llm_mask, llm_negative_mask], dim=0)
-            encoder_hidden_states_2 = torch.cat([prompt_embeds, negative_prompt_embeds], dim=0)
+            encoder_hidden_states_2 = torch.cat(
+                [prompt_embeds, negative_prompt_embeds], dim=0
+            )
         else:
             encoder_hidden_states = llm_prompt_embeds
             encoder_attention_mask = llm_mask
@@ -154,8 +168,12 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             timesteps=timesteps,
             latents=latents,
             transformer_kwargs=dict(
-                encoder_hidden_states=encoder_hidden_states.to(self.device, dtype=transformer_dtype),
-                encoder_hidden_states_2=encoder_hidden_states_2.to(self.device, dtype=transformer_dtype),
+                encoder_hidden_states=encoder_hidden_states.to(
+                    self.device, dtype=transformer_dtype
+                ),
+                encoder_hidden_states_2=encoder_hidden_states_2.to(
+                    self.device, dtype=transformer_dtype
+                ),
                 encoder_attention_mask=encoder_attention_mask.to(self.device),
                 condition_hidden_states=condition_hidden_states,
             ),
@@ -164,7 +182,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
-            guidance_scale=guidance_scale
+            guidance_scale=guidance_scale,
         )
 
         if offload:

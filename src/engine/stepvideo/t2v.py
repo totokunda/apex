@@ -30,7 +30,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
         timesteps_as_indices: bool = True,
         **kwargs,
     ):
-        
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -62,28 +62,30 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
 
         if "stepvideo.llm" not in self.preprocessors:
             self.load_preprocessor_by_type("stepvideo.llm")
-        
+
         llm_preprocessor = self.preprocessors["stepvideo.llm"]
         self.to_device(llm_preprocessor)
         llm_prompt_embeds, llm_mask = llm_preprocessor(
             prompt, with_mask=True, max_length=320
         )
-        
+
         len_clip = prompt_embeds.shape[1]
         llm_mask = torch.nn.functional.pad(llm_mask, (len_clip, 0), value=1)
-        
+
         if use_cfg_guidance:
             llm_negative_prompt_embeds, llm_negative_mask = llm_preprocessor(
                 negative_prompt, with_mask=True, max_length=320
             )
             len_clip = negative_prompt_embeds.shape[1]
-            llm_negative_mask = torch.nn.functional.pad(llm_negative_mask, (len_clip, 0), value=1)
-        
+            llm_negative_mask = torch.nn.functional.pad(
+                llm_negative_mask, (len_clip, 0), value=1
+            )
+
         if offload:
             self._offload(llm_preprocessor)
 
         transformer_dtype = self.component_dtypes["transformer"]
-        
+
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -126,26 +128,44 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             dtype=torch.float32,
             generator=generator,
             parse_frames=False,
-            order="BFC"
-        )        
-        
+            order="BFC",
+        )
+
         if use_cfg_guidance:
-            encoder_hidden_states = torch.cat([llm_prompt_embeds, llm_negative_prompt_embeds], dim=0)
+            encoder_hidden_states = torch.cat(
+                [llm_prompt_embeds, llm_negative_prompt_embeds], dim=0
+            )
             encoder_attention_mask = torch.cat([llm_mask, llm_negative_mask], dim=0)
-            encoder_hidden_states_2 = torch.cat([prompt_embeds, negative_prompt_embeds], dim=0)
+            encoder_hidden_states_2 = torch.cat(
+                [prompt_embeds, negative_prompt_embeds], dim=0
+            )
         else:
             encoder_hidden_states = llm_prompt_embeds
             encoder_attention_mask = llm_mask
             encoder_hidden_states_2 = prompt_embeds
-            
-        
+
+        module = torch.load("/workspace/Step-Video-T2V/emb.pt")
+        encoder_hidden_states = module["y"]
+        encoder_hidden_states_2 = module["clip_embedding"]
+        encoder_attention_mask = module["y_mask"]
+        encoder_hidden_states = encoder_hidden_states.to(
+            self.device, dtype=transformer_dtype
+        )
+        encoder_hidden_states_2 = encoder_hidden_states_2.to(
+            self.device, dtype=transformer_dtype
+        )
+        encoder_attention_mask = encoder_attention_mask.to(self.device)
 
         latents = self.denoise(
             timesteps=timesteps,
             latents=latents,
             transformer_kwargs=dict(
-                encoder_hidden_states=encoder_hidden_states.to(self.device, dtype=transformer_dtype),
-                encoder_hidden_states_2=encoder_hidden_states_2.to(self.device, dtype=transformer_dtype),
+                encoder_hidden_states=encoder_hidden_states.to(
+                    self.device, dtype=transformer_dtype
+                ),
+                encoder_hidden_states_2=encoder_hidden_states_2.to(
+                    self.device, dtype=transformer_dtype
+                ),
                 encoder_attention_mask=encoder_attention_mask.to(self.device),
             ),
             transformer_dtype=transformer_dtype,
@@ -153,7 +173,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
-            guidance_scale=guidance_scale
+            guidance_scale=guidance_scale,
         )
 
         if offload:

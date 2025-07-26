@@ -31,10 +31,12 @@ class StepVideoDenoise:
             len(timesteps), desc=f"Sampling {self.model_type}"
         ) as pbar:
             for t in timesteps:
-                latent_model_input = torch.cat([latents] * 2) if use_cfg_guidance else latents
+                latent_model_input = (
+                    torch.cat([latents] * 2) if use_cfg_guidance else latents
+                )
                 latent_model_input = latent_model_input.to(transformer_dtype)
                 timestep = t.expand(latent_model_input.shape[0]).to(transformer_dtype)
-                
+
                 # Forward pass with both text and image conditioning
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -42,14 +44,14 @@ class StepVideoDenoise:
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
-
+                
                 if use_cfg_guidance:
                     noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (
                         noise_pred_text - noise_pred_uncond
                     )
 
-                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = scheduler.step(noise_pred, t, latents)
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)

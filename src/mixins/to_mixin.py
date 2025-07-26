@@ -114,10 +114,12 @@ class ToMixin:
                 if any(name == p or name.startswith(p + ".") for p in frozen_prefixes):
                     continue
                 wanted_dtype = (
-                    torch.float32 if _matches(keep_fp32_patterns, name) else target_dtype
+                    torch.float32
+                    if _matches(keep_fp32_patterns, name)
+                    else target_dtype
                 )
                 buf.data = buf.data.to(wanted_dtype)
-    
+
         # d) propagate ignore-lists for state-dict loading
         if hasattr(module, "_keys_to_ignore_on_load_unexpected"):
             module._keys_to_ignore_on_load_unexpected = getattr(

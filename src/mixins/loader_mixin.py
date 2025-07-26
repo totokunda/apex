@@ -112,7 +112,7 @@ class LoaderMixin:
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
         key_map: Dict[str, str] | None = None,
-        extra_kwargs: Dict[str, Any] | None = None
+        extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
         model_base = component.get("base")
         if getter_fn:
@@ -138,7 +138,7 @@ class LoaderMixin:
                 model_path, torch_dtype=load_dtype, **extra_kwargs
             )
             return model
-        
+
         print(load_dtype)
 
         with init_empty_weights():
@@ -185,9 +185,7 @@ class LoaderMixin:
             files_to_load += glob(os.path.join(model_path, bin_pattern), recursive=True)
             files_to_load += glob(os.path.join(model_path, pt_pattern), recursive=True)
             if not files_to_load:
-                self.logger.warning(
-                    f"No model files found in {model_path}"
-                )
+                self.logger.warning(f"No model files found in {model_path}")
         else:
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model file not found at {model_path}")
