@@ -1,7 +1,7 @@
 from src.engine.base_engine import BaseEngine
 import torch
 from typing import List
-from enum import Enum
+from src.utils.type_utils import EnumType
 from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise import CogVideoDenoise, CogVideoDenoiseType
@@ -12,7 +12,7 @@ from .fun_control import CogVideoFunControlEngine
 from .fun_inp import CogVideoFunInpEngine
 
 
-class ModelType(Enum):
+class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     FUN_CONTROL = "fun_control"  # fun control video

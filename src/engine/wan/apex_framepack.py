@@ -31,7 +31,7 @@ class WanApexFramepackEngine(WanBaseEngine):
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
-        timesteps_as_indices: bool = True,
+        timesteps_as_indices: bool = False,
         **kwargs,
     ):
 
@@ -77,17 +77,7 @@ class WanApexFramepackEngine(WanBaseEngine):
         self.to_device(self.scheduler)
         scheduler = self.scheduler
 
-        scheduler.set_timesteps(
-            num_inference_steps if timesteps is None else 1000, device=self.device
-        )
-        timesteps, num_inference_steps = self._get_timesteps(
-            scheduler=scheduler,
-            timesteps=timesteps,
-            timesteps_as_indices=timesteps_as_indices,
-            num_inference_steps=num_inference_steps,
-        )
-
-        num_frames = self._parse_num_frames(duration, fps)
+        
 
         latents = self._get_latents(
             height,
@@ -105,14 +95,15 @@ class WanApexFramepackEngine(WanBaseEngine):
         denoised_mask = torch.zeros(
             total_latent_frames, dtype=torch.bool, device=self.device
         )
-        sections_to_denoise = framepack_schedule.num_sections(num_frames)
+        
+        sections_to_denoise = framepack_schedule.num_sections(total_latent_frames)
 
         if seed is not None:
-            seeds = [seed] * sections_to_denoise
+            seeds = [seed] * num_videos
         elif generator is not None:
-            seeds = [generator.seed() for _ in range(sections_to_denoise)]
+            seeds = [generator.seed() for _ in range(num_videos)]
         else:
-            seeds = None
+            seeds = [None] * num_videos
 
         with self._progress_bar(
             total=sections_to_denoise, desc="Denoising sections"
@@ -128,7 +119,12 @@ class WanApexFramepackEngine(WanBaseEngine):
                 ) = framepack_schedule.get_inference_inputs(
                     latents, denoised_mask, reverse=reverse, seeds=seeds
                 )
-
+                
+                if past_latents is not None:
+                    past_latents = past_latents.to(self.device, dtype=transformer_dtype)
+                if future_latents is not None:
+                    future_latents = future_latents.to(self.device, dtype=transformer_dtype)
+                
                 latent_context = self.transformer.get_latent_context(
                     past_latents,
                     past_indices,
@@ -136,9 +132,16 @@ class WanApexFramepackEngine(WanBaseEngine):
                     future_indices,
                     total_latent_frames,
                 )
-
-                denoised_latents = self.denoise(
+                
+                timesteps_input, num_inference_steps = self._get_timesteps(
+                    scheduler=scheduler,
                     timesteps=timesteps,
+                    timesteps_as_indices=timesteps_as_indices,
+                    num_inference_steps=num_inference_steps,
+                )
+                
+                denoised_latents = self.denoise(
+                    timesteps=timesteps_input,
                     latents=target_latents,
                     transformer_kwargs=dict(
                         encoder_hidden_states=prompt_embeds,
@@ -165,6 +168,7 @@ class WanApexFramepackEngine(WanBaseEngine):
                 )
 
                 denoised_mask[target_indices] = True
+            
                 latents[:, :, target_indices, :, :] = denoised_latents.to(
                     latents.device, dtype=latents.dtype
                 )
@@ -172,6 +176,8 @@ class WanApexFramepackEngine(WanBaseEngine):
                 self.logger.info(
                     f"Section {section_idx} denoised frames: {', '.join(str(i) for i in target_indices.cpu().tolist())}"
                 )
+                
+                pbar.update(1)
 
         if offload:
             self._offload(self.transformer)

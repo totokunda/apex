@@ -222,7 +222,7 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
 
         if not denoising_mask.any():
             target_indices = latent_indices[:2]
-            seeds = kwargs.get("seeds", [None])
+            seeds = kwargs.get("seeds", [None]) or [None]
             generators = [
                 torch.Generator(device=latent.device) for _ in range(len(seeds))
             ]

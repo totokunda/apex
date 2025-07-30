@@ -84,7 +84,6 @@ sdist/
 parts/
 **/parts/
 *.msi
-*.png
 *.old
 *.pyo
 *.exe
@@ -111,7 +110,6 @@ parts/
 *.bak
 *.pdb
 *.lib
-*.mp4
 *.log
 *.backup
 *.dmg
@@ -121,6 +119,7 @@ parts/
 *.rar
 *.bz2
 *.o
+*.mp4
 **/.vscode/*
 scripts/zip_branch.sh
 scripts/zip_branches.sh

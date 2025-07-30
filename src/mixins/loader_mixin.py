@@ -135,11 +135,9 @@ class LoaderMixin:
         if not config:
             # try to load from model_path directly
             model = model_class.from_pretrained(
-                model_path, torch_dtype=load_dtype, **extra_kwargs
+                model_path, torch_dtype=load_dtype, **(extra_kwargs if extra_kwargs else {})
             )
             return model
-
-        print(load_dtype)
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects

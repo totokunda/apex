@@ -21,7 +21,7 @@ class OffloadMixin:
 
     @staticmethod
     @torch.no_grad()
-    def _offload(module: torch.nn.Module, *, recurse: bool = True) -> None:
+    def _offload(module: torch.nn.Module | None, *, recurse: bool = True) -> None:
         """
         Move every weight/buffer to CPU **and** clear CUDA/MPS/CPU caches.
 
@@ -32,6 +32,9 @@ class OffloadMixin:
         recurse  : bool, default True
             Whether to descend into sub-modules (almost always what you want).
         """
+        
+        if not module:
+            return
 
         # 1)  Off-load PARAMETERS
         for name, param in module.named_parameters(recurse=recurse):

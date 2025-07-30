@@ -24,7 +24,7 @@ from src.utils.dtype_utils import select_ideal_dtypes
 from src.attention import attention_register
 from src.utils.cache_utils import empty_cache
 from logging import Logger
-from src.preprocess import CLIPPreprocessor, CameraPreprocessor
+from src.scheduler import SchedulerInterface
 from typing import Callable
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -54,7 +54,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     config: Dict[str, Any]
-    scheduler: Any | None = None
+    scheduler: SchedulerInterface | None = None
     vae: AutoencoderKL | None = None
     text_encoder: TextEncoder | None = None
     transformer: ModelMixin | None = None
@@ -79,7 +79,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     vae_scale_factor_temporal: float = 1.0
     vae_scale_factor_spatial: float = 1.0
     num_channels_latents: int = 4
-
+    denoise_type: str | None = None
+    
     def __init__(
         self,
         yaml_path: str,
@@ -160,6 +161,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.component_init_kwargs = component_init_kwargs
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
+        if config.get("denoise_type", None):
+            self.denoise_type = config.get("denoise_type")
 
         if component_dtypes:
             self.component_dtypes = {}
@@ -232,25 +235,56 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_component(
         self,
         component: Dict[str, Any],
-        load_dtype: torch.dtype | None,
+        load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
     ):
         component_type = component.get("type")
+        component_module = None
         if component_type == "scheduler":
-            self.load_scheduler(component)
+            scheduler = self.load_scheduler(component)
+            component_module = scheduler
         elif component_type == "vae":
-            self.load_vae(component, load_dtype, no_weights)
+            vae = self.load_vae(component, load_dtype, no_weights)
+            component_module = vae
         elif component_type == "text_encoder":
-            self.load_text_encoder(component, no_weights)
+            text_encoder = self.load_text_encoder(component, no_weights)
+            component_module = text_encoder
         elif component_type == "transformer":
-            self.load_transformer(component, load_dtype, no_weights)
+            transformer = self.load_transformer(component, load_dtype, no_weights)
+            component_module = transformer
         else:
             raise ValueError(f"Component type {component_type} not supported")
         empty_cache()
+        return component_module
 
     def load_scheduler(self, component: Dict[str, Any]):
-        self.scheduler = self._load_component(component)
-
+        scheduler = self._load_component(component)
+        
+        # Add all SchedulerInterface methods to self.scheduler if not already present
+        if not isinstance(scheduler, SchedulerInterface):
+            # Create a new class that inherits from both the scheduler's class and SchedulerInterface
+            class SchedulerWrapper(scheduler.__class__, SchedulerInterface):
+                pass
+            
+            # Add all SchedulerInterface methods to the scheduler instance
+            scheduler_interface = SchedulerInterface()
+            
+            # Add the alphas_cumprod attribute if not present
+            if not hasattr(scheduler, 'alphas_cumprod'):
+                scheduler.alphas_cumprod = getattr(scheduler_interface, 'alphas_cumprod', None)
+            
+            # Add all methods from SchedulerInterface
+            for method_name in ['add_noise', 'convert_x0_to_noise', 'convert_noise_to_x0', 
+                              'convert_velocity_to_x0', 'convert_flow_pred_to_x0', 'convert_x0_to_flow_pred']:
+                if not hasattr(scheduler, method_name):
+                    method = getattr(scheduler_interface, method_name)
+                    setattr(scheduler, method_name, method.__get__(scheduler, type(scheduler)))
+            
+            # Change the class to include SchedulerInterface
+            scheduler.__class__ = SchedulerWrapper
+            
+        return scheduler
+        
     def load_vae(
         self,
         component: Dict[str, Any],
@@ -267,7 +301,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
-            self.vae = self.convert_vae_weights(component)
+            vae = self.convert_vae_weights(component)
             if self.save_converted_weights:
                 self.logger.info(
                     f"Saving converted vae weights to {component.get('model_path', None)}"
@@ -276,7 +310,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
                 try:
                     self.save_component(
-                        self.vae, tmp_dir, "vae", **self.config.get("save_kwargs", {})
+                        vae, tmp_dir, "vae", **self.config.get("save_kwargs", {})
                     )
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
@@ -298,7 +332,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info(f"Converted vae weights to diffusers format")
                 empty_cache()
         else:
-            self.vae = self._load_model(
+            vae = self._load_model(
                 component,
                 get_vae,
                 "VAE",
@@ -307,22 +341,24 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 key_map=component.get("key_map", {}),
                 extra_kwargs=component.get("extra_kwargs", {}),
             )
+            self.vae = vae
         if self.component_dtypes and "vae" in self.component_dtypes:
-            self.to_dtype(self.vae, self.component_dtypes["vae"])
+            self.to_dtype(vae, self.component_dtypes["vae"])
             vae_init_kwargs = self.component_init_kwargs.get("vae", {})
             if (
                 "enable_slicing" in vae_init_kwargs
                 and vae_init_kwargs["enable_slicing"]
-                and hasattr(self.vae, "enable_slicing")
+                and hasattr(vae, "enable_slicing")
             ):
-                self.vae.enable_slicing()
+                vae.enable_slicing()
             if (
                 "enable_tiling" in vae_init_kwargs
                 and vae_init_kwargs["enable_tiling"]
-                and hasattr(self.vae, "enable_tiling")
+                and hasattr(vae, "enable_tiling")
             ):
-                self.vae.enable_tiling()
-
+                vae.enable_tiling()
+        return vae
+    
     def load_config_by_type(self, component_type: str):
         with accelerate.init_empty_weights():
             # check if the component is already loaded
@@ -352,13 +388,14 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         if self._is_url(component.get("config_path")):
             config_path = self._check_config_for_url(component.get("config_path"))
             component["config_path"] = config_path
-        self.text_encoder = TextEncoder(component, no_weights)
+        text_encoder = TextEncoder(component, no_weights)
         if self.component_dtypes and "text_encoder" in self.component_dtypes:
             self.to_dtype(
-                self.text_encoder,
+                text_encoder,
                 self.component_dtypes["text_encoder"],
                 cast_buffers=False,
             )
+        return text_encoder
 
     def load_transformer(
         self,
@@ -376,16 +413,17 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
-            self.transformer = self.convert_transformer_weights(component)
+            transformer = self.convert_transformer_weights(component)
             if self.save_converted_weights:
                 self.logger.info(
                     f"Saving converted transformer weights to {component.get('model_path', None)}"
                 )
                 model_path = component.get("model_path", None)
-                tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
+                
+                tmp_dir = tempfile.mkdtemp()
                 try:
                     self.save_component(
-                        self.transformer,
+                        transformer,
                         tmp_dir,
                         "transformer",
                         **self.config.get("save_kwargs", {}),
@@ -410,7 +448,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info(f"Converted transformer weights to diffusers format")
                 empty_cache()
         else:
-            self.transformer = self._load_model(
+            transformer = self._load_model(
                 component,
                 TRANSFORMERS_REGISTRY.get,
                 "Transformer",
@@ -421,7 +459,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
-            self.to_dtype(self.transformer, self.component_dtypes["transformer"])
+            self.to_dtype(transformer, self.component_dtypes["transformer"])
+        
+        return transformer
 
     def _get_safetensors_keys(self, model_path: str, model_key: str | None = None):
         keys = set()
@@ -458,19 +498,19 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         component_type = component.get("type")
         if os.path.isfile(model_path):
             # check base directory
-            if os.path.isdir(os.path.dirname(model_path)):
-                if os.path.isdir(
-                    os.path.join(os.path.dirname(model_path), component_type)
-                ):
-                    return (
-                        os.path.join(os.path.dirname(model_path), component_type),
-                        True,
-                    )
+            if os.path.isdir(
+                os.path.join(os.path.dirname(model_path), component_type)
+            ):
+                return (
+                    os.path.join(os.path.dirname(model_path), component_type),
+                    True,
+                )
         elif os.path.isdir(model_path):
             if os.path.isdir(os.path.join(model_path, component_type)):
                 return os.path.join(model_path, component_type), True
         return model_path, False
-
+    
+    
     def _check_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
         model_path = component["model_path"]
@@ -485,6 +525,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         pt_extensions = tuple(["pt", "bin", "pth"])
         model_key = component.get("model_key", None)
         keys = set()
+        extra_model_paths = component.get("extra_model_paths", [])
 
         if os.path.isdir(model_path):
             if file_pattern:
@@ -512,6 +553,29 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 keys.update(self._get_safetensors_keys(model_path, model_key))
             elif model_path.endswith(pt_extensions):
                 keys.update(self._get_pt_keys(model_path, model_key))
+        
+        for extra_model_path in extra_model_paths:
+            # check if is dir
+            if os.path.isdir(extra_model_path):
+                if file_pattern:
+                    files = glob(os.path.join(extra_model_path, file_pattern))
+                else:
+                    files = (
+                        glob(os.path.join(extra_model_path, "*.safetensors"))
+                        + glob(os.path.join(extra_model_path, "*.pt"))
+                        + glob(os.path.join(extra_model_path, "*.bin"))
+                        + glob(os.path.join(extra_model_path, "*.pth"))
+                    )
+                    for file in files:
+                        if file.endswith(".safetensors"):
+                            keys.update(self._get_safetensors_keys(file, model_key))
+                        elif file.endswith(pt_extensions):
+                            keys.update(self._get_pt_keys(file, model_key))
+            else:
+                if extra_model_path.endswith(".safetensors"):
+                    keys.update(self._get_safetensors_keys(extra_model_path, model_key))
+                elif extra_model_path.endswith(pt_extensions):
+                    keys.update(self._get_pt_keys(extra_model_path, model_key))
 
         if component_type == "transformer":
             _keys = set(
@@ -549,7 +613,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         return convert_transformer(
             component.get("tag", None),
             component["base"],
-            component["model_path"],
+            component["model_path"] if not component.get("extra_model_paths", []) else [component["model_path"]] + component.get("extra_model_paths", []),
             component.get("model_key", None),
             component.get("file_pattern", None),
         )
@@ -562,7 +626,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         return convert_vae(
             component.get("tag", None),
             component["base"],
-            component["model_path"],
+            component["model_path"] if not component.get("extra_model_paths", []) else [component["model_path"]] + component.get("extra_model_paths", []),
             component.get("model_key", None),
             component.get("file_pattern", None),
             **component.get("converter_kwargs", {}),
@@ -627,8 +691,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self, components: List[Dict[str, Any]], components_to_load: List[str] | None
     ):
         for component in components:
-            if components_to_load and component.get("type") in components_to_load:
-                self.load_component(
+            if components_to_load and (component.get("type") in components_to_load or component.get("name") in components_to_load):
+                component_module = self.load_component(
                     component,
                     (
                         self.component_load_dtypes.get(component.get("type"))
@@ -636,11 +700,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                         else None
                     ),
                 )
+                setattr(self, component.get("name", component.get("type")), component_module)
 
     def load_component_by_type(self, component_type: str):
         for component in self.config.get("components", []):
             if component.get("type") == component_type:
-                self.load_component(
+                component_module = self.load_component(
                     component,
                     (
                         self.component_load_dtypes.get(component.get("type"))
@@ -648,19 +713,32 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                         else None
                     ),
                 )
+                setattr(self, component.get("type"), component_module)
                 break
-
-    def set_compiler(self, compiler_name: str):
-        pass
-
-    def set_quantizer(self, quantizer_name: str):
-        pass
+    
+    def load_component_by_name(self, component_name: str):
+        for component in self.config.get("components", []):
+            if component.get("name") == component_name:
+                component_module = self.load_component(
+                    component,
+                    (
+                        self.component_load_dtypes.get(component.get("type"))
+                        if self.component_load_dtypes
+                        else None
+                    ),
+                )
+                setattr(self, component.get("name"), component_module)
+                break
 
     def load_preprocessor_by_type(self, preprocessor_type: str):
         for preprocessor in self.config.get("preprocessors", []):
             if preprocessor.get("type") == preprocessor_type:
-                self.load_preprocessor(preprocessor)
-                break
+                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(preprocessor)
+            
+    def load_preprocessor_by_name(self, preprocessor_name: str):
+        for preprocessor in self.config.get("preprocessors", []):
+            if preprocessor.get("name") == preprocessor_name:
+                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(preprocessor)
 
     def load_preprocessor(self, config: Dict[str, Any]):
         preprocessor_type = config.get("type")
@@ -677,7 +755,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         for preprocessor in preprocessors:
             if (
                 preprocessors_to_load is None
-                or preprocessor.get("type") in preprocessors_to_load
+                or (preprocessor.get("type") in preprocessors_to_load)
+                or (preprocessor.get("name") in preprocessors_to_load)
             ):
                 self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
                     preprocessor
@@ -686,8 +765,16 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def load_postprocessor_by_type(self, postprocessor_type: str):
         for postprocessor in self.config.get("postprocessors", []):
             if postprocessor.get("type") == postprocessor_type:
-                self.load_postprocessor(postprocessor)
-                break
+                self.postprocessors[postprocessor.get("type")] = (
+                    self.load_postprocessor(postprocessor)
+                )
+
+    def load_postprocessor_by_name(self, postprocessor_name: str):
+        for postprocessor in self.config.get("postprocessors", []):
+            if postprocessor.get("name") == postprocessor_name:
+                self.postprocessors[postprocessor.get("type")] = (
+                    self.load_postprocessor(postprocessor)
+                )
 
     def load_postprocessor(self, config: Dict[str, Any]):
         postprocessor_type = config.get("type")
@@ -704,7 +791,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         for postprocessor in postprocessors:
             if (
                 postprocessors_to_load is None
-                or postprocessor.get("type") in postprocessors_to_load
+                or (postprocessor.get("type") in postprocessors_to_load)
+                or (postprocessor.get("name") in postprocessors_to_load)
             ):
                 self.postprocessors[postprocessor.get("type")] = (
                     self.load_postprocessor(postprocessor)
@@ -744,6 +832,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 downloaded_model_path = self._download(model_path, save_path)
                 if downloaded_model_path:
                     component["model_path"] = downloaded_model_path
+            if extra_model_paths := component.get("extra_model_paths"):
+                for extra_model_path in extra_model_paths:
+                    downloaded_extra_model_path = self._download(extra_model_path, save_path)
+                    if downloaded_extra_model_path:
+                        component["extra_model_paths"] = downloaded_extra_model_path
 
         preprocessors = self.config.get("preprocessors", []) or []
         if preprocessors:

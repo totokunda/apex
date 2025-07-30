@@ -1,11 +1,11 @@
 import torch
 import math
-from enum import Enum
 from diffusers.schedulers import CogVideoXDPMScheduler
 from contextlib import nullcontext
+from src.utils.type_utils import EnumType
 
 
-class CogVideoDenoiseType(Enum):
+class CogVideoDenoiseType(EnumType):
     T2V = "t2v"
     I2V = "i2v"
     V2V = "v2v"

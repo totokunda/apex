@@ -1,7 +1,7 @@
 from src.engine.base_engine import BaseEngine
 import torch
 from typing import List
-from enum import Enum
+from src.utils.type_utils import EnumType
 from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise import MagiDenoise, MagiDenoiseType
@@ -11,7 +11,7 @@ from .i2v import MagiI2VEngine
 from .v2v import MagiV2VEngine
 
 
-class ModelType(Enum):
+class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     V2V = "v2v"  # video to video
@@ -25,10 +25,12 @@ class MagiEngine(BaseEngine, MagiDenoise):
         denoise_type: MagiDenoiseType = MagiDenoiseType.T2V,
         **kwargs,
     ):
-        super().__init__(yaml_path, **kwargs)
+        
 
         self.model_type = model_type
         self.denoise_type = denoise_type
+        
+        super().__init__(yaml_path, **kwargs)
 
         # Set up VAE scale factors based on MAGI VAE configuration
         self.vae_scale_factor_temporal = (

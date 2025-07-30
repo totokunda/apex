@@ -1,8 +1,6 @@
-import torch
 from diffusers.video_processor import VideoProcessor
-from enum import Enum, auto
 from typing import List
-
+from src.utils.type_utils import EnumType
 from src.engine.base_engine import BaseEngine
 from src.mixins import OffloadMixin
 from src.engine.denoise.ltx_denoise import LTXDenoise, DenoiseType
@@ -17,7 +15,7 @@ from .i2v import LTXI2VEngine
 from .control import LTXControlEngine
 
 
-class ModelType(Enum):
+class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     CONTROL = "control"
@@ -33,6 +31,7 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
         super().__init__(yaml_path, **kwargs)
 
         self.model_type = model_type
+    
         if self.model_type == ModelType.CONTROL:
             self.denoise_type = DenoiseType.CONDITION
         elif self.model_type == ModelType.T2V:

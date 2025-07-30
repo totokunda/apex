@@ -27,7 +27,7 @@ from diffusers.utils import (
     scale_lora_layers,
     unscale_lora_layers,
 )
-from diffusers.models.attention import FeedForward
+from diffusers.models.attention import FeedForward, AttentionModuleMixin
 from diffusers.models.attention_processor import Attention
 from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import (
@@ -38,12 +38,117 @@ from diffusers.models.embeddings import (
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
+
 from diffusers.models.normalization import FP32LayerNorm
 from src.attention.processors.wan_processor import WanAttnProcessor2_0
 
 from src.transformer_models.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+
+class WanAttention(torch.nn.Module, AttentionModuleMixin):
+    _default_processor_cls = WanAttnProcessor2_0
+    _available_processors = [WanAttnProcessor2_0]
+
+    def __init__(
+        self,
+        dim: int,
+        heads: int = 8,
+        dim_head: int = 64,
+        eps: float = 1e-5,
+        dropout: float = 0.0,
+        added_kv_proj_dim: Optional[int] = None,
+        cross_attention_dim_head: Optional[int] = None,
+        processor=None,
+    ):
+        super().__init__()
+
+        self.inner_dim = dim_head * heads
+        self.heads = heads
+        self.added_kv_proj_dim = added_kv_proj_dim
+        self.cross_attention_dim_head = cross_attention_dim_head
+        self.kv_inner_dim = self.inner_dim if cross_attention_dim_head is None else cross_attention_dim_head * heads
+
+        self.to_q = torch.nn.Linear(dim, self.inner_dim, bias=True)
+        self.to_k = torch.nn.Linear(dim, self.kv_inner_dim, bias=True)
+        self.to_v = torch.nn.Linear(dim, self.kv_inner_dim, bias=True)
+        self.to_out = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(self.inner_dim, dim, bias=True),
+                torch.nn.Dropout(dropout),
+            ]
+        )
+        self.norm_q = torch.nn.RMSNorm(dim_head * heads, eps=eps, elementwise_affine=True)
+        self.norm_k = torch.nn.RMSNorm(dim_head * heads, eps=eps, elementwise_affine=True)
+
+        self.add_k_proj = self.add_v_proj = None
+        if added_kv_proj_dim is not None:
+            self.add_k_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
+            self.add_v_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
+            self.norm_added_k = torch.nn.RMSNorm(dim_head * heads, eps=eps)
+
+        self.set_processor(processor)
+
+    def fuse_projections(self):
+        if getattr(self, "fused_projections", False):
+            return
+
+        if self.cross_attention_dim_head is None:
+            concatenated_weights = torch.cat([self.to_q.weight.data, self.to_k.weight.data, self.to_v.weight.data])
+            concatenated_bias = torch.cat([self.to_q.bias.data, self.to_k.bias.data, self.to_v.bias.data])
+            out_features, in_features = concatenated_weights.shape
+            with torch.device("meta"):
+                self.to_qkv = nn.Linear(in_features, out_features, bias=True)
+            self.to_qkv.load_state_dict(
+                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+            )
+        else:
+            concatenated_weights = torch.cat([self.to_k.weight.data, self.to_v.weight.data])
+            concatenated_bias = torch.cat([self.to_k.bias.data, self.to_v.bias.data])
+            out_features, in_features = concatenated_weights.shape
+            with torch.device("meta"):
+                self.to_kv = nn.Linear(in_features, out_features, bias=True)
+            self.to_kv.load_state_dict(
+                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+            )
+
+        if self.added_kv_proj_dim is not None:
+            concatenated_weights = torch.cat([self.add_k_proj.weight.data, self.add_v_proj.weight.data])
+            concatenated_bias = torch.cat([self.add_k_proj.bias.data, self.add_v_proj.bias.data])
+            out_features, in_features = concatenated_weights.shape
+            with torch.device("meta"):
+                self.to_added_kv = nn.Linear(in_features, out_features, bias=True)
+            self.to_added_kv.load_state_dict(
+                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+            )
+
+        self.fused_projections = True
+
+    @torch.no_grad()
+    def unfuse_projections(self):
+        if not getattr(self, "fused_projections", False):
+            return
+
+        if hasattr(self, "to_qkv"):
+            delattr(self, "to_qkv")
+        if hasattr(self, "to_kv"):
+            delattr(self, "to_kv")
+        if hasattr(self, "to_added_kv"):
+            delattr(self, "to_added_kv")
+
+        self.fused_projections = False
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        return self.processor(self, hidden_states, encoder_hidden_states, attention_mask, rotary_emb, **kwargs)
+
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -200,32 +305,24 @@ class WanTransformerBlock(nn.Module):
 
         # 1. Self-attention
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
-        self.attn1 = Attention(
-            query_dim=dim,
+        self.attn1 = WanAttention(
+            dim=dim,
             heads=num_heads,
-            kv_heads=num_heads,
             dim_head=dim // num_heads,
-            qk_norm=qk_norm,
             eps=eps,
-            bias=True,
-            cross_attention_dim=None,
-            out_bias=True,
+            added_kv_proj_dim=added_kv_proj_dim,
+            cross_attention_dim_head=dim // num_heads,
             processor=WanAttnProcessor2_0(),
         )
 
         # 2. Cross-attention
-        self.attn2 = Attention(
-            query_dim=dim,
+        self.attn2 = WanAttention(
+            dim=dim,
             heads=num_heads,
-            kv_heads=num_heads,
             dim_head=dim // num_heads,
-            qk_norm=qk_norm,
             eps=eps,
-            bias=True,
-            cross_attention_dim=None,
-            out_bias=True,
             added_kv_proj_dim=added_kv_proj_dim,
-            added_proj_bias=True,
+            cross_attention_dim_head=dim // num_heads,
             processor=WanAttnProcessor2_0(),
         )
         self.norm2 = (
