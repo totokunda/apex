@@ -114,12 +114,14 @@ class WanI2VEngine(WanBaseEngine):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
+        
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
+        
         num_frames = self._parse_num_frames(duration, fps)
 
         latents = self._get_latents(
@@ -156,6 +158,7 @@ class WanI2VEngine(WanBaseEngine):
             dtype=latents.dtype,
             normalize_latents_dtype=latents.dtype,
         )
+        
         batch_size, _, _, latent_height, latent_width = latents.shape
 
         mask_lat_size = torch.ones(

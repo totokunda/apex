@@ -80,29 +80,60 @@ class SkyReelsTransformerConverter(WanTransformerConverter):
         )
 
 
-class WanMultiTalkTransformerConverter(WanTransformerConverter):
+class WanMultiTalkTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
-        # Add audio-specific parameter mappings
-        self.rename_dict.update(
-            {
-                # Audio projection model mappings
-                "audio_proj.proj1": "audio_proj.proj1",
-                "audio_proj.proj1_vf": "audio_proj.proj1_vf",
-                "audio_proj.proj2": "audio_proj.proj2",
-                "audio_proj.proj3": "audio_proj.proj3",
-                "audio_proj.norm": "audio_proj.norm",
-                # Audio cross-attention mappings
-                "audio_cross_attn.to_q": "audio_cross_attn.to_q",
-                "audio_cross_attn.to_k": "audio_cross_attn.to_k",
-                "audio_cross_attn.to_v": "audio_cross_attn.to_v",
-                "audio_cross_attn.to_out": "audio_cross_attn.to_out",
-                "audio_cross_attn.norm_q": "audio_cross_attn.norm_q",
-                "audio_cross_attn.norm_k": "audio_cross_attn.norm_k",
-                # Visual normalization
-                "norm_x": "norm_x",
-            }
-        )
+        self.rename_dict = {
+            "audio_cross_attn.q_linear": "audio_attn2.q_linear",
+            "audio_cross_attn.q_norm": "audio_attn2.q_norm",
+            "audio_cross_attn.k_norm": "audio_attn2.k_norm",
+            "audio_cross_attn.v_norm": "audio_attn2.v_norm",
+            "audio_cross_attn.kv_linear": "audio_attn2.kv_linear",
+            "audio_cross_attn.add_q_norm": "audio_attn2.add_q_norm",
+            "audio_cross_attn.add_k_norm": "audio_attn2.add_k_norm",
+            "audio_cross_attn.proj": "audio_attn2.proj",
+            "time_embedding.0": "condition_embedder.time_embedder.linear_1",
+            "time_embedding.2": "condition_embedder.time_embedder.linear_2",
+            "text_embedding.0": "condition_embedder.text_embedder.linear_1",
+            "text_embedding.2": "condition_embedder.text_embedder.linear_2",
+            "time_projection.1": "condition_embedder.time_proj",
+            "head.modulation": "scale_shift_table",
+            "head.head": "proj_out",
+            "modulation": "scale_shift_table",
+            "ffn.0": "ffn.net.0.proj",
+            "ffn.2": "ffn.net.2",
+            # Hack to swap the layer names
+            # The original model calls the norms in following order: norm1, norm3, norm2
+            # We convert it to: norm1, norm2, norm3
+            "norm2": "norm__placeholder",
+            "norm3": "norm2",
+            "norm__placeholder": "norm3",
+            # For the I2V model
+            "img_emb.proj.0": "condition_embedder.image_embedder.norm1",
+            "img_emb.proj.1": "condition_embedder.image_embedder.ff.net.0.proj",
+            "img_emb.proj.3": "condition_embedder.image_embedder.ff.net.2",
+            "img_emb.proj.4": "condition_embedder.image_embedder.norm2",
+            # for the FLF2V model
+            "img_emb.emb_pos": "condition_embedder.image_embedder.pos_embed",
+            # Add attention component mappings
+            "self_attn.q": "attn1.to_q",
+            "self_attn.k": "attn1.to_k",
+            "self_attn.v": "attn1.to_v",
+            "self_attn.o": "attn1.to_out.0",
+            "self_attn.norm_q": "attn1.norm_q",
+            "self_attn.norm_k": "attn1.norm_k",
+            "cross_attn.q": "attn2.to_q",
+            "cross_attn.k": "attn2.to_k",
+            "cross_attn.v": "attn2.to_v",
+            "cross_attn.o": "attn2.to_out.0",
+            "cross_attn.norm_q": "attn2.norm_q",
+            "cross_attn.norm_k": "attn2.norm_k",
+            "attn2.to_k_img": "attn2.add_k_proj",
+            "attn2.to_v_img": "attn2.add_v_proj",
+            "attn2.norm_k_img": "attn2.norm_added_k",
+        }
+        
+        self.special_keys_map = {}
 
 
 class WanVaceTransformerConverter(WanTransformerConverter):

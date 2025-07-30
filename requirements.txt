@@ -34,3 +34,4 @@ scikit-image
 matplotlib
 onnxruntime
 librosa
+pyloudnorm
