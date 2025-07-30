@@ -34,6 +34,8 @@ class WanI2VEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        boundary_ratio: float | None = None,
+        expand_timesteps: bool = False,
     ):
 
         if not self.text_encoder:
@@ -82,10 +84,19 @@ class WanI2VEngine(WanBaseEngine):
         transformer_dtype = self.component_dtypes["transformer"]
 
         self.to_device(self.transformer)
+        
+        if "clip" not in self.preprocessors and boundary_ratio is None:
+            self.load_preprocessor_by_type("clip")
+            self.to_device(self.preprocessors["clip"])
 
-        image_embeds = self.preprocessors["clip"](
-            loaded_image, hidden_states_layer=-2
-        ).to(self.device, dtype=transformer_dtype)
+        if boundary_ratio is None:
+            image_embeds = self.preprocessors["clip"](
+                loaded_image, hidden_states_layer=-2
+            ).to(self.device, dtype=transformer_dtype)
+        else:
+            image_embeds = None
+            
+            
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -166,8 +177,14 @@ class WanI2VEngine(WanBaseEngine):
         mask_lat_size = mask_lat_size.to(latents.device)
 
         latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
+        
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * getattr(self.scheduler.config, "num_train_timesteps", 1000)
+        else:
+            boundary_timestep = None
 
         latents = self.denoise(
+            boundary_timestep=boundary_timestep,
             timesteps=timesteps,
             latents=latents,
             latent_condition=latent_condition,
@@ -191,6 +208,7 @@ class WanI2VEngine(WanBaseEngine):
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
+            expand_timesteps=expand_timesteps,
         )
 
         if offload:

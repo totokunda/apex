@@ -1,4 +1,4 @@
-from enum import Enum
+from src.utils.type_utils import EnumType
 from src.engine.denoise.wan_denoise import DenoiseType
 import torch
 from typing import List, Union, Optional
@@ -13,7 +13,7 @@ from .df import SkyReelsDFEngine
 from src.engine.wan import WanEngine
 
 
-class ModelType(Enum):
+class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     DF = "df"  # diffusion forcing
@@ -26,8 +26,9 @@ class SkyReelsEngine(WanEngine):
         else:
             denoise_type = DenoiseType.BASE
         super().__init__(
-            yaml_path, model_type=model_type, denoise_type=denoise_type, **kwargs
+            yaml_path, model_type=model_type, **kwargs
         )
+        self.denoise_type = denoise_type
 
         # Initialize the appropriate implementation engine
         self._init_implementation_engine()

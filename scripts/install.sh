@@ -456,7 +456,7 @@ if [[ "$CUDA_AVAILABLE" == true ]]; then
     else
         cd flash-attention
         print_status "Installing Flash Attention from existing directory..."
-        $CONDA_RUN pip install . --verbose
+        $CONDA_RUN pip install . --verbose --no-build-isolation
         
         # The setup.py of modern flash-attention automatically detects and builds for the present GPU architecture.
         if [[ "$SUPPORTS_HOPPER" == true ]]; then

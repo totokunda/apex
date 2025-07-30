@@ -1,7 +1,6 @@
 from src.engine.base_engine import BaseEngine
 import torch
-from typing import Dict, Any, Callable, List, Union, Optional
-from enum import Enum
+from typing import List
 from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
@@ -17,9 +16,9 @@ from .inp import WanInpEngine
 from .phantom import WanPhantomEngine
 from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
+from src.utils.type_utils import EnumType
 
-
-class ModelType(Enum):
+class ModelType(EnumType):
     VACE = "vace"  # vace
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
@@ -41,10 +40,10 @@ class WanEngine(BaseEngine, WanDenoise):
         denoise_type: DenoiseType = DenoiseType.BASE,
         **kwargs,
     ):
-        super().__init__(yaml_path, **kwargs)
-
         self.model_type = model_type
         self.denoise_type = denoise_type
+            
+        super().__init__(yaml_path, **kwargs)
 
         self.vae_scale_factor_temporal = (
             2 ** sum(self.vae.temperal_downsample)

@@ -41,7 +41,11 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import FP32LayerNorm
 from src.attention.processors.wan_processor import WanAttnProcessor2_0
-
+from src.attention.processors.multitalk_wan_processor import MultiTalkWanAttnProcessor2_0
+from src.attention import attention_register
+from einops import repeat
+from functools import lru_cache
+from einops import rearrange
 from src.transformer_models.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -65,75 +69,244 @@ class WanRMSNorm(nn.Module):
         return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
 
 
-class SingleStreamMutiAttention(nn.Module):
-    """Audio cross-attention module for MultiTalk"""
 
+class SingleStreamAttention(nn.Module):
     def __init__(
         self,
         dim: int,
         encoder_hidden_states_dim: int,
         num_heads: int,
-        qk_norm: bool = False,
-        qkv_bias: bool = True,
+        qkv_bias: bool,
+        qk_norm: bool,
+        norm_layer: nn.Module,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
         eps: float = 1e-6,
-        norm_layer=WanRMSNorm,
-        class_range: int = 24,
-        class_interval: int = 4,
-    ):
+    ) -> None:
         super().__init__()
+        assert dim % num_heads == 0, "dim should be divisible by num_heads"
         self.dim = dim
+        self.encoder_hidden_states_dim = encoder_hidden_states_dim
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.encoder_hidden_states_dim = encoder_hidden_states_dim
-        self.class_range = class_range
-        self.class_interval = class_interval
+        self.scale = self.head_dim**-0.5
+        self.qk_norm = qk_norm
 
-        # Linear projections
-        self.to_q = nn.Linear(dim, dim, bias=qkv_bias)
-        self.to_k = nn.Linear(encoder_hidden_states_dim, dim, bias=qkv_bias)
-        self.to_v = nn.Linear(encoder_hidden_states_dim, dim, bias=qkv_bias)
-        self.to_out = nn.Linear(dim, dim)
+        self.q_linear = nn.Linear(dim, dim, bias=qkv_bias)
 
-        # Normalization
-        if qk_norm:
-            self.norm_q = norm_layer(dim, eps=eps)
-            self.norm_k = norm_layer(dim, eps=eps)
-        else:
-            self.norm_q = nn.Identity()
-            self.norm_k = nn.Identity()
+        self.q_norm = norm_layer(self.head_dim, eps=eps) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim,eps=eps) if qk_norm else nn.Identity()
 
-    def forward(
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        self.kv_linear = nn.Linear(encoder_hidden_states_dim, dim * 2, bias=qkv_bias)
+
+        self.add_q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.add_k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+
+    def forward(self, hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor, shape=None, enable_sp=False, kv_seq=None) -> torch.Tensor:
+       
+        N_t, N_h, N_w = shape
+        if not enable_sp:
+            hidden_states = rearrange(hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t)
+
+        # get q for hidden_state
+        B, N, C = hidden_states.shape
+        q = self.q_linear(hidden_states)
+        q_shape = (B, N, self.num_heads, self.head_dim)
+        q = q.view(q_shape).permute((0, 2, 1, 3))
+
+        if self.qk_norm:
+            q = self.q_norm(q)
+        
+        # get kv from encoder_hidden_states
+        _, N_a, _ = encoder_hidden_states.shape
+        encoder_kv = self.kv_linear(encoder_hidden_states)
+        encoder_kv_shape = (B, N_a, 2, self.num_heads, self.head_dim)
+        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4)) 
+        encoder_k, encoder_v = encoder_kv.unbind(0)
+
+        if self.qk_norm:
+            encoder_k = self.add_k_norm(encoder_k)
+
+
+        attn_bias = None
+        hidden_states = attention_register.call(q, encoder_k, encoder_v, attn_bias=attn_bias, op=None)
+
+        # linear transform
+        x_output_shape = (B, N, C)
+        hidden_states = hidden_states.transpose(1, 2) 
+        hidden_states = hidden_states.reshape(x_output_shape) 
+        hidden_states = self.proj(hidden_states)
+        hidden_states = self.proj_drop(hidden_states)
+
+        if not enable_sp:
+            # reshape x to origin shape
+            x = rearrange(x, "(B N_t) S C -> B (N_t S) C", N_t=N_t)
+
+        return x
+
+
+class RotaryPositionalEmbedding1D(nn.Module):
+
+    def __init__(self,
+                 head_dim,
+                 ):
+        super().__init__()
+        self.head_dim = head_dim
+        self.base = 10000
+
+
+    @lru_cache(maxsize=32)
+    def precompute_freqs_cis_1d(self, pos_indices):
+
+        freqs = 1.0 / (self.base ** (torch.arange(0, self.head_dim, 2)[: (self.head_dim // 2)].float() / self.head_dim))
+        freqs = freqs.to(pos_indices.device)
+        freqs = torch.einsum("..., f -> ... f", pos_indices.float(), freqs)
+        freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+        return freqs
+    
+    def rotate_half(self, x):
+        x = rearrange(x, "... (d r) -> ... d r", r=2)
+        x1, x2 = x.unbind(dim=-1)
+        x = torch.stack((-x2, x1), dim=-1)
+        return rearrange(x, "... d r -> ... (d r)")
+
+    def forward(self, x, pos_indices):
+        """1D RoPE.
+
+        Args:
+            query (torch.tensor): [B, head, seq, head_dim]
+            pos_indices (torch.tensor): [seq,]
+        Returns:
+            query with the same shape as input.
+        """
+        freqs_cis = self.precompute_freqs_cis_1d(pos_indices)
+
+        x_ = x.float()
+
+        freqs_cis = freqs_cis.float().to(x.device)
+        cos, sin = freqs_cis.cos(), freqs_cis.sin()
+        cos, sin = rearrange(cos, 'n d -> 1 1 n d'), rearrange(sin, 'n d -> 1 1 n d')
+        x_ = (x_ * cos) + (self.rotate_half(x_) * sin)
+
+        return x_.type_as(x)
+
+class SingleStreamMutiAttention(SingleStreamAttention):
+    def __init__(
         self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        shape: torch.Tensor,
-        x_ref_attn_map: Optional[torch.Tensor] = None,
-        human_num: Optional[int] = None,
-    ) -> torch.Tensor:
-        batch_size, seq_len, _ = hidden_states.shape
-
-        # Project to query, key, value
-        q = self.norm_q(self.to_q(hidden_states))
-        k = self.norm_k(self.to_k(encoder_hidden_states))
-        v = self.to_v(encoder_hidden_states)
-
-        # Reshape for multi-head attention
-        q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-
-        # Compute attention
-        scale = self.head_dim**-0.5
-        attn_weights = torch.matmul(q, k.transpose(-2, -1)) * scale
-        attn_weights = F.softmax(attn_weights, dim=-1)
-
-        attn_output = torch.matmul(attn_weights, v)
-        attn_output = (
-            attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.dim)
+        dim: int,
+        encoder_hidden_states_dim: int,
+        num_heads: int,
+        qkv_bias: bool,
+        qk_norm: bool,
+        norm_layer: nn.Module,
+        attn_drop: float = 0.0,
+        proj_drop: float = 0.0,
+        eps: float = 1e-6,
+        class_range: int = 24,
+        class_interval: int = 4,
+    ) -> None:
+        super().__init__(
+            dim=dim,
+            encoder_hidden_states_dim=encoder_hidden_states_dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_norm=qk_norm,
+            norm_layer=norm_layer,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            eps=eps,
         )
+        self.class_interval = class_interval
+        self.class_range = class_range
+        self.rope_h1  = (0, self.class_interval)
+        self.rope_h2  = (self.class_range - self.class_interval, self.class_range)
+        self.rope_bak = int(self.class_range // 2)
 
-        return self.to_out(attn_output)
+        self.rope_1d = RotaryPositionalEmbedding1D(self.head_dim)
+        
+    def normalize_and_scale(self, column, source_range, target_range, epsilon=1e-8):
+        source_min, source_max = source_range
+        new_min, new_max = target_range
+        normalized = (column - source_min) / (source_max - source_min + epsilon)
+        scaled = normalized * (new_max - new_min) + new_min
+        return scaled
 
+    def forward(self, 
+                hidden_states: torch.Tensor, 
+                encoder_hidden_states: torch.Tensor, 
+                shape=None, 
+                x_ref_attn_map=None,
+                human_num=None,
+                ) -> torch.Tensor:
+        
+        encoder_hidden_states = encoder_hidden_states.squeeze(0)
+        if human_num == 1:
+            return super().forward(hidden_states, encoder_hidden_states, shape)
+
+        N_t, _, _ = shape 
+        hidden_states = rearrange(hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t) 
+
+        # get q for hidden_state
+        B, N, C = hidden_states.shape
+        q = self.q_linear(hidden_states) 
+        q_shape = (B, N, self.num_heads, self.head_dim) 
+        q = q.view(q_shape).permute((0, 2, 1, 3))
+
+        if self.qk_norm:
+            q = self.q_norm(q)
+
+        max_values = x_ref_attn_map.max(1).values[:, None, None] 
+        min_values = x_ref_attn_map.min(1).values[:, None, None] 
+        max_min_values = torch.cat([max_values, min_values], dim=2)
+
+        human1_max_value, human1_min_value = max_min_values[0, :, 0].max(), max_min_values[0, :, 1].min()
+        human2_max_value, human2_min_value = max_min_values[1, :, 0].max(), max_min_values[1, :, 1].min()
+
+        human1 = self.normalize_and_scale(x_ref_attn_map[0], (human1_min_value, human1_max_value), (self.rope_h1[0], self.rope_h1[1]))
+        human2 = self.normalize_and_scale(x_ref_attn_map[1], (human2_min_value, human2_max_value), (self.rope_h2[0], self.rope_h2[1]))
+        back   = torch.full((x_ref_attn_map.size(1),), self.rope_bak, dtype=human1.dtype).to(human1.device)
+        max_indices = x_ref_attn_map.argmax(dim=0)
+        normalized_map = torch.stack([human1, human2, back], dim=1)
+        normalized_pos = normalized_map[range(x_ref_attn_map.size(1)), max_indices] # N 
+
+        q = rearrange(q, "(B N_t) H S C -> B H (N_t S) C", N_t=N_t)
+        q = self.rope_1d(q, normalized_pos)
+        q = rearrange(q, "B H (N_t S) C -> (B N_t) H S C", N_t=N_t)
+
+        _, N_a, _ = encoder_hidden_states.shape 
+        encoder_kv = self.kv_linear(encoder_hidden_states) 
+        encoder_kv_shape = (B, N_a, 2, self.num_heads, self.head_dim)
+        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4)) 
+        encoder_k, encoder_v = encoder_kv.unbind(0) 
+
+        if self.qk_norm:
+            encoder_k = self.add_k_norm(encoder_k)
+
+        per_frame = torch.zeros(N_a, dtype=encoder_k.dtype).to(encoder_k.device)
+        per_frame[:per_frame.size(0)//2] = (self.rope_h1[0] + self.rope_h1[1]) / 2
+        per_frame[per_frame.size(0)//2:] = (self.rope_h2[0] + self.rope_h2[1]) / 2
+        encoder_pos = torch.concat([per_frame]*N_t, dim=0)
+        encoder_k = rearrange(encoder_k, "(B N_t) H S C -> B H (N_t S) C", N_t=N_t)
+        encoder_k = self.rope_1d(encoder_k, encoder_pos)
+        encoder_k = rearrange(encoder_k, "B H (N_t S) C -> (B N_t) H S C", N_t=N_t)
+
+        hidden_states = attention_register.call(q, encoder_k, encoder_v, attn_bias=None, op=None,)
+
+        # linear transform
+        hidden_states_output_shape = (B, N, C)
+        hidden_states = hidden_states.transpose(1, 2) 
+        hidden_states = hidden_states.reshape(hidden_states_output_shape) 
+        hidden_states = self.proj(hidden_states) 
+        hidden_states = self.proj_drop(hidden_states)
+
+        # reshape x to origin shape
+        hidden_states = rearrange(hidden_states, "(B N_t) S C -> B (N_t S) C", N_t=N_t) 
+
+        return hidden_states
 
 class AudioProjModel(nn.Module):
     """Audio projection model for MultiTalk"""
@@ -390,7 +563,7 @@ class WanMultiTalkTransformerBlock(nn.Module):
             bias=True,
             cross_attention_dim=None,
             out_bias=True,
-            processor=WanAttnProcessor2_0(),
+            processor=MultiTalkWanAttnProcessor2_0(),
         )
 
         # 2. Cross-attention for text/image
@@ -459,8 +632,8 @@ class WanMultiTalkTransformerBlock(nn.Module):
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
         ).type_as(hidden_states)
 
-        attn_output = self.attn1(
-            hidden_states=norm_hidden_states, rotary_emb=rotary_emb
+        attn_output, x_ref_attn_map = self.attn1(
+            hidden_states=norm_hidden_states, rotary_emb=rotary_emb, grid_sizes=grid_sizes, ref_target_masks=ref_target_masks
         )
 
         hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
@@ -481,9 +654,9 @@ class WanMultiTalkTransformerBlock(nn.Module):
             x_a = self.audio_cross_attn(
                 self.norm_x(hidden_states),
                 encoder_hidden_states=encoder_hidden_states_audio,
-                shape=grid_sizes[0] if grid_sizes is not None else None,
-                x_ref_attn_map=None,  # TODO: Implement attention map if needed
+                shape=grid_sizes,
                 human_num=human_num,
+                x_ref_attn_map=x_ref_attn_map,
             )
             hidden_states = hidden_states + x_a
 
@@ -590,6 +763,8 @@ class WanMultiTalkTransformer3DModel(
         vae_scale: int = 4,
         norm_input_visual: bool = True,
         norm_output_audio: bool = True,
+        class_range: int = 24,
+        class_interval: int = 4,
     ) -> None:
         super().__init__()
 
@@ -635,6 +810,8 @@ class WanMultiTalkTransformer3DModel(
                     added_kv_proj_dim,
                     output_dim,
                     norm_input_visual,
+                    class_range,
+                    class_interval,
                 )
                 for _ in range(num_layers)
             ]
@@ -686,10 +863,7 @@ class WanMultiTalkTransformer3DModel(
         post_patch_width = width // p_w
 
         # Calculate grid sizes for audio processing
-        grid_sizes = torch.tensor(
-            [[post_patch_num_frames, post_patch_height, post_patch_width]],
-            dtype=torch.long,
-        )
+        grid_sizes = (post_patch_num_frames, post_patch_height, post_patch_width)
 
         rotary_emb = self.rope(hidden_states)
 

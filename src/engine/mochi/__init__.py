@@ -1,5 +1,5 @@
 from typing import List
-from enum import Enum
+from src.utils.type_utils import EnumType
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise.mochi_denoise import MochiDenoise
 from src.ui.nodes import UINode
@@ -9,7 +9,7 @@ from src.engine.base_engine import BaseEngine
 from .t2v import MochiT2VEngine
 
 
-class ModelType(Enum):
+class ModelType(EnumType):
     T2V = "t2v"  # text to video
 
 

@@ -1355,7 +1355,7 @@ class WanApexFramepackTransformer3DModel(
         context_decay_steps: int = 1000,
         context_decay_max: float = 0.5,
         context_decay_min: float = 0.10,
-        model_categories: List[str] = ["porn", "anime", "cinema"],
+        model_categories: List[str] | None = None,
         use_moe: bool = False,
         moe_top_k: int = 1,
         num_style_tokens: int = 8,
@@ -1382,7 +1382,7 @@ class WanApexFramepackTransformer3DModel(
         )
 
         self.framepack_schedule: BaseSchedule = getattr(
-            src.utils.framepack_schedules, framepack_schedule
+            src.transformer_models.wan.apex_framepack.module, framepack_schedule
         )(context_decay_steps, context_decay_max, context_decay_min)
 
         # 2. Condition embeddings
@@ -1457,7 +1457,7 @@ class WanApexFramepackTransformer3DModel(
         hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_hidden_states: torch.Tensor,
-        model_category: torch.LongTensor,
+        model_category: torch.LongTensor | None = None,
         latent_context: List[Tuple[torch.Tensor, torch.Tensor, int]] | None = None,
         indices: Optional[torch.Tensor] = None,
         encoder_hidden_states_image: Optional[torch.Tensor] = None,

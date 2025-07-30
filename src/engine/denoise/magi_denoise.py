@@ -1,14 +1,14 @@
 import torch
 import math
 import numpy as np
-from enum import Enum
+from src.utils.type_utils import EnumType
 from typing import Optional, List, Dict, Any, Tuple
 from collections import Counter
 from tqdm import tqdm
 import gc
 
 
-class MagiDenoiseType(Enum):
+class MagiDenoiseType(EnumType):
     T2V = "t2v"
     I2V = "i2v"
     V2V = "v2v"

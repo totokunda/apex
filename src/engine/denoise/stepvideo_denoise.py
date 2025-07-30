@@ -1,8 +1,8 @@
 import torch
-from enum import Enum
+from src.utils.type_utils import EnumType   
 
 
-class DenoiseType(Enum):
+class DenoiseType(EnumType):
     BASE = "base"
 
 

@@ -5,7 +5,6 @@ import numpy as np
 
 from .base import WanBaseEngine
 
-
 class WanT2VEngine(WanBaseEngine):
     """WAN Text-to-Video Engine Implementation"""
 
@@ -31,6 +30,7 @@ class WanT2VEngine(WanBaseEngine):
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        boundary_ratio: float | None = None,
         **kwargs,
     ):
 
@@ -58,10 +58,6 @@ class WanT2VEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if not self.transformer:
-            self.load_component_by_type("transformer")
-
-        self.to_device(self.transformer)
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
@@ -94,8 +90,15 @@ class WanT2VEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
+        
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * getattr(self.scheduler.config, "num_train_timesteps", 1000)
+        else:
+            boundary_timestep = None
+        
 
         latents = self.denoise(
+            boundary_timestep=boundary_timestep,
             timesteps=timesteps,
             latents=latents,
             latent_condition=None,

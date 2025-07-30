@@ -1,9 +1,8 @@
 import torch
-from enum import Enum
-from typing import Optional
+from src.utils.type_utils import EnumType
 
 
-class DenoiseType(Enum):
+class DenoiseType(EnumType):    
     T2V = "t2v"
     I2V = "i2v"
     CONDITION = "condition"

@@ -9,6 +9,7 @@ import glob
 from src.transformer_models.base import get_transformer
 from src.vae import get_vae
 from accelerate import init_empty_weights
+from typing import List
 
 from src.converters.transformer_converters import (
     WanTransformerConverter,
@@ -173,7 +174,7 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
 def convert_transformer(
     model_tag: str,
     model_type: str,
-    ckpt_path: str = None,
+    ckpt_path: str | List[str] = None,
     model_key: str = None,
     pattern: str | None = None,
     **transformer_converter_kwargs,
@@ -186,7 +187,12 @@ def convert_transformer(
     model_class = get_model_class(model_type, config, model_type="transformer_models")
 
     converter = get_transformer_converter(model_type)
-    state_dict = load_state_dict(ckpt_path, model_key, pattern)
+    if isinstance(ckpt_path, list):
+        state_dict = {}
+        for ckpt in ckpt_path:
+            state_dict.update(load_state_dict(ckpt, model_key, pattern))
+    else:
+        state_dict = load_state_dict(ckpt_path, model_key, pattern)
 
     model = get_empty_model(model_class, config)
 
@@ -202,7 +208,7 @@ def convert_transformer(
 def convert_vae(
     vae_tag: str,
     vae_type: str,
-    ckpt_path: str = None,
+    ckpt_path: str | List[str] = None,
     model_key: str = None,
     pattern: str | None = None,
     **vae_converter_kwargs,
@@ -213,7 +219,12 @@ def convert_vae(
     model_class = get_model_class(vae_type, config, model_type="vae")
 
     converter = get_vae_converter(vae_type, **vae_converter_kwargs)
-    state_dict = load_state_dict(ckpt_path, model_key, pattern)
+    if isinstance(ckpt_path, list):
+        state_dict = {}
+        for ckpt in ckpt_path:
+            state_dict.update(load_state_dict(ckpt, model_key, pattern))
+    else:
+        state_dict = load_state_dict(ckpt_path, model_key, pattern)
 
     model = get_empty_model(model_class, config)
 

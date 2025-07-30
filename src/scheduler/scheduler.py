@@ -30,19 +30,25 @@ class SchedulerInterface(ABC):
 
     alphas_cumprod: torch.Tensor  # [T], alphas for defining the noise schedule
 
-    @abstractmethod
-    def add_noise(
-        self, clean_latent: torch.Tensor, noise: torch.Tensor, timestep: torch.Tensor
-    ):
+    def add_noise(self, original_samples, noise, timestep):
         """
         Diffusion forward corruption process.
         Input:
-            - clean_latent: the clean latent with shape [B, C, H, W]
-            - noise: the noise with shape [B, C, H, W]
-            - timestep: the timestep with shape [B]
-        Output: the corrupted latent with shape [B, C, H, W]
+            - clean_latent: the clean latent with shape [B*T, C, H, W]
+            - noise: the noise with shape [B*T, C, H, W]
+            - timestep: the timestep with shape [B*T]
+        Output: the corrupted latent with shape [B*T, C, H, W]
         """
-        pass
+        if timestep.ndim == 2:
+            timestep = timestep.flatten(0, 1)
+        self.sigmas = self.sigmas.to(noise.device)
+        self.timesteps = self.timesteps.to(noise.device)
+        timestep_id = torch.argmin(
+            (self.timesteps.unsqueeze(0) - timestep.unsqueeze(1)).abs(), dim=1
+        )
+        sigma = self.sigmas[timestep_id].reshape(-1, 1, 1, 1)
+        sample = (1 - sigma) * original_samples + sigma * noise
+        return sample.type_as(noise)
 
     def convert_x0_to_noise(
         self, x0: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor
