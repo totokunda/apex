@@ -1,15 +1,11 @@
 from diffusers.utils import export_to_video
 from PIL import Image
 import torch
-from src.engine import WanEngine, WanModelType
+from src.engine import create_engine
 
-engine = WanEngine(
-        yaml_path="manifest/wan_x2v_camera_1.3b.yml",
-        model_type=WanModelType.FUN,
-        save_path="/mnt/localssd/apex-models",  # Change this to your desired save path,  # Change this to your desired save path
-        components_to_load=["transformer"],
-        component_dtypes={"vae": torch.bfloat16}
-    )
+engine = create_engine("wan", "manifest/wan/wan_x2v_camera_1.3b.yml", "i2v", save_path="/workspace/models", attention_type="flash3", component_dtypes={"text_encoder": torch.float32})
+
+
 
 poses = "data/poses/pan_left.txt"
 image = "data/images/img.png"

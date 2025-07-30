@@ -1,11 +1,8 @@
 import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
-import numpy as np
-
 from .base import WanBaseEngine
 from torch.nn import functional as F
-import math
 from torchvision import transforms as T
 from diffusers.utils.torch_utils import randn_tensor
 from src.utils.color_utils import match_and_blend_colors    
@@ -22,7 +19,7 @@ class WanMultitalkEngine(WanBaseEngine):
         negative_prompt: List[str] | str = None,
         height: int = 480,
         width: int = 832,
-        num_frames: int = 81,
+        duration: int | str = 81,
         max_num_frames: int = 1000,
         num_inference_steps: int = 40,
         num_videos: int = 1,
@@ -34,7 +31,6 @@ class WanMultitalkEngine(WanBaseEngine):
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
-        attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -42,9 +38,8 @@ class WanMultitalkEngine(WanBaseEngine):
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         face_scale: float = 0.05,
-        color_correction_strength: float = 0.0,
+        color_correction_strength: float = 1.0,
         bbox: Optional[Dict[str, List[float]]] = None,
-        duration: int | str = 16,
         **kwargs,
     ):
         """
@@ -72,22 +67,19 @@ class WanMultitalkEngine(WanBaseEngine):
             shift: Timestep transform shift parameter   
         """
         
+        num_frames = self._parse_num_frames(duration, fps)
         loaded_image = self._load_image(image)
         resized_image = self.resize_and_centercrop(loaded_image, (height, width))
-        
-        cond_image = self.video_processor.preprocess(
-            resized_image, height, width
-        ).unsqueeze(0)
-        
+        cond_image = resized_image / 255
+        cond_image = (cond_image - 0.5) * 2 # normalization
+
         original_color_reference = None
         if color_correction_strength > 0.0:
             original_color_reference = cond_image.clone()
         
-        
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
             
-        
         if "wan.multitalk" not in self.preprocessors:
             self.load_preprocessor_by_type("wan.multitalk")
             
@@ -107,16 +99,16 @@ class WanMultitalkEngine(WanBaseEngine):
         full_audio_embs = processed_inputs["audio_embeddings"]
 
         indices = (torch.arange(2 * 2 + 1) - 2) * 1 
-        clip_length = self._parse_num_frames(duration, fps)
+        clip_length = num_frames
         cur_motion_frames_num = 1
         audio_start_idx = 0
+        arrive_last_frame = False
         audio_end_idx = audio_start_idx + clip_length
         gen_video_list = []
         gen_latents_list = []
         is_first_clip = True
         
         transformer_dtype = self.component_dtypes["transformer"]
-        transformer_config = self.load_config_by_type("transformer")
         
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -138,11 +130,15 @@ class WanMultitalkEngine(WanBaseEngine):
             )
         else:
             negative_prompt_embeds = None
+        
         if offload:
             self._offload(self.text_encoder)
+    
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+            self.to_device(self.transformer)
             
-            
-        
+
         while True:
             audio_embs = []
             # split audio with window size
@@ -174,20 +170,22 @@ class WanMultitalkEngine(WanBaseEngine):
             msk = msk.transpose(1, 2).to(transformer_dtype) # B 4 T H W
             
             # get clip embedding
-            clip_processor = self.load_preprocessor_by_type("clip")
+            if "clip" not in self.preprocessors:
+                self.load_preprocessor_by_type("clip")
+                
+            clip_processor = self.preprocessors["clip"]
             self.to_device(clip_processor)
             # get clip embedding
-            image_embeds = clip_processor(cond_image[:, :, -1:, :, :]).to(transformer_dtype) 
+            image_embeds = clip_processor(loaded_image).to(transformer_dtype) 
             if offload:
                 self._offload(clip_processor)
                 
             # zero padding and vae encode
-            video_frames = torch.zeros(1, cond_image.shape[1], num_frames-cond_image.shape[2], lat_h, lat_w).to(self.device)
-            padding_frames_pixels_values = torch.concat([cond_image, video_frames], dim=2)
+            video_frames = torch.zeros(1, cond_image.shape[1], num_frames-cond_image.shape[2], h, w).to(self.device)
+            padding_frames_pixels_values = torch.concat([cond_image.to(self.device), video_frames], dim=2)
             
-                
-            latent_condition = self.vae_encode(padding_frames_pixels_values, offload=offload) 
-            latent_condition = torch.stack(latent_condition).to(transformer_dtype) # B C T H W
+            latent_condition = self.vae_encode(padding_frames_pixels_values, offload=offload)
+            latent_condition = latent_condition.to(transformer_dtype) # B C T H W
             cur_motion_frames_latent_num = int(1 + (cur_motion_frames_num-1) // 4)
             latent_motion_frames = latent_condition[:, :, :cur_motion_frames_latent_num][0] # C T H W
             latent_condition = torch.concat([msk, latent_condition], dim=1) # B 4+C T H W
@@ -200,7 +198,8 @@ class WanMultitalkEngine(WanBaseEngine):
             
             # prepare noise
             latents = randn_tensor(
-                (transformer_config.in_channels, (num_frames - 1) // 4 + 1,
+                (num_videos, self.num_channels_latents, 
+                 (num_frames - 1) // 4 + 1,
                 lat_h,
                 lat_w),
                 dtype=torch.float32,
@@ -214,48 +213,30 @@ class WanMultitalkEngine(WanBaseEngine):
             
             scheduler = self.scheduler
             
-            timesteps = self._get_timesteps(
+            input_timesteps, _ = self._get_timesteps(
                 scheduler=scheduler,
                 num_inference_steps=num_inference_steps,
                 timesteps=timesteps,
                 timesteps_as_indices=timesteps_as_indices,
             )
             
+
             if not is_first_clip:
                 latent_motion_frames = latent_motion_frames.to(latents.dtype).to(self.device)
                 motion_add_noise = torch.randn_like(latent_motion_frames).contiguous()
-                add_latent = scheduler.add_noise(latent_motion_frames, motion_add_noise, timesteps[0])
-                _, T_m, _, _ = add_latent.shape
-                latents[:, :T_m] = add_latent
-                    
+                add_latent = scheduler.add_noise(latent_motion_frames, motion_add_noise, input_timesteps[0].expand(latents.shape[0]))
+                C, T_m, H, W = add_latent.shape
+                latents[:, :C, :T_m, :H, :W] = add_latent
+                
             latents = self.denoise(
-                timesteps=timesteps,
+                timesteps=input_timesteps,
                 latents=latents,
                 latent_condition=latent_condition,
-                transformer_kwargs=dict(
-                    encoder_hidden_states=prompt_embeds,
-                    encoder_hidden_states_image=image_embeds,
-                    encoder_hidden_states_audio=audio_embs,
-                    ref_target_masks=ref_target_masks,
-                    human_num=human_num,
-                    attention_kwargs=attention_kwargs,
-                ),
-                unconditional_transformer_kwargs=(
-                    dict(
-                        encoder_hidden_states=negative_prompt_embeds,
-                        encoder_hidden_states_image=image_embeds,
-                        encoder_hidden_states_audio=(
-                            torch.zeros_like(audio_embs)
-                            if audio_embs is not None
-                            else None
-                        ),
-                        ref_target_masks=ref_target_masks,
-                        human_num=human_num,
-                        attention_kwargs=attention_kwargs,
-                    )
-                    if negative_prompt_embeds is not None
-                    else None
-                ),
+                image_embeds=image_embeds.to(self.device).to(transformer_dtype),
+                audio_embeds=audio_embs.to(self.device).to(transformer_dtype),
+                prompt_embeds=prompt_embeds.to(self.device).to(transformer_dtype),
+                negative_prompt_embeds=negative_prompt_embeds.to(self.device).to(transformer_dtype),
+                ref_target_masks=ref_target_masks,
                 transformer_dtype=transformer_dtype,
                 use_cfg_guidance=use_cfg_guidance,
                 render_on_step=render_on_step,
@@ -265,12 +246,11 @@ class WanMultitalkEngine(WanBaseEngine):
                 audio_guidance_scale=audio_guidance_scale,
             )
             
-            
             videos = self.vae_decode(latents, offload=offload).cpu()
         
             # >>> START OF COLOR CORRECTION STEP <<<
             if color_correction_strength > 0.0 and original_color_reference is not None:
-                videos = match_and_blend_colors(videos, original_color_reference, color_correction_strength)
+                videos = match_and_blend_colors(videos.float(), original_color_reference.float(), color_correction_strength)
             # >>> END OF COLOR CORRECTION STEP <<<
 
             if is_first_clip:
@@ -290,7 +270,6 @@ class WanMultitalkEngine(WanBaseEngine):
             audio_start_idx += (num_frames - cur_motion_frames_num)
             audio_end_idx = audio_start_idx + clip_length
 
-            # Repeat audio emb
             if audio_end_idx >= min(max_num_frames, len(full_audio_embs[0])):
                 arrive_last_frame = True
                 miss_lengths = []
@@ -299,7 +278,7 @@ class WanMultitalkEngine(WanBaseEngine):
                     source_frame = len(full_audio_embs[human_inx])
                     source_frames.append(source_frame)
                     if audio_end_idx >= len(full_audio_embs[human_inx]):
-                        miss_length   = audio_end_idx - len(full_audio_embs[human_inx]) + 3 
+                        miss_length = audio_end_idx - len(full_audio_embs[human_inx]) + 3 
                         add_audio_emb = torch.flip(full_audio_embs[human_inx][-1*miss_length:], dims=[0])
                         full_audio_embs[human_inx] = torch.cat([full_audio_embs[human_inx], add_audio_emb], dim=0)
                         miss_lengths.append(miss_length)
@@ -317,8 +296,11 @@ class WanMultitalkEngine(WanBaseEngine):
             return latents
         else:
             # postprocess
-            video = torch.cat(gen_video_list, dim=2).cpu()
-            postprocessed_video = self._postprocess(video)
+            gen_video_samples = torch.cat(gen_video_list, dim=2)[:, :, :int(max_num_frames)] 
+            if max_num_frames > num_frames and sum(miss_lengths) > 0:
+                # split video frames
+                gen_video_samples = gen_video_samples[:, :, :-1*miss_lengths[0]]
+            postprocessed_video = self._postprocess(gen_video_samples)
             return postprocessed_video
 
         

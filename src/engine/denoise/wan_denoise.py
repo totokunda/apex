@@ -285,7 +285,6 @@ class WanDenoise:
         latents = kwargs.get("latents", None)
         latent_condition = kwargs.get("latent_condition", None)
         transformer_dtype = kwargs.get("transformer_dtype", None)
-        use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         is_first_clip = kwargs.get("is_first_clip", True)
         latent_motion_frames = kwargs.get("latent_motion_frames", None)
         render_on_step = kwargs.get("render_on_step", False)
@@ -308,9 +307,11 @@ class WanDenoise:
             for i, t in enumerate(timesteps):
                 latent_model_input = torch.cat([latents, latent_condition], dim=1).to(transformer_dtype)
                 
+                timestep = t.expand(latents.shape[0])
+                
                 noise_pred_cond = self.transformer(
                     latent_model_input,
-                    t,
+                    timestep,
                     encoder_hidden_states=prompt_embeds,
                     encoder_hidden_states_image=image_embeds,
                     encoder_hidden_states_audio=audio_embeds,
@@ -323,7 +324,7 @@ class WanDenoise:
                 if math.isclose(guidance_scale, 1.0):
                     noise_pred_drop_audio = self.transformer(
                         latent_model_input,
-                        t,
+                        timestep,
                         encoder_hidden_states=prompt_embeds,
                         encoder_hidden_states_image=image_embeds,
                         encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
@@ -335,7 +336,7 @@ class WanDenoise:
                 else:
                     noise_pred_drop_text = self.transformer(
                         latent_model_input,
-                        t,
+                        timestep,
                         encoder_hidden_states=negative_prompt_embeds,
                         encoder_hidden_states_image=image_embeds,
                         encoder_hidden_states_audio=audio_embeds,
@@ -347,7 +348,7 @@ class WanDenoise:
                     
                     noise_pred_uncond = self.transformer(
                         latent_model_input,
-                        t,
+                        timestep,
                         encoder_hidden_states=negative_prompt_embeds,
                         encoder_hidden_states_image=image_embeds,
                         encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
@@ -356,9 +357,10 @@ class WanDenoise:
                         return_dict=False,
                         **attention_kwargs,
                     )[0]
+                
                     
                 if math.isclose(guidance_scale, 1.0):
-                            noise_pred = noise_pred_drop_audio + audio_guidance_scale* (noise_pred_cond - noise_pred_drop_audio)  
+                    noise_pred = noise_pred_drop_audio + audio_guidance_scale* (noise_pred_cond - noise_pred_drop_audio)  
                 else:
                     noise_pred = noise_pred_uncond + guidance_scale * (
                         noise_pred_cond - noise_pred_drop_text) + \

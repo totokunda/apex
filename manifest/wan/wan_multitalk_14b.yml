@@ -9,10 +9,15 @@ shared:
 
 components:
   - type: scheduler
-    base: "diffusers.UniPCMultistepScheduler"
-    config_path: "https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers/resolve/main/scheduler/scheduler_config.json"
+    base: "src.scheduler.FlowMatchScheduler"
     config:
-      flow_shift: 5.0
+      shift: 5.0
+      sigma_max: 1.0
+      sigma_min: 0.001
+      inverse_timesteps: False
+      extra_one_step: True
+      reverse_sigmas: False
+      add_zero_timestep: True
 
   - !include shared:wan/vae
   - !include shared:wan/text_encoder
@@ -25,7 +30,10 @@ components:
     config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P/resolve/main/config.json
     tag: "wan_multitalk_14b"
 
-preprocessors: null 
+preprocessors: 
+  - type: wan.multitalk
+    model_path: TencentGameMate/chinese-wav2vec2-base
+  - !include shared:wan/clip
 
 defaults:
   run:

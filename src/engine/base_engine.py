@@ -414,10 +414,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             transformer = self.convert_transformer_weights(component)
+            
             if self.save_converted_weights:
                 self.logger.info(
                     f"Saving converted transformer weights to {component.get('model_path', None)}"
                 )
+                
                 model_path = component.get("model_path", None)
                 
                 tmp_dir = tempfile.mkdtemp()
@@ -610,10 +612,18 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         component_type = component.get("type")
         assert component_type == "transformer", "Only transformer is supported for now"
         self.logger.info(f"Converting old model weights to diffusers format")
+        model_path = component["model_path"]
+        
+        if component.get("extra_model_paths", []):
+            extra_model_paths = component.get("extra_model_paths", [])
+            if isinstance(extra_model_paths, str):
+                extra_model_paths = [extra_model_paths]
+            model_path = [model_path] + extra_model_paths
+        
         return convert_transformer(
             component.get("tag", None),
             component["base"],
-            component["model_path"] if not component.get("extra_model_paths", []) else [component["model_path"]] + component.get("extra_model_paths", []),
+            model_path,
             component.get("model_key", None),
             component.get("file_pattern", None),
         )

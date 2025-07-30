@@ -5,7 +5,6 @@ from typing import Optional
 
 from src.attention.functions import attention_register
 
-
 @torch.compile
 def calculate_x_ref_attn_map(visual_q, ref_k, ref_target_masks, mode='mean', attn_bias=None):
     
@@ -162,7 +161,7 @@ class MultiTalkWanAttnProcessor2_0:
         hidden_states = attn.to_out[1](hidden_states)
             
         with torch.no_grad():
-            x_ref_attn_map = get_attn_map_with_target(query.type_as(hidden_states), key.type_as(hidden_states), grid_sizes, 
+            x_ref_attn_map = get_attn_map_with_target(query.type_as(hidden_states).transpose(1, 2), key.type_as(hidden_states).transpose(1, 2), grid_sizes, 
                                                     ref_target_masks=ref_target_masks)
         
         return hidden_states, x_ref_attn_map

@@ -1,5 +1,5 @@
 {
-    "_class_name": "WanTransformer3DModel",
+    "_class_name": "WanMultiTalkTransformer3DModel",
     "_diffusers_version": "0.33.0.dev0",
     "added_kv_proj_dim": 5120,
     "attention_head_dim": 128,

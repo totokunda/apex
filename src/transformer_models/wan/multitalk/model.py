@@ -142,11 +142,9 @@ class SingleStreamAttention(nn.Module):
         hidden_states = self.proj(hidden_states)
         hidden_states = self.proj_drop(hidden_states)
 
-        if not enable_sp:
-            # reshape x to origin shape
-            x = rearrange(x, "(B N_t) S C -> B (N_t S) C", N_t=N_t)
+        hidden_states = rearrange(hidden_states, "(B N_t) S C -> B (N_t S) C", N_t=N_t)
 
-        return x
+        return hidden_states
 
 
 class RotaryPositionalEmbedding1D(nn.Module):
@@ -308,32 +306,32 @@ class SingleStreamMutiAttention(SingleStreamAttention):
 
         return hidden_states
 
-class AudioProjModel(nn.Module):
-    """Audio projection model for MultiTalk"""
 
+
+class AudioProjModel(ModelMixin, ConfigMixin):
     def __init__(
         self,
-        seq_len: int = 5,
-        seq_len_vf: int = 12,
-        blocks: int = 12,
-        channels: int = 768,
-        intermediate_dim: int = 512,
-        output_dim: int = 768,
-        context_tokens: int = 32,
-        norm_output_audio: bool = False,
+        seq_len=5,
+        seq_len_vf=12,
+        blocks=12,  
+        channels=768, 
+        intermediate_dim=512,
+        output_dim=768,
+        context_tokens=32,
+        norm_output_audio=False,
     ):
         super().__init__()
 
         self.seq_len = seq_len
         self.blocks = blocks
         self.channels = channels
-        self.input_dim = seq_len * blocks * channels
+        self.input_dim = seq_len * blocks * channels  
         self.input_dim_vf = seq_len_vf * blocks * channels
         self.intermediate_dim = intermediate_dim
         self.context_tokens = context_tokens
         self.output_dim = output_dim
 
-        # Define linear layers
+        # define multiple linear layers
         self.proj1 = nn.Linear(self.input_dim, intermediate_dim)
         self.proj1_vf = nn.Linear(self.input_dim_vf, intermediate_dim)
         self.proj2 = nn.Linear(intermediate_dim, intermediate_dim)
@@ -344,39 +342,33 @@ class AudioProjModel(nn.Module):
         video_length = audio_embeds.shape[1] + audio_embeds_vf.shape[1]
         B, _, _, S, C = audio_embeds.shape
 
-        # Process audio of first frame
+        # process audio of first frame
         audio_embeds = rearrange(audio_embeds, "bz f w b c -> (bz f) w b c")
         batch_size, window_size, blocks, channels = audio_embeds.shape
         audio_embeds = audio_embeds.view(batch_size, window_size * blocks * channels)
 
-        # Process audio of latter frames
+        # process audio of latter frame
         audio_embeds_vf = rearrange(audio_embeds_vf, "bz f w b c -> (bz f) w b c")
         batch_size_vf, window_size_vf, blocks_vf, channels_vf = audio_embeds_vf.shape
-        audio_embeds_vf = audio_embeds_vf.view(
-            batch_size_vf, window_size_vf * blocks_vf * channels_vf
-        )
+        audio_embeds_vf = audio_embeds_vf.view(batch_size_vf, window_size_vf * blocks_vf * channels_vf)
 
-        # First projection
-        audio_embeds = torch.relu(self.proj1(audio_embeds))
-        audio_embeds_vf = torch.relu(self.proj1_vf(audio_embeds_vf))
+        # first projection
+        audio_embeds = torch.relu(self.proj1(audio_embeds)) 
+        audio_embeds_vf = torch.relu(self.proj1_vf(audio_embeds_vf)) 
         audio_embeds = rearrange(audio_embeds, "(bz f) c -> bz f c", bz=B)
         audio_embeds_vf = rearrange(audio_embeds_vf, "(bz f) c -> bz f c", bz=B)
-        audio_embeds_c = torch.concat([audio_embeds, audio_embeds_vf], dim=1)
+        audio_embeds_c = torch.concat([audio_embeds, audio_embeds_vf], dim=1) 
         batch_size_c, N_t, C_a = audio_embeds_c.shape
-        audio_embeds_c = audio_embeds_c.view(batch_size_c * N_t, C_a)
+        audio_embeds_c = audio_embeds_c.view(batch_size_c*N_t, C_a)
 
-        # Second projection
+        # second projection
         audio_embeds_c = torch.relu(self.proj2(audio_embeds_c))
 
-        context_tokens = self.proj3(audio_embeds_c).reshape(
-            batch_size_c * N_t, self.context_tokens, self.output_dim
-        )
+        context_tokens = self.proj3(audio_embeds_c).reshape(batch_size_c*N_t, self.context_tokens, self.output_dim)
 
-        # Normalization and reshape
+        # normalization and reshape
         context_tokens = self.norm(context_tokens)
-        context_tokens = rearrange(
-            context_tokens, "(bz f) m c -> bz f m c", f=video_length
-        )
+        context_tokens = rearrange(context_tokens, "(bz f) m c -> bz f m c", f=video_length)
 
         return context_tokens
 
@@ -588,7 +580,7 @@ class WanMultiTalkTransformerBlock(nn.Module):
         )
 
         # 3. Audio cross-attention
-        self.audio_cross_attn = SingleStreamMutiAttention(
+        self.audio_attn2 = SingleStreamMutiAttention(
             dim=dim,
             encoder_hidden_states_dim=output_dim,
             num_heads=num_heads,
@@ -651,7 +643,7 @@ class WanMultiTalkTransformerBlock(nn.Module):
 
         # 3. Audio cross-attention
         if encoder_hidden_states_audio is not None:
-            x_a = self.audio_cross_attn(
+            x_a = self.audio_attn2(
                 self.norm_x(hidden_states),
                 encoder_hidden_states=encoder_hidden_states_audio,
                 shape=grid_sizes,
@@ -825,6 +817,8 @@ class WanMultiTalkTransformer3DModel(
         )
 
         self.gradient_checkpointing = False
+        self.audio_window = audio_window
+        self.vae_scale = vae_scale
 
     def forward(
         self,
@@ -856,6 +850,7 @@ class WanMultiTalkTransformer3DModel(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
 
+
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size
         post_patch_num_frames = num_frames // p_t
@@ -883,21 +878,36 @@ class WanMultiTalkTransformer3DModel(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1
             )
 
-        # Process audio embeddings if provided
-        if encoder_hidden_states_audio is not None:
-            # Audio embeddings are expected in format: [batch, frames, window, blocks, channels]
-            first_frame_audio = encoder_hidden_states_audio[:, :1, ...]
-            latter_frame_audio = encoder_hidden_states_audio[:, 1:, ...]
-
-            # Process with audio projection model
-            audio_embedding = self.audio_proj(first_frame_audio, latter_frame_audio)
-
-            # Combine audio embeddings if multiple humans
-            if len(audio_embedding) > 1:
-                audio_embedding = torch.concat(audio_embedding.split(1), dim=2)
-            audio_embedding = audio_embedding.to(hidden_states.dtype)
-        else:
-            audio_embedding = None
+        # Process with audio projection model
+        audio_cond = encoder_hidden_states_audio.to(device=hidden_states.device, dtype=hidden_states.dtype)
+        first_frame_audio_emb_s = audio_cond[:, :1, ...] 
+        latter_frame_audio_emb = audio_cond[:, 1:, ...] 
+        latter_frame_audio_emb = rearrange(latter_frame_audio_emb, "b (n_t n) w s c -> b n_t n w s c", n=self.vae_scale) 
+        middle_index = self.audio_window // 2
+        latter_first_frame_audio_emb = latter_frame_audio_emb[:, :, :1, :middle_index+1, ...] 
+        latter_first_frame_audio_emb = rearrange(latter_first_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
+        latter_last_frame_audio_emb = latter_frame_audio_emb[:, :, -1:, middle_index:, ...] 
+        latter_last_frame_audio_emb = rearrange(latter_last_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
+        latter_middle_frame_audio_emb = latter_frame_audio_emb[:, :, 1:-1, middle_index:middle_index+1, ...] 
+        latter_middle_frame_audio_emb = rearrange(latter_middle_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
+        latter_frame_audio_emb_s = torch.concat([latter_first_frame_audio_emb, latter_middle_frame_audio_emb, latter_last_frame_audio_emb], dim=2)
+        audio_embedding = self.audio_proj(first_frame_audio_emb_s, latter_frame_audio_emb_s) 
+        human_num = len(audio_embedding)
+        audio_embedding = torch.concat(audio_embedding.split(1), dim=2).to(hidden_states.dtype)
+        # Combine audio embeddings if multiple humans
+        
+        if len(audio_embedding) > 1:
+            audio_embedding = torch.concat(audio_embedding.split(1), dim=2)
+        
+        audio_embedding = audio_embedding.to(hidden_states.dtype)
+        
+        if ref_target_masks is not None:
+            ref_target_masks = ref_target_masks.unsqueeze(0).to(torch.float32) 
+            token_ref_target_masks = nn.functional.interpolate(ref_target_masks, size=(post_patch_height, post_patch_width), mode='nearest') 
+            token_ref_target_masks = token_ref_target_masks.squeeze(0)
+            token_ref_target_masks = (token_ref_target_masks > 0)
+            token_ref_target_masks = token_ref_target_masks.view(token_ref_target_masks.shape[0], -1) 
+            token_ref_target_masks = token_ref_target_masks.to(hidden_states.dtype)
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -909,11 +919,12 @@ class WanMultiTalkTransformer3DModel(
                     timestep_proj,
                     rotary_emb,
                     audio_embedding,
-                    ref_target_masks,
+                    token_ref_target_masks,
                     human_num,
                     grid_sizes,
                 )
         else:
+
             for block in self.blocks:
                 hidden_states = block(
                     hidden_states,
@@ -921,7 +932,7 @@ class WanMultiTalkTransformer3DModel(
                     timestep_proj,
                     rotary_emb,
                     encoder_hidden_states_audio=audio_embedding,
-                    ref_target_masks=ref_target_masks,
+                    ref_target_masks=token_ref_target_masks,
                     human_num=human_num,
                     grid_sizes=grid_sizes,
                 )
@@ -948,6 +959,7 @@ class WanMultiTalkTransformer3DModel(
             p_w,
             -1,
         )
+        
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 
