@@ -5,7 +5,6 @@ import numpy as np
 
 from .base import WanBaseEngine
 
-
 class WanFFLFEngine(WanBaseEngine):
     """WAN First-Frame-Last-Frame Engine Implementation"""
 
@@ -37,6 +36,7 @@ class WanFFLFEngine(WanBaseEngine):
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        boundary_ratio: float | None = None,
         **kwargs,
     ):
         """
@@ -98,10 +98,20 @@ class WanFFLFEngine(WanBaseEngine):
         self.to_device(self.transformer)
 
         transformer_dtype = self.component_dtypes["transformer"]
+        
+        
+        if "clip" not in self.preprocessors and boundary_ratio is None:
+            self.load_preprocessor_by_type("clip")
+            self.to_device(self.preprocessors["clip"])
 
-        image_embeds = self.preprocessors["clip"](
+        if boundary_ratio is None:
+            image_embeds = self.preprocessors["clip"](
             [loaded_first_frame, loaded_last_frame], hidden_states_layer=-2
-        ).to(self.device, dtype=transformer_dtype)
+            ).to(self.device, dtype=transformer_dtype)
+        else:
+            image_embeds = None
+
+        
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
 
         if negative_prompt_embeds is not None:
@@ -127,11 +137,19 @@ class WanFFLFEngine(WanBaseEngine):
             num_inference_steps=num_inference_steps,
         )
         num_frames = self._parse_num_frames(duration, fps)
+        
+        vae_config = self.load_config_by_type("vae")
+        vae_scale_factor_spatial = getattr(vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial)
+        vae_scale_factor_temporal = getattr(vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal)
+
 
         latents = self._get_latents(
             height,
             width,
             duration,
+            num_channels_latents=getattr(vae_config, "z_dim", 16),
+            vae_scale_factor_spatial=vae_scale_factor_spatial,
+            vae_scale_factor_temporal=vae_scale_factor_temporal,
             fps=fps,
             num_videos=num_videos,
             seed=seed,
@@ -189,8 +207,14 @@ class WanFFLFEngine(WanBaseEngine):
         mask_lat_size = mask_lat_size.to(latents.device)
 
         latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
+        
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * getattr(self.scheduler.config, "num_train_timesteps", 1000)
+        else:
+            boundary_timestep = None
 
         latents = self.denoise(
+            boundary_timestep=boundary_timestep,
             timesteps=timesteps,
             latents=latents,
             latent_condition=latent_condition,
