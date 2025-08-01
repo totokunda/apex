@@ -17,7 +17,6 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.utils.checkpoint
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin
@@ -26,15 +25,109 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 from diffusers.models.activations import get_activation
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.autoencoders.vae import (
-    DecoderOutput,
-    DiagonalGaussianDistribution,
-)
+from diffusers.models.autoencoders.vae import DecoderOutput, DiagonalGaussianDistribution
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 CACHE_T = 2
+
+
+class AvgDown3D(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        factor_t,
+        factor_s=1,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.factor_t = factor_t
+        self.factor_s = factor_s
+        self.factor = self.factor_t * self.factor_s * self.factor_s
+
+        assert in_channels * self.factor % out_channels == 0
+        self.group_size = in_channels * self.factor // out_channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        pad_t = (self.factor_t - x.shape[2] % self.factor_t) % self.factor_t
+        pad = (0, 0, 0, 0, pad_t, 0)
+        x = F.pad(x, pad)
+        B, C, T, H, W = x.shape
+        x = x.view(
+            B,
+            C,
+            T // self.factor_t,
+            self.factor_t,
+            H // self.factor_s,
+            self.factor_s,
+            W // self.factor_s,
+            self.factor_s,
+        )
+        x = x.permute(0, 1, 3, 5, 7, 2, 4, 6).contiguous()
+        x = x.view(
+            B,
+            C * self.factor,
+            T // self.factor_t,
+            H // self.factor_s,
+            W // self.factor_s,
+        )
+        x = x.view(
+            B,
+            self.out_channels,
+            self.group_size,
+            T // self.factor_t,
+            H // self.factor_s,
+            W // self.factor_s,
+        )
+        x = x.mean(dim=2)
+        return x
+
+
+class DupUp3D(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        factor_t,
+        factor_s=1,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.factor_t = factor_t
+        self.factor_s = factor_s
+        self.factor = self.factor_t * self.factor_s * self.factor_s
+
+        assert out_channels * self.factor % in_channels == 0
+        self.repeats = out_channels * self.factor // in_channels
+
+    def forward(self, x: torch.Tensor, first_chunk=False) -> torch.Tensor:
+        x = x.repeat_interleave(self.repeats, dim=1)
+        x = x.view(
+            x.size(0),
+            self.out_channels,
+            self.factor_t,
+            self.factor_s,
+            self.factor_s,
+            x.size(2),
+            x.size(3),
+            x.size(4),
+        )
+        x = x.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+        x = x.view(
+            x.size(0),
+            self.out_channels,
+            x.size(2) * self.factor_t,
+            x.size(4) * self.factor_s,
+            x.size(6) * self.factor_s,
+        )
+        if first_chunk:
+            x = x[:, :, self.factor_t - 1 :, :, :]
+        return x
 
 
 class WanCausalConv3d(nn.Conv3d):
@@ -69,14 +162,7 @@ class WanCausalConv3d(nn.Conv3d):
         )
 
         # Set up causal padding
-        self._padding = (
-            self.padding[2],
-            self.padding[2],
-            self.padding[1],
-            self.padding[1],
-            2 * self.padding[0],
-            0,
-        )
+        self._padding = (self.padding[2], self.padding[2], self.padding[1], self.padding[1], 2 * self.padding[0], 0)
         self.padding = (0, 0, 0)
 
     def forward(self, x, cache_x=None):
@@ -101,13 +187,7 @@ class WanRMS_norm(nn.Module):
         bias (bool, optional): Whether to include a learnable bias term. Default is False.
     """
 
-    def __init__(
-        self,
-        dim: int,
-        channel_first: bool = True,
-        images: bool = True,
-        bias: bool = False,
-    ) -> None:
+    def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
         shape = (dim, *broadcastable_dims) if channel_first else (dim,)
@@ -118,12 +198,7 @@ class WanRMS_norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return (
-            F.normalize(x, dim=(1 if self.channel_first else -1))
-            * self.scale
-            * self.gamma
-            + self.bias
-        )
+        return F.normalize(x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma + self.bias
 
 
 class WanUpsample(nn.Upsample):
@@ -155,35 +230,33 @@ class WanResample(nn.Module):
             - 'downsample3d': 3D downsampling with zero-padding, convolution, and causal 3D convolution.
     """
 
-    def __init__(self, dim: int, mode: str) -> None:
+    def __init__(self, dim: int, mode: str, upsample_out_dim: int = None) -> None:
         super().__init__()
         self.dim = dim
         self.mode = mode
+
+        # default to dim //2
+        if upsample_out_dim is None:
+            upsample_out_dim = dim // 2
 
         # layers
         if mode == "upsample2d":
             self.resample = nn.Sequential(
                 WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"),
-                nn.Conv2d(dim, dim // 2, 3, padding=1),
+                nn.Conv2d(dim, upsample_out_dim, 3, padding=1),
             )
         elif mode == "upsample3d":
             self.resample = nn.Sequential(
                 WanUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"),
-                nn.Conv2d(dim, dim // 2, 3, padding=1),
+                nn.Conv2d(dim, upsample_out_dim, 3, padding=1),
             )
             self.time_conv = WanCausalConv3d(dim, dim * 2, (3, 1, 1), padding=(1, 0, 0))
 
         elif mode == "downsample2d":
-            self.resample = nn.Sequential(
-                nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2))
-            )
+            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
         elif mode == "downsample3d":
-            self.resample = nn.Sequential(
-                nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2))
-            )
-            self.time_conv = WanCausalConv3d(
-                dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0)
-            )
+            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
+            self.time_conv = WanCausalConv3d(dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0))
 
         else:
             self.resample = nn.Identity()
@@ -198,30 +271,13 @@ class WanResample(nn.Module):
                     feat_idx[0] += 1
                 else:
                     cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if (
-                        cache_x.shape[2] < 2
-                        and feat_cache[idx] is not None
-                        and feat_cache[idx] != "Rep"
-                    ):
+                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] != "Rep":
                         # cache last frame of last two chunk
                         cache_x = torch.cat(
-                            [
-                                feat_cache[idx][:, :, -1, :, :]
-                                .unsqueeze(2)
-                                .to(cache_x.device),
-                                cache_x,
-                            ],
-                            dim=2,
+                            [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2
                         )
-                    if (
-                        cache_x.shape[2] < 2
-                        and feat_cache[idx] is not None
-                        and feat_cache[idx] == "Rep"
-                    ):
-                        cache_x = torch.cat(
-                            [torch.zeros_like(cache_x).to(cache_x.device), cache_x],
-                            dim=2,
-                        )
+                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] == "Rep":
+                        cache_x = torch.cat([torch.zeros_like(cache_x).to(cache_x.device), cache_x], dim=2)
                     if feat_cache[idx] == "Rep":
                         x = self.time_conv(x)
                     else:
@@ -245,9 +301,7 @@ class WanResample(nn.Module):
                     feat_idx[0] += 1
                 else:
                     cache_x = x[:, :, -1:, :, :].clone()
-                    x = self.time_conv(
-                        torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2)
-                    )
+                    x = self.time_conv(torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2))
                     feat_cache[idx] = cache_x
                     feat_idx[0] += 1
         return x
@@ -282,9 +336,7 @@ class WanResidualBlock(nn.Module):
         self.norm2 = WanRMS_norm(out_dim, images=False)
         self.dropout = nn.Dropout(dropout)
         self.conv2 = WanCausalConv3d(out_dim, out_dim, 3, padding=1)
-        self.conv_shortcut = (
-            WanCausalConv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
-        )
+        self.conv_shortcut = WanCausalConv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
 
     def forward(self, x, feat_cache=None, feat_idx=[0]):
         # Apply shortcut connection
@@ -298,13 +350,7 @@ class WanResidualBlock(nn.Module):
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
 
             x = self.conv1(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -323,13 +369,7 @@ class WanResidualBlock(nn.Module):
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
 
             x = self.conv2(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -374,11 +414,7 @@ class WanAttentionBlock(nn.Module):
         # apply attention
         x = F.scaled_dot_product_attention(q, k, v)
 
-        x = (
-            x.squeeze(1)
-            .permute(0, 2, 1)
-            .reshape(batch_size * time, channels, height, width)
-        )
+        x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
 
         # output projection
         x = self.proj(x)
@@ -400,13 +436,7 @@ class WanMidBlock(nn.Module):
         non_linearity (str): Type of non-linearity to use.
     """
 
-    def __init__(
-        self,
-        dim: int,
-        dropout: float = 0.0,
-        non_linearity: str = "silu",
-        num_layers: int = 1,
-    ):
+    def __init__(self, dim: int, dropout: float = 0.0, non_linearity: str = "silu", num_layers: int = 1):
         super().__init__()
         self.dim = dim
 
@@ -435,6 +465,42 @@ class WanMidBlock(nn.Module):
         return x
 
 
+class WanResidualDownBlock(nn.Module):
+    def __init__(self, in_dim, out_dim, dropout, num_res_blocks, temperal_downsample=False, down_flag=False):
+        super().__init__()
+
+        # Shortcut path with downsample
+        self.avg_shortcut = AvgDown3D(
+            in_dim,
+            out_dim,
+            factor_t=2 if temperal_downsample else 1,
+            factor_s=2 if down_flag else 1,
+        )
+
+        # Main path with residual blocks and downsample
+        resnets = []
+        for _ in range(num_res_blocks):
+            resnets.append(WanResidualBlock(in_dim, out_dim, dropout))
+            in_dim = out_dim
+        self.resnets = nn.ModuleList(resnets)
+
+        # Add the final downsample block
+        if down_flag:
+            mode = "downsample3d" if temperal_downsample else "downsample2d"
+            self.downsampler = WanResample(out_dim, mode=mode)
+        else:
+            self.downsampler = None
+
+    def forward(self, x, feat_cache=None, feat_idx=[0]):
+        x_copy = x.clone()
+        for resnet in self.resnets:
+            x = resnet(x, feat_cache, feat_idx)
+        if self.downsampler is not None:
+            x = self.downsampler(x, feat_cache, feat_idx)
+
+        return x + self.avg_shortcut(x_copy)
+
+
 class WanEncoder3d(nn.Module):
     r"""
     A 3D encoder module.
@@ -452,6 +518,7 @@ class WanEncoder3d(nn.Module):
 
     def __init__(
         self,
+        in_channels: int = 3,
         dim=128,
         z_dim=4,
         dim_mult=[1, 2, 4, 4],
@@ -460,6 +527,7 @@ class WanEncoder3d(nn.Module):
         temperal_downsample=[True, True, False],
         dropout=0.0,
         non_linearity: str = "silu",
+        is_residual: bool = False,  # wan 2.2 vae use a residual downblock
     ):
         super().__init__()
         self.dim = dim
@@ -475,23 +543,35 @@ class WanEncoder3d(nn.Module):
         scale = 1.0
 
         # init block
-        self.conv_in = WanCausalConv3d(3, dims[0], 3, padding=1)
+        self.conv_in = WanCausalConv3d(in_channels, dims[0], 3, padding=1)
 
         # downsample blocks
         self.down_blocks = nn.ModuleList([])
         for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
             # residual (+attention) blocks
-            for _ in range(num_res_blocks):
-                self.down_blocks.append(WanResidualBlock(in_dim, out_dim, dropout))
-                if scale in attn_scales:
-                    self.down_blocks.append(WanAttentionBlock(out_dim))
-                in_dim = out_dim
+            if is_residual:
+                self.down_blocks.append(
+                    WanResidualDownBlock(
+                        in_dim,
+                        out_dim,
+                        dropout,
+                        num_res_blocks,
+                        temperal_downsample=temperal_downsample[i] if i != len(dim_mult) - 1 else False,
+                        down_flag=i != len(dim_mult) - 1,
+                    )
+                )
+            else:
+                for _ in range(num_res_blocks):
+                    self.down_blocks.append(WanResidualBlock(in_dim, out_dim, dropout))
+                    if scale in attn_scales:
+                        self.down_blocks.append(WanAttentionBlock(out_dim))
+                    in_dim = out_dim
 
-            # downsample block
-            if i != len(dim_mult) - 1:
-                mode = "downsample3d" if temperal_downsample[i] else "downsample2d"
-                self.down_blocks.append(WanResample(out_dim, mode=mode))
-                scale /= 2.0
+                # downsample block
+                if i != len(dim_mult) - 1:
+                    mode = "downsample3d" if temperal_downsample[i] else "downsample2d"
+                    self.down_blocks.append(WanResample(out_dim, mode=mode))
+                    scale /= 2.0
 
         # middle blocks
         self.mid_block = WanMidBlock(out_dim, dropout, non_linearity, num_layers=1)
@@ -508,13 +588,7 @@ class WanEncoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
             x = self.conv_in(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
@@ -539,18 +613,100 @@ class WanEncoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
             x = self.conv_out(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
         else:
             x = self.conv_out(x)
+        return x
+
+
+class WanResidualUpBlock(nn.Module):
+    """
+    A block that handles upsampling for the WanVAE decoder.
+
+    Args:
+        in_dim (int): Input dimension
+        out_dim (int): Output dimension
+        num_res_blocks (int): Number of residual blocks
+        dropout (float): Dropout rate
+        temperal_upsample (bool): Whether to upsample on temporal dimension
+        up_flag (bool): Whether to upsample or not
+        non_linearity (str): Type of non-linearity to use
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        num_res_blocks: int,
+        dropout: float = 0.0,
+        temperal_upsample: bool = False,
+        up_flag: bool = False,
+        non_linearity: str = "silu",
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+        if up_flag:
+            self.avg_shortcut = DupUp3D(
+                in_dim,
+                out_dim,
+                factor_t=2 if temperal_upsample else 1,
+                factor_s=2,
+            )
+        else:
+            self.avg_shortcut = None
+
+        # create residual blocks
+        resnets = []
+        current_dim = in_dim
+        for _ in range(num_res_blocks + 1):
+            resnets.append(WanResidualBlock(current_dim, out_dim, dropout, non_linearity))
+            current_dim = out_dim
+
+        self.resnets = nn.ModuleList(resnets)
+
+        # Add upsampling layer if needed
+        if up_flag:
+            upsample_mode = "upsample3d" if temperal_upsample else "upsample2d"
+            self.upsampler = WanResample(out_dim, mode=upsample_mode, upsample_out_dim=out_dim)
+        else:
+            self.upsampler = None
+
+        self.gradient_checkpointing = False
+
+    def forward(self, x, feat_cache=None, feat_idx=[0], first_chunk=False):
+        """
+        Forward pass through the upsampling block.
+
+        Args:
+            x (torch.Tensor): Input tensor
+            feat_cache (list, optional): Feature cache for causal convolutions
+            feat_idx (list, optional): Feature index for cache management
+
+        Returns:
+            torch.Tensor: Output tensor
+        """
+        x_copy = x.clone()
+
+        for resnet in self.resnets:
+            if feat_cache is not None:
+                x = resnet(x, feat_cache, feat_idx)
+            else:
+                x = resnet(x)
+
+        if self.upsampler is not None:
+            if feat_cache is not None:
+                x = self.upsampler(x, feat_cache, feat_idx)
+            else:
+                x = self.upsampler(x)
+
+        if self.avg_shortcut is not None:
+            x = x + self.avg_shortcut(x_copy, first_chunk=first_chunk)
+
         return x
 
 
@@ -585,9 +741,7 @@ class WanUpBlock(nn.Module):
         # Add residual blocks and attention if needed
         current_dim = in_dim
         for _ in range(num_res_blocks + 1):
-            resnets.append(
-                WanResidualBlock(current_dim, out_dim, dropout, non_linearity)
-            )
+            resnets.append(WanResidualBlock(current_dim, out_dim, dropout, non_linearity))
             current_dim = out_dim
 
         self.resnets = nn.ModuleList(resnets)
@@ -599,7 +753,7 @@ class WanUpBlock(nn.Module):
 
         self.gradient_checkpointing = False
 
-    def forward(self, x, feat_cache=None, feat_idx=[0]):
+    def forward(self, x, feat_cache=None, feat_idx=[0], first_chunk=None):
         """
         Forward pass through the upsampling block.
 
@@ -650,6 +804,8 @@ class WanDecoder3d(nn.Module):
         temperal_upsample=[False, True, True],
         dropout=0.0,
         non_linearity: str = "silu",
+        out_channels: int = 3,
+        is_residual: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -663,7 +819,6 @@ class WanDecoder3d(nn.Module):
 
         # dimensions
         dims = [dim * u for u in [dim_mult[-1]] + dim_mult[::-1]]
-        scale = 1.0 / 2 ** (len(dim_mult) - 2)
 
         # init block
         self.conv_in = WanCausalConv3d(z_dim, dims[0], 3, padding=1)
@@ -675,49 +830,54 @@ class WanDecoder3d(nn.Module):
         self.up_blocks = nn.ModuleList([])
         for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
             # residual (+attention) blocks
-            if i > 0:
+            if i > 0 and not is_residual:
+                # wan vae 2.1
                 in_dim = in_dim // 2
 
-            # Determine if we need upsampling
+            # determine if we need upsampling
+            up_flag = i != len(dim_mult) - 1
+            # determine upsampling mode, if not upsampling, set to None
             upsample_mode = None
-            if i != len(dim_mult) - 1:
-                upsample_mode = "upsample3d" if temperal_upsample[i] else "upsample2d"
-
+            if up_flag and temperal_upsample[i]:
+                upsample_mode = "upsample3d"
+            elif up_flag:
+                upsample_mode = "upsample2d"
             # Create and add the upsampling block
-            up_block = WanUpBlock(
-                in_dim=in_dim,
-                out_dim=out_dim,
-                num_res_blocks=num_res_blocks,
-                dropout=dropout,
-                upsample_mode=upsample_mode,
-                non_linearity=non_linearity,
-            )
+            if is_residual:
+                up_block = WanResidualUpBlock(
+                    in_dim=in_dim,
+                    out_dim=out_dim,
+                    num_res_blocks=num_res_blocks,
+                    dropout=dropout,
+                    temperal_upsample=temperal_upsample[i] if up_flag else False,
+                    up_flag=up_flag,
+                    non_linearity=non_linearity,
+                )
+            else:
+                up_block = WanUpBlock(
+                    in_dim=in_dim,
+                    out_dim=out_dim,
+                    num_res_blocks=num_res_blocks,
+                    dropout=dropout,
+                    upsample_mode=upsample_mode,
+                    non_linearity=non_linearity,
+                )
             self.up_blocks.append(up_block)
-
-            # Update scale for next iteration
-            if upsample_mode is not None:
-                scale *= 2.0
 
         # output blocks
         self.norm_out = WanRMS_norm(out_dim, images=False)
-        self.conv_out = WanCausalConv3d(out_dim, 3, 3, padding=1)
+        self.conv_out = WanCausalConv3d(out_dim, out_channels, 3, padding=1)
 
         self.gradient_checkpointing = False
 
-    def forward(self, x, feat_cache=None, feat_idx=[0]):
+    def forward(self, x, feat_cache=None, feat_idx=[0], first_chunk=False):
         ## conv1
         if feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
             x = self.conv_in(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
@@ -729,7 +889,7 @@ class WanDecoder3d(nn.Module):
 
         ## upsamples
         for up_block in self.up_blocks:
-            x = up_block(x, feat_cache, feat_idx)
+            x = up_block(x, feat_cache, feat_idx, first_chunk=first_chunk)
 
         ## head
         x = self.norm_out(x)
@@ -739,19 +899,84 @@ class WanDecoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat(
-                    [
-                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
-                        cache_x,
-                    ],
-                    dim=2,
-                )
+                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
             x = self.conv_out(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
         else:
             x = self.conv_out(x)
         return x
+
+
+def patchify(x, patch_size):
+    if patch_size == 1:
+        return x
+
+    if x.dim() == 4:
+        # x shape: [batch_size, channels, height, width]
+        batch_size, channels, height, width = x.shape
+
+        # Ensure height and width are divisible by patch_size
+        if height % patch_size != 0 or width % patch_size != 0:
+            raise ValueError(f"Height ({height}) and width ({width}) must be divisible by patch_size ({patch_size})")
+
+        # Reshape to [batch_size, channels, height//patch_size, patch_size, width//patch_size, patch_size]
+        x = x.view(batch_size, channels, height // patch_size, patch_size, width // patch_size, patch_size)
+
+        # Rearrange to [batch_size, channels * patch_size * patch_size, height//patch_size, width//patch_size]
+        x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
+        x = x.view(batch_size, channels * patch_size * patch_size, height // patch_size, width // patch_size)
+
+    elif x.dim() == 5:
+        # x shape: [batch_size, channels, frames, height, width]
+        batch_size, channels, frames, height, width = x.shape
+
+        # Ensure height and width are divisible by patch_size
+        if height % patch_size != 0 or width % patch_size != 0:
+            raise ValueError(f"Height ({height}) and width ({width}) must be divisible by patch_size ({patch_size})")
+
+        # Reshape to [batch_size, channels, frames, height//patch_size, patch_size, width//patch_size, patch_size]
+        x = x.view(batch_size, channels, frames, height // patch_size, patch_size, width // patch_size, patch_size)
+
+        # Rearrange to [batch_size, channels * patch_size * patch_size, frames, height//patch_size, width//patch_size]
+        x = x.permute(0, 1, 4, 6, 2, 3, 5).contiguous()
+        x = x.view(batch_size, channels * patch_size * patch_size, frames, height // patch_size, width // patch_size)
+
+    else:
+        raise ValueError(f"Invalid input shape: {x.shape}")
+
+    return x
+
+
+def unpatchify(x, patch_size):
+    if patch_size == 1:
+        return x
+
+    if x.dim() == 4:
+        # x shape: [b, (c * patch_size * patch_size), h, w]
+        batch_size, c_patches, height, width = x.shape
+        channels = c_patches // (patch_size * patch_size)
+
+        # Reshape to [b, c, patch_size, patch_size, h, w]
+        x = x.view(batch_size, channels, patch_size, patch_size, height, width)
+
+        # Rearrange to [b, c, h * patch_size, w * patch_size]
+        x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
+        x = x.view(batch_size, channels, height * patch_size, width * patch_size)
+
+    elif x.dim() == 5:
+        # x shape: [batch_size, (channels * patch_size * patch_size), frame, height, width]
+        batch_size, c_patches, frames, height, width = x.shape
+        channels = c_patches // (patch_size * patch_size)
+
+        # Reshape to [b, c, patch_size, patch_size, f, h, w]
+        x = x.view(batch_size, channels, patch_size, patch_size, frames, height, width)
+
+        # Rearrange to [b, c, f, h * patch_size, w * patch_size]
+        x = x.permute(0, 1, 4, 5, 2, 6, 3).contiguous()
+        x = x.view(batch_size, channels, frames, height * patch_size, width * patch_size)
+
+    return x
 
 
 class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
@@ -769,6 +994,7 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
     def __init__(
         self,
         base_dim: int = 96,
+        decoder_base_dim: Optional[int] = None,
         z_dim: int = 16,
         dim_mult: Tuple[int] = [1, 2, 4, 4],
         num_res_blocks: int = 2,
@@ -811,6 +1037,13 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             2.8251,
             1.9160,
         ],
+        is_residual: bool = False,
+        in_channels: int = 3,
+        out_channels: int = 3,
+        patch_size: Optional[int] = None,
+        scale_factor_temporal: Optional[int] = 4,
+        scale_factor_spatial: Optional[int] = 8,
+        clip_output: bool = True,
     ) -> None:
         super().__init__()
 
@@ -818,26 +1051,33 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         self.temperal_downsample = temperal_downsample
         self.temperal_upsample = temperal_downsample[::-1]
 
+        if decoder_base_dim is None:
+            decoder_base_dim = base_dim
+
         self.encoder = WanEncoder3d(
-            base_dim,
-            z_dim * 2,
-            dim_mult,
-            num_res_blocks,
-            attn_scales,
-            self.temperal_downsample,
-            dropout,
+            in_channels=in_channels,
+            dim=base_dim,
+            z_dim=z_dim * 2,
+            dim_mult=dim_mult,
+            num_res_blocks=num_res_blocks,
+            attn_scales=attn_scales,
+            temperal_downsample=temperal_downsample,
+            dropout=dropout,
+            is_residual=is_residual,
         )
         self.quant_conv = WanCausalConv3d(z_dim * 2, z_dim * 2, 1)
         self.post_quant_conv = WanCausalConv3d(z_dim, z_dim, 1)
 
         self.decoder = WanDecoder3d(
-            base_dim,
-            z_dim,
-            dim_mult,
-            num_res_blocks,
-            attn_scales,
-            self.temperal_upsample,
-            dropout,
+            dim=decoder_base_dim,
+            z_dim=z_dim,
+            dim_mult=dim_mult,
+            num_res_blocks=num_res_blocks,
+            attn_scales=attn_scales,
+            temperal_upsample=self.temperal_upsample,
+            dropout=dropout,
+            out_channels=out_channels,
+            is_residual=is_residual,
         )
 
         self.spatial_compression_ratio = 2 ** len(self.temperal_downsample)
@@ -861,16 +1101,12 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         # Precompute and cache conv counts for encoder and decoder for clear_cache speedup
         self._cached_conv_counts = {
-            "decoder": (
-                sum(isinstance(m, WanCausalConv3d) for m in self.decoder.modules())
-                if self.decoder is not None
-                else 0
-            ),
-            "encoder": (
-                sum(isinstance(m, WanCausalConv3d) for m in self.encoder.modules())
-                if self.encoder is not None
-                else 0
-            ),
+            "decoder": sum(isinstance(m, WanCausalConv3d) for m in self.decoder.modules())
+            if self.decoder is not None
+            else 0,
+            "encoder": sum(isinstance(m, WanCausalConv3d) for m in self.encoder.modules())
+            if self.encoder is not None
+            else 0,
         }
 
     def enable_tiling(
@@ -898,16 +1134,10 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 artifacts produced across the width dimension.
         """
         self.use_tiling = True
-        self.tile_sample_min_height = (
-            tile_sample_min_height or self.tile_sample_min_height
-        )
+        self.tile_sample_min_height = tile_sample_min_height or self.tile_sample_min_height
         self.tile_sample_min_width = tile_sample_min_width or self.tile_sample_min_width
-        self.tile_sample_stride_height = (
-            tile_sample_stride_height or self.tile_sample_stride_height
-        )
-        self.tile_sample_stride_width = (
-            tile_sample_stride_width or self.tile_sample_stride_width
-        )
+        self.tile_sample_stride_height = tile_sample_stride_height or self.tile_sample_stride_height
+        self.tile_sample_stride_width = tile_sample_stride_width or self.tile_sample_stride_width
 
     def disable_tiling(self) -> None:
         r"""
@@ -943,21 +1173,17 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
     def _encode(self, x: torch.Tensor):
         _, _, num_frame, height, width = x.shape
 
-        if self.use_tiling and (
-            width > self.tile_sample_min_width or height > self.tile_sample_min_height
-        ):
+        if self.use_tiling and (width > self.tile_sample_min_width or height > self.tile_sample_min_height):
             return self.tiled_encode(x)
 
         self.clear_cache()
+        if self.config.patch_size is not None:
+            x = patchify(x, patch_size=self.config.patch_size)
         iter_ = 1 + (num_frame - 1) // 4
         for i in range(iter_):
             self._enc_conv_idx = [0]
             if i == 0:
-                out = self.encoder(
-                    x[:, :, :1, :, :],
-                    feat_cache=self._enc_feat_map,
-                    feat_idx=self._enc_conv_idx,
-                )
+                out = self.encoder(x[:, :, :1, :, :], feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
             else:
                 out_ = self.encoder(
                     x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :],
@@ -999,16 +1225,10 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
     def _decode(self, z: torch.Tensor, return_dict: bool = True):
         _, _, num_frame, height, width = z.shape
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
+        tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
+        tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
 
-        if self.use_tiling and (
-            width > tile_latent_min_width or height > tile_latent_min_height
-        ):
+        if self.use_tiling and (width > tile_latent_min_width or height > tile_latent_min_height):
             return self.tiled_decode(z, return_dict=return_dict)
 
         self.clear_cache()
@@ -1017,55 +1237,24 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             self._conv_idx = [0]
             if i == 0:
                 out = self.decoder(
-                    x[:, :, i : i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
+                    x[:, :, i : i + 1, :, :], feat_cache=self._feat_map, feat_idx=self._conv_idx, first_chunk=True
                 )
             else:
-                out_ = self.decoder(
-                    x[:, :, i : i + 1, :, :],
-                    feat_cache=self._feat_map,
-                    feat_idx=self._conv_idx,
-                )
+                out_ = self.decoder(x[:, :, i : i + 1, :, :], feat_cache=self._feat_map, feat_idx=self._conv_idx)
                 out = torch.cat([out, out_], 2)
 
-        out = torch.clamp(out, min=-1.0, max=1.0)
+        if self.config.clip_output:
+            out = torch.clamp(out, min=-1.0, max=1.0)
+        if self.config.patch_size is not None:
+            out = unpatchify(out, patch_size=self.config.patch_size)
         self.clear_cache()
         if not return_dict:
             return (out,)
 
         return DecoderOutput(sample=out)
 
-    @torch.no_grad()
-    def denormalize_latents(self, latents: torch.Tensor):
-        latents_mean = latents_mean = (
-            torch.tensor(self.config.latents_mean)
-            .view(1, self.config.z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
-            1, self.config.z_dim, 1, 1, 1
-        ).to(latents.device, latents.dtype)
-        latents = (latents / latents_std) + latents_mean
-        return latents
-
-    @torch.no_grad()
-    def normalize_latents(self, latents: torch.Tensor):
-        latents_mean = (
-            torch.tensor(self.config.latents_mean)
-            .view(1, self.config.z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
-            1, self.config.z_dim, 1, 1, 1
-        ).to(latents.device, latents.dtype)
-        latents = (latents - latents_mean) * latents_std
-        return latents
-
     @apply_forward_hook
-    def decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
+    def decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
         r"""
         Decode a batch of images.
 
@@ -1089,24 +1278,20 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             return (decoded,)
         return DecoderOutput(sample=decoded)
 
-    def blend_v(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
         for y in range(blend_extent):
-            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (
-                1 - y / blend_extent
-            ) + b[:, :, :, y, :] * (y / blend_extent)
+            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, :, y, :] * (
+                y / blend_extent
+            )
         return b
 
-    def blend_h(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (
-                1 - x / blend_extent
-            ) + b[:, :, :, :, x] * (x / blend_extent)
+            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, :, x] * (
+                x / blend_extent
+            )
         return b
 
     def tiled_encode(self, x: torch.Tensor) -> AutoencoderKLOutput:
@@ -1123,18 +1308,10 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         latent_height = height // self.spatial_compression_ratio
         latent_width = width // self.spatial_compression_ratio
 
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
-        tile_latent_stride_height = (
-            self.tile_sample_stride_height // self.spatial_compression_ratio
-        )
-        tile_latent_stride_width = (
-            self.tile_sample_stride_width // self.spatial_compression_ratio
-        )
+        tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
+        tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
+        tile_latent_stride_height = self.tile_sample_stride_height // self.spatial_compression_ratio
+        tile_latent_stride_width = self.tile_sample_stride_width // self.spatial_compression_ratio
 
         blend_height = tile_latent_min_height - tile_latent_stride_height
         blend_width = tile_latent_min_width - tile_latent_stride_width
@@ -1151,13 +1328,7 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 for k in range(frame_range):
                     self._enc_conv_idx = [0]
                     if k == 0:
-                        tile = x[
-                            :,
-                            :,
-                            :1,
-                            i : i + self.tile_sample_min_height,
-                            j : j + self.tile_sample_min_width,
-                        ]
+                        tile = x[:, :, :1, i : i + self.tile_sample_min_height, j : j + self.tile_sample_min_width]
                     else:
                         tile = x[
                             :,
@@ -1166,9 +1337,7 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                             i : i + self.tile_sample_min_height,
                             j : j + self.tile_sample_min_width,
                         ]
-                    tile = self.encoder(
-                        tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx
-                    )
+                    tile = self.encoder(tile, feat_cache=self._enc_feat_map, feat_idx=self._enc_conv_idx)
                     tile = self.quant_conv(tile)
                     time.append(tile)
                 row.append(torch.cat(time, dim=2))
@@ -1185,17 +1354,13 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                     tile = self.blend_v(rows[i - 1][j], tile, blend_height)
                 if j > 0:
                     tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(
-                    tile[:, :, :, :tile_latent_stride_height, :tile_latent_stride_width]
-                )
+                result_row.append(tile[:, :, :, :tile_latent_stride_height, :tile_latent_stride_width])
             result_rows.append(torch.cat(result_row, dim=-1))
 
         enc = torch.cat(result_rows, dim=3)[:, :, :, :latent_height, :latent_width]
         return enc
 
-    def tiled_decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
+    def tiled_decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
         r"""
         Decode a batch of images using a tiled decoder.
 
@@ -1213,18 +1378,10 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         sample_height = height * self.spatial_compression_ratio
         sample_width = width * self.spatial_compression_ratio
 
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
-        tile_latent_stride_height = (
-            self.tile_sample_stride_height // self.spatial_compression_ratio
-        )
-        tile_latent_stride_width = (
-            self.tile_sample_stride_width // self.spatial_compression_ratio
-        )
+        tile_latent_min_height = self.tile_sample_min_height // self.spatial_compression_ratio
+        tile_latent_min_width = self.tile_sample_min_width // self.spatial_compression_ratio
+        tile_latent_stride_height = self.tile_sample_stride_height // self.spatial_compression_ratio
+        tile_latent_stride_width = self.tile_sample_stride_width // self.spatial_compression_ratio
 
         blend_height = self.tile_sample_min_height - self.tile_sample_stride_height
         blend_width = self.tile_sample_min_width - self.tile_sample_stride_width
@@ -1239,17 +1396,9 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 time = []
                 for k in range(num_frames):
                     self._conv_idx = [0]
-                    tile = z[
-                        :,
-                        :,
-                        k : k + 1,
-                        i : i + tile_latent_min_height,
-                        j : j + tile_latent_min_width,
-                    ]
+                    tile = z[:, :, k : k + 1, i : i + tile_latent_min_height, j : j + tile_latent_min_width]
                     tile = self.post_quant_conv(tile)
-                    decoded = self.decoder(
-                        tile, feat_cache=self._feat_map, feat_idx=self._conv_idx
-                    )
+                    decoded = self.decoder(tile, feat_cache=self._feat_map, feat_idx=self._conv_idx)
                     time.append(decoded)
                 row.append(torch.cat(time, dim=2))
             rows.append(row)
@@ -1265,15 +1414,7 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                     tile = self.blend_v(rows[i - 1][j], tile, blend_height)
                 if j > 0:
                     tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(
-                    tile[
-                        :,
-                        :,
-                        :,
-                        : self.tile_sample_stride_height,
-                        : self.tile_sample_stride_width,
-                    ]
-                )
+                result_row.append(tile[:, :, :, : self.tile_sample_stride_height, : self.tile_sample_stride_width])
             result_rows.append(torch.cat(result_row, dim=-1))
 
         dec = torch.cat(result_rows, dim=3)[:, :, :, :sample_height, :sample_width]
@@ -1303,3 +1444,29 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             z = posterior.mode()
         dec = self.decode(z, return_dict=return_dict)
         return dec
+
+    @torch.no_grad()
+    def denormalize_latents(self, latents: torch.Tensor):
+        latents_mean = latents_mean = (
+            torch.tensor(self.config.latents_mean)
+            .view(1, self.config.z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
+        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
+            1, self.config.z_dim, 1, 1, 1
+        ).to(latents.device, latents.dtype)
+        latents = (latents / latents_std) + latents_mean
+        return latents
+
+    @torch.no_grad()
+    def normalize_latents(self, latents: torch.Tensor):
+        latents_mean = (
+            torch.tensor(self.config.latents_mean)
+            .view(1, self.config.z_dim, 1, 1, 1)
+            .to(latents.device, latents.dtype)
+        )
+        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
+            1, self.config.z_dim, 1, 1, 1
+        ).to(latents.device, latents.dtype)
+        latents = (latents - latents_mean) * latents_std
+        return latents

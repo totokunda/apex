@@ -50,14 +50,17 @@ class WanEngine(BaseEngine, WanDenoise):
             if getattr(self.vae, "temperal_downsample", None)
             else 4
         )
+        
         self.vae_scale_factor_spatial = (
             2 ** len(self.vae.temperal_downsample)
             if getattr(self.vae, "temperal_downsample", None)
             else 8
         )
+        
         self.num_channels_latents = getattr(self.vae, "config", {}).get("z_dim", 16)
+
         self.video_processor = VideoProcessor(
-            vae_scale_factor=self.vae_scale_factor_spatial
+            vae_scale_factor=kwargs.get("vae_scale_factor", self.vae_scale_factor_spatial)
         )
 
         # Initialize the appropriate implementation engine

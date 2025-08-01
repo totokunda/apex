@@ -120,6 +120,7 @@ parts/
 *.bz2
 *.o
 *.mp4
+*.pt
 **/.vscode/*
 scripts/zip_branch.sh
 scripts/zip_branches.sh

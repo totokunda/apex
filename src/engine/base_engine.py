@@ -879,6 +879,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         fps: int = 16,
         num_videos: int = 1,
         num_channels_latents: int = None,
+        vae_scale_factor_spatial: int = None,
+        vae_scale_factor_temporal: int = None,
         seed: int | None = None,
         dtype: torch.dtype = None,
         layout: torch.layout = None,
@@ -890,14 +892,15 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         if parse_frames or isinstance(duration, str):
             num_frames = self._parse_num_frames(duration, fps)
             latent_num_frames = math.ceil(
-                (num_frames + 3) / self.vae_scale_factor_temporal
+                ((num_frames - 1) / self.vae_scale_factor_temporal) + 1
             )
         else:
             latent_num_frames = duration
- 
-        latent_height = math.ceil(height / self.vae_scale_factor_spatial)
-        latent_width = math.ceil(width / self.vae_scale_factor_spatial)
+        
 
+        latent_height = math.ceil(height / vae_scale_factor_spatial if vae_scale_factor_spatial else self.vae_scale_factor_spatial)
+        latent_width = math.ceil(width / vae_scale_factor_spatial if vae_scale_factor_spatial else self.vae_scale_factor_spatial)
+        
         if seed is not None and generator is not None:
             self.logger.warning(
                 f"Both `seed` and `generator` are provided. `seed` will be ignored."

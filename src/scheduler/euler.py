@@ -14,7 +14,6 @@ class FlowMatchScheduler(SchedulerInterface):
         inverse_timesteps=False,
         extra_one_step=False,
         reverse_sigmas=False,
-        add_zero_timestep=False,
     ):
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
@@ -23,7 +22,6 @@ class FlowMatchScheduler(SchedulerInterface):
         self.inverse_timesteps = inverse_timesteps
         self.extra_one_step = extra_one_step
         self.reverse_sigmas = reverse_sigmas
-        self.add_zero_timestep = add_zero_timestep
         self.set_timesteps(num_inference_steps)
 
     def set_timesteps(
@@ -45,8 +43,6 @@ class FlowMatchScheduler(SchedulerInterface):
             self.sigmas = torch.linspace(
                 sigma_start, self.sigma_min, num_inference_steps
             )
-        if self.add_zero_timestep:
-            self.sigmas = torch.cat([self.sigmas, torch.tensor([0.0])])
         if self.inverse_timesteps:
             self.sigmas = torch.flip(self.sigmas, dims=[0])
         self.sigmas = self.shift * self.sigmas / (1 + (self.shift - 1) * self.sigmas)

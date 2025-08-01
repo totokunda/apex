@@ -38,20 +38,11 @@ class WanDenoise:
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
-        expand_timesteps = kwargs.get("expand_timesteps", False)
-        mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         
         with self._progress_bar(
             len(timesteps), desc=f"Sampling MOE"
         ) as pbar:
             for i, t in enumerate(timesteps):
-                if expand_timesteps:
-                    # seq_len: num_latent_frames * latent_height//2 * latent_width//2
-                    temp_ts = (mask[0][0][:, ::2, ::2] * t).flatten()
-                    # batch_size, seq_len
-                    timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
-                else:
-                    timestep = t.expand(latents.shape[0])
                 
                 if latent_condition is not None:
                     latent_model_input = torch.cat(
@@ -60,6 +51,7 @@ class WanDenoise:
                 else:
                     latent_model_input = latents.to(transformer_dtype)
                 
+                timestep = t.expand(latents.shape[0])
                 
                 if boundary_timestep is None or t >= boundary_timestep:
                     if hasattr(self, "transformer_2") and self.transformer_2:
@@ -129,6 +121,13 @@ class WanDenoise:
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
+        expand_timesteps = kwargs.get("expand_timesteps", False)
+        first_frame_mask = kwargs.get("first_frame_mask", None)
+        
+        if expand_timesteps and first_frame_mask is not None:
+            mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
+        else:
+            mask = None
         
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -139,45 +138,59 @@ class WanDenoise:
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
             for i, t in enumerate(timesteps):
-                timestep = t.expand(latents.shape[0])
-                if latent_condition is not None:
-                    latent_model_input = torch.cat(
-                        [latents, latent_condition], dim=1
-                    ).to(transformer_dtype)
+                if expand_timesteps:
+                    # seq_len: num_latent_frames * latent_height//2 * latent_width//2
+                    if latent_condition is not None and first_frame_mask is not None:
+                        latent_model_input = (1 - first_frame_mask) * latent_condition + first_frame_mask * latents
+                        latent_model_input = latent_model_input.to(transformer_dtype)
+                        temp_ts = (first_frame_mask[0][0][:, ::2, ::2] * t).flatten()
+                    else:
+                        latent_model_input = latents.to(transformer_dtype)
+                        temp_ts = (mask[0][0][:, ::2, ::2] * t).flatten()
+
+                    # batch_size, seq_len
+                    timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
                 else:
-                    latent_model_input = latents.to(transformer_dtype)
-                    # Standard denoising
-                    noise_pred = self.transformer(
+                    timestep = t.expand(latents.shape[0])
+                    
+                    if latent_condition is not None:
+                        latent_model_input = torch.cat(
+                            [latents, latent_condition], dim=1
+                        ).to(transformer_dtype)
+                    else:
+                        latent_model_input = latents.to(transformer_dtype)
+                # Standard denoising
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    return_dict=False,
+                    **kwargs.get("transformer_kwargs", {}),
+                )[0]
+                if use_cfg_guidance and kwargs.get(
+                    "unconditional_transformer_kwargs", None
+                ):
+                    uncond_noise_pred = self.transformer(
                         hidden_states=latent_model_input,
                         timestep=timestep,
                         return_dict=False,
-                        **kwargs.get("transformer_kwargs", {}),
+                        **kwargs.get("unconditional_transformer_kwargs", {}),
                     )[0]
-
-                    if use_cfg_guidance and kwargs.get(
-                        "unconditional_transformer_kwargs", None
-                    ):
-                        uncond_noise_pred = self.transformer(
-                            hidden_states=latent_model_input,
-                            timestep=timestep,
-                            return_dict=False,
-                            **kwargs.get("unconditional_transformer_kwargs", {}),
-                        )[0]
-
-                        noise_pred = uncond_noise_pred + guidance_scale * (
-                            noise_pred - uncond_noise_pred
-                        )
-
-                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
-                        0
-                    ]
+                    noise_pred = uncond_noise_pred + guidance_scale * (
+                        noise_pred - uncond_noise_pred
+                    )
+                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
+                    0
+                ]
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
+                
+            if expand_timesteps and first_frame_mask is not None:
+                latents = (1 - first_frame_mask) * latent_condition + first_frame_mask * latents
 
             self.logger.info("Denoising completed.")
-
+            
         return latents
 
 
@@ -199,6 +212,7 @@ class WanDenoise:
         valid_interval = kwargs.get("valid_interval", None)
         schedulers_counter = kwargs.get("schedulers_counter", None)
         schedulers = kwargs.get("schedulers", None)
+        
 
         with self._progress_bar(
             total=len(step_matrix),
@@ -364,8 +378,7 @@ class WanDenoise:
                 else:
                     noise_pred = noise_pred_uncond + guidance_scale * (
                         noise_pred_cond - noise_pred_drop_text) + \
-                        audio_guidance_scale * (noise_pred_drop_text - noise_pred_uncond)  
-                noise_pred = -noise_pred  
+                        audio_guidance_scale * (noise_pred_drop_text - noise_pred_uncond)   
                 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
                 

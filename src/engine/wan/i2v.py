@@ -63,15 +63,16 @@ class WanI2VEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if not self.preprocessors or "clip" not in self.preprocessors:
+        if not self.preprocessors or "clip" not in self.preprocessors and boundary_ratio is None and not expand_timesteps:
             self.load_preprocessor_by_type("clip")
 
-        self.to_device(self.preprocessors["clip"])
+        if boundary_ratio is None and not expand_timesteps:
+            self.to_device(self.preprocessors["clip"])
 
         loaded_image = self._load_image(image)
 
         loaded_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width
+            loaded_image, max_area=height * width, mod_value=32 if expand_timesteps else 16
         )
 
         preprocessed_image = self.video_processor.preprocess(
@@ -85,11 +86,12 @@ class WanI2VEngine(WanBaseEngine):
 
         self.to_device(self.transformer)
         
-        if "clip" not in self.preprocessors and boundary_ratio is None:
+        
+        if "clip" not in self.preprocessors and boundary_ratio is None and not expand_timesteps:
             self.load_preprocessor_by_type("clip")
             self.to_device(self.preprocessors["clip"])
 
-        if boundary_ratio is None:
+        if boundary_ratio is None and not expand_timesteps:
             image_embeds = self.preprocessors["clip"](
                 loaded_image, hidden_states_layer=-2
             ).to(self.device, dtype=transformer_dtype)
@@ -103,7 +105,7 @@ class WanI2VEngine(WanBaseEngine):
                 self.device, dtype=transformer_dtype
             )
 
-        if offload:
+        if offload and boundary_ratio is None and not expand_timesteps:
             self._offload(self.preprocessors["clip"])
 
         if not self.scheduler:
@@ -123,11 +125,18 @@ class WanI2VEngine(WanBaseEngine):
         )
         
         num_frames = self._parse_num_frames(duration, fps)
+        
+        vae_config = self.load_config_by_type("vae")
+        vae_scale_factor_spatial = getattr(vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial)
+        vae_scale_factor_temporal = getattr(vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal)
 
         latents = self._get_latents(
             height,
             width,
             duration,
+            num_channels_latents=getattr(vae_config, "z_dim", 16),
+            vae_scale_factor_spatial=vae_scale_factor_spatial,
+            vae_scale_factor_temporal=vae_scale_factor_temporal,
             fps=fps,
             num_videos=num_videos,
             seed=seed,
@@ -159,27 +168,35 @@ class WanI2VEngine(WanBaseEngine):
             normalize_latents_dtype=latents.dtype,
         )
         
-        batch_size, _, _, latent_height, latent_width = latents.shape
+        batch_size, _, num_latent_frames, latent_height, latent_width = latents.shape
+        
+        if expand_timesteps:
+            first_frame_mask = torch.ones(
+                1, 1, num_latent_frames, latent_height, latent_width, dtype=latents.dtype, device=latents.device
+            )
+            first_frame_mask[:, :, 0] = 0
+        else:
+            mask_lat_size = torch.ones(
+                batch_size, 1, num_frames, latent_height, latent_width, device=self.device
+            )
 
-        mask_lat_size = torch.ones(
-            batch_size, 1, num_frames, latent_height, latent_width, device=self.device
-        )
-        mask_lat_size[:, :, list(range(1, num_frames))] = 0
-        first_frame_mask = mask_lat_size[:, :, 0:1]
-        first_frame_mask = torch.repeat_interleave(
-            first_frame_mask, dim=2, repeats=self.vae_scale_factor_temporal
-        )
-        mask_lat_size = torch.concat(
-            [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2
-        )
-        mask_lat_size = mask_lat_size.view(
-            batch_size, -1, self.vae_scale_factor_temporal, latent_height, latent_width
-        )
+            mask_lat_size[:, :, list(range(1, num_frames))] = 0
+            first_frame_mask = mask_lat_size[:, :, 0:1]
+            first_frame_mask = torch.repeat_interleave(
+                first_frame_mask, dim=2, repeats=self.vae_scale_factor_temporal
+            )
+            
+            mask_lat_size = torch.concat(
+                [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2
+            )
+            mask_lat_size = mask_lat_size.view(
+                batch_size, -1, self.vae_scale_factor_temporal, latent_height, latent_width
+            )
 
-        mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(latents.device)
+            mask_lat_size = mask_lat_size.transpose(1, 2)
+            mask_lat_size = mask_lat_size.to(latents.device)
 
-        latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
+            latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
         
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(self.scheduler.config, "num_train_timesteps", 1000)
@@ -212,8 +229,9 @@ class WanI2VEngine(WanBaseEngine):
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             expand_timesteps=expand_timesteps,
+            first_frame_mask=first_frame_mask,
         )
-
+        
         if offload:
             self._offload(self.transformer)
 
