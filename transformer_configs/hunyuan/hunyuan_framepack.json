@@ -1,5 +1,5 @@
 {
-    "_class_name": "HunyuanVideoTransformer3DModelPacked",
+    "_class_name": "HunyuanVideoFramepackTransformer3DModel",
     "_diffusers_version": "0.33.0.dev0",
     "_name_or_path": "hunyuanvideo-community/HunyuanVideo",
     "attention_head_dim": 128,

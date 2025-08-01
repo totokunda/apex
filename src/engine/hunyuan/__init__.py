@@ -10,14 +10,14 @@ from src.engine.denoise.hunyuan_denoise import DenoiseType as HunyuanDenoiseType
 from .t2v import HunyuanT2VEngine
 from .i2v import HunyuanI2VEngine
 from .framepack import HunyuanFramepackEngine
-from .hyavatar import HunyuanHyavatarEngine
+from .avatar import HunyuanAvatarEngine
 
 
 class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     FRAMEPACK = "framepack"  # framepack
-    HYAVATAR = "hyavatar"  # hyavatar
+    AVATAR = "avatar"  # avatar
 
 
 class HunyuanEngine(BaseEngine, HunyuanDenoise):
@@ -63,8 +63,8 @@ class HunyuanEngine(BaseEngine, HunyuanDenoise):
             self.implementation_engine = HunyuanI2VEngine(self)
         elif self.model_type == ModelType.FRAMEPACK:
             self.implementation_engine = HunyuanFramepackEngine(self)
-        elif self.model_type == ModelType.HYAVATAR:
-            self.implementation_engine = HunyuanHyavatarEngine(self)
+        elif self.model_type == ModelType.AVATAR:
+            self.implementation_engine = HunyuanAvatarEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

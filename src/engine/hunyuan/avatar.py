@@ -2,12 +2,13 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-
+from src.utils.pos_emb_utils import get_nd_rotary_pos_embed_new
+import torch.nn.functional as F
 from .base import HunyuanBaseEngine
 
 
-class HunyuanHyavatarEngine(HunyuanBaseEngine):
-    """Hunyuan Hyavatar Engine Implementation"""
+class HunyuanAvatarEngine(HunyuanBaseEngine):
+    """Hunyuan Avatar Engine Implementation"""
 
     def run(
         self,
@@ -34,9 +35,9 @@ class HunyuanHyavatarEngine(HunyuanBaseEngine):
         **kwargs,
     ):
         # 1. Load preprocessor and VAE
-        if "hyavatar" not in self.preprocessors:
-            self.load_preprocessor_by_type("hyavatar")
-        hyavatar_preprocessor = self.preprocessors["hyavatar"]
+        if "hunyuan.avatar" not in self.preprocessors:
+            self.load_preprocessor_by_type("hunyuan.avatar")
+        hyavatar_preprocessor = self.preprocessors["hunyuan.avatar"]
         self.to_device(hyavatar_preprocessor)
 
         if not self.vae:
