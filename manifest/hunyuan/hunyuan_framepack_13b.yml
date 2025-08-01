@@ -9,7 +9,7 @@ shared:
 components:
   - type: scheduler
     base: "diffusers.FlowMatchEulerDiscreteScheduler"
-    config_path: "https://huggingface.co/hunyuanvideo-community/HunyuanVideo-I2V/resolve/main/scheduler/scheduler_config.json"
+    config_path: "https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/scheduler/scheduler_config.json"
 
   - !include shared:hunyuan/vae
   - !include shared:hunyuan/text_encoder
@@ -29,7 +29,7 @@ preprocessors:
 
 defaults:
   run:
-    num_inference_steps: 50
+    num_inference_steps: 25
     return_latents: false
     text_encoder_kwargs: 
       output_type: "pooler_output"

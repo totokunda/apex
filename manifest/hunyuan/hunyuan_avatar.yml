@@ -1,0 +1,34 @@
+name: "Hunyuan Avatar"
+description: "Hunyuan Avatar is a 13B parameter model for avatar generation."
+engine: hunyuan
+type: avatar
+
+shared: 
+  - shared_hunyuan.yml 
+
+components:
+  - type: scheduler
+    base: "diffusers.FlowMatchEulerDiscreteScheduler"
+    config_path: "https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/scheduler/scheduler_config.json"
+
+  - !include shared:hunyuan/vae
+  - !include shared:hunyuan/text_encoder
+  
+  - type: transformer
+    base: "hunyuan.avatar" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt
+    tag: "hunyuan_avatar"
+
+preprocessors: 
+  - !include shared:hunyuan/llama/t2v
+  - type: hunyuan.avatar
+    model_path: tencent/HunyuanVideo-Avatar/ckpts/whisper-tiny
+    align_pt_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/det_align/detface.pt
+
+defaults:
+  run:
+    num_inference_steps: 40
+    return_latents: false
+    text_encoder_kwargs: 
+      output_type: "pooler_output"
+    attention_kwargs: {}

@@ -988,7 +988,7 @@ class HunyuanVideoTokenReplaceTransformerBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-@TRANSFORMERS_REGISTRY("hunyuan.hyavatar")
+@TRANSFORMERS_REGISTRY("hunyuan.avatar")
 class HunyuanVideoTransformer3DModel(
     ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
 ):

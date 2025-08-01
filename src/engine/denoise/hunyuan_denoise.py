@@ -4,7 +4,7 @@ from src.utils.type_utils import EnumType
 
 class DenoiseType(EnumType):
     BASE = "base"
-    HYAVATAR = "hyavatar"
+    AVATAR = "avatar"
 
 
 class HunyuanDenoise:
@@ -14,8 +14,8 @@ class HunyuanDenoise:
     def denoise(self, *args, **kwargs) -> torch.Tensor:
         if self.denoise_type == DenoiseType.BASE:
             return self.base_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.HYAVATAR:
-            return self.hyavatar_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseType.AVATAR:
+            return self.avatar_denoise(*args, **kwargs)
 
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps", None)
@@ -98,7 +98,7 @@ class HunyuanDenoise:
 
         return latents
 
-    def hyavatar_denoise(self, *args, **kwargs) -> torch.Tensor:
+    def avatar_denoise(self, *args, **kwargs) -> torch.Tensor:
         infer_length = kwargs.get("infer_length", None)
         latents_all = kwargs.get("latents_all", None)
         audio_prompts = kwargs.get("audio_prompts", None)
