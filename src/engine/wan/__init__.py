@@ -18,6 +18,7 @@ from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
 from src.utils.type_utils import EnumType
 
+
 class ModelType(EnumType):
     VACE = "vace"  # vace
     T2V = "t2v"  # text to video
@@ -42,7 +43,7 @@ class WanEngine(BaseEngine, WanDenoise):
     ):
         self.model_type = model_type
         self.denoise_type = denoise_type
-            
+
         super().__init__(yaml_path, **kwargs)
 
         self.vae_scale_factor_temporal = (
@@ -50,17 +51,19 @@ class WanEngine(BaseEngine, WanDenoise):
             if getattr(self.vae, "temperal_downsample", None)
             else 4
         )
-        
+
         self.vae_scale_factor_spatial = (
             2 ** len(self.vae.temperal_downsample)
             if getattr(self.vae, "temperal_downsample", None)
             else 8
         )
-        
+
         self.num_channels_latents = getattr(self.vae, "config", {}).get("z_dim", 16)
 
         self.video_processor = VideoProcessor(
-            vae_scale_factor=kwargs.get("vae_scale_factor", self.vae_scale_factor_spatial)
+            vae_scale_factor=kwargs.get(
+                "vae_scale_factor", self.vae_scale_factor_spatial
+            )
         )
 
         # Initialize the appropriate implementation engine

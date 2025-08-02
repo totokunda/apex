@@ -62,7 +62,11 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
 
         self.pos_embed = PatchEmbed(
             patch_size=patch_size,
-            in_channels=self.config.in_channels if model_type == "t2v" else self.config.in_channels*2,
+            in_channels=(
+                self.config.in_channels
+                if model_type == "t2v"
+                else self.config.in_channels * 2
+            ),
             embed_dim=self.inner_dim,
         )
 
@@ -87,8 +91,10 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
             self.inner_dim, patch_size * patch_size * self.out_channels
         )
         self.patch_size = patch_size
-        
-        adaln_singe_cls = AdaLayerNormSingleText if model_type == "t2v" else AdaLayerNormSingleImage
+
+        adaln_singe_cls = (
+            AdaLayerNormSingleText if model_type == "t2v" else AdaLayerNormSingleImage
+        )
 
         self.adaln_single = adaln_singe_cls(
             self.inner_dim, use_additional_conditions=self.use_additional_conditions
@@ -192,8 +198,12 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
             }
         elif self.use_additional_conditions and self.model_type == "i2v":
             added_cond_kwargs = {
-                "motion_score": torch.tensor([motion_score], device=hidden_states.device, dtype=hidden_states.dtype).repeat(bsz),
-            } 
+                "motion_score": torch.tensor(
+                    [motion_score],
+                    device=hidden_states.device,
+                    dtype=hidden_states.dtype,
+                ).repeat(bsz),
+            }
         else:
             added_cond_kwargs = {}
 
@@ -217,13 +227,13 @@ class StepVideoModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapte
         encoder_hidden_states, attn_mask = self.prepare_attn_mask(
             encoder_attention_mask, encoder_hidden_states, q_seqlen=frame * len_frame
         )
-        
+
         hidden_states = self.block_forward(
             hidden_states,
             encoder_hidden_states,
             timestep=timestep,
             rope_positions=[frame, height, width],
-            attn_mask=attn_mask
+            attn_mask=attn_mask,
         )
 
         hidden_states = rearrange(

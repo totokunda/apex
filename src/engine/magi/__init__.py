@@ -25,11 +25,10 @@ class MagiEngine(BaseEngine, MagiDenoise):
         denoise_type: MagiDenoiseType = MagiDenoiseType.T2V,
         **kwargs,
     ):
-        
 
         self.model_type = model_type
         self.denoise_type = denoise_type
-        
+
         super().__init__(yaml_path, **kwargs)
 
         # Set up VAE scale factors based on MAGI VAE configuration

@@ -8,6 +8,7 @@ from src.engine.denoise.stepvideo_denoise import StepVideoDenoise, DenoiseType
 from .t2v import StepVideoT2VEngine
 from .i2v import StepVideoI2VEngine
 
+
 class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
@@ -21,10 +22,10 @@ class StepVideoEngine(BaseEngine, StepVideoDenoise):
         denoise_type: DenoiseType = DenoiseType.BASE,
         **kwargs,
     ):
-        
+
         self.model_type = model_type
         self.denoise_type = denoise_type
-        
+
         super().__init__(yaml_path, **kwargs)
 
         self.vae_scale_factor_temporal = (

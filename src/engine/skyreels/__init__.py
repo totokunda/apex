@@ -25,9 +25,7 @@ class SkyReelsEngine(WanEngine):
             denoise_type = DenoiseType.DIFFUSION_FORCING
         else:
             denoise_type = DenoiseType.BASE
-        super().__init__(
-            yaml_path, model_type=model_type, **kwargs
-        )
+        super().__init__(yaml_path, model_type=model_type, **kwargs)
         self.denoise_type = denoise_type
 
         # Initialize the appropriate implementation engine

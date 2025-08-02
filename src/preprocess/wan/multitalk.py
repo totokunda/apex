@@ -21,9 +21,12 @@ import torch.nn.functional as F
 from transformers import Wav2Vec2Config, Wav2Vec2Model
 from transformers.modeling_outputs import BaseModelOutput
 
+
 def linear_interpolation(features, seq_len):
     features = features.transpose(1, 2)
-    output_features = F.interpolate(features, size=seq_len, align_corners=True, mode='linear')
+    output_features = F.interpolate(
+        features, size=seq_len, align_corners=True, mode="linear"
+    )
     return output_features.transpose(1, 2)
 
 
@@ -44,9 +47,13 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
         self.config.output_attentions = True
 
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         extract_features = self.feature_extractor(input_values)
         extract_features = extract_features.transpose(1, 2)
@@ -60,7 +67,9 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
 
         hidden_states, extract_features = self.feature_projection(extract_features)
         hidden_states = self._mask_hidden_states(
-            hidden_states, mask_time_indices=mask_time_indices, attention_mask=attention_mask
+            hidden_states,
+            mask_time_indices=mask_time_indices,
+            attention_mask=attention_mask,
         )
 
         encoder_outputs = self.encoder(
@@ -77,13 +86,12 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
             hidden_states = self.adapter(hidden_states)
 
         if not return_dict:
-            return (hidden_states, ) + encoder_outputs[1:]
+            return (hidden_states,) + encoder_outputs[1:]
         return BaseModelOutput(
             last_hidden_state=hidden_states,
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
-
 
     def feature_extract(
         self,
@@ -108,20 +116,25 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
         self.config.output_attentions = True
 
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if attention_mask is not None:
             # compute reduced attention_mask corresponding to feature vectors
             attention_mask = self._get_feature_vector_attention_mask(
                 extract_features.shape[1], attention_mask, add_adapter=False
             )
-            
 
         hidden_states, extract_features = self.feature_projection(extract_features)
         hidden_states = self._mask_hidden_states(
-            hidden_states, mask_time_indices=mask_time_indices, attention_mask=attention_mask
+            hidden_states,
+            mask_time_indices=mask_time_indices,
+            attention_mask=attention_mask,
         )
 
         encoder_outputs = self.encoder(
@@ -138,7 +151,7 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
             hidden_states = self.adapter(hidden_states)
 
         if not return_dict:
-            return (hidden_states, ) + encoder_outputs[1:]
+            return (hidden_states,) + encoder_outputs[1:]
         return BaseModelOutput(
             last_hidden_state=hidden_states,
             hidden_states=encoder_outputs.hidden_states,
@@ -372,6 +385,7 @@ class MultiTalkPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         """Normalize audio loudness."""
         try:
             import pyloudnorm as pyln
+
             meter = pyln.Meter(sr)
             loudness = meter.integrated_loudness(audio_array)
             if abs(loudness) < 100:  # Valid loudness measurement
@@ -383,33 +397,36 @@ class MultiTalkPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         return audio_array
 
     def _extract_audio_features(
-        self, audio_array: np.ndarray, sr: int=16000
+        self, audio_array: np.ndarray, sr: int = 16000
     ) -> torch.Tensor:
         """Extract audio features using Wav2Vec2."""
-        
+
         if self.wav2vec_model is None or self.wav2vec_feature_extractor is None:
             raise ValueError("Wav2Vec2 components not available")
-        
+
         audio_duration = len(audio_array) / sr
-        
+
         video_length = int(audio_duration * 25)
 
         device = self.wav2vec_model.device
         # Process audio with feature extractor
-        audio_features = np.squeeze(self.wav2vec_feature_extractor(
-            audio_array, sampling_rate=sr).input_values)
-        
+        audio_features = np.squeeze(
+            self.wav2vec_feature_extractor(audio_array, sampling_rate=sr).input_values
+        )
+
         audio_feature = torch.from_numpy(audio_features).float().to(device=device)
         audio_feature = audio_feature.unsqueeze(0)
 
         # Extract embeddings using Wav2Vec2 model
         with torch.no_grad():
-            embeddings = self.wav2vec_model(audio_feature, seq_len=video_length, output_hidden_states=True)
+            embeddings = self.wav2vec_model(
+                audio_feature, seq_len=video_length, output_hidden_states=True
+            )
 
         # Stack hidden states from different layers
         audio_emb = torch.stack(embeddings.hidden_states[1:], dim=1).squeeze(0)
         audio_emb = rearrange(audio_emb, "b s d -> s b d")
-        
+
         return audio_emb
 
     def _generate_human_masks(

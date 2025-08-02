@@ -68,7 +68,11 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
         self.heads = heads
         self.added_kv_proj_dim = added_kv_proj_dim
         self.cross_attention_dim_head = cross_attention_dim_head
-        self.kv_inner_dim = self.inner_dim if cross_attention_dim_head is None else cross_attention_dim_head * heads
+        self.kv_inner_dim = (
+            self.inner_dim
+            if cross_attention_dim_head is None
+            else cross_attention_dim_head * heads
+        )
 
         self.to_q = torch.nn.Linear(dim, self.inner_dim, bias=True)
         self.to_k = torch.nn.Linear(dim, self.kv_inner_dim, bias=True)
@@ -79,13 +83,21 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
                 torch.nn.Dropout(dropout),
             ]
         )
-        self.norm_q = torch.nn.RMSNorm(dim_head * heads, eps=eps, elementwise_affine=True)
-        self.norm_k = torch.nn.RMSNorm(dim_head * heads, eps=eps, elementwise_affine=True)
+        self.norm_q = torch.nn.RMSNorm(
+            dim_head * heads, eps=eps, elementwise_affine=True
+        )
+        self.norm_k = torch.nn.RMSNorm(
+            dim_head * heads, eps=eps, elementwise_affine=True
+        )
 
         self.add_k_proj = self.add_v_proj = None
         if added_kv_proj_dim is not None:
-            self.add_k_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
-            self.add_v_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
+            self.add_k_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=True
+            )
+            self.add_v_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=True
+            )
             self.norm_added_k = torch.nn.RMSNorm(dim_head * heads, eps=eps)
 
         self.set_processor(processor)
@@ -95,32 +107,48 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
             return
 
         if self.cross_attention_dim_head is None:
-            concatenated_weights = torch.cat([self.to_q.weight.data, self.to_k.weight.data, self.to_v.weight.data])
-            concatenated_bias = torch.cat([self.to_q.bias.data, self.to_k.bias.data, self.to_v.bias.data])
+            concatenated_weights = torch.cat(
+                [self.to_q.weight.data, self.to_k.weight.data, self.to_v.weight.data]
+            )
+            concatenated_bias = torch.cat(
+                [self.to_q.bias.data, self.to_k.bias.data, self.to_v.bias.data]
+            )
             out_features, in_features = concatenated_weights.shape
             with torch.device("meta"):
                 self.to_qkv = nn.Linear(in_features, out_features, bias=True)
             self.to_qkv.load_state_dict(
-                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+                {"weight": concatenated_weights, "bias": concatenated_bias},
+                strict=True,
+                assign=True,
             )
         else:
-            concatenated_weights = torch.cat([self.to_k.weight.data, self.to_v.weight.data])
+            concatenated_weights = torch.cat(
+                [self.to_k.weight.data, self.to_v.weight.data]
+            )
             concatenated_bias = torch.cat([self.to_k.bias.data, self.to_v.bias.data])
             out_features, in_features = concatenated_weights.shape
             with torch.device("meta"):
                 self.to_kv = nn.Linear(in_features, out_features, bias=True)
             self.to_kv.load_state_dict(
-                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+                {"weight": concatenated_weights, "bias": concatenated_bias},
+                strict=True,
+                assign=True,
             )
 
         if self.added_kv_proj_dim is not None:
-            concatenated_weights = torch.cat([self.add_k_proj.weight.data, self.add_v_proj.weight.data])
-            concatenated_bias = torch.cat([self.add_k_proj.bias.data, self.add_v_proj.bias.data])
+            concatenated_weights = torch.cat(
+                [self.add_k_proj.weight.data, self.add_v_proj.weight.data]
+            )
+            concatenated_bias = torch.cat(
+                [self.add_k_proj.bias.data, self.add_v_proj.bias.data]
+            )
             out_features, in_features = concatenated_weights.shape
             with torch.device("meta"):
                 self.to_added_kv = nn.Linear(in_features, out_features, bias=True)
             self.to_added_kv.load_state_dict(
-                {"weight": concatenated_weights, "bias": concatenated_bias}, strict=True, assign=True
+                {"weight": concatenated_weights, "bias": concatenated_bias},
+                strict=True,
+                assign=True,
             )
 
         self.fused_projections = True
@@ -147,8 +175,14 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
         rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ) -> torch.Tensor:
-        return self.processor(self, hidden_states, encoder_hidden_states, attention_mask, rotary_emb, **kwargs)
-
+        return self.processor(
+            self,
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            rotary_emb,
+            **kwargs,
+        )
 
 
 class WanImageEmbedding(torch.nn.Module):
@@ -217,7 +251,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep_seq_len: Optional[int] = None,
     ):
         timestep = self.timesteps_proj(timestep)
-        
+
         if timestep_seq_len is not None:
             timestep = timestep.unflatten(0, (1, timestep_seq_len))
 
@@ -557,17 +591,19 @@ class WanTransformer3DModel(
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        
+
         if timestep.ndim == 2:
             ts_seq_len = timestep.shape[1]
             timestep = timestep.flatten()  # batch_size * seq_len
         else:
             ts_seq_len = None
-            
 
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = (
             self.condition_embedder(
-                timestep, encoder_hidden_states, encoder_hidden_states_image, timestep_seq_len=ts_seq_len
+                timestep,
+                encoder_hidden_states,
+                encoder_hidden_states_image,
+                timestep_seq_len=ts_seq_len,
             )
         )
 
@@ -598,17 +634,17 @@ class WanTransformer3DModel(
                 hidden_states = block(
                     hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
                 )
-                
-    
+
         if temb.ndim == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
-            shift, scale = (self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)).chunk(2, dim=2)
+            shift, scale = (
+                self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)
+            ).chunk(2, dim=2)
             shift = shift.squeeze(2)
             scale = scale.squeeze(2)
         else:
             # batch_size, inner_dim
             shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
-
 
         # Move the shift and scale tensors to the same device as hidden_states.
         # When using multi-GPU inference via accelerate these will be on the

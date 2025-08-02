@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List, Union, Optional
 import numpy as np
 from .base import MochiBaseEngine
 
+
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
         linear_steps = num_steps // 2
@@ -57,7 +58,7 @@ class MochiT2VEngine(MochiBaseEngine):
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
         self.to_device(self.text_encoder)
-        
+
         transformer_dtype = self.component_dtypes.get("transformer")
 
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
@@ -81,7 +82,11 @@ class MochiT2VEngine(MochiBaseEngine):
                     return_attention_mask=True,
                 )
             )
-            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0).to(self.device).to(transformer_dtype)
+            prompt_embeds = (
+                torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+                .to(self.device)
+                .to(transformer_dtype)
+            )
             prompt_attention_mask = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask], dim=0
             ).to(self.device)
@@ -102,9 +107,9 @@ class MochiT2VEngine(MochiBaseEngine):
 
         if generator is None and seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-        
+
         num_frames = self._parse_num_frames(duration, fps=fps)
-        latent_num_frames =  int((num_frames - 1) // self.vae_scale_factor_temporal + 1)
+        latent_num_frames = int((num_frames - 1) // self.vae_scale_factor_temporal + 1)
 
         if latents is None:
             latents = self._get_latents(

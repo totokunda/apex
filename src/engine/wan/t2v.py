@@ -5,6 +5,7 @@ import numpy as np
 
 from .base import WanBaseEngine
 
+
 class WanT2VEngine(WanBaseEngine):
     """WAN Text-to-Video Engine Implementation"""
 
@@ -39,14 +40,14 @@ class WanT2VEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
- 
+
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
@@ -71,7 +72,7 @@ class WanT2VEngine(WanBaseEngine):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
         scheduler = self.scheduler
-        
+
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
@@ -81,11 +82,15 @@ class WanT2VEngine(WanBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-        
+
         vae_config = self.load_config_by_type("vae")
-        vae_scale_factor_spatial = getattr(vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial)
-        vae_scale_factor_temporal = getattr(vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal)
-        
+        vae_scale_factor_spatial = getattr(
+            vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial
+        )
+        vae_scale_factor_temporal = getattr(
+            vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
+        )
+
         latents = self._get_latents(
             height,
             width,
@@ -99,13 +104,14 @@ class WanT2VEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
-        
-        
+
         if boundary_ratio is not None:
-            boundary_timestep = boundary_ratio * getattr(self.scheduler.config, "num_train_timesteps", 1000)
+            boundary_timestep = boundary_ratio * getattr(
+                self.scheduler.config, "num_train_timesteps", 1000
+            )
         else:
             boundary_timestep = None
-        
+
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
             boundary_timestep=boundary_timestep,

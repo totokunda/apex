@@ -1,5 +1,5 @@
 import torch
-from src.utils.type_utils import EnumType   
+from src.utils.type_utils import EnumType
 
 
 class DenoiseType(EnumType):
@@ -44,7 +44,7 @@ class StepVideoDenoise:
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
-                
+
                 if use_cfg_guidance:
                     noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (

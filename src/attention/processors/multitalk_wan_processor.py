@@ -5,9 +5,12 @@ from typing import Optional
 
 from src.attention.functions import attention_register
 
+
 @torch.compile
-def calculate_x_ref_attn_map(visual_q, ref_k, ref_target_masks, mode='mean', attn_bias=None):
-    
+def calculate_x_ref_attn_map(
+    visual_q, ref_k, ref_target_masks, mode="mean", attn_bias=None
+):
+
     ref_k = ref_k.to(visual_q.dtype).to(visual_q.device)
     scale = 1.0 / visual_q.shape[-1] ** 0.5
     visual_q = visual_q * scale
@@ -18,8 +21,7 @@ def calculate_x_ref_attn_map(visual_q, ref_k, ref_target_masks, mode='mean', att
     if attn_bias is not None:
         attn = attn + attn_bias
 
-    x_ref_attn_map_source = attn.softmax(-1) # B, H, x_seqlens, ref_seqlens
-
+    x_ref_attn_map_source = attn.softmax(-1)  # B, H, x_seqlens, ref_seqlens
 
     x_ref_attn_maps = []
     ref_target_masks = ref_target_masks.to(visual_q.dtype)
@@ -28,43 +30,54 @@ def calculate_x_ref_attn_map(visual_q, ref_k, ref_target_masks, mode='mean', att
     for class_idx, ref_target_mask in enumerate(ref_target_masks):
         ref_target_mask = ref_target_mask[None, None, None, ...]
         x_ref_attnmap = x_ref_attn_map_source * ref_target_mask
-        x_ref_attnmap = x_ref_attnmap.sum(-1) / ref_target_mask.sum() # B, H, x_seqlens, ref_seqlens --> B, H, x_seqlens
-        x_ref_attnmap = x_ref_attnmap.permute(0, 2, 1) # B, x_seqlens, H
-       
-        if mode == 'mean':
-            x_ref_attnmap = x_ref_attnmap.mean(-1) # B, x_seqlens
-        elif mode == 'max':
-            x_ref_attnmap = x_ref_attnmap.max(-1) # B, x_seqlens
-        
+        x_ref_attnmap = (
+            x_ref_attnmap.sum(-1) / ref_target_mask.sum()
+        )  # B, H, x_seqlens, ref_seqlens --> B, H, x_seqlens
+        x_ref_attnmap = x_ref_attnmap.permute(0, 2, 1)  # B, x_seqlens, H
+
+        if mode == "mean":
+            x_ref_attnmap = x_ref_attnmap.mean(-1)  # B, x_seqlens
+        elif mode == "max":
+            x_ref_attnmap = x_ref_attnmap.max(-1)  # B, x_seqlens
+
         x_ref_attn_maps.append(x_ref_attnmap)
-    
+
     del attn
     del x_ref_attn_map_source
 
     return torch.concat(x_ref_attn_maps, dim=0)
 
-def get_attn_map_with_target(visual_q, ref_k, shape, ref_target_masks=None, split_num=2, enable_sp=False):
+
+def get_attn_map_with_target(
+    visual_q, ref_k, shape, ref_target_masks=None, split_num=2, enable_sp=False
+):
     """Args:
-        query (torch.tensor): B M H K
-        key (torch.tensor): B M H K
-        shape (tuple): (N_t, N_h, N_w)
-        ref_target_masks: [B, N_h * N_w]
+    query (torch.tensor): B M H K
+    key (torch.tensor): B M H K
+    shape (tuple): (N_t, N_h, N_w)
+    ref_target_masks: [B, N_h * N_w]
     """
 
     N_t, N_h, N_w = shape
-    
+
     x_seqlens = N_h * N_w
-    ref_k     = ref_k[:, :x_seqlens]
+    ref_k = ref_k[:, :x_seqlens]
     _, seq_lens, heads, _ = visual_q.shape
     class_num, _ = ref_target_masks.shape
-    x_ref_attn_maps = torch.zeros(class_num, seq_lens).to(visual_q.device).to(visual_q.dtype)
+    x_ref_attn_maps = (
+        torch.zeros(class_num, seq_lens).to(visual_q.device).to(visual_q.dtype)
+    )
 
     split_chunk = heads // split_num
-    
+
     for i in range(split_num):
-        x_ref_attn_maps_perhead = calculate_x_ref_attn_map(visual_q[:, :, i*split_chunk:(i+1)*split_chunk, :], ref_k[:, :, i*split_chunk:(i+1)*split_chunk, :], ref_target_masks)
+        x_ref_attn_maps_perhead = calculate_x_ref_attn_map(
+            visual_q[:, :, i * split_chunk : (i + 1) * split_chunk, :],
+            ref_k[:, :, i * split_chunk : (i + 1) * split_chunk, :],
+            ref_target_masks,
+        )
         x_ref_attn_maps += x_ref_attn_maps_perhead
-    
+
     return x_ref_attn_maps / split_num
 
 
@@ -159,9 +172,13 @@ class MultiTalkWanAttnProcessor2_0:
 
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)
-            
+
         with torch.no_grad():
-            x_ref_attn_map = get_attn_map_with_target(query.type_as(hidden_states).transpose(1, 2), key.type_as(hidden_states).transpose(1, 2), grid_sizes, 
-                                                    ref_target_masks=ref_target_masks)
-        
+            x_ref_attn_map = get_attn_map_with_target(
+                query.type_as(hidden_states).transpose(1, 2),
+                key.type_as(hidden_states).transpose(1, 2),
+                grid_sizes,
+                ref_target_masks=ref_target_masks,
+            )
+
         return hidden_states, x_ref_attn_map

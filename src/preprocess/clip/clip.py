@@ -70,14 +70,14 @@ class CLIPPreprocessor(BasePreprocessor):
             images = [self._load_image(img) for img in image]
         else:
             images = [self._load_image(image)]
- 
+
         device = self.model.device
         dtype = self.model.dtype
 
         processed_images = self.processor(images, return_tensors="pt", **kwargs).to(
             device=device, dtype=dtype
         )
-        
+
         image_embeds = self.model(**processed_images, output_hidden_states=True)
 
         image_embeds = image_embeds.hidden_states[hidden_states_layer]

@@ -1,29 +1,15 @@
-from abc import abstractmethod, ABC
 import torch
 from src.utils.support_utils import supports_double
-import math
-from typing import List
 from typing import Optional
-from typing import Tuple
-from typing import Union
 
 import numpy as np
 import torch
 from diffusers.configuration_utils import ConfigMixin
-from diffusers.configuration_utils import register_to_config
-from diffusers.schedulers.scheduling_utils import KarrasDiffusionSchedulers
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from diffusers.schedulers.scheduling_utils import SchedulerOutput
-from diffusers.utils import deprecate
 import math
-import os
-import json
-from pathlib import Path
-from torch import Tensor
-from safetensors.torch import safe_open
 
 
-class SchedulerInterface(ABC):
+class SchedulerInterface(SchedulerMixin, ConfigMixin):
     """
     Base class for diffusion noise schedule.
     """
@@ -190,3 +176,8 @@ class SchedulerInterface(ABC):
         sigma_t = sigmas[timestep_id].reshape(-1, 1, 1, 1)
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
+
+    def scale_model_input(
+        self, sample: torch.Tensor, timestep: Optional[int] = None
+    ) -> torch.Tensor:
+        return sample

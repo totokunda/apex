@@ -12,17 +12,17 @@ from .offload_strategies import OffloadStrategy, CPUOffloadStrategy, DiskOffload
 from .config import MemoryConfig
 
 __all__ = [
-    'MemoryManager',
-    'OffloadableModule', 
-    'MemoryMonitor',
-    'OffloadStrategy',
-    'CPUOffloadStrategy',
-    'DiskOffloadStrategy',
-    'MemoryConfig',
-    'auto_manage_model',
-    'create_memory_manager',
-    'wrap_module',
-    'wrap_model_layers'
+    "MemoryManager",
+    "OffloadableModule",
+    "MemoryMonitor",
+    "OffloadStrategy",
+    "CPUOffloadStrategy",
+    "DiskOffloadStrategy",
+    "MemoryConfig",
+    "auto_manage_model",
+    "create_memory_manager",
+    "wrap_module",
+    "wrap_model_layers",
 ]
 
-__version__ = '1.0.0' 
+__version__ = "1.0.0"

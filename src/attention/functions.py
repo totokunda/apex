@@ -385,21 +385,23 @@ def flex_attention_func(q, k, v, attn_mask=None, softmax_scale=None, **kwargs):
 
 
 @attention_register("xformers")
-def xformers_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, **kwargs):
+def xformers_attention(
+    q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, **kwargs
+):
     if xformers is None:
         raise ImportError("xformers is not installed")
-    
+
     # xformers expects (B, S, H, D) format, so we need to transpose
     q = q.transpose(1, 2)  # (B, H, S, D) -> (B, S, H, D)
     k = k.transpose(1, 2)  # (B, H, S, D) -> (B, S, H, D)
     v = v.transpose(1, 2)  # (B, H, S, D) -> (B, S, H, D)
-    
+
     # Handle causal mask
     if is_causal:
         attn_bias = xformers.ops.fmha.attn_bias.LowerTriangularMask()
     else:
         attn_bias = None
-    
+
     # Apply attention mask if provided
     if attn_mask is not None:
         if attn_bias is None:
@@ -407,10 +409,10 @@ def xformers_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, 
         else:
             # Combine causal mask with attention mask
             attn_bias = attn_bias & attn_mask
-    
+
     output = xformers.ops.memory_efficient_attention(
         q, k, v, attn_bias=attn_bias, p=dropout_p
     )
-    
+
     # Transpose back to (B, H, S, D) format
     return output.transpose(1, 2)

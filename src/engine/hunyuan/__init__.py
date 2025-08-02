@@ -28,11 +28,13 @@ class HunyuanEngine(BaseEngine, HunyuanDenoise):
         denoise_type: HunyuanDenoiseType = HunyuanDenoiseType.BASE,
         **kwargs,
     ):
-        
+        super().__init__(yaml_path, **kwargs)
 
         self.model_type = model_type
         self.denoise_type = denoise_type
-        super().__init__(yaml_path, **kwargs)
+
+        if model_type == ModelType.AVATAR:
+            self.denoise_type = HunyuanDenoiseType.AVATAR
 
         self.vae_scale_factor_temporal = (
             getattr(self.vae, "temporal_compression_ratio", None) or 4

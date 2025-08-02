@@ -8,8 +8,10 @@ shared:
 
 components:
   - type: scheduler
-    base: "diffusers.FlowMatchEulerDiscreteScheduler"
-    config_path: "https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/scheduler/scheduler_config.json"
+    base: "src.scheduler.FlowMatchDiscreteScheduler"
+    config:
+      shift: 5.0
+      reverse: true
 
   - !include shared:hunyuan/vae
   - !include shared:hunyuan/text_encoder
