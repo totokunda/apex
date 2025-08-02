@@ -12,6 +12,7 @@ components:
     config:
       shift: 5.0
       reverse: true
+      solver: "euler"
 
   - !include shared:hunyuan/vae
   - !include shared:hunyuan/text_encoder

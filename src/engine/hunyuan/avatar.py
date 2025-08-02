@@ -23,7 +23,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         duration: Union[str, int] = 129,
         fps: int = 25,
         num_inference_steps: int = 50,
-        use_classifier_free_guidance: bool = True,
+        use_cfg_guidance: bool = True,
         guidance_scale: float = 3.5,
         dynamic_guidance_start: float = 3.5,
         dynamic_guidance_end: float = 6.5,
@@ -38,6 +38,9 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         image_embed_interleave: Optional[int] = None,
         image_condition_type: Optional[str] = None,
         max_sequence_length: int = 256,
+        frame_per_batch: int = 33,
+        shift_offset: int = 10,
+        no_cache_steps: int = None,
         **kwargs,
     ):
         # 1. Load preprocessor and VAE
@@ -274,6 +277,9 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         latents_all = latents.clone()
         infer_length = latents.shape[2]
         video_length = infer_length
+        
+        if not no_cache_steps:
+            no_cache_steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] + list(range(15, 42, 5)) + [41, 42, 43, 44, 45, 46, 47, 48, 49]
 
         latents_all = self.denoise(
             infer_length=infer_length,
@@ -292,15 +298,19 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             timesteps=timesteps,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
-            use_classifier_free_guidance=use_classifier_free_guidance,
+            use_cfg_guidance=use_cfg_guidance,
             dynamic_guidance_start=dynamic_guidance_start,
             dynamic_guidance_end=dynamic_guidance_end,
+            hidden_size=hidden_size,
             motion_exp=motion_exp,
             motion_pose=motion_pose,
             fps_tensor=fps_tensor,
             freqs_cis=freqs_cis,
             num_videos=num_videos,
             transformer_dtype=transformer_dtype,
+            frame_per_batch=frame_per_batch,
+            shift_offset=shift_offset,
+            no_cache_steps=no_cache_steps,
             **kwargs,
         )
 

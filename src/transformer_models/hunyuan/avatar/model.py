@@ -1372,8 +1372,7 @@ class HunyuanAvatarVideoTransformer3DModel(
             if len(self.single_transformer_blocks) > 0:
                 for block_idx, block in enumerate(self.single_transformer_blocks):
                     if block_idx == len(self.single_transformer_blocks) - 1:
-                        temp = hidden_states[:, :-encoder_hidden_states_length, ...]
-                        self.latent_cache = torch.cat((temp, hidden_states[:, -encoder_hidden_states_length:, ...]), dim=1)
+                        self.latent_cache = torch.cat((hidden_states, encoder_hidden_states), dim=1)
 
                     hidden_states, encoder_hidden_states = block(
                         hidden_states,
@@ -1386,6 +1385,7 @@ class HunyuanAvatarVideoTransformer3DModel(
                     )
         else:
             hidden_states = self.latent_cache
+            hidden_states, encoder_hidden_states = hidden_states[:, :-encoder_hidden_states_length, ...], hidden_states[:, -encoder_hidden_states_length:, ...]
             if len(self.single_transformer_blocks) > 0:
                 for layer_num, block in enumerate(self.single_transformer_blocks):
                     if layer_num < (len(self.single_transformer_blocks) - 1):

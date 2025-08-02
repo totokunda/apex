@@ -19,11 +19,11 @@ video = engine.run(
     duration=129,
     num_videos=1,
     num_inference_steps=40,
-    guidance_scale=3.5,
+    guidance_scale=5.0,
     dynamic_guidance_start=3.5,
     dynamic_guidance_end=6.5,
     seed=42
 )
 
-outfile_path = "test_wan_multitalk_t2v.mp4"
+outfile_path = "test_wan_avatar.mp4"
 export_to_video(video[0], outfile_path, fps=25, quality=5)
