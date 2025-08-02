@@ -57,7 +57,7 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
             self.device
         )
-        
+
         loaded_image = loaded_image.resize((width, height))
 
         last_image_tensor = None
@@ -66,11 +66,11 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
             loaded_last_image, height, width = self._aspect_ratio_resize(
                 loaded_last_image, max_area=height * width
             )
-            
+
             last_image_tensor = self.video_processor.preprocess(
                 loaded_last_image, height, width
             ).to(self.device)
-            
+
             loaded_last_image = loaded_last_image.resize((width, height))
 
         # 2. Encode prompts
@@ -106,9 +106,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
         clip_image_encoder = self.preprocessors["clip"]
         self.to_device(clip_image_encoder)
 
-        image_embeds = clip_image_encoder(
-            loaded_image, hidden_states_layer=-1
-        ).to(self.device)
+        image_embeds = clip_image_encoder(loaded_image, hidden_states_layer=-1).to(
+            self.device
+        )
 
         if last_image_tensor is not None:
             last_image_embeds = clip_image_encoder(
@@ -133,7 +133,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
         pooled_prompt_embeds = pooled_prompt_embeds.to(
             self.device, dtype=transformer_dtype
         )
-        prompt_attention_mask = prompt_attention_mask.to(self.device, dtype=transformer_dtype)
+        prompt_attention_mask = prompt_attention_mask.to(
+            self.device, dtype=transformer_dtype
+        )
         image_embeds = image_embeds.to(self.device, dtype=transformer_dtype)
 
         if negative_prompt_embeds is not None:
@@ -143,7 +145,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
             negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
-            negative_prompt_attention_mask = negative_prompt_attention_mask.to(self.device, dtype=transformer_dtype)
+            negative_prompt_attention_mask = negative_prompt_attention_mask.to(
+                self.device, dtype=transformer_dtype
+            )
         # 5. Prepare image latents
         num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
 
@@ -212,13 +216,15 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
             )
             * 1000.0
         )
-        
+
         use_true_cfg_guidance = (
             true_guidance_scale > 1.0 and negative_prompt is not None
         )
 
         # 9. Generation loop for each section
-        with self._progress_bar(num_latent_sections, desc="Generating sections") as pbar:
+        with self._progress_bar(
+            num_latent_sections, desc="Generating sections"
+        ) as pbar:
             for k in range(num_latent_sections):
                 # Prepare latents for this section
                 latents = self._get_latents(
@@ -273,7 +279,10 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                     latent_padding_size = latent_paddings[k] * latent_window_size
 
                     indices = torch.arange(
-                        0, sum([1, latent_padding_size, latent_window_size, *history_sizes])
+                        0,
+                        sum(
+                            [1, latent_padding_size, latent_window_size, *history_sizes]
+                        ),
                     )
 
                     (
@@ -284,7 +293,8 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                         indices_latents_history_2x,
                         indices_latents_history_4x,
                     ) = indices.split(
-                        [1, latent_padding_size, latent_window_size, *history_sizes], dim=0
+                        [1, latent_padding_size, latent_window_size, *history_sizes],
+                        dim=0,
                     )
 
                     indices_latents_clean = torch.cat(
@@ -301,10 +311,14 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                     if last_image_latents is not None and is_first_section:
                         latents_history_1x = last_image_latents
 
-                    latents_clean = torch.cat([latents_prefix, latents_history_1x], dim=2)
+                    latents_clean = torch.cat(
+                        [latents_prefix, latents_history_1x], dim=2
+                    )
 
                 else:  # vanilla
-                    indices = torch.arange(0, sum([1, *history_sizes, latent_window_size]))
+                    indices = torch.arange(
+                        0, sum([1, *history_sizes, latent_window_size])
+                    )
                     (
                         indices_prefix,
                         indices_latents_history_4x,
@@ -324,7 +338,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                         )
                     )
 
-                    latents_clean = torch.cat([latents_prefix, latents_history_1x], dim=2)
+                    latents_clean = torch.cat(
+                        [latents_prefix, latents_history_1x], dim=2
+                    )
 
                 latents = self.denoise(
                     latents=latents,
@@ -347,21 +363,25 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                         guidance=guidance,
                         attention_kwargs=attention_kwargs,
                     ),
-                    unconditional_noise_pred_kwargs=dict(
-                        indices_latents=indices_latents,
-                        latents_clean=latents_clean.to(transformer_dtype),
-                        indices_latents_clean=indices_latents_clean,
-                        image_embeds=image_embeds.to(transformer_dtype),
-                        latents_history_2x=latents_history_2x.to(transformer_dtype),
-                        indices_latents_history_2x=indices_latents_history_2x,
-                        latents_history_4x=latents_history_4x.to(transformer_dtype),
-                        indices_latents_history_4x=indices_latents_history_4x,
-                        encoder_hidden_states=negative_prompt_embeds,
-                        encoder_attention_mask=negative_prompt_attention_mask,
-                        pooled_projections=negative_pooled_prompt_embeds,
-                        guidance=guidance,
-                        attention_kwargs=attention_kwargs,
-                    ) if (use_true_cfg_guidance and negative_prompt is not None) else None,
+                    unconditional_noise_pred_kwargs=(
+                        dict(
+                            indices_latents=indices_latents,
+                            latents_clean=latents_clean.to(transformer_dtype),
+                            indices_latents_clean=indices_latents_clean,
+                            image_embeds=image_embeds.to(transformer_dtype),
+                            latents_history_2x=latents_history_2x.to(transformer_dtype),
+                            indices_latents_history_2x=indices_latents_history_2x,
+                            latents_history_4x=latents_history_4x.to(transformer_dtype),
+                            indices_latents_history_4x=indices_latents_history_4x,
+                            encoder_hidden_states=negative_prompt_embeds,
+                            encoder_attention_mask=negative_prompt_attention_mask,
+                            pooled_projections=negative_pooled_prompt_embeds,
+                            guidance=guidance,
+                            attention_kwargs=attention_kwargs,
+                        )
+                        if (use_true_cfg_guidance and negative_prompt is not None)
+                        else None
+                    ),
                     render_on_step=render_on_step,
                     render_on_step_callback=render_on_step_callback,
                     transformer_dtype=transformer_dtype,
@@ -406,7 +426,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                 if history_video is None:
                     if not return_latents:
                         current_latents = real_history_latents
-                        history_video = self.vae_decode(current_latents, offload=offload)
+                        history_video = self.vae_decode(
+                            current_latents, offload=offload
+                        )
                     else:
                         history_video = [real_history_latents]
                 else:
@@ -415,7 +437,9 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                             latent_window_size - 1
                         ) * self.vae_scale_factor_temporal + 1
                         current_latents = real_history_latents[index_slice]
-                        current_video = self.vae_decode(current_latents, offload=offload)
+                        current_video = self.vae_decode(
+                            current_latents, offload=offload
+                        )
 
                         if sampling_type == "inverted_anti_drifting":
                             history_video = self._soft_append(
@@ -429,7 +453,7 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                         history_video.append(real_history_latents)
 
                 pbar.update(1)
-        
+
         if offload:
             self._offload(self.transformer)
 

@@ -132,7 +132,7 @@ class WanMultiTalkTransformerConverter(TransformerConverter):
             "attn2.to_v_img": "attn2.add_v_proj",
             "attn2.norm_k_img": "attn2.norm_added_k",
         }
-        
+
         self.special_keys_map = {}
 
 
@@ -443,6 +443,25 @@ class HunyuanTransformerConverter(TransformerConverter):
             new_key = new_key.replace("q_norm", "attn.norm_q")
             new_key = new_key.replace("k_norm", "attn.norm_k")
             state_dict[new_key] = state_dict.pop(key)
+
+
+class HunyuanAvatarTransformerConverter(HunyuanTransformerConverter):
+    def __init__(self):
+        super().__init__()
+
+        self.rename_dict.update(
+            {
+                "audio_proj": "audio_projection",
+                "motion_pose.mlp.0": "time_text_embed.motion_pose.linear_1",
+                "motion_pose.mlp.2": "time_text_embed.motion_pose.linear_2",
+                "motion_exp.mlp.0": "time_text_embed.motion_exp.linear_1",
+                "motion_exp.mlp.2": "time_text_embed.motion_exp.linear_2",
+                "fps_proj.mlp.0": "time_text_embed.fps_proj.linear_1",
+                "fps_proj.mlp.2": "time_text_embed.fps_proj.linear_2",
+                "ref_in": "ref_latents_embedder",
+                "before_proj": "ref_latents_proj",
+            }
+        )
 
 
 class MochiTransformerConverter(TransformerConverter):

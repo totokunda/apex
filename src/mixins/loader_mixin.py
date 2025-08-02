@@ -114,10 +114,10 @@ class LoaderMixin:
         key_map: Dict[str, str] | None = None,
         extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
-        
+
         if extra_kwargs is None:
             extra_kwargs = {}
-        
+
         model_base = component.get("base")
         if getter_fn:
             model_class = getter_fn(model_base)

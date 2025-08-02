@@ -14,6 +14,8 @@ from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 from einops import rearrange
 from src.preprocess.hunyuan.align import get_facemask
+from torchvision.transforms import ToPILImage
+
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
@@ -29,6 +31,7 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
         align_pt_path: str = None,
         device: str = "cuda",
+        **kwargs,
     ):
         super().__init__(
             model_path, save_path, preprocessor_type=PreprocessorType.AUDIO
@@ -63,95 +66,66 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         self,
         image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
         audio: str,
-        image_height: int = 720,
-        image_width: int = 1280,
+        height: int = 720,
+        width: int = 1280,
         fps: int = 25,
+        num_frames: int = 129,
         dtype: torch.dtype = torch.float32,
+        device: str = "cuda",
     ):
-
         loaded_image = self._load_image(image)
+
+        resized_image, height, width = self._aspect_ratio_resize(
+            loaded_image, max_area=height * width, mod_value=64
+        )
+
+        resized_image = resized_image.resize((width, height), Image.Resampling.LANCZOS)
+
+        ref_image = np.array(resized_image)
+        ref_image = torch.from_numpy(ref_image).to(device=device, dtype=dtype)
+
+        audio_input, audio_len = self._extract_audio_features(audio)
+        audio_prompts = audio_input[0].unsqueeze(0)
+
         motion_bucket_id_heads = np.array([25] * 4)
         motion_bucket_id_exps = np.array([30] * 4)
-        motion_bucket_id_heads = torch.from_numpy(motion_bucket_id_heads)
-        motion_bucket_id_exps = torch.from_numpy(motion_bucket_id_exps)
+        motion_bucket_id_heads = torch.from_numpy(motion_bucket_id_heads).unsqueeze(0)
+        motion_bucket_id_exps = torch.from_numpy(motion_bucket_id_exps).unsqueeze(0)
+        fps = torch.from_numpy(np.array(fps)).unsqueeze(0)
 
-        resized_image, image_height, image_width = self._aspect_ratio_resize(
-            loaded_image, max_area=image_height * image_width, mod_value=64
+        pixel_value_ref = rearrange(
+            ref_image.clone().unsqueeze(0), "b h w c -> b c h w"
         )
 
-        fps = torch.from_numpy(np.array(fps))
-        audio_features, audio_length = self._extract_audio_features(audio)
         audio_prompts = [
-            self._encode_audio(audio_feature, fps, num_frames=129)
-            for audio_feature in audio_features
+            self._encode_audio(
+                audio_feat.to(dtype=self.wav2vec_model.dtype),
+                fps.item(),
+                num_frames=num_frames,
+            )
+            for audio_feat in audio_prompts
         ]
+        audio_prompts = torch.cat(audio_prompts, dim=0).to(device=device, dtype=dtype)
 
-        if audio_prompts.shape[1] <= 129:
-            audio_prompts = torch.cat(
-                [
-                    audio_prompts,
-                    torch.zeros_like(audio_prompts[:, :1]).repeat(
-                        1, 129 - audio_prompts.shape[1], 1, 1, 1
-                    ),
-                ],
-                dim=1,
-            )
-        else:
-            audio_prompts = torch.cat(
-                [
-                    audio_prompts,
-                    torch.zeros_like(audio_prompts[:, :1]).repeat(1, 5, 1, 1, 1),
-                ],
-                dim=1,
-            )
+        self._offload(self.wav2vec_model)
+        self._offload(self.align_image)
 
-        pixel_value_ref_llava = [self.llava_transform(resized_image)]
-        pixel_value_ref_llava = torch.stack(pixel_value_ref_llava, dim=0)
-        pixel_value_ref_clip = self.clip_image_processor(
-            images=Image.fromarray(
-                (resized_image.permute(1, 2, 0)).data.cpu().numpy().astype(np.uint8)
-            ),
-            return_tensors="pt",
-        ).pixel_values[0]
+        uncond_audio_prompts = torch.zeros_like(audio_prompts)
+        motion_exp = motion_bucket_id_exps.to(device=device, dtype=dtype)
+        motion_pose = motion_bucket_id_heads.to(device=device, dtype=dtype)
+        self.align_image.to(device=device)
 
-        pixel_value_ref_clip = pixel_value_ref_clip.unsqueeze(0)
-
-        uncond_audio_prompts = torch.zeros_like(audio_prompts[:, :129])
-        motion_exp = motion_bucket_id_exps.to(self.device)
-        motion_pose = motion_bucket_id_heads.to(self.device)
-
-        pixel_value_ref = pixel_value_ref_llava.to(
-            self.device
-        )  # (b f c h w) 取值范围[0,255]
-        face_masks = get_facemask(pixel_value_ref.clone(), self.align_image, area=3.0)
-
-        pixel_value_ref = pixel_value_ref.clone().repeat(1, 129, 1, 1, 1)
-        uncond_pixel_value_ref = torch.zeros_like(pixel_value_ref)
-        pixel_value_ref = pixel_value_ref / 127.5 - 1.0
-        uncond_pixel_value_ref = uncond_pixel_value_ref * 2 - 1
-
-        pixel_value_ref_for_vae = rearrange(pixel_value_ref, "b f c h w -> b c f h w")
-        uncond_uncond_pixel_value_ref = rearrange(
-            uncond_pixel_value_ref, "b f c h w -> b c f h w"
+        face_masks = get_facemask(
+            pixel_value_ref.clone().unsqueeze(0), self.align_image, area=3.0
         )
-
-        pixel_value_llava = pixel_value_ref_llava.to(self.device)
-        pixel_value_llava = rearrange(pixel_value_llava, "b f c h w -> (b f) c h w")
-        uncond_pixel_value_llava = pixel_value_llava.clone()
 
         return {
-            "pixel_value_ref": pixel_value_ref,
-            "uncond_pixel_value_ref": uncond_pixel_value_ref,
-            "pixel_value_ref_for_vae": pixel_value_ref_for_vae,
-            "uncond_uncond_pixel_value_ref": uncond_uncond_pixel_value_ref,
-            "pixel_value_llava": pixel_value_llava,
-            "uncond_pixel_value_llava": uncond_pixel_value_llava,
+            "fps": fps,
             "face_masks": face_masks,
             "motion_exp": motion_exp,
             "motion_pose": motion_pose,
             "uncond_audio_prompts": uncond_audio_prompts,
             "audio_prompts": audio_prompts,
-            "pixel_value_ref_clip": pixel_value_ref_clip,
         }
 
     def _extract_audio_features(self, audio: str):
@@ -171,12 +145,6 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         audio_features = torch.cat(audio_features, dim=-1)
         return audio_features, len(audio_input) // 640
 
-    def _encode_image(self, image: Image.Image):
-        pass
-
-    def _encode_prompt(self, prompt: str):
-        pass
-
     def _encode_audio(self, audio_feats, fps, num_frames=129):
         if fps == 25:
             start_ts = [0]
@@ -186,7 +154,8 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
             step_ts = [2]
         num_frames = min(num_frames, 400)
         audio_feats = self.wav2vec_model.encoder(
-            audio_feats.unsqueeze(0)[:, :, :3000], output_hidden_states=True
+            audio_feats.unsqueeze(0)[:, :, :3000].to(self.wav2vec_model.device),
+            output_hidden_states=True,
         ).hidden_states
         audio_feats = torch.stack(audio_feats, dim=2)
         audio_feats = torch.cat([torch.zeros_like(audio_feats[:, :4]), audio_feats], 1)

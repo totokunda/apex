@@ -41,7 +41,9 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import FP32LayerNorm
 from src.attention.processors.wan_processor import WanAttnProcessor2_0
-from src.attention.processors.multitalk_wan_processor import MultiTalkWanAttnProcessor2_0
+from src.attention.processors.multitalk_wan_processor import (
+    MultiTalkWanAttnProcessor2_0,
+)
 from src.attention import attention_register
 from einops import repeat
 from functools import lru_cache
@@ -69,7 +71,6 @@ class WanRMSNorm(nn.Module):
         return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
 
 
-
 class SingleStreamAttention(nn.Module):
     def __init__(
         self,
@@ -95,7 +96,7 @@ class SingleStreamAttention(nn.Module):
         self.q_linear = nn.Linear(dim, dim, bias=qkv_bias)
 
         self.q_norm = norm_layer(self.head_dim, eps=eps) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer(self.head_dim,eps=eps) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim, eps=eps) if qk_norm else nn.Identity()
 
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
@@ -106,11 +107,20 @@ class SingleStreamAttention(nn.Module):
         self.add_q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
         self.add_k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
 
-    def forward(self, hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor, shape=None, enable_sp=False, kv_seq=None) -> torch.Tensor:
-       
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        shape=None,
+        enable_sp=False,
+        kv_seq=None,
+    ) -> torch.Tensor:
+
         N_t, N_h, N_w = shape
         if not enable_sp:
-            hidden_states = rearrange(hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t)
+            hidden_states = rearrange(
+                hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t
+            )
 
         # get q for hidden_state
         B, N, C = hidden_states.shape
@@ -120,25 +130,26 @@ class SingleStreamAttention(nn.Module):
 
         if self.qk_norm:
             q = self.q_norm(q)
-        
+
         # get kv from encoder_hidden_states
         _, N_a, _ = encoder_hidden_states.shape
         encoder_kv = self.kv_linear(encoder_hidden_states)
         encoder_kv_shape = (B, N_a, 2, self.num_heads, self.head_dim)
-        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4)) 
+        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4))
         encoder_k, encoder_v = encoder_kv.unbind(0)
 
         if self.qk_norm:
             encoder_k = self.add_k_norm(encoder_k)
 
-
         attn_bias = None
-        hidden_states = attention_register.call(q, encoder_k, encoder_v, attn_bias=attn_bias, op=None)
+        hidden_states = attention_register.call(
+            q, encoder_k, encoder_v, attn_bias=attn_bias, op=None
+        )
 
         # linear transform
         x_output_shape = (B, N, C)
-        hidden_states = hidden_states.transpose(1, 2) 
-        hidden_states = hidden_states.reshape(x_output_shape) 
+        hidden_states = hidden_states.transpose(1, 2)
+        hidden_states = hidden_states.reshape(x_output_shape)
         hidden_states = self.proj(hidden_states)
         hidden_states = self.proj_drop(hidden_states)
 
@@ -149,23 +160,29 @@ class SingleStreamAttention(nn.Module):
 
 class RotaryPositionalEmbedding1D(nn.Module):
 
-    def __init__(self,
-                 head_dim,
-                 ):
+    def __init__(
+        self,
+        head_dim,
+    ):
         super().__init__()
         self.head_dim = head_dim
         self.base = 10000
 
-
     @lru_cache(maxsize=32)
     def precompute_freqs_cis_1d(self, pos_indices):
 
-        freqs = 1.0 / (self.base ** (torch.arange(0, self.head_dim, 2)[: (self.head_dim // 2)].float() / self.head_dim))
+        freqs = 1.0 / (
+            self.base
+            ** (
+                torch.arange(0, self.head_dim, 2)[: (self.head_dim // 2)].float()
+                / self.head_dim
+            )
+        )
         freqs = freqs.to(pos_indices.device)
         freqs = torch.einsum("..., f -> ... f", pos_indices.float(), freqs)
         freqs = repeat(freqs, "... n -> ... (n r)", r=2)
         return freqs
-    
+
     def rotate_half(self, x):
         x = rearrange(x, "... (d r) -> ... d r", r=2)
         x1, x2 = x.unbind(dim=-1)
@@ -187,10 +204,11 @@ class RotaryPositionalEmbedding1D(nn.Module):
 
         freqs_cis = freqs_cis.float().to(x.device)
         cos, sin = freqs_cis.cos(), freqs_cis.sin()
-        cos, sin = rearrange(cos, 'n d -> 1 1 n d'), rearrange(sin, 'n d -> 1 1 n d')
+        cos, sin = rearrange(cos, "n d -> 1 1 n d"), rearrange(sin, "n d -> 1 1 n d")
         x_ = (x_ * cos) + (self.rotate_half(x_) * sin)
 
         return x_.type_as(x)
+
 
 class SingleStreamMutiAttention(SingleStreamAttention):
     def __init__(
@@ -220,12 +238,12 @@ class SingleStreamMutiAttention(SingleStreamAttention):
         )
         self.class_interval = class_interval
         self.class_range = class_range
-        self.rope_h1  = (0, self.class_interval)
-        self.rope_h2  = (self.class_range - self.class_interval, self.class_range)
+        self.rope_h1 = (0, self.class_interval)
+        self.rope_h2 = (self.class_range - self.class_interval, self.class_range)
         self.rope_bak = int(self.class_range // 2)
 
         self.rope_1d = RotaryPositionalEmbedding1D(self.head_dim)
-        
+
     def normalize_and_scale(self, column, source_range, target_range, epsilon=1e-8):
         source_min, source_max = source_range
         new_min, new_max = target_range
@@ -233,79 +251,101 @@ class SingleStreamMutiAttention(SingleStreamAttention):
         scaled = normalized * (new_max - new_min) + new_min
         return scaled
 
-    def forward(self, 
-                hidden_states: torch.Tensor, 
-                encoder_hidden_states: torch.Tensor, 
-                shape=None, 
-                x_ref_attn_map=None,
-                human_num=None,
-                ) -> torch.Tensor:
-        
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        shape=None,
+        x_ref_attn_map=None,
+        human_num=None,
+    ) -> torch.Tensor:
+
         encoder_hidden_states = encoder_hidden_states.squeeze(0)
         if human_num == 1:
             return super().forward(hidden_states, encoder_hidden_states, shape)
 
-        N_t, _, _ = shape 
-        hidden_states = rearrange(hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t) 
+        N_t, _, _ = shape
+        hidden_states = rearrange(hidden_states, "B (N_t S) C -> (B N_t) S C", N_t=N_t)
 
         # get q for hidden_state
         B, N, C = hidden_states.shape
-        q = self.q_linear(hidden_states) 
-        q_shape = (B, N, self.num_heads, self.head_dim) 
+        q = self.q_linear(hidden_states)
+        q_shape = (B, N, self.num_heads, self.head_dim)
         q = q.view(q_shape).permute((0, 2, 1, 3))
 
         if self.qk_norm:
             q = self.q_norm(q)
 
-        max_values = x_ref_attn_map.max(1).values[:, None, None] 
-        min_values = x_ref_attn_map.min(1).values[:, None, None] 
+        max_values = x_ref_attn_map.max(1).values[:, None, None]
+        min_values = x_ref_attn_map.min(1).values[:, None, None]
         max_min_values = torch.cat([max_values, min_values], dim=2)
 
-        human1_max_value, human1_min_value = max_min_values[0, :, 0].max(), max_min_values[0, :, 1].min()
-        human2_max_value, human2_min_value = max_min_values[1, :, 0].max(), max_min_values[1, :, 1].min()
+        human1_max_value, human1_min_value = (
+            max_min_values[0, :, 0].max(),
+            max_min_values[0, :, 1].min(),
+        )
+        human2_max_value, human2_min_value = (
+            max_min_values[1, :, 0].max(),
+            max_min_values[1, :, 1].min(),
+        )
 
-        human1 = self.normalize_and_scale(x_ref_attn_map[0], (human1_min_value, human1_max_value), (self.rope_h1[0], self.rope_h1[1]))
-        human2 = self.normalize_and_scale(x_ref_attn_map[1], (human2_min_value, human2_max_value), (self.rope_h2[0], self.rope_h2[1]))
-        back   = torch.full((x_ref_attn_map.size(1),), self.rope_bak, dtype=human1.dtype).to(human1.device)
+        human1 = self.normalize_and_scale(
+            x_ref_attn_map[0],
+            (human1_min_value, human1_max_value),
+            (self.rope_h1[0], self.rope_h1[1]),
+        )
+        human2 = self.normalize_and_scale(
+            x_ref_attn_map[1],
+            (human2_min_value, human2_max_value),
+            (self.rope_h2[0], self.rope_h2[1]),
+        )
+        back = torch.full(
+            (x_ref_attn_map.size(1),), self.rope_bak, dtype=human1.dtype
+        ).to(human1.device)
         max_indices = x_ref_attn_map.argmax(dim=0)
         normalized_map = torch.stack([human1, human2, back], dim=1)
-        normalized_pos = normalized_map[range(x_ref_attn_map.size(1)), max_indices] # N 
+        normalized_pos = normalized_map[range(x_ref_attn_map.size(1)), max_indices]  # N
 
         q = rearrange(q, "(B N_t) H S C -> B H (N_t S) C", N_t=N_t)
         q = self.rope_1d(q, normalized_pos)
         q = rearrange(q, "B H (N_t S) C -> (B N_t) H S C", N_t=N_t)
 
-        _, N_a, _ = encoder_hidden_states.shape 
-        encoder_kv = self.kv_linear(encoder_hidden_states) 
+        _, N_a, _ = encoder_hidden_states.shape
+        encoder_kv = self.kv_linear(encoder_hidden_states)
         encoder_kv_shape = (B, N_a, 2, self.num_heads, self.head_dim)
-        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4)) 
-        encoder_k, encoder_v = encoder_kv.unbind(0) 
+        encoder_kv = encoder_kv.view(encoder_kv_shape).permute((2, 0, 3, 1, 4))
+        encoder_k, encoder_v = encoder_kv.unbind(0)
 
         if self.qk_norm:
             encoder_k = self.add_k_norm(encoder_k)
 
         per_frame = torch.zeros(N_a, dtype=encoder_k.dtype).to(encoder_k.device)
-        per_frame[:per_frame.size(0)//2] = (self.rope_h1[0] + self.rope_h1[1]) / 2
-        per_frame[per_frame.size(0)//2:] = (self.rope_h2[0] + self.rope_h2[1]) / 2
-        encoder_pos = torch.concat([per_frame]*N_t, dim=0)
+        per_frame[: per_frame.size(0) // 2] = (self.rope_h1[0] + self.rope_h1[1]) / 2
+        per_frame[per_frame.size(0) // 2 :] = (self.rope_h2[0] + self.rope_h2[1]) / 2
+        encoder_pos = torch.concat([per_frame] * N_t, dim=0)
         encoder_k = rearrange(encoder_k, "(B N_t) H S C -> B H (N_t S) C", N_t=N_t)
         encoder_k = self.rope_1d(encoder_k, encoder_pos)
         encoder_k = rearrange(encoder_k, "B H (N_t S) C -> (B N_t) H S C", N_t=N_t)
 
-        hidden_states = attention_register.call(q, encoder_k, encoder_v, attn_bias=None, op=None,)
+        hidden_states = attention_register.call(
+            q,
+            encoder_k,
+            encoder_v,
+            attn_bias=None,
+            op=None,
+        )
 
         # linear transform
         hidden_states_output_shape = (B, N, C)
-        hidden_states = hidden_states.transpose(1, 2) 
-        hidden_states = hidden_states.reshape(hidden_states_output_shape) 
-        hidden_states = self.proj(hidden_states) 
+        hidden_states = hidden_states.transpose(1, 2)
+        hidden_states = hidden_states.reshape(hidden_states_output_shape)
+        hidden_states = self.proj(hidden_states)
         hidden_states = self.proj_drop(hidden_states)
 
         # reshape x to origin shape
-        hidden_states = rearrange(hidden_states, "(B N_t) S C -> B (N_t S) C", N_t=N_t) 
+        hidden_states = rearrange(hidden_states, "(B N_t) S C -> B (N_t S) C", N_t=N_t)
 
         return hidden_states
-
 
 
 class AudioProjModel(ModelMixin, ConfigMixin):
@@ -313,8 +353,8 @@ class AudioProjModel(ModelMixin, ConfigMixin):
         self,
         seq_len=5,
         seq_len_vf=12,
-        blocks=12,  
-        channels=768, 
+        blocks=12,
+        channels=768,
         intermediate_dim=512,
         output_dim=768,
         context_tokens=32,
@@ -325,7 +365,7 @@ class AudioProjModel(ModelMixin, ConfigMixin):
         self.seq_len = seq_len
         self.blocks = blocks
         self.channels = channels
-        self.input_dim = seq_len * blocks * channels  
+        self.input_dim = seq_len * blocks * channels
         self.input_dim_vf = seq_len_vf * blocks * channels
         self.intermediate_dim = intermediate_dim
         self.context_tokens = context_tokens
@@ -350,25 +390,31 @@ class AudioProjModel(ModelMixin, ConfigMixin):
         # process audio of latter frame
         audio_embeds_vf = rearrange(audio_embeds_vf, "bz f w b c -> (bz f) w b c")
         batch_size_vf, window_size_vf, blocks_vf, channels_vf = audio_embeds_vf.shape
-        audio_embeds_vf = audio_embeds_vf.view(batch_size_vf, window_size_vf * blocks_vf * channels_vf)
+        audio_embeds_vf = audio_embeds_vf.view(
+            batch_size_vf, window_size_vf * blocks_vf * channels_vf
+        )
 
         # first projection
-        audio_embeds = torch.relu(self.proj1(audio_embeds)) 
-        audio_embeds_vf = torch.relu(self.proj1_vf(audio_embeds_vf)) 
+        audio_embeds = torch.relu(self.proj1(audio_embeds))
+        audio_embeds_vf = torch.relu(self.proj1_vf(audio_embeds_vf))
         audio_embeds = rearrange(audio_embeds, "(bz f) c -> bz f c", bz=B)
         audio_embeds_vf = rearrange(audio_embeds_vf, "(bz f) c -> bz f c", bz=B)
-        audio_embeds_c = torch.concat([audio_embeds, audio_embeds_vf], dim=1) 
+        audio_embeds_c = torch.concat([audio_embeds, audio_embeds_vf], dim=1)
         batch_size_c, N_t, C_a = audio_embeds_c.shape
-        audio_embeds_c = audio_embeds_c.view(batch_size_c*N_t, C_a)
+        audio_embeds_c = audio_embeds_c.view(batch_size_c * N_t, C_a)
 
         # second projection
         audio_embeds_c = torch.relu(self.proj2(audio_embeds_c))
 
-        context_tokens = self.proj3(audio_embeds_c).reshape(batch_size_c*N_t, self.context_tokens, self.output_dim)
+        context_tokens = self.proj3(audio_embeds_c).reshape(
+            batch_size_c * N_t, self.context_tokens, self.output_dim
+        )
 
         # normalization and reshape
         context_tokens = self.norm(context_tokens)
-        context_tokens = rearrange(context_tokens, "(bz f) m c -> bz f m c", f=video_length)
+        context_tokens = rearrange(
+            context_tokens, "(bz f) m c -> bz f m c", f=video_length
+        )
 
         return context_tokens
 
@@ -625,7 +671,10 @@ class WanMultiTalkTransformerBlock(nn.Module):
         ).type_as(hidden_states)
 
         attn_output, x_ref_attn_map = self.attn1(
-            hidden_states=norm_hidden_states, rotary_emb=rotary_emb, grid_sizes=grid_sizes, ref_target_masks=ref_target_masks
+            hidden_states=norm_hidden_states,
+            rotary_emb=rotary_emb,
+            grid_sizes=grid_sizes,
+            ref_target_masks=ref_target_masks,
         )
 
         hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
@@ -850,7 +899,6 @@ class WanMultiTalkTransformer3DModel(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
 
-
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.config.patch_size
         post_patch_num_frames = num_frames // p_t
@@ -879,34 +927,67 @@ class WanMultiTalkTransformer3DModel(
             )
 
         # Process with audio projection model
-        audio_cond = encoder_hidden_states_audio.to(device=hidden_states.device, dtype=hidden_states.dtype)
-        first_frame_audio_emb_s = audio_cond[:, :1, ...] 
-        latter_frame_audio_emb = audio_cond[:, 1:, ...] 
-        latter_frame_audio_emb = rearrange(latter_frame_audio_emb, "b (n_t n) w s c -> b n_t n w s c", n=self.vae_scale) 
+        audio_cond = encoder_hidden_states_audio.to(
+            device=hidden_states.device, dtype=hidden_states.dtype
+        )
+        first_frame_audio_emb_s = audio_cond[:, :1, ...]
+        latter_frame_audio_emb = audio_cond[:, 1:, ...]
+        latter_frame_audio_emb = rearrange(
+            latter_frame_audio_emb, "b (n_t n) w s c -> b n_t n w s c", n=self.vae_scale
+        )
         middle_index = self.audio_window // 2
-        latter_first_frame_audio_emb = latter_frame_audio_emb[:, :, :1, :middle_index+1, ...] 
-        latter_first_frame_audio_emb = rearrange(latter_first_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
-        latter_last_frame_audio_emb = latter_frame_audio_emb[:, :, -1:, middle_index:, ...] 
-        latter_last_frame_audio_emb = rearrange(latter_last_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
-        latter_middle_frame_audio_emb = latter_frame_audio_emb[:, :, 1:-1, middle_index:middle_index+1, ...] 
-        latter_middle_frame_audio_emb = rearrange(latter_middle_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c") 
-        latter_frame_audio_emb_s = torch.concat([latter_first_frame_audio_emb, latter_middle_frame_audio_emb, latter_last_frame_audio_emb], dim=2)
-        audio_embedding = self.audio_proj(first_frame_audio_emb_s, latter_frame_audio_emb_s) 
+        latter_first_frame_audio_emb = latter_frame_audio_emb[
+            :, :, :1, : middle_index + 1, ...
+        ]
+        latter_first_frame_audio_emb = rearrange(
+            latter_first_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c"
+        )
+        latter_last_frame_audio_emb = latter_frame_audio_emb[
+            :, :, -1:, middle_index:, ...
+        ]
+        latter_last_frame_audio_emb = rearrange(
+            latter_last_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c"
+        )
+        latter_middle_frame_audio_emb = latter_frame_audio_emb[
+            :, :, 1:-1, middle_index : middle_index + 1, ...
+        ]
+        latter_middle_frame_audio_emb = rearrange(
+            latter_middle_frame_audio_emb, "b n_t n w s c -> b n_t (n w) s c"
+        )
+        latter_frame_audio_emb_s = torch.concat(
+            [
+                latter_first_frame_audio_emb,
+                latter_middle_frame_audio_emb,
+                latter_last_frame_audio_emb,
+            ],
+            dim=2,
+        )
+        audio_embedding = self.audio_proj(
+            first_frame_audio_emb_s, latter_frame_audio_emb_s
+        )
         human_num = len(audio_embedding)
-        audio_embedding = torch.concat(audio_embedding.split(1), dim=2).to(hidden_states.dtype)
+        audio_embedding = torch.concat(audio_embedding.split(1), dim=2).to(
+            hidden_states.dtype
+        )
         # Combine audio embeddings if multiple humans
-        
+
         if len(audio_embedding) > 1:
             audio_embedding = torch.concat(audio_embedding.split(1), dim=2)
-        
+
         audio_embedding = audio_embedding.to(hidden_states.dtype)
-        
+
         if ref_target_masks is not None:
-            ref_target_masks = ref_target_masks.unsqueeze(0).to(torch.float32) 
-            token_ref_target_masks = nn.functional.interpolate(ref_target_masks, size=(post_patch_height, post_patch_width), mode='nearest') 
+            ref_target_masks = ref_target_masks.unsqueeze(0).to(torch.float32)
+            token_ref_target_masks = nn.functional.interpolate(
+                ref_target_masks,
+                size=(post_patch_height, post_patch_width),
+                mode="nearest",
+            )
             token_ref_target_masks = token_ref_target_masks.squeeze(0)
-            token_ref_target_masks = (token_ref_target_masks > 0)
-            token_ref_target_masks = token_ref_target_masks.view(token_ref_target_masks.shape[0], -1) 
+            token_ref_target_masks = token_ref_target_masks > 0
+            token_ref_target_masks = token_ref_target_masks.view(
+                token_ref_target_masks.shape[0], -1
+            )
             token_ref_target_masks = token_ref_target_masks.to(hidden_states.dtype)
 
         # 4. Transformer blocks
@@ -959,7 +1040,7 @@ class WanMultiTalkTransformer3DModel(
             p_w,
             -1,
         )
-        
+
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

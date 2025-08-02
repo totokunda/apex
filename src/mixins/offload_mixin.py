@@ -32,7 +32,7 @@ class OffloadMixin:
         recurse  : bool, default True
             Whether to descend into sub-modules (almost always what you want).
         """
-        
+
         if not module:
             return
 

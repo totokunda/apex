@@ -1,6 +1,7 @@
 import torch
 from contextlib import nullcontext
 
+
 class MochiDenoise:
     def denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps")
@@ -27,9 +28,12 @@ class MochiDenoise:
                     latent_model_input = latents.to(transformer_dtype)
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-                timestep = t.expand(latent_model_input.shape[0]).to(self.device).to(transformer_dtype)
-                
-                
+                timestep = (
+                    t.expand(latent_model_input.shape[0])
+                    .to(self.device)
+                    .to(transformer_dtype)
+                )
+
                 if hasattr(self.transformer, "cache_context"):
                     cache_context = self.transformer.cache_context("cond_uncond")
                 else:

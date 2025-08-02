@@ -21,6 +21,7 @@ from src.converters.transformer_converters import (
     LTXTransformerConverter,
     StepVideoTransformerConverter,
     SkyReelsTransformerConverter,
+    HunyuanAvatarTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -49,6 +50,8 @@ def get_transformer_converter(model_type: str):
         return CogVideoXTransformerConverter()
     elif model_type == "hunyuan.base":
         return HunyuanTransformerConverter()
+    elif model_type == "hunyuan.avatar":
+        return HunyuanAvatarTransformerConverter()
     elif model_type == "mochi.base":
         return MochiTransformerConverter()
     elif model_type == "ltx.base":
@@ -187,18 +190,18 @@ def convert_transformer(
     model_class = get_model_class(model_type, config, model_type="transformer_models")
 
     converter = get_transformer_converter(model_type)
-    
+
     if isinstance(ckpt_path, list):
         state_dict = {}
         for ckpt in ckpt_path:
             state_dict.update(load_state_dict(ckpt, model_key, pattern))
     else:
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
-        
+
     model = get_empty_model(model_class, config)
 
     converter.convert(state_dict)
-    
+
     state_dict = strip_common_prefix(state_dict, model.state_dict())
 
     model.load_state_dict(state_dict, strict=True, assign=True)
@@ -228,7 +231,7 @@ def convert_vae(
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
 
     model = get_empty_model(model_class, config)
-    
+
     converter.convert(state_dict)
 
     state_dict = strip_common_prefix(state_dict, model.state_dict())

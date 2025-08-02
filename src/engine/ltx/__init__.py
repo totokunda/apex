@@ -31,7 +31,7 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
         super().__init__(yaml_path, **kwargs)
 
         self.model_type = model_type
-    
+
         if self.model_type == ModelType.CONTROL:
             self.denoise_type = DenoiseType.CONDITION
         elif self.model_type == ModelType.T2V:

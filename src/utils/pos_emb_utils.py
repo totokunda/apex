@@ -1,5 +1,5 @@
 import torch
-from typing import Union, List
+from typing import Union, List, Tuple
 
 from itertools import repeat
 import collections.abc
@@ -316,3 +316,56 @@ def get_nd_rotary_pos_embed_new(
     else:
         emb = torch.cat(embs, dim=1)  # (WHD, D/2)
         return emb
+
+
+def get_rotary_pos_embed(
+    video_length,
+    height,
+    width,
+    patch_size,
+    hidden_size,
+    num_heads,
+    rope_dim_list,
+    concat_dict={},
+    vae_scale_factor_temporal=4,
+    vae_scale_factor_spatial=8,
+    theta=10000.0,
+):
+    target_ndim = 3
+    ndim = 5 - 2
+    latents_size = [
+        (video_length - 1) // vae_scale_factor_temporal + 1,
+        height // vae_scale_factor_spatial,
+        width // vae_scale_factor_spatial,
+    ]
+
+    if isinstance(patch_size, int):
+        assert all(s % patch_size == 0 for s in latents_size), (
+            f"Latent size(last {ndim} dimensions) should be divisible by patch size({patch_size}), "
+            f"but got {latents_size}."
+        )
+        rope_sizes = [s // patch_size for s in latents_size]
+    elif isinstance(patch_size, list):
+        assert all(s % patch_size[idx] == 0 for idx, s in enumerate(latents_size)), (
+            f"Latent size(last {ndim} dimensions) should be divisible by patch size({patch_size}), "
+            f"but got {latents_size}."
+        )
+        rope_sizes = [s // patch_size[idx] for idx, s in enumerate(latents_size)]
+    if len(rope_sizes) != target_ndim:
+        rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes  # time axis
+    head_dim = hidden_size // num_heads
+    rope_dim_list = rope_dim_list
+    if rope_dim_list is None:
+        rope_dim_list = [head_dim // target_ndim for _ in range(target_ndim)]
+    assert (
+        sum(rope_dim_list) == head_dim
+    ), "sum(rope_dim_list) should equal to head_dim of attention layer"
+    freqs_cos, freqs_sin = get_nd_rotary_pos_embed_new(
+        rope_dim_list,
+        rope_sizes,
+        theta=theta,
+        use_real=True,
+        theta_rescale_factor=1,
+        concat_dict=concat_dict,
+    )
+    return freqs_cos, freqs_sin

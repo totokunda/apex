@@ -2,7 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from src.utils.pos_emb_utils import get_nd_rotary_pos_embed_new
+from src.utils.pos_emb_utils import get_rotary_pos_embed
 import torch.nn.functional as F
 from .base import HunyuanBaseEngine
 
@@ -20,10 +20,13 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         negative_prompt_2: Union[List[str], str] = None,
         height: int = 1024,
         width: int = 1024,
-        duration: Union[str, int] = None,
+        duration: Union[str, int] = 129,
         fps: int = 25,
         num_inference_steps: int = 50,
+        use_classifier_free_guidance: bool = True,
         guidance_scale: float = 3.5,
+        dynamic_guidance_start: float = 3.5,
+        dynamic_guidance_end: float = 6.5,
         num_videos: int = 1,
         seed: int = None,
         return_latents: bool = False,
@@ -32,6 +35,9 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         timesteps: List[int] = None,
         sigmas: List[float] = None,
         text_encoder_kwargs: Dict[str, Any] = {},
+        image_embed_interleave: Optional[int] = None,
+        image_condition_type: Optional[str] = None,
+        max_sequence_length: int = 256,
         **kwargs,
     ):
         # 1. Load preprocessor and VAE
@@ -44,36 +50,53 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             self.load_component_by_type("vae")
         self.to_device(self.vae)
 
+        num_frames = self._parse_num_frames(duration, fps)
+
+        loaded_image = self._load_image(image)
+
+        if self.transformer is not None:
+            image_condition_type = getattr(
+                self.transformer.config, "image_condition_type", "token_replace"
+            )
+        else:
+            image_condition_type = (
+                "token_replace"
+                if image_condition_type is None
+                else image_condition_type
+            )
+
+        image_embed_interleave = (
+            image_embed_interleave
+            if image_embed_interleave is not None
+            else (
+                2
+                if image_condition_type == "latent_concat"
+                else 4 if image_condition_type == "token_replace" else 1
+            )
+        )
+
+        # Preprocess image
+        image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
+            self.device
+        )
+
         # 2. Preprocess inputs
-        batch = hyavatar_preprocessor(
+        preprocessed_inputs = hyavatar_preprocessor(
             image=image,
             audio=audio,
             height=height,
             width=width,
             fps=fps,
-            dtype=self.vae.dtype,
+            num_frames=num_frames,
         )
 
-        # 3. VAE encode reference images and prepare face masks
-        ref_latents = self.vae_encode(
-            batch["pixel_value_ref_for_vae"],
-            offload=offload,
-            sample_mode="sample",
-            generator=generator,
-        )
-        uncond_ref_latents = self.vae_encode(
-            batch["uncond_pixel_value_ref_for_vae"],
-            offload=offload,
-            sample_mode="sample",
-            generator=generator,
-        )
-        face_masks = F.interpolate(
-            batch["face_masks"].to(self.device),
-            size=(ref_latents.shape[-2], ref_latents.shape[-1]),
-            mode="bilinear",
-        )
+        face_masks = preprocessed_inputs["face_masks"]
+        motion_exp = preprocessed_inputs["motion_exp"]
+        motion_pose = preprocessed_inputs["motion_pose"]
+        uncond_audio_prompts = preprocessed_inputs["uncond_audio_prompts"]
+        audio_prompts = preprocessed_inputs["audio_prompts"]
+        fps = preprocessed_inputs["fps"]
 
-        # 4. Encode prompts
         (
             pooled_prompt_embeds,
             prompt_embeds,
@@ -81,8 +104,10 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         ) = self._encode_prompt(
             prompt=prompt,
             prompt_2=prompt_2,
-            image=batch["pixel_value_llava"],
+            image=image,
             num_videos_per_prompt=num_videos,
+            max_sequence_length=max_sequence_length,
+            image_embed_interleave=image_embed_interleave,
             **text_encoder_kwargs,
         )
 
@@ -94,21 +119,8 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             ) = self._encode_prompt(
                 prompt=negative_prompt,
                 prompt_2=negative_prompt_2,
-                image=batch["uncond_pixel_value_llava"],
                 num_videos_per_prompt=num_videos,
-                **text_encoder_kwargs,
-            )
-        else:
-            # Create empty negative prompts if not provided
-            (
-                negative_pooled_prompt_embeds,
-                negative_prompt_embeds,
-                negative_prompt_attention_mask,
-            ) = self._encode_prompt(
-                prompt=[""] * len(prompt),
-                prompt_2=[""] * len(prompt) if prompt_2 else None,
-                image=batch["uncond_pixel_value_llava"],
-                num_videos_per_prompt=num_videos,
+                max_sequence_length=max_sequence_length,
                 **text_encoder_kwargs,
             )
 
@@ -117,11 +129,68 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             if self.llama_text_encoder is not None:
                 self._offload(self.llama_text_encoder)
 
-        # 5. Load transformer and scheduler
         if not self.transformer:
             self.load_component_by_type("transformer")
+
         self.to_device(self.transformer)
         transformer_dtype = self.component_dtypes["transformer"]
+
+        prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
+        pooled_prompt_embeds = pooled_prompt_embeds.to(
+            self.device, dtype=transformer_dtype
+        )
+        prompt_attention_mask = prompt_attention_mask.to(
+            self.device, dtype=transformer_dtype
+        )
+
+        if negative_prompt is not None:
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
+            negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
+            negative_prompt_attention_mask = negative_prompt_attention_mask.to(
+                self.device, dtype=transformer_dtype
+            )
+
+        if image_condition_type == "latent_concat":
+            num_channels_latents = (
+                getattr(self.transformer.config, "in_channels", 16) - 1
+            ) // 2
+        elif image_condition_type == "token_replace":
+            num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
+
+        # Encode image to latents
+        image_tensor_unsqueezed = image_tensor.unsqueeze(2).repeat(
+            1, 1, num_frames, 1, 1
+        )
+
+        image_latents = self.vae_encode(
+            image_tensor_unsqueezed,
+            offload=offload,
+            sample_mode="mode",
+            normalize_latents_dtype=torch.float32,
+            dtype=torch.float32,
+        )
+
+        uncond_image_latents = self.vae_encode(
+            torch.zeros_like(image_tensor_unsqueezed),
+            offload=offload,
+            sample_mode="mode",
+            normalize_latents_dtype=torch.float32,
+            dtype=torch.float32,
+        )
+
+        face_masks = (
+            F.interpolate(
+                face_masks.to(self.device).squeeze(2),
+                size=(image_latents.shape[-2], image_latents.shape[-1]),
+                mode="bilinear",
+            )
+            .unsqueeze(2)
+            .to(transformer_dtype)
+        )
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -140,82 +209,66 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         num_frames = (
             self._parse_num_frames(duration, fps)
             if duration
-            else batch["audio_prompts"].shape[1]
-        )
-        target_ndim = 3
-        if "884" in self.vae.config.name:
-            latents_size = [(num_frames - 1) // 4 + 1, height // 8, width // 8]
-        else:
-            latents_size = [num_frames, height // 8, width // 8]
-
-        patch_size = self.transformer.config.patch_size
-        hidden_size = self.transformer.config.hidden_size
-        num_heads = self.transformer.config.num_heads
-
-        if isinstance(patch_size, int):
-            rope_sizes = [s // patch_size for s in latents_size]
-        else:
-            rope_sizes = [s // patch_size[idx] for idx, s in enumerate(latents_size)]
-
-        if len(rope_sizes) != target_ndim:
-            rope_sizes = [1] * (target_ndim - len(rope_sizes)) + rope_sizes
-        head_dim = hidden_size // num_heads
-        rope_dim_list = self.transformer.config.get(
-            "rope_dim_list", [head_dim // target_ndim for _ in range(target_ndim)]
+            else audio_prompts.shape[1]
         )
 
-        freqs_cos, freqs_sin = get_nd_rotary_pos_embed_new(
-            rope_dim_list,
-            rope_sizes,
-            theta=self.transformer.config.rope_theta,
-            use_real=True,
+
+        patch_size = [self.transformer.config.patch_size_t, self.transformer.config.patch_size, self.transformer.config.patch_size]
+        hidden_size = (
+            self.transformer.config.num_attention_heads
+            * self.transformer.config.attention_head_dim
         )
+        num_heads = self.transformer.config.num_attention_heads
+        rope_axes_dim = self.transformer.config.rope_axes_dim
+        rope_theta = self.transformer.config.rope_theta
+
+        freqs_cos, freqs_sin = get_rotary_pos_embed(
+            num_frames,
+            height,
+            width,
+            patch_size,
+            hidden_size,
+            num_heads,
+            rope_axes_dim,
+            concat_dict={'mode': 'timecat', 'bias': -1},
+            vae_scale_factor_temporal=self.vae_scale_factor_temporal,
+            vae_scale_factor_spatial=self.vae_scale_factor_spatial,
+            theta=rope_theta,
+        )
+
         freqs_cis = (
             freqs_cos.to(self.device, dtype=transformer_dtype),
             freqs_sin.to(self.device, dtype=transformer_dtype),
         )
 
         # 8. Prepare inputs for denoising loop
-        audio_prompts = batch["audio_prompts"].to(self.device, dtype=transformer_dtype)
-        uncond_audio_prompts = batch["uncond_audio_prompts"].to(
+        audio_prompts = audio_prompts.to(self.device, dtype=transformer_dtype)
+        uncond_audio_prompts = uncond_audio_prompts.to(
             self.device, dtype=transformer_dtype
         )
 
-        motion_exp = batch["motion_exp"].to(self.device, dtype=transformer_dtype)
-        motion_pose = batch["motion_pose"].to(self.device, dtype=transformer_dtype)
-        fps_tensor = batch["fps"].to(self.device, dtype=transformer_dtype)
-
-        prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
-        pooled_prompt_embeds = pooled_prompt_embeds.to(
-            self.device, dtype=transformer_dtype
-        )
-        negative_prompt_embeds = negative_prompt_embeds.to(
-            self.device, dtype=transformer_dtype
-        )
-        negative_pooled_prompt_embeds = negative_pooled_prompt_embeds.to(
-            self.device, dtype=transformer_dtype
-        )
-        prompt_attention_mask = prompt_attention_mask.to(self.device)
-        negative_prompt_attention_mask = negative_prompt_attention_mask.to(self.device)
+        motion_exp = motion_exp.to(self.device, dtype=transformer_dtype)
+        motion_pose = motion_pose.to(self.device, dtype=transformer_dtype)
+        fps_tensor = fps.to(self.device, dtype=transformer_dtype)
 
         # 9. Prepare latents
         num_frames = audio_prompts.shape[1]
-
-        if "884" in self.vae.config.name:
-            num_latent_frames = (num_frames - 1) // 4 + 1
-        else:
-            num_latent_frames = num_frames
+        infer_length = (audio_prompts.shape[1] // 128 + 1) * 32 + 1
 
         latents = self._get_latents(
             height=height,
             width=width,
-            duration=num_latent_frames,
+            duration=infer_length,
+            num_channels_latents=num_channels_latents,
             fps=fps,
             num_videos=num_videos,
             seed=seed,
             generator=generator,
             parse_frames=False,
         )
+
+        if hasattr(self.scheduler, "init_noise_sigma"):
+            latents = latents * self.scheduler.init_noise_sigma
 
         # 10. Denoising loop
         latents_all = latents.clone()
@@ -234,16 +287,20 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             prompt_attention_mask=prompt_attention_mask,
             pooled_prompt_embeds=pooled_prompt_embeds,
             negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-            ref_latents=ref_latents,
-            uncond_ref_latents=uncond_ref_latents,
+            ref_latents=image_latents,
+            uncond_ref_latents=uncond_image_latents,
             timesteps=timesteps,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
+            use_classifier_free_guidance=use_classifier_free_guidance,
+            dynamic_guidance_start=dynamic_guidance_start,
+            dynamic_guidance_end=dynamic_guidance_end,
             motion_exp=motion_exp,
             motion_pose=motion_pose,
             fps_tensor=fps_tensor,
             freqs_cis=freqs_cis,
             num_videos=num_videos,
+            transformer_dtype=transformer_dtype,
             **kwargs,
         )
 

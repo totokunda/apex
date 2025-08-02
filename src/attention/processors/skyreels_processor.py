@@ -94,7 +94,7 @@ class SkyReelsAttnProcessor:
             is_causal=False,
             key="sdpa" if ar_attention else None,
         ).transpose(1, 2)
-        
+
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
 

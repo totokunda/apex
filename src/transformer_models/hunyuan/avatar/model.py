@@ -102,6 +102,9 @@ class HunyuanAudioProjNet2(ModelMixin):
         self.intermediate_dim = intermediate_dim
         self.context_tokens = context_tokens
         self.output_dim = output_dim
+        print(
+            f"input_dim: {self.input_dim}, intermediate_dim: {self.intermediate_dim}, context_tokens: {self.context_tokens}, output_dim: {self.output_dim}"
+        )
 
         # define multiple linear layers
         self.proj1 = nn.Linear(self.input_dim, intermediate_dim)
@@ -160,8 +163,7 @@ class HunyuanPerceiverAttentionCA(nn.Module):
         """
         x = self.norm1(x)
         latents = self.norm2(latents)
-        # print("latents shape: ", latents.shape)
-        # print("x shape: ", x.shape)
+
         q = self.to_q(latents)
         k, v = self.to_kv(x).chunk(2, dim=-1)
 
@@ -355,9 +357,7 @@ class HunyuanVideoConditionEmbedding(nn.Module):
         self.motion_pose = TimestepEmbedding(
             in_channels=256, time_embed_dim=embedding_dim // 4
         )
-        self.fps_proj = TimestepEmbedding(
-            in_channels=256, time_embed_dim=embedding_dim // 4
-        )
+        self.fps_proj = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
 
     def forward(
         self,
@@ -374,6 +374,7 @@ class HunyuanVideoConditionEmbedding(nn.Module):
         )  # (N, D)
         pooled_projections = self.text_embedder(pooled_projection)
         conditioning = timesteps_emb + pooled_projections
+        batch_size = pooled_projection.shape[0]
 
         token_replace_emb = None
         if self.image_condition_type == "token_replace":
@@ -392,15 +393,22 @@ class HunyuanVideoConditionEmbedding(nn.Module):
             conditioning = conditioning + guidance_emb
 
         if motion_exp is not None:
-            motion_exp_emb = self.motion_exp(motion_exp)
+            motion_proj = self.time_proj(motion_exp.view(-1))
+            motion_exp_emb = self.motion_exp(
+                motion_proj.to(dtype=pooled_projection.dtype)
+            ).view(batch_size, -1)
             conditioning = conditioning + motion_exp_emb
 
         if motion_pose is not None:
-            motion_pose_emb = self.motion_pose(motion_pose)
+            motion_pose_proj = self.time_proj(motion_pose.view(-1))
+            motion_pose_emb = self.motion_pose(
+                motion_pose_proj.to(dtype=pooled_projection.dtype)
+            ).view(batch_size, -1)
             conditioning = conditioning + motion_pose_emb
 
         if fps is not None:
-            fps_emb = self.fps_proj(fps)
+            fps_proj = self.time_proj(fps)
+            fps_emb = self.fps_proj(fps_proj.to(dtype=pooled_projection.dtype))
             conditioning = conditioning + fps_emb
 
         return conditioning, token_replace_emb
@@ -989,7 +997,7 @@ class HunyuanVideoTokenReplaceTransformerBlock(nn.Module):
 
 
 @TRANSFORMERS_REGISTRY("hunyuan.avatar")
-class HunyuanVideoTransformer3DModel(
+class HunyuanAvatarVideoTransformer3DModel(
     ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
 ):
     r"""
@@ -1092,6 +1100,7 @@ class HunyuanVideoTransformer3DModel(
         self.ref_latents_embedder = HunyuanVideoPatchEmbed(
             (patch_size_t, patch_size, patch_size), in_channels, inner_dim
         )
+
         self.context_embedder = HunyuanVideoTokenRefiner(
             text_embed_dim,
             num_attention_heads,
@@ -1248,10 +1257,10 @@ class HunyuanVideoTransformer3DModel(
         post_patch_height = height // p
         post_patch_width = width // p
         first_frame_num_tokens = 1 * post_patch_height * post_patch_width
-        encoder_hidden_states_length = encoder_hidden_states.shape[1]
+        
 
         # 1. RoPE
-        image_rotary_emb = torch.cat([freqs_cos, freqs_sin], dim=1)
+        image_rotary_emb = (freqs_cos, freqs_sin)
 
         # 2. Conditional embeddings
         temb, token_replace_emb = self.time_text_embed(
@@ -1266,32 +1275,44 @@ class HunyuanVideoTransformer3DModel(
         audio_embeds = self.audio_projection(encoder_hidden_states_audio)
 
         ref_latents_first = ref_latents[:, :, :1].clone()
-        ref_length = ref_latents_first.shape[1]
+        hidden_states = self.x_embedder(hidden_states)
         ref_hidden_states = self.ref_latents_embedder(ref_latents)
         ref_hidden_states_first = self.x_embedder(ref_latents_first)
-        hidden_states = self.x_embedder(hidden_states)
+
         encoder_hidden_states = self.context_embedder(
             encoder_hidden_states, timestep, encoder_attention_mask
         )
+        
+        encoder_hidden_states_length = encoder_hidden_states.shape[1]
+
         hidden_states = self.ref_latents_proj(ref_hidden_states) + hidden_states
+        ref_length = ref_hidden_states_first.shape[1]
         hidden_states = torch.cat([ref_hidden_states_first, hidden_states], dim=1)
+        hidden_states_len = hidden_states.shape[1]
+        mask_len = hidden_states_len - ref_length
 
         # 3. Attention mask preparation
         latent_sequence_length = hidden_states.shape[1]
         condition_sequence_length = encoder_hidden_states.shape[1]
         sequence_length = latent_sequence_length + condition_sequence_length
-
+        
+        if encoder_hidden_states_face_mask.shape[2] == 1:
+            encoder_hidden_states_face_mask = encoder_hidden_states_face_mask.repeat(
+                1, 1, num_frames, 1, 1
+            )
+            
         encoder_hidden_states_face_mask = torch.nn.functional.interpolate(
             encoder_hidden_states_face_mask,
-            size=[post_patch_height, post_patch_width],
+            size=[num_frames, post_patch_height, post_patch_width],
             mode="nearest",
         )
+
         encoder_hidden_states_face_mask = (
-            encoder_hidden_states_face_mask.view(-1, 1, 1)
-            .repeat(1, 1, post_patch_num_frames)
+            encoder_hidden_states_face_mask.view(-1, mask_len, 1)
+            .repeat(1, 1, hidden_states.shape[2])
             .type_as(hidden_states)
         )
-
+        
         attention_mask = torch.ones(
             batch_size, sequence_length, device=hidden_states.device, dtype=torch.bool
         )  # [B, N]
@@ -1307,7 +1328,7 @@ class HunyuanVideoTransformer3DModel(
         mask_indices = indices >= effective_sequence_length.unsqueeze(1)  # [B, N]
         attention_mask = attention_mask.masked_fill(mask_indices, False)
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)  # [B, 1, 1, N]
-
+        
         # 4. Transformer blocks
         if not use_cache:
             for block_idx, block in enumerate(self.transformer_blocks):
@@ -1325,7 +1346,7 @@ class HunyuanVideoTransformer3DModel(
                     hidden_states_real = (
                         hidden_states[:, ref_length:]
                         .clone()
-                        .view(batch_size, -1, post_patch_height, post_patch_width, -1)
+                        .view(batch_size, num_frames, -1, hidden_states.shape[2])
                     )
                     hidden_states_ref_real = torch.zeros_like(
                         hidden_states[:, :ref_length]
@@ -1333,11 +1354,12 @@ class HunyuanVideoTransformer3DModel(
                     audio_embeds_padded = audio_embeds[:, :1].repeat(1, 3, 1, 1)
                     audio_embeds_all_insert = torch.cat(
                         [audio_embeds_padded, audio_embeds], dim=1
-                    ).view(batch_size, -1, hidden_states.shape[2])
+                    ).view(batch_size, num_frames, 16, hidden_states.shape[2])
+                    
                     double_idx = self.double_stream_map[str(block_idx)]
                     hidden_states_real = self.audio_adapter_blocks[double_idx](
                         audio_embeds_all_insert, hidden_states_real
-                    ).view(batch_size, -1, 3072)
+                    ).view(batch_size, -1, hidden_states.shape[2])
                     hidden_states = hidden_states + torch.cat(
                         [
                             hidden_states_ref_real,
@@ -1345,20 +1367,23 @@ class HunyuanVideoTransformer3DModel(
                         ],
                         dim=1,
                     )
+            
 
-            for block_idx, block in enumerate(self.single_transformer_blocks):
-                if block_idx == len(self.single_transformer_blocks) - 1:
-                    self.latent_cache = hidden_states.clone()
+            if len(self.single_transformer_blocks) > 0:
+                for block_idx, block in enumerate(self.single_transformer_blocks):
+                    if block_idx == len(self.single_transformer_blocks) - 1:
+                        temp = hidden_states[:, :-encoder_hidden_states_length, ...]
+                        self.latent_cache = torch.cat((temp, hidden_states[:, -encoder_hidden_states_length:, ...]), dim=1)
 
-                hidden_states, encoder_hidden_states = block(
-                    hidden_states,
-                    encoder_hidden_states,
-                    temb,
-                    attention_mask,
-                    image_rotary_emb,
-                    token_replace_emb,
-                    first_frame_num_tokens,
-                )
+                    hidden_states, encoder_hidden_states = block(
+                        hidden_states,
+                        encoder_hidden_states,
+                        temb,
+                        attention_mask,
+                        image_rotary_emb,
+                        token_replace_emb,
+                        first_frame_num_tokens,
+                    )
         else:
             hidden_states = self.latent_cache
             if len(self.single_transformer_blocks) > 0:
@@ -1376,7 +1401,6 @@ class HunyuanVideoTransformer3DModel(
                     )
 
         # 5. Output projection
-        hidden_states = hidden_states[:, :-encoder_hidden_states_length, ...]
         hidden_states = hidden_states[:, ref_length:]
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)

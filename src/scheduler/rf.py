@@ -3,7 +3,6 @@ import torch
 from src.scheduler.scheduler import SchedulerInterface
 from diffusers.configuration_utils import ConfigMixin
 from diffusers.configuration_utils import register_to_config
-from diffusers.schedulers.scheduling_utils import KarrasDiffusionSchedulers
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.schedulers.scheduling_utils import SchedulerOutput
 from diffusers.utils import deprecate

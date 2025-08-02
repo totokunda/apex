@@ -77,8 +77,6 @@ class WanApexFramepackEngine(WanBaseEngine):
         self.to_device(self.scheduler)
         scheduler = self.scheduler
 
-        
-
         latents = self._get_latents(
             height,
             width,
@@ -95,7 +93,7 @@ class WanApexFramepackEngine(WanBaseEngine):
         denoised_mask = torch.zeros(
             total_latent_frames, dtype=torch.bool, device=self.device
         )
-        
+
         sections_to_denoise = framepack_schedule.num_sections(total_latent_frames)
 
         if seed is not None:
@@ -119,12 +117,14 @@ class WanApexFramepackEngine(WanBaseEngine):
                 ) = framepack_schedule.get_inference_inputs(
                     latents, denoised_mask, reverse=reverse, seeds=seeds
                 )
-                
+
                 if past_latents is not None:
                     past_latents = past_latents.to(self.device, dtype=transformer_dtype)
                 if future_latents is not None:
-                    future_latents = future_latents.to(self.device, dtype=transformer_dtype)
-                
+                    future_latents = future_latents.to(
+                        self.device, dtype=transformer_dtype
+                    )
+
                 latent_context = self.transformer.get_latent_context(
                     past_latents,
                     past_indices,
@@ -132,14 +132,14 @@ class WanApexFramepackEngine(WanBaseEngine):
                     future_indices,
                     total_latent_frames,
                 )
-                
+
                 timesteps_input, num_inference_steps = self._get_timesteps(
                     scheduler=scheduler,
                     timesteps=timesteps,
                     timesteps_as_indices=timesteps_as_indices,
                     num_inference_steps=num_inference_steps,
                 )
-                
+
                 denoised_latents = self.denoise(
                     timesteps=timesteps_input,
                     latents=target_latents,
@@ -168,7 +168,7 @@ class WanApexFramepackEngine(WanBaseEngine):
                 )
 
                 denoised_mask[target_indices] = True
-            
+
                 latents[:, :, target_indices, :, :] = denoised_latents.to(
                     latents.device, dtype=latents.dtype
                 )
@@ -176,7 +176,7 @@ class WanApexFramepackEngine(WanBaseEngine):
                 self.logger.info(
                     f"Section {section_idx} denoised frames: {', '.join(str(i) for i in target_indices.cpu().tolist())}"
                 )
-                
+
                 pbar.update(1)
 
         if offload:

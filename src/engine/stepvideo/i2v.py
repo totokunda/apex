@@ -34,7 +34,6 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         **kwargs,
     ):
 
-        
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -135,12 +134,13 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             parse_frames=False,
             order="BFC",
         )
-        
-        
+
         loaded_image = self._load_image(image)
-        preprocessed_image = T.ToTensor()(loaded_image)*2-1
-        preprocessed_image = self.resize_to_desired_aspect_ratio(preprocessed_image[None], aspect_size=[(height, width)])[None]
-        
+        preprocessed_image = T.ToTensor()(loaded_image) * 2 - 1
+        preprocessed_image = self.resize_to_desired_aspect_ratio(
+            preprocessed_image[None], aspect_size=[(height, width)]
+        )[None]
+
         img_emb = self.vae_encode(preprocessed_image).repeat(num_videos, 1, 1, 1, 1)
         padding_tensor = torch.zeros(
             (

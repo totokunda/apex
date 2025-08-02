@@ -429,32 +429,47 @@ class AdaLayerNormSingleText(nn.Module):
         out = self.linear(self.silu(embedded_timestep))
 
         return out, embedded_timestep
-    
-    
+
 
 class PixArtAlphaCombinedTimestepSizeEmbeddingsImage(nn.Module):
-    def __init__(self, embedding_dim, size_emb_dim, use_additional_conditions: bool = False):
+    def __init__(
+        self, embedding_dim, size_emb_dim, use_additional_conditions: bool = False
+    ):
         super().__init__()
 
         self.outdim = size_emb_dim
-        self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-        self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+        self.time_proj = Timesteps(
+            num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
+        self.timestep_embedder = TimestepEmbedding(
+            in_channels=256, time_embed_dim=embedding_dim
+        )
 
         self.use_additional_conditions = use_additional_conditions
         if self.use_additional_conditions:
-            self.additional_condition_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-            self.motion_score_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+            self.additional_condition_proj = Timesteps(
+                num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0
+            )
+            self.motion_score_embedder = TimestepEmbedding(
+                in_channels=256, time_embed_dim=embedding_dim
+            )
 
     def forward(self, timestep, motion_score=None):
         hidden_dtype = next(self.timestep_embedder.parameters()).dtype
 
         timesteps_proj = self.time_proj(timestep)
-        timesteps_emb = self.timestep_embedder(timesteps_proj.to(dtype=hidden_dtype))  # (N, D)
+        timesteps_emb = self.timestep_embedder(
+            timesteps_proj.to(dtype=hidden_dtype)
+        )  # (N, D)
 
         if self.use_additional_conditions:
             batch_size = timestep.shape[0]
-            motion_score_emb = self.additional_condition_proj(motion_score.flatten()).to(hidden_dtype)
-            motion_score_emb = self.motion_score_embedder(motion_score_emb).reshape(batch_size, -1)
+            motion_score_emb = self.additional_condition_proj(
+                motion_score.flatten()
+            ).to(hidden_dtype)
+            motion_score_emb = self.motion_score_embedder(motion_score_emb).reshape(
+                batch_size, -1
+            )
             conditioning = timesteps_emb + motion_score_emb
 
         else:
@@ -463,22 +478,29 @@ class PixArtAlphaCombinedTimestepSizeEmbeddingsImage(nn.Module):
         return conditioning
 
 
-
 class AdaLayerNormSingleImage(nn.Module):
     r"""
-        Norm layer adaptive layer norm single (adaLN-single).
+    Norm layer adaptive layer norm single (adaLN-single).
 
-        As proposed in PixArt-Alpha (see: https://arxiv.org/abs/2310.00426; Section 2.3).
+    As proposed in PixArt-Alpha (see: https://arxiv.org/abs/2310.00426; Section 2.3).
 
-        Parameters:
-            embedding_dim (`int`): The size of each embedding vector.
-            use_additional_conditions (`bool`): To use additional conditions for normalization or not.
+    Parameters:
+        embedding_dim (`int`): The size of each embedding vector.
+        use_additional_conditions (`bool`): To use additional conditions for normalization or not.
     """
-    def __init__(self, embedding_dim: int, use_additional_conditions: bool = False, time_step_rescale=1000):
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        use_additional_conditions: bool = False,
+        time_step_rescale=1000,
+    ):
         super().__init__()
 
         self.emb = PixArtAlphaCombinedTimestepSizeEmbeddingsImage(
-            embedding_dim, size_emb_dim=embedding_dim // 2, use_additional_conditions=use_additional_conditions
+            embedding_dim,
+            size_emb_dim=embedding_dim // 2,
+            use_additional_conditions=use_additional_conditions,
         )
 
         self.silu = nn.SiLU()
@@ -491,7 +513,9 @@ class AdaLayerNormSingleImage(nn.Module):
         timestep: torch.Tensor,
         added_cond_kwargs: Dict[str, torch.Tensor] = None,
     ):
-        embedded_timestep = self.emb(timestep*self.time_step_rescale, **added_cond_kwargs)
+        embedded_timestep = self.emb(
+            timestep * self.time_step_rescale, **added_cond_kwargs
+        )
 
         out = self.linear(self.silu(embedded_timestep))
 
@@ -582,8 +606,6 @@ class SelfAttention(nn.Module):
             max_seqlen=max_seqlen,
             attn_mask=attn_mask,
         )
-        
-        
 
         output = rearrange(output, "b s h d -> b s (h d)")
         output = self.wo(output)
@@ -625,7 +647,6 @@ class CrossAttention(nn.Module):
             xk = self.k_norm(xk)
 
         output = self.core_attention(xq, xk, xv, attn_mask=attn_mask)
-        
 
         output = rearrange(output, "b s h d -> b s (h d)")
         output = self.wo(output)
@@ -775,7 +796,7 @@ class StepVideoTransformerBlock(nn.Module):
         scale_shift_q = modulate(self.norm1(q), scale_msa, shift_msa)
 
         attn_q = self.attn1(scale_shift_q, rope_positions=rope_positions)
-        
+
         q = gate(attn_q, gate_msa) + q
 
         attn_q = self.attn2(q, kv, attn_mask)

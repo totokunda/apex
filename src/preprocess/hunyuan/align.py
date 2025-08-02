@@ -293,11 +293,12 @@ class DetFace(DownloadMixin, nn.Module):
         nmsThreshold=0.45,
         device="cuda",
     ):
+        super().__init__()
         self.inpSize = 416
         self.conf_thres = confThreshold
         self.iou_thres = nmsThreshold
         model_path = self._download(pt_path, save_path)
-        self.test_device = torch.device(device if torch.cuda.is_available() else "cpu")
+        self.test_device = torch.device(device)
         self.model = torch.jit.load(model_path).to(self.test_device)
         self.last_w = 416
         self.last_h = 416
@@ -365,6 +366,7 @@ class DetFace(DownloadMixin, nn.Module):
 
 class AlignImage(DownloadMixin, nn.Module):
     def __init__(self, save_path: str, pt_path: str, device="cuda"):
+        super().__init__()
         self.facedet = DetFace(
             save_path=save_path,
             pt_path=pt_path,
@@ -372,6 +374,7 @@ class AlignImage(DownloadMixin, nn.Module):
             nmsThreshold=0.45,
             device=device,
         )
+        self.device = device
 
     @torch.no_grad()
     def __call__(self, im, maxface=False):

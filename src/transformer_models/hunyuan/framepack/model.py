@@ -301,7 +301,7 @@ class HunyuanVideoFramepackTransformer3DModel(
             width=width,
             device=hidden_states.device,
         )
- 
+
         latents_clean, latents_history_2x, latents_history_4x = self.clean_x_embedder(
             latents_clean, latents_history_2x, latents_history_4x
         )
@@ -340,7 +340,7 @@ class HunyuanVideoFramepackTransformer3DModel(
             post_patch_height,
             post_patch_width,
         )
-        
+
         temb, _ = self.time_text_embed(timestep, pooled_projections, guidance)
         encoder_hidden_states = self.context_embedder(
             encoder_hidden_states, timestep, encoder_attention_mask
