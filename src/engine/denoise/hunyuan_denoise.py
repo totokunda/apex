@@ -119,7 +119,7 @@ class HunyuanDenoise:
         timesteps = kwargs.get("timesteps", None)
         num_inference_steps = kwargs.get("num_inference_steps", 50)
         guidance_scale = kwargs.get("guidance_scale", 6.0)
-        use_classifier_free_guidance = kwargs.get("use_classifier_free_guidance", True)
+        use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         dynamic_guidance_start = kwargs.get("dynamic_guidance_start", 3.5)
         dynamic_guidance_end = kwargs.get("dynamic_guidance_end", 6.5)
         motion_exp = kwargs.get("motion_exp", None)
@@ -128,19 +128,18 @@ class HunyuanDenoise:
         freqs_cis = kwargs.get("freqs_cis", None)
         num_videos = kwargs.get("num_videos", 1)
         transformer_dtype = kwargs.get("transformer_dtype", None)
+        hidden_size = kwargs.get("hidden_size", 3072)
+        frames_per_batch = kwargs.get("frame_per_batch", 33)
+        shift_offset = kwargs.get("shift_offset", 10)
+        no_cache_steps = kwargs.get("no_cache_steps", None)
 
-        frames_per_batch = 33  # From the reference implementation
         shift = 0
-        shift_offset = 10  # From the reference implementation
-
+        
         if infer_length <= frames_per_batch:
             shift_offset = 0
 
-        no_cache_steps = (
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-            + list(range(15, 42, 5))
-            + [41, 42, 43, 44, 45, 46, 47, 48, 49]
-        )
+        
+        
         cache_tensor = {}
         with self._progress_bar(
             total=num_inference_steps, desc="Denoising Hunyuan Avatar"
@@ -181,7 +180,7 @@ class HunyuanDenoise:
     
 
                     # Classifier-Free Guidance setup
-                    if use_classifier_free_guidance:
+                    if use_cfg_guidance:
                         latent_model_input = torch.cat([latents] * 2)
                     else:
                         latent_model_input = latents
@@ -189,36 +188,28 @@ class HunyuanDenoise:
                         latent_model_input, timestep
                     ).to(transformer_dtype)
 
-                    if use_classifier_free_guidance:
+                    if use_cfg_guidance:
                         # Dynamic Guidance
                         if i < 10:
                             current_guidance_scale = (1 - i / len(timesteps)) * (
                                 guidance_scale - 2
                             ) + 2
                             current_face_masks = face_masks * 0.6
-                            text_embeds_input = torch.cat(
-                                [negative_prompt_embeds, prompt_embeds]
-                            ).to(transformer_dtype)
-                            text_mask_input = torch.cat(
-                                [negative_prompt_attention_mask, prompt_attention_mask]
-                            ).to(transformer_dtype)
-                            pooled_embeds_input = torch.cat(
-                                [negative_pooled_prompt_embeds, pooled_prompt_embeds]
-                            )
                         else:
                             current_guidance_scale = (1 - i / len(timesteps)) * (
                                 dynamic_guidance_end - dynamic_guidance_start
                             ) + dynamic_guidance_start
                             current_face_masks = face_masks
-                            text_embeds_input = torch.cat(
-                                [prompt_embeds, prompt_embeds]
-                            )  # Use conditional prompts for both
-                            text_mask_input = torch.cat(
-                                [prompt_attention_mask, prompt_attention_mask]
-                            ).to(transformer_dtype)
-                            pooled_embeds_input = torch.cat(
-                                [pooled_prompt_embeds, pooled_prompt_embeds]
-                            )
+                        
+                        text_embeds_input = torch.cat(
+                            [prompt_embeds, prompt_embeds]
+                        )  # Use conditional prompts for both
+                        text_mask_input = torch.cat(
+                            [prompt_attention_mask, prompt_attention_mask]
+                        ).to(transformer_dtype)
+                        pooled_embeds_input = torch.cat(
+                            [pooled_prompt_embeds, pooled_prompt_embeds]
+                        )
                             
                         audio_prompts_input = torch.cat(
                                 [current_uncond_audio_prompts, current_audio_prompts]
@@ -283,7 +274,7 @@ class HunyuanDenoise:
                                         latents_all.shape[-3],
                                         (latent_model_input.shape[-1] // 2)
                                         * (latent_model_input.shape[-2] // 2),
-                                        3072,
+                                        hidden_size,
                                     ]
                                 )
                                 .to(self.transformer.latent_cache.dtype)
@@ -295,7 +286,7 @@ class HunyuanDenoise:
                                         latents_all.shape[-3],
                                         (latent_model_input.shape[-1] // 2)
                                         * (latent_model_input.shape[-2] // 2),
-                                        3072,
+                                        hidden_size,
                                     ]
                                 )
                                 .to(self.transformer.latent_cache.dtype)
@@ -306,7 +297,7 @@ class HunyuanDenoise:
                                         latent_model_input.shape[0],
                                         latents_all.shape[-3],
                                         text_embeds_input.shape[1],
-                                        3072,
+                                        hidden_size,
                                     ]
                                 )
                                 .to(self.transformer.latent_cache.dtype)
@@ -318,7 +309,7 @@ class HunyuanDenoise:
                             self.transformer.latent_cache[
                                 :, : latent_ref_len - latent_input_len
                             ]
-                            .reshape(latent_model_input.shape[0], 1, -1, 3072)
+                            .reshape(latent_model_input.shape[0], 1, -1, hidden_size)
                             .repeat(1, len(idx_list), 1, 1)
                             .to(latent_model_input.device)
                         )
@@ -327,7 +318,7 @@ class HunyuanDenoise:
                                 :, latent_ref_len - latent_input_len : latent_ref_len
                             ]
                             .reshape(
-                                latent_model_input.shape[0], len(idx_list), -1, 3072
+                                latent_model_input.shape[0], len(idx_list), -1, hidden_size
                             )
                             .to(latent_model_input.device)
                         )
@@ -346,14 +337,32 @@ class HunyuanDenoise:
                             :, latent_ref_len - latent_input_len : latent_ref_len
                         ] = (
                             cache_tensor["input_latent"][:, idx_list]
-                            .reshape(-1, latent_input_len, 3072)
+                            .reshape(-1, latent_input_len, hidden_size)
                             .clone()
                         )
                         self.transformer.latent_cache[:, latent_ref_len:] = (
                             cache_tensor["text_embeds"][:, idx_list][:, 0].clone()
                         )
+                        
+                        noise_pred = self.transformer(
+                            hidden_states=latent_model_input,
+                            timestep=timestep,
+                            encoder_hidden_states=text_embeds_input,
+                            encoder_attention_mask=text_mask_input,
+                            pooled_projections=pooled_embeds_input,
+                            ref_latents=ref_latents_input,
+                            encoder_hidden_states_face_mask=face_masks_input,
+                            encoder_hidden_states_audio=audio_prompts_input,
+                            encoder_hidden_states_motion=motion_exp_input,
+                            encoder_hidden_states_pose=motion_pose_input,
+                            encoder_hidden_states_fps=fps_input,
+                            freqs_cos=freqs_cis[0],
+                            freqs_sin=freqs_cis[1],
+                            use_cache=use_cache,
+                            return_dict=False,
+                        )[0]
 
-                    if use_classifier_free_guidance:
+                    if use_cfg_guidance:
                         # Perform guidance
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                         noise_pred = noise_pred_uncond + current_guidance_scale * (
