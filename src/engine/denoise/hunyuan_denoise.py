@@ -152,6 +152,10 @@ class HunyuanDenoise:
                 timestep = t.expand(latents_all.shape[0]).to(latents_all.dtype)
 
                 for index_start in range(0, infer_length, frames_per_batch):
+                    
+                    if hasattr(self.scheduler, "_step_index"):
+                        self.scheduler._step_index = None
+                        
                     index_start = index_start - shift
 
                     idx_list = [
@@ -178,7 +182,6 @@ class HunyuanDenoise:
                         :, idx_list_audio
                     ].clone()
     
-
                     # Classifier-Free Guidance setup
                     if use_cfg_guidance:
                         latent_model_input = torch.cat([latents] * 2)
@@ -202,13 +205,13 @@ class HunyuanDenoise:
                             current_face_masks = face_masks
                         
                         text_embeds_input = torch.cat(
-                            [prompt_embeds, prompt_embeds]
+                            [prompt_embeds, negative_prompt_embeds]
                         )  # Use conditional prompts for both
                         text_mask_input = torch.cat(
-                            [prompt_attention_mask, prompt_attention_mask]
+                            [prompt_attention_mask, negative_prompt_attention_mask]
                         ).to(transformer_dtype)
                         pooled_embeds_input = torch.cat(
-                            [pooled_prompt_embeds, pooled_prompt_embeds]
+                            [pooled_prompt_embeds, negative_pooled_prompt_embeds]
                         )
                             
                         audio_prompts_input = torch.cat(
