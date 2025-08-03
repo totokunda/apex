@@ -1,8 +1,9 @@
 from typing import TypeVar, overload, Callable, Any
 import functools
 
-F = TypeVar('F', bound=Callable[..., Any])
-T = TypeVar('T', bound=type)
+F = TypeVar("F", bound=Callable[..., Any])
+T = TypeVar("T", bound=type)
+
 
 class FunctionRegister:
     """
@@ -32,29 +33,40 @@ class FunctionRegister:
             If False (default), re-using a key raises KeyError.
             If True, newly-decorated callables replace existing ones.
         """
-        self._store: dict[str, callable] = {}
+        self._store: dict[str, dict] = {}
         self._allow_overwrite = allow_overwrite
 
     # --------------- decorator interface ------------------------------ #
     @overload
-    def __call__(self, key_or_func: F, *, overwrite: bool | None = None) -> F: ...
-    
+    def __call__(
+        self, key_or_func: F, *, overwrite: bool | None = None, available: bool = True
+    ) -> F: ...
+
     @overload
-    def __call__(self, key_or_func: str | None = None, *, overwrite: bool | None = None) -> Callable[[F], F]: ...
-    
-    def __call__(self, key_or_func=None, *, overwrite: bool | None = None):
+    def __call__(
+        self,
+        key_or_func: str | None = None,
+        *,
+        overwrite: bool | None = None,
+        available: bool = True,
+    ) -> Callable[[F], F]: ...
+
+    def __call__(
+        self, key_or_func=None, *, overwrite: bool | None = None, available: bool = True
+    ):
         """
         Acts as either:
             @registry                 – uses the function's __name__ as key
             @registry("explicit_key") – uses the supplied key
 
         `overwrite` overrides the instance-wide `allow_overwrite` flag.
+        `available` determines if the function is available for use.
         """
         # Case 1: used bare -- @registry
         if callable(key_or_func) and overwrite is None:
             func = key_or_func
             key = func.__name__
-            self._add(key, func, self._allow_overwrite)
+            self._add(key, func, self._allow_overwrite, available)
             return func
 
         # Case 2: used with explicit key -- @registry("name")
@@ -62,34 +74,62 @@ class FunctionRegister:
 
         def decorator(func: F) -> F:
             self._add(
-                key, func, overwrite if overwrite is not None else self._allow_overwrite
+                key,
+                func,
+                overwrite if overwrite is not None else self._allow_overwrite,
+                available,
             )
             return func
 
         return decorator
 
     # --------------- CRUD helpers ------------------------------------- #
-    def _add(self, key: str, func: callable, allow: bool):
+    def _add(self, key: str, func: callable, allow: bool, available: bool):
         if not allow and key in self._store:
             raise KeyError(
                 f"Key '{key}' already registered. Use overwrite=True to replace."
             )
-        self._store[key] = func
+        self._store[key] = {"func": func, "available": available}
 
     def get(self, key: str) -> callable:
         """Return the callable registered under *key* (raises KeyError if missing)."""
-        return self._store[key]
+        if key not in self._store:
+            raise KeyError(f"Key '{key}' not found in registry.")
+        return self._store[key]["func"]
+
+    def is_available(self, key: str) -> bool:
+        """Check if a registered function is available for use."""
+        if key not in self._store:
+            return False
+        return self._store[key]["available"]
+
+    def set_availability(self, key: str, available: bool):
+        """Update the availability status of a registered function."""
+        if key not in self._store:
+            raise KeyError(f"Key '{key}' not found in registry.")
+        self._store[key]["available"] = available
 
     def call(self, *args, key: str | None = None, **kwargs):
         """Directly invoke the registered function."""
         if key is None and hasattr(self, "_default"):
             key = self._default
 
+        if not self.is_available(key):
+            raise RuntimeError(f"Function '{key}' is not available.")
+
         return self.get(key)(*args, **kwargs)
 
     def all(self) -> dict[str, callable]:
         """Return a shallow copy of the internal mapping."""
-        return dict(self._store)
+        return {key: entry["func"] for key, entry in self._store.items()}
+
+    def all_available(self) -> dict[str, callable]:
+        """Return a mapping of only available functions."""
+        return {
+            key: entry["func"]
+            for key, entry in self._store.items()
+            if entry["available"]
+        }
 
     def set_default(self, key: str):
         self._default = key
@@ -127,29 +167,40 @@ class ClassRegister:
 
     # ------------------------------------------------------------------ #
     def __init__(self, *, allow_overwrite: bool = False):
-        self._store: dict[str, type] = {}
+        self._store: dict[str, dict] = {}
         self._allow_overwrite = allow_overwrite
 
     # ---------------- decorator interface ----------------------------- #
     @overload
-    def __call__(self, key_or_cls: T, *, overwrite: bool | None = None) -> T: ...
-    
+    def __call__(
+        self, key_or_cls: T, *, overwrite: bool | None = None, available: bool = True
+    ) -> T: ...
+
     @overload
-    def __call__(self, key_or_cls: str | None = None, *, overwrite: bool | None = None) -> Callable[[T], T]: ...
-    
-    def __call__(self, key_or_cls=None, *, overwrite: bool | None = None):
+    def __call__(
+        self,
+        key_or_cls: str | None = None,
+        *,
+        overwrite: bool | None = None,
+        available: bool = True,
+    ) -> Callable[[T], T]: ...
+
+    def __call__(
+        self, key_or_cls=None, *, overwrite: bool | None = None, available: bool = True
+    ):
         """
         Acts as either:
             @registry                – uses the class' __name__ as key
             @registry("explicit")    – uses the supplied key
 
         `overwrite` overrides the instance-wide `allow_overwrite` flag.
+        `available` determines if the class is available for use.
         """
         # Case 1 – bare decorator: @registry
         if isinstance(key_or_cls, type) and overwrite is None:
             cls = key_or_cls
             key = cls.__name__
-            self._add(key, cls, self._allow_overwrite)
+            self._add(key, cls, self._allow_overwrite, available)
             return cls
 
         # Case 2 – explicit key: @registry("name")
@@ -159,23 +210,40 @@ class ClassRegister:
             if not isinstance(cls, type):
                 raise TypeError("Only classes can be registered in ClassRegister.")
             self._add(
-                key, cls, overwrite if overwrite is not None else self._allow_overwrite
+                key,
+                cls,
+                overwrite if overwrite is not None else self._allow_overwrite,
+                available,
             )
-            return cls 
+            return cls
 
         return decorator
 
     # ---------------- CRUD helpers ------------------------------------ #
-    def _add(self, key: str, cls: type, allow: bool):
+    def _add(self, key: str, cls: type, allow: bool, available: bool):
         if not allow and key in self._store:
             raise KeyError(
                 f"Key '{key}' already registered. Use overwrite=True to replace."
             )
-        self._store[key] = cls
+        self._store[key] = {"cls": cls, "available": available}
 
     def get(self, key: str) -> type:
         """Return the class registered under *key* (raises KeyError if missing)."""
-        return self._store[key]
+        if key not in self._store:
+            raise KeyError(f"Key '{key}' not found in registry.")
+        return self._store[key]["cls"]
+
+    def is_available(self, key: str) -> bool:
+        """Check if a registered class is available for use."""
+        if key not in self._store:
+            return False
+        return self._store[key]["available"]
+
+    def set_availability(self, key: str, available: bool):
+        """Update the availability status of a registered class."""
+        if key not in self._store:
+            raise KeyError(f"Key '{key}' not found in registry.")
+        self._store[key]["available"] = available
 
     def call(self, key: str | None = None, *args, **kwargs):
         """
@@ -186,11 +254,23 @@ class ClassRegister:
         """
         if key is None and hasattr(self, "_default"):
             key = self._default
+
+        if not self.is_available(key):
+            raise RuntimeError(f"Class '{key}' is not available.")
+
         return self.get(key)(*args, **kwargs)
 
     def all(self) -> dict[str, type]:
         """Return a shallow copy of the internal mapping."""
-        return dict(self._store)
+        return {key: entry["cls"] for key, entry in self._store.items()}
+
+    def all_available(self) -> dict[str, type]:
+        """Return a mapping of only available classes."""
+        return {
+            key: entry["cls"]
+            for key, entry in self._store.items()
+            if entry["available"]
+        }
 
     def set_default(self, key: str):
         """Mark *key* as the default used when ``call()`` receives no key."""

@@ -14,11 +14,7 @@ components:
       reverse: true
       solver: "euler"
 
-  - type: vae
-    base: "hunyuan"
-    model_path: tencent/HunyuanVideo-Avatar/ckpts/hunyuan-video-t2v-720p/vae
-    config_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/hunyuan-video-t2v-720p/vae/config.json
-    file_pattern: "*.pt"
+  - !include shared:hunyuan/vae
 
   - type: text_encoder
     base: "CLIPTextModel"

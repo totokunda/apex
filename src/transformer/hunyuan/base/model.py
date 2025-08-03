@@ -1157,9 +1157,9 @@ class HunyuanVideoTransformer3DModel(
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
-            
+
             for block in self.transformer_blocks:
-                
+
                 hidden_states, encoder_hidden_states = (
                     self._gradient_checkpointing_func(
                         block,

@@ -29,7 +29,7 @@ from diffusers.utils import (
     unscale_lora_layers,
 )
 from diffusers.models.attention import FeedForward
-from diffusers.models.attention_processor import Attention, AttentionProcessor
+from diffusers.models.attention_processor import Attention
 from diffusers.models.cache_utils import CacheMixin
 
 from diffusers.models.embeddings import (
@@ -49,11 +49,39 @@ from diffusers.models.normalization import (
     FP32LayerNorm,
 )
 from src.attention import attention_register
-from src.attention.processors.hunyuan_processor import HunyuanVideoAttnProcessor2_0
+from src.attention.processors.hunyuan_processor import (
+    HunyuanAvatarVideoAttnProcessor2_0,
+)
 from src.transformer.base import TRANSFORMERS_REGISTRY
 from einops import rearrange
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+
+def get_cu_seqlens(text_mask, img_len):
+    """Calculate cu_seqlens_q, cu_seqlens_kv using text_mask and img_len
+
+    Args:
+        text_mask (torch.Tensor): the mask of text
+        img_len (int): the length of image
+
+    Returns:
+        torch.Tensor: the calculated cu_seqlens for flash attention
+    """
+    batch_size = text_mask.shape[0]
+    text_len = text_mask.sum(dim=1)
+    max_len = text_mask.shape[1] + img_len
+
+    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device="cuda")
+
+    for i in range(batch_size):
+        s = text_len[i] + img_len
+        s1 = i * max_len + s
+        s2 = (i + 1) * max_len
+        cu_seqlens[2 * i + 1] = s1
+        cu_seqlens[2 * i + 2] = s2
+
+    return cu_seqlens
 
 
 class HunyuanAudioProjNet2(ModelMixin):
@@ -167,9 +195,11 @@ class HunyuanPerceiverAttentionCA(nn.Module):
         q = self.to_q(latents)
         k, v = self.to_kv(x).chunk(2, dim=-1)
 
-        out = attention_register.call(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, key='sdpa')
+        scale = 1 / math.sqrt(math.sqrt(self.dim_head))
+        weight = (q * scale) @ (k * scale).transpose(-2, -1)
+        weight = torch.softmax(weight.float(), dim=-1).type(weight.dtype)
+        out = weight @ v
 
-        # out = out.permute(0, 2, 1, 3)
         return self.to_out(out)
 
 
@@ -280,49 +310,6 @@ class HunyuanVideoTokenReplaceAdaLayerNormZero(nn.Module):
         )
 
 
-class HunyuanVideoTokenReplaceAdaLayerNormZeroSingle(nn.Module):
-    def __init__(
-        self, embedding_dim: int, norm_type: str = "layer_norm", bias: bool = True
-    ):
-        super().__init__()
-
-        self.silu = nn.SiLU()
-        self.linear = nn.Linear(embedding_dim, 3 * embedding_dim, bias=bias)
-
-        if norm_type == "layer_norm":
-            self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
-        else:
-            raise ValueError(
-                f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
-            )
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        emb: torch.Tensor,
-        token_replace_emb: torch.Tensor,
-        first_frame_num_tokens: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        emb = self.linear(self.silu(emb))
-        token_replace_emb = self.linear(self.silu(token_replace_emb))
-
-        shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=1)
-        tr_shift_msa, tr_scale_msa, tr_gate_msa = token_replace_emb.chunk(3, dim=1)
-
-        norm_hidden_states = self.norm(hidden_states)
-        hidden_states_zero = (
-            norm_hidden_states[:, :first_frame_num_tokens] * (1 + tr_scale_msa[:, None])
-            + tr_shift_msa[:, None]
-        )
-        hidden_states_orig = (
-            norm_hidden_states[:, first_frame_num_tokens:] * (1 + scale_msa[:, None])
-            + shift_msa[:, None]
-        )
-        hidden_states = torch.cat([hidden_states_zero, hidden_states_orig], dim=1)
-
-        return hidden_states, gate_msa, tr_gate_msa
-
-
 class HunyuanVideoConditionEmbedding(nn.Module):
     def __init__(
         self,
@@ -369,35 +356,31 @@ class HunyuanVideoConditionEmbedding(nn.Module):
         fps: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         time_proj = self.time_proj
-        
-        conditioning = self.timestep_embedder(
-            time_proj(timestep)
-        )  
-        
+
+        conditioning = self.timestep_embedder(time_proj(timestep))
+
         batch_size = pooled_projection.shape[0]
 
         if self.guidance_embedder is not None:
-            guidance_emb = self.guidance_embedder(
-                time_proj(guidance)
-            )
+            guidance_emb = self.guidance_embedder(time_proj(guidance))
             conditioning = conditioning + guidance_emb
 
         if motion_exp is not None:
-            motion_exp_emb = self.motion_exp(
-                time_proj(motion_exp.view(-1))
-            ).view(batch_size, -1)
+            motion_exp_emb = self.motion_exp(time_proj(motion_exp.view(-1))).view(
+                batch_size, -1
+            )
             conditioning = conditioning + motion_exp_emb
 
         if motion_pose is not None:
-            motion_pose_emb = self.motion_pose(
-                time_proj(motion_pose.view(-1))
-            ).view(batch_size, -1)
+            motion_pose_emb = self.motion_pose(time_proj(motion_pose.view(-1))).view(
+                batch_size, -1
+            )
             conditioning = conditioning + motion_pose_emb
 
         if fps is not None:
             fps_emb = self.fps_proj(time_proj(fps))
             conditioning = conditioning + fps_emb
-        
+
         conditioning = conditioning + self.text_embedder(pooled_projection)
 
         return conditioning
@@ -549,7 +532,7 @@ class HunyuanVideoTokenRefiner(nn.Module):
             pooled_projections = (hidden_states * mask_float).sum(
                 dim=1
             ) / mask_float.sum(dim=1)
-            
+
         temb = self.time_text_embed(timestep, pooled_projections)
         hidden_states = self.proj_in(hidden_states)
         hidden_states = self.token_refiner(hidden_states, temb, attention_mask)
@@ -624,7 +607,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             heads=num_attention_heads,
             out_dim=hidden_size,
             bias=True,
-            processor=HunyuanVideoAttnProcessor2_0(),
+            processor=HunyuanAvatarVideoAttnProcessor2_0(),
             qk_norm=qk_norm,
             eps=1e-6,
             pre_only=True,
@@ -642,6 +625,10 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         temb: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        cu_seqlens_q: Optional[torch.Tensor] = None,
+        cu_seqlens_kv: Optional[torch.Tensor] = None,
+        max_seqlen_q: Optional[int] = None,
+        max_seqlen_kv: Optional[int] = None,
         *args,
         **kwargs,
     ) -> torch.Tensor:
@@ -665,6 +652,10 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             encoder_hidden_states=norm_encoder_hidden_states,
             attention_mask=attention_mask,
             image_rotary_emb=image_rotary_emb,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_kv=cu_seqlens_kv,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_kv=max_seqlen_kv,
         )
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
 
@@ -704,7 +695,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
             out_dim=hidden_size,
             context_pre_only=False,
             bias=True,
-            processor=HunyuanVideoAttnProcessor2_0(),
+            processor=HunyuanAvatarVideoAttnProcessor2_0(),
             qk_norm=qk_norm,
             eps=1e-6,
         )
@@ -728,6 +719,10 @@ class HunyuanVideoTransformerBlock(nn.Module):
         temb: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         freqs_cis: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        cu_seqlens_q: Optional[torch.Tensor] = None,
+        cu_seqlens_kv: Optional[torch.Tensor] = None,
+        max_seqlen_q: Optional[int] = None,
+        max_seqlen_kv: Optional[int] = None,
         *args,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -738,7 +733,6 @@ class HunyuanVideoTransformerBlock(nn.Module):
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
             self.norm1_context(encoder_hidden_states, emb=temb)
         )
-        
 
         # 2. Joint attention
         attn_output, context_attn_output = self.attn(
@@ -746,10 +740,15 @@ class HunyuanVideoTransformerBlock(nn.Module):
             encoder_hidden_states=norm_encoder_hidden_states,
             attention_mask=attention_mask,
             image_rotary_emb=freqs_cis,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_kv=cu_seqlens_kv,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_kv=max_seqlen_kv,
         )
 
         # 3. Modulation and residual connection
         hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
+
         encoder_hidden_states = (
             encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
         )
@@ -770,214 +769,6 @@ class HunyuanVideoTransformerBlock(nn.Module):
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
 
         hidden_states = hidden_states + gate_mlp.unsqueeze(1) * ff_output
-        encoder_hidden_states = (
-            encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
-        )
-
-        return hidden_states, encoder_hidden_states
-
-
-class HunyuanVideoTokenReplaceSingleTransformerBlock(nn.Module):
-    def __init__(
-        self,
-        num_attention_heads: int,
-        attention_head_dim: int,
-        mlp_ratio: float = 4.0,
-        qk_norm: str = "rms_norm",
-    ) -> None:
-        super().__init__()
-
-        hidden_size = num_attention_heads * attention_head_dim
-        mlp_dim = int(hidden_size * mlp_ratio)
-
-        self.attn = Attention(
-            query_dim=hidden_size,
-            cross_attention_dim=None,
-            dim_head=attention_head_dim,
-            heads=num_attention_heads,
-            out_dim=hidden_size,
-            bias=True,
-            processor=HunyuanVideoAttnProcessor2_0(),
-            qk_norm=qk_norm,
-            eps=1e-6,
-            pre_only=True,
-        )
-
-        self.norm = HunyuanVideoTokenReplaceAdaLayerNormZeroSingle(
-            hidden_size, norm_type="layer_norm"
-        )
-        self.proj_mlp = nn.Linear(hidden_size, mlp_dim)
-        self.act_mlp = nn.GELU(approximate="tanh")
-        self.proj_out = nn.Linear(hidden_size + mlp_dim, hidden_size)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        temb: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        token_replace_emb: torch.Tensor = None,
-        num_tokens: int = None,
-    ) -> torch.Tensor:
-        text_seq_length = encoder_hidden_states.shape[1]
-        hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
-
-        residual = hidden_states
-
-        # 1. Input normalization
-        norm_hidden_states, gate, tr_gate = self.norm(
-            hidden_states, temb, token_replace_emb, num_tokens
-        )
-        mlp_hidden_states = self.act_mlp(self.proj_mlp(norm_hidden_states))
-
-        norm_hidden_states, norm_encoder_hidden_states = (
-            norm_hidden_states[:, :-text_seq_length, :],
-            norm_hidden_states[:, -text_seq_length:, :],
-        )
-
-        # 2. Attention
-        attn_output, context_attn_output = self.attn(
-            hidden_states=norm_hidden_states,
-            encoder_hidden_states=norm_encoder_hidden_states,
-            attention_mask=attention_mask,
-            image_rotary_emb=image_rotary_emb,
-        )
-        attn_output = torch.cat([attn_output, context_attn_output], dim=1)
-
-        # 3. Modulation and residual connection
-        hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
-
-        proj_output = self.proj_out(hidden_states)
-        hidden_states_zero = proj_output[:, :num_tokens] * tr_gate.unsqueeze(1)
-        hidden_states_orig = proj_output[:, num_tokens:] * gate.unsqueeze(1)
-        hidden_states = torch.cat([hidden_states_zero, hidden_states_orig], dim=1)
-        hidden_states = hidden_states + residual
-
-        hidden_states, encoder_hidden_states = (
-            hidden_states[:, :-text_seq_length, :],
-            hidden_states[:, -text_seq_length:, :],
-        )
-        return hidden_states, encoder_hidden_states
-
-
-class HunyuanVideoTokenReplaceTransformerBlock(nn.Module):
-    def __init__(
-        self,
-        num_attention_heads: int,
-        attention_head_dim: int,
-        mlp_ratio: float,
-        qk_norm: str = "rms_norm",
-    ) -> None:
-        super().__init__()
-
-        hidden_size = num_attention_heads * attention_head_dim
-
-        self.norm1 = HunyuanVideoTokenReplaceAdaLayerNormZero(
-            hidden_size, norm_type="layer_norm"
-        )
-        self.norm1_context = AdaLayerNormZero(hidden_size, norm_type="layer_norm")
-
-        self.attn = Attention(
-            query_dim=hidden_size,
-            cross_attention_dim=None,
-            added_kv_proj_dim=hidden_size,
-            dim_head=attention_head_dim,
-            heads=num_attention_heads,
-            out_dim=hidden_size,
-            context_pre_only=False,
-            bias=True,
-            processor=HunyuanVideoAttnProcessor2_0(),
-            qk_norm=qk_norm,
-            eps=1e-6,
-        )
-
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff = FeedForward(
-            hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate"
-        )
-
-        self.norm2_context = nn.LayerNorm(
-            hidden_size, elementwise_affine=False, eps=1e-6
-        )
-        self.ff_context = FeedForward(
-            hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate"
-        )
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        temb: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        freqs_cis: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        token_replace_emb: torch.Tensor = None,
-        num_tokens: int = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # 1. Input normalization
-        (
-            norm_hidden_states,
-            gate_msa,
-            shift_mlp,
-            scale_mlp,
-            gate_mlp,
-            tr_gate_msa,
-            tr_shift_mlp,
-            tr_scale_mlp,
-            tr_gate_mlp,
-        ) = self.norm1(hidden_states, temb, token_replace_emb, num_tokens)
-        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
-            self.norm1_context(encoder_hidden_states, emb=temb)
-        )
-
-        # 2. Joint attention
-        attn_output, context_attn_output = self.attn(
-            hidden_states=norm_hidden_states,
-            encoder_hidden_states=norm_encoder_hidden_states,
-            attention_mask=attention_mask,
-            image_rotary_emb=freqs_cis,
-        )
-
-        # 3. Modulation and residual connection
-        hidden_states_zero = hidden_states[:, :num_tokens] + attn_output[
-            :, :num_tokens
-        ] * tr_gate_msa.unsqueeze(1)
-        hidden_states_orig = hidden_states[:, num_tokens:] + attn_output[
-            :, num_tokens:
-        ] * gate_msa.unsqueeze(1)
-        hidden_states = torch.cat([hidden_states_zero, hidden_states_orig], dim=1)
-        encoder_hidden_states = (
-            encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
-        )
-
-        norm_hidden_states = self.norm2(hidden_states)
-        norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
-
-        hidden_states_zero = (
-            norm_hidden_states[:, :num_tokens] * (1 + tr_scale_mlp[:, None])
-            + tr_shift_mlp[:, None]
-        )
-        hidden_states_orig = (
-            norm_hidden_states[:, num_tokens:] * (1 + scale_mlp[:, None])
-            + shift_mlp[:, None]
-        )
-        norm_hidden_states = torch.cat([hidden_states_zero, hidden_states_orig], dim=1)
-        norm_encoder_hidden_states = (
-            norm_encoder_hidden_states * (1 + c_scale_mlp[:, None])
-            + c_shift_mlp[:, None]
-        )
-
-        # 4. Feed-forward
-        ff_output = self.ff(norm_hidden_states)
-        context_ff_output = self.ff_context(norm_encoder_hidden_states)
-
-        hidden_states_zero = hidden_states[:, :num_tokens] + ff_output[
-            :, :num_tokens
-        ] * tr_gate_mlp.unsqueeze(1)
-        hidden_states_orig = hidden_states[:, num_tokens:] + ff_output[
-            :, num_tokens:
-        ] * gate_mlp.unsqueeze(1)
-        hidden_states = torch.cat([hidden_states_zero, hidden_states_orig], dim=1)
         encoder_hidden_states = (
             encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
         )
@@ -1070,15 +861,6 @@ class HunyuanAvatarVideoTransformer3DModel(
     ) -> None:
         super().__init__()
 
-        supported_image_condition_types = ["latent_concat", "token_replace"]
-        if (
-            image_condition_type is not None
-            and image_condition_type not in supported_image_condition_types
-        ):
-            raise ValueError(
-                f"Invalid `image_condition_type` ({image_condition_type}). Supported ones are: {supported_image_condition_types}"
-            )
-
         inner_dim = num_attention_heads * attention_head_dim
         out_channels = out_channels or in_channels
 
@@ -1106,57 +888,29 @@ class HunyuanAvatarVideoTransformer3DModel(
             patch_size, patch_size_t, rope_axes_dim, rope_theta
         )
 
-        # 3. Dual stream transformer blocks
-        if image_condition_type == "token_replace":
-            self.transformer_blocks = nn.ModuleList(
-                [
-                    HunyuanVideoTokenReplaceTransformerBlock(
-                        num_attention_heads,
-                        attention_head_dim,
-                        mlp_ratio=mlp_ratio,
-                        qk_norm=qk_norm,
-                    )
-                    for _ in range(num_layers)
-                ]
-            )
-        else:
-            self.transformer_blocks = nn.ModuleList(
-                [
-                    HunyuanVideoTransformerBlock(
-                        num_attention_heads,
-                        attention_head_dim,
-                        mlp_ratio=mlp_ratio,
-                        qk_norm=qk_norm,
-                    )
-                    for _ in range(num_layers)
-                ]
-            )
+        self.transformer_blocks = nn.ModuleList(
+            [
+                HunyuanVideoTransformerBlock(
+                    num_attention_heads,
+                    attention_head_dim,
+                    mlp_ratio=mlp_ratio,
+                    qk_norm=qk_norm,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
-        # 4. Single stream transformer blocks
-        if image_condition_type == "token_replace":
-            self.single_transformer_blocks = nn.ModuleList(
-                [
-                    HunyuanVideoTokenReplaceSingleTransformerBlock(
-                        num_attention_heads,
-                        attention_head_dim,
-                        mlp_ratio=mlp_ratio,
-                        qk_norm=qk_norm,
-                    )
-                    for _ in range(num_single_layers)
-                ]
-            )
-        else:
-            self.single_transformer_blocks = nn.ModuleList(
-                [
-                    HunyuanVideoSingleTransformerBlock(
-                        num_attention_heads,
-                        attention_head_dim,
-                        mlp_ratio=mlp_ratio,
-                        qk_norm=qk_norm,
-                    )
-                    for _ in range(num_single_layers)
-                ]
-            )
+        self.single_transformer_blocks = nn.ModuleList(
+            [
+                HunyuanVideoSingleTransformerBlock(
+                    num_attention_heads,
+                    attention_head_dim,
+                    mlp_ratio=mlp_ratio,
+                    qk_norm=qk_norm,
+                )
+                for _ in range(num_single_layers)
+            ]
+        )
 
         # 5. Output projection
         self.norm_out = AdaLayerNormContinuous(
@@ -1257,10 +1011,8 @@ class HunyuanAvatarVideoTransformer3DModel(
             encoder_hidden_states_pose,
             encoder_hidden_states_fps,
         )
-        
 
         audio_embeds = self.audio_projection(encoder_hidden_states_audio)
-        
 
         ref_latents_first = ref_latents[:, :, :1].clone()
         hidden_states = self.x_embedder(hidden_states)
@@ -1274,14 +1026,12 @@ class HunyuanAvatarVideoTransformer3DModel(
         encoder_hidden_states_length = encoder_hidden_states.shape[1]
 
         hidden_states = self.ref_latents_proj(ref_hidden_states) + hidden_states
-        
-        
+
         ref_length = ref_hidden_states_first.shape[1]
         hidden_states = torch.cat([ref_hidden_states_first, hidden_states], dim=1)
         hidden_states_len = hidden_states.shape[1]
         mask_len = hidden_states_len - ref_length
 
-        
         if encoder_hidden_states_face_mask.shape[2] == 1:
             encoder_hidden_states_face_mask = encoder_hidden_states_face_mask.repeat(
                 1, 1, num_frames, 1, 1
@@ -1298,8 +1048,11 @@ class HunyuanAvatarVideoTransformer3DModel(
             .repeat(1, 1, hidden_states.shape[2])
             .type_as(hidden_states)
         )
-        
 
+        cu_seqlens_q = get_cu_seqlens(encoder_attention_mask, hidden_states_len)
+        cu_seqlens_kv = cu_seqlens_q
+        max_seqlen_q = hidden_states_len + encoder_hidden_states_length
+        max_seqlen_kv = max_seqlen_q
 
         # 4. Transformer blocks
 
@@ -1310,10 +1063,12 @@ class HunyuanAvatarVideoTransformer3DModel(
                     encoder_hidden_states,
                     temb,
                     None,
-                    image_rotary_emb
+                    image_rotary_emb,
+                    cu_seqlens_q,
+                    cu_seqlens_kv,
+                    max_seqlen_q,
+                    max_seqlen_kv,
                 )
-                
-                return hidden_states, encoder_hidden_states
 
                 if block_idx in self.double_stream_list:
 
@@ -1325,6 +1080,7 @@ class HunyuanAvatarVideoTransformer3DModel(
                     hidden_states_ref_real = torch.zeros_like(
                         hidden_states[:, :ref_length]
                     )
+
                     audio_embeds_padded = audio_embeds[:, :1].repeat(1, 3, 1, 1)
                     audio_embeds_all_insert = torch.cat(
                         [audio_embeds_padded, audio_embeds], dim=1
@@ -1334,6 +1090,7 @@ class HunyuanAvatarVideoTransformer3DModel(
                     hidden_states_real = self.audio_adapter_blocks[double_idx](
                         audio_embeds_all_insert, hidden_states_real
                     ).view(batch_size, -1, hidden_states.shape[2])
+
                     hidden_states = hidden_states + torch.cat(
                         [
                             hidden_states_ref_real,
@@ -1355,6 +1112,10 @@ class HunyuanAvatarVideoTransformer3DModel(
                         temb,
                         None,
                         image_rotary_emb,
+                        cu_seqlens_q,
+                        cu_seqlens_kv,
+                        max_seqlen_q,
+                        max_seqlen_kv,
                     )
         else:
             hidden_states = self.latent_cache
@@ -1371,7 +1132,11 @@ class HunyuanAvatarVideoTransformer3DModel(
                         encoder_hidden_states,
                         temb,
                         None,
-                        image_rotary_emb 
+                        image_rotary_emb,
+                        cu_seqlens_q,
+                        cu_seqlens_kv,
+                        max_seqlen_q,
+                        max_seqlen_kv,
                     )
 
         # 5. Output projection

@@ -43,9 +43,24 @@ attention_register = FunctionRegister()
 
 
 @attention_register("sdpa")
-def sdpa_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, **kwargs):
+def sdpa_attention(
+    q,
+    k,
+    v,
+    attn_mask=None,
+    dropout_p=0.0,
+    is_causal=False,
+    softmax_scale=None,
+    **kwargs,
+):
     return torch.nn.functional.scaled_dot_product_attention(
-        q, k, v, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal
+        q,
+        k,
+        v,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=softmax_scale,
     )
 
 
@@ -265,7 +280,7 @@ def flash_attention_varlen(
     return out
 
 
-@attention_register("flash")
+@attention_register("flash", available=flash_attn_func is not None)
 def flash_attention(
     q,
     k,
@@ -306,7 +321,7 @@ def flash_attention(
         )
 
 
-@attention_register("flash3")
+@attention_register("flash3", available=flash_attn_func_3 is not None)
 def flash_attention3(
     q, k, v, softmax_scale=None, default_dtype=torch.bfloat16, is_causal=False, **kwargs
 ):
@@ -341,13 +356,15 @@ def flash_attention3(
         return out.permute(0, 2, 1, 3)
 
 
-@attention_register("sage")
-def sage_attention(q, k, v, is_causal=False, **kwargs):
-    attn_output = sageattn(q, k, v, tensor_layout="HND", is_causal=is_causal)
+@attention_register("sage", available=sageattn is not None)
+def sage_attention(q, k, v, is_causal=False, softmax_scale=None, **kwargs):
+    attn_output = sageattn(
+        q, k, v, tensor_layout="HND", is_causal=is_causal, sm_scale=softmax_scale
+    )
     return attn_output.transpose(1, 2)
 
 
-@attention_register("xla_flash")
+@attention_register("xla_flash", available=xla_flash_attention_func is not None)
 def xla_flash_attention(q, k, v, attention_mask, softmax_scale, **kwargs):
     batch_size = q.shape[0]
     q_segment_indexes = None
@@ -377,16 +394,23 @@ def xla_flash_attention(q, k, v, attention_mask, softmax_scale, **kwargs):
     )
 
 
-@attention_register("flex")
+@attention_register("flex", available=flex_attention is not None)
 def flex_attention_func(q, k, v, attn_mask=None, softmax_scale=None, **kwargs):
     if flex_attention is None:
         raise ImportError("flex_attention is not installed")
     return flex_attention(q, k, v, block_mask=attn_mask, scale=softmax_scale, **kwargs)
 
 
-@attention_register("xformers")
+@attention_register("xformers", available=xformers is not None)
 def xformers_attention(
-    q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, **kwargs
+    q,
+    k,
+    v,
+    attn_mask=None,
+    dropout_p=0.0,
+    is_causal=False,
+    softmax_scale=None,
+    **kwargs,
 ):
     if xformers is None:
         raise ImportError("xformers is not installed")
@@ -411,7 +435,7 @@ def xformers_attention(
             attn_bias = attn_bias & attn_mask
 
     output = xformers.ops.memory_efficient_attention(
-        q, k, v, attn_bias=attn_bias, p=dropout_p
+        q, k, v, attn_bias=attn_bias, p=dropout_p, scale=softmax_scale
     )
 
     # Transpose back to (B, H, S, D) format

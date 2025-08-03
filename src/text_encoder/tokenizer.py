@@ -44,7 +44,6 @@ def fetch_and_save_tokenizer_from_config(
         loaded_config.update(config)
 
     _name_or_path = tokenizer_name or loaded_config.get("_name_or_path", None)
-    
 
     if _name_or_path is not None:
         tokenizer_kwargs["from_tiktoken"] = False
@@ -52,7 +51,7 @@ def fetch_and_save_tokenizer_from_config(
             tokenizer_class = find_class_recursive(transformers, tokenizer_class)
         else:
             tokenizer_class = AutoTokenizer
-            
+
         tokenizer = tokenizer_class.from_pretrained(_name_or_path, **tokenizer_kwargs)
         save_dir = Path(model_path).parent
         os.makedirs(save_dir, exist_ok=True)

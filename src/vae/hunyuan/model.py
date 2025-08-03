@@ -489,7 +489,10 @@ class HunyuanVideoEncoder3D(nn.Module):
 
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
-            if down_block_type != "HunyuanVideoDownBlock3D" and down_block_type != "DownEncoderBlockCausal3D":
+            if (
+                down_block_type != "HunyuanVideoDownBlock3D"
+                and down_block_type != "DownEncoderBlockCausal3D"
+            ):
                 raise ValueError(f"Unsupported down_block_type: {down_block_type}")
 
             input_channel = output_channel
@@ -621,7 +624,10 @@ class HunyuanVideoDecoder3D(nn.Module):
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
         for i, up_block_type in enumerate(up_block_types):
-            if up_block_type != "HunyuanVideoUpBlock3D" and up_block_type != "UpDecoderBlockCausal3D":
+            if (
+                up_block_type != "HunyuanVideoUpBlock3D"
+                and up_block_type != "UpDecoderBlockCausal3D"
+            ):
                 raise ValueError(f"Unsupported up_block_type: {up_block_type}")
 
             prev_output_channel = output_channel
@@ -1246,10 +1252,18 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
         return DecoderOutput(sample=dec)
 
     def normalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
-        return latents * self.config.scaling_factor
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = (latents - self.config.shift_factor) * self.config.scaling_factor
+        else:
+            latents = latents * self.config.scaling_factor
+        return latents
 
     def denormalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
-        return latents / self.config.scaling_factor
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = latents / self.config.scaling_factor + self.config.shift_factor
+        else:
+            latents = latents / self.config.scaling_factor
+        return latents
 
     def forward(
         self,

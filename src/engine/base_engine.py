@@ -126,7 +126,13 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def _init_logger(self):
         self.logger = logger
 
-    def _aspect_ratio_resize(self, image, max_area=720 * 1280, mod_value=16, resize_mode=Image.Resampling.LANCZOS):
+    def _aspect_ratio_resize(
+        self,
+        image,
+        max_area=720 * 1280,
+        mod_value=16,
+        resize_mode=Image.Resampling.LANCZOS,
+    ):
         aspect_ratio = image.height / image.width
         height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
         width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
@@ -357,14 +363,14 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         if self.vae_slicing:
             self.enable_vae_slicing()
         return vae
-    
+
     def enable_vae_tiling(self):
         self.vae_tiling = True
         if self.vae is not None and hasattr(self.vae, "enable_tiling"):
             self.vae.enable_tiling()
         else:
             self.logger.warning("VAE does not support tiling")
-    
+
     def enable_vae_slicing(self):
         self.vae_slicing = True
         if self.vae is not None and hasattr(self.vae, "enable_slicing"):
@@ -916,12 +922,18 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     ):
         if parse_frames or isinstance(duration, str):
             num_frames = self._parse_num_frames(duration, fps)
-            latent_num_frames = (num_frames - 1) // (vae_scale_factor_temporal or self.vae_scale_factor_temporal) + 1
+            latent_num_frames = (num_frames - 1) // (
+                vae_scale_factor_temporal or self.vae_scale_factor_temporal
+            ) + 1
         else:
             latent_num_frames = duration
 
-        latent_height = height // (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
-        latent_width = width // (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
+        latent_height = height // (
+            vae_scale_factor_spatial or self.vae_scale_factor_spatial
+        )
+        latent_width = width // (
+            vae_scale_factor_spatial or self.vae_scale_factor_spatial
+        )
 
         if seed is not None and generator is not None:
             self.logger.warning(
