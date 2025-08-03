@@ -5,7 +5,6 @@ import torch
 from loguru import logger
 import urllib3
 from diffusers.models.modeling_utils import ModelMixin
-import re
 from contextlib import contextmanager
 from tqdm import tqdm
 import math
@@ -14,7 +13,7 @@ import accelerate
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from src.transformer_models.base import TRANSFORMERS_REGISTRY
+from src.transformer.base import TRANSFORMERS_REGISTRY
 from src.text_encoder.text_encoder import TextEncoder
 from src.vae import get_vae
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -43,7 +42,7 @@ from src.converters import (
     convert_vae,
 )
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 from torchvision import transforms as TF
 import inspect
 from src.preprocess import preprocessor_registry
@@ -69,7 +68,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     components_to_load: List[str] | None = None
     preprocessors_to_load: List[str] | None = None
     postprocessors_to_load: List[str] | None = None
-    component_init_kwargs: Dict[str, Any] | None = None
     save_path: str | None = None
     logger: Logger
     attention_type: str = "sdpa"
@@ -80,6 +78,8 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     vae_scale_factor_spatial: float = 1.0
     num_channels_latents: int = 4
     denoise_type: str | None = None
+    vae_tiling: bool = False
+    vae_slicing: bool = False
 
     def __init__(
         self,
@@ -104,7 +104,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                 "components_to_load",
                 "component_load_dtypes",
                 "component_dtypes",
-                "component_init_kwargs",
                 "preprocessors_to_load",
                 "postprocessors_to_load",
                 "device",
@@ -117,7 +116,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             kwargs.get("components_to_load", None),
             kwargs.get("component_load_dtypes", None),
             kwargs.get("component_dtypes", None),
-            kwargs.get("component_init_kwargs", {}),
             kwargs.get("preprocessors_to_load", None),
             kwargs.get("postprocessors_to_load", None),
         )
@@ -128,11 +126,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     def _init_logger(self):
         self.logger = logger
 
-    def _aspect_ratio_resize(self, image, max_area=720 * 1280, mod_value=16):
+    def _aspect_ratio_resize(self, image, max_area=720 * 1280, mod_value=16, resize_mode=Image.Resampling.LANCZOS):
         aspect_ratio = image.height / image.width
         height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
         width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
-        image = image.resize((width, height))
+        image = image.resize((width, height), resize_mode)
         return image, height, width
 
     def _center_crop_resize(self, image, height, width):
@@ -153,12 +151,10 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         components_to_load: List[str] | None,
         component_load_dtypes: Dict[str, torch.dtype] | None,
         component_dtypes: Dict[str, str] | None,
-        component_init_kwargs: Dict[str, Any] | None,
         preprocessors_to_load: List[str] | None,
         postprocessors_to_load: List[str] | None,
     ):
         self.logger.info(f"Loading model {config['name']}")
-        self.component_init_kwargs = component_init_kwargs
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
         if config.get("denoise_type", None):
@@ -356,20 +352,25 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             self.vae = vae
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(vae, self.component_dtypes["vae"])
-            vae_init_kwargs = self.component_init_kwargs.get("vae", {})
-            if (
-                "enable_slicing" in vae_init_kwargs
-                and vae_init_kwargs["enable_slicing"]
-                and hasattr(vae, "enable_slicing")
-            ):
-                vae.enable_slicing()
-            if (
-                "enable_tiling" in vae_init_kwargs
-                and vae_init_kwargs["enable_tiling"]
-                and hasattr(vae, "enable_tiling")
-            ):
-                vae.enable_tiling()
+        if self.vae_tiling:
+            self.enable_vae_tiling()
+        if self.vae_slicing:
+            self.enable_vae_slicing()
         return vae
+    
+    def enable_vae_tiling(self):
+        self.vae_tiling = True
+        if self.vae is not None and hasattr(self.vae, "enable_tiling"):
+            self.vae.enable_tiling()
+        else:
+            self.logger.warning("VAE does not support tiling")
+    
+    def enable_vae_slicing(self):
+        self.vae_slicing = True
+        if self.vae is not None and hasattr(self.vae, "enable_slicing"):
+            self.vae.enable_slicing()
+        else:
+            self.logger.warning("VAE does not support slicing")
 
     def load_config_by_type(self, component_type: str):
         with accelerate.init_empty_weights():
@@ -915,22 +916,12 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
     ):
         if parse_frames or isinstance(duration, str):
             num_frames = self._parse_num_frames(duration, fps)
-            latent_num_frames = math.ceil(
-                (
-                    (num_frames - 1)
-                    / (vae_scale_factor_temporal or self.vae_scale_factor_temporal)
-                )
-                + 1
-            )
+            latent_num_frames = (num_frames - 1) // (vae_scale_factor_temporal or self.vae_scale_factor_temporal) + 1
         else:
             latent_num_frames = duration
 
-        latent_height = math.ceil(
-            height / (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
-        )
-        latent_width = math.ceil(
-            width / (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
-        )
+        latent_height = height // (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
+        latent_width = width // (vae_scale_factor_spatial or self.vae_scale_factor_spatial)
 
         if seed is not None and generator is not None:
             self.logger.warning(

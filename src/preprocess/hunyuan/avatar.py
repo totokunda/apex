@@ -64,24 +64,14 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
 
     def __call__(
         self,
-        image: Union[Image.Image, List[Image.Image], str, np.ndarray, torch.Tensor],
+        image: Image.Image,
         audio: str,
-        height: int = 720,
-        width: int = 1280,
         fps: int = 25,
         num_frames: int = 129,
         dtype: torch.dtype = torch.float32,
         device: str = "cuda",
     ):
-        loaded_image = self._load_image(image)
-
-        resized_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width, mod_value=64
-        )
-
-        resized_image = resized_image.resize((width, height), Image.Resampling.LANCZOS)
-
-        ref_image = np.array(resized_image)
+        ref_image = np.array(image)
         ref_image = torch.from_numpy(ref_image).to(device=device, dtype=dtype)
 
         audio_input, audio_len = self._extract_audio_features(audio)
@@ -172,10 +162,3 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         audio_prompts = torch.cat(audio_prompts)
 
         return audio_prompts
-
-    def _aspect_ratio_resize(self, image, max_area=720 * 1280, mod_value=16):
-        aspect_ratio = image.height / image.width
-        height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
-        width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
-        image = image.resize((width, height))
-        return image, height, width

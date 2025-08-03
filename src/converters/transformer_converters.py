@@ -575,3 +575,94 @@ class MochiTransformerConverter(TransformerConverter):
             for src, tgt in self.rename_dict.items():
                 new_key = new_key.replace(src, tgt)
             update_state_dict_(state_dict, key, new_key)
+
+
+class MagiTransformerConverter(TransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            # Basic embeddings
+            "x_embedder.weight": "patch_embedding.weight",
+            # Time embedder
+            "t_embedder.mlp.0": "condition_embedder.time_embedder.linear_1",
+            "t_embedder.mlp.2": "condition_embedder.time_embedder.linear_2",
+            # Text embedder (linear_1 only, linear_2 is special handled)
+            "y_embedder.y_proj_xattn.0": "condition_embedder.text_embedder.linear_1",
+            # Final layers
+            "videodit_blocks.final_layernorm": "norm_out",
+            "final_linear.linear": "proj_out",
+            # RoPE
+            "rope.bands": "rope.freqs",
+            # Layer transformations
+            "videodit_blocks.layers": "blocks",
+            # Self attention components
+            "self_attention.linear_qkv.layer_norm": "norm1",
+            "self_attention.linear_qkv.q": "attn1.to_q",
+            "self_attention.linear_qkv.k": "attn1.to_k",
+            "self_attention.linear_qkv.v": "attn1.to_v",
+            "self_attention.linear_proj": "attn1.to_out.0",
+            "self_attention.q_layernorm": "attn1.norm_q",
+            "self_attention.k_layernorm": "attn1.norm_k",
+            # Cross attention Q
+            "self_attention.linear_qkv.qx": "attn2.to_q",
+            "self_attention.q_layernorm_xattn": "attn2.norm_q",
+            "self_attention.k_layernorm_xattn": "attn2.norm_k",
+            # Post attention norms
+            "self_attn_post_norm": "norm2",
+            # MLP components
+            "mlp.layer_norm": "norm3",
+            "mlp.linear_fc1": "ff.net.0.proj",
+            "mlp.linear_fc2": "ff.net.2",
+            "mlp_post_norm": "norm4",
+            # AdaLN modulation
+            "ada_modulate_layer.proj.0": "scale_shift_table",
+        }
+
+        self.special_keys_map = {
+            "y_embedder.y_proj_adaln.2": self.handle_text_embedder_linear_2,
+            "linear_kv_xattn": self.handle_cross_attn_kv,
+        }
+
+    @staticmethod
+    def handle_text_embedder_linear_2(key: str, state_dict: Dict[str, Any]):
+        """Handle the special case where text_embedder.linear_2 is replaced with identity"""
+        # Find the hidden size from the corresponding weight
+        y_proj_key = key.replace("y_proj_adaln.2", "y_proj_xattn.0")
+        if y_proj_key + ".weight" in state_dict:
+            hidden_size = state_dict[y_proj_key + ".weight"].shape[0]
+
+            # Create identity matrix and zero bias
+            if key.endswith(".weight"):
+                new_key = key.replace(
+                    "y_embedder.y_proj_adaln.2",
+                    "condition_embedder.text_embedder.linear_2",
+                )
+                state_dict[new_key] = torch.eye(hidden_size)
+            elif key.endswith(".bias"):
+                new_key = key.replace(
+                    "y_embedder.y_proj_adaln.2",
+                    "condition_embedder.text_embedder.linear_2",
+                )
+                state_dict[new_key] = torch.zeros(hidden_size)
+
+        # Remove the original key
+        state_dict.pop(key)
+
+    @staticmethod
+    def handle_cross_attn_kv(key: str, state_dict: Dict[str, Any]):
+        """Handle chunking of cross attention KV weights and biases"""
+        tensor = state_dict.pop(key)
+
+        # Extract layer index from key
+        layer_match = re.search(r"videodit_blocks\.layers\.(\d+)", key)
+        if layer_match:
+            layer_idx = layer_match.group(1)
+
+            if key.endswith(".weight"):
+                k_weight, v_weight = tensor.chunk(2, dim=0)
+                state_dict[f"blocks.{layer_idx}.attn2.to_k.weight"] = k_weight
+                state_dict[f"blocks.{layer_idx}.attn2.to_v.weight"] = v_weight
+            elif key.endswith(".bias"):
+                k_bias, v_bias = tensor.chunk(2, dim=0)
+                state_dict[f"blocks.{layer_idx}.attn2.to_k.bias"] = k_bias
+                state_dict[f"blocks.{layer_idx}.attn2.to_v.bias"] = v_bias

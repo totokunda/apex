@@ -111,3 +111,45 @@ class LTXVAEConverter(VAEConverter):
     @staticmethod
     def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
         state_dict.pop(key)
+
+
+class MagiVAEConverter(VAEConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            # Encoder components
+            "encoder.patch_embed.proj": "encoder.patch_embedding",
+            "encoder.norm": "encoder.norm_out",
+            "encoder.last_layer": "encoder.linear_out",
+            # Decoder components
+            "decoder.norm": "decoder.norm_out",
+            "decoder.last_layer": "decoder.conv_out",
+            # Attention components (for both encoder and decoder)
+            "attn.proj": "attn.to_out.0",
+            # MLP components (for both encoder and decoder)
+            "mlp.fc1": "proj_out.net.0.proj",
+            "mlp.fc2": "proj_out.net.2",
+        }
+
+        self.special_keys_map = {
+            "attn.qkv": self.handle_qkv_chunking,
+        }
+
+    @staticmethod
+    def handle_qkv_chunking(key: str, state_dict: Dict[str, Any]):
+        """Handle chunking of QKV weights and biases for attention layers"""
+        tensor = state_dict.pop(key)
+
+        # Get the base key without the qkv suffix
+        base_key = key.replace("attn.qkv", "attn")
+
+        if key.endswith(".weight"):
+            q_weight, k_weight, v_weight = tensor.chunk(3, dim=0)
+            state_dict[f"{base_key}.to_q.weight"] = q_weight
+            state_dict[f"{base_key}.to_k.weight"] = k_weight
+            state_dict[f"{base_key}.to_v.weight"] = v_weight
+        elif key.endswith(".bias"):
+            q_bias, k_bias, v_bias = tensor.chunk(3, dim=0)
+            state_dict[f"{base_key}.to_q.bias"] = q_bias
+            state_dict[f"{base_key}.to_k.bias"] = k_bias
+            state_dict[f"{base_key}.to_v.bias"] = v_bias

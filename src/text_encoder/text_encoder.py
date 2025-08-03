@@ -15,8 +15,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin):
         super().__init__()
         self.base = config.get("base")
         # check if base has transformers in it if so remove it
-        if "transformer_models" in self.base:
-            self.base = self.base.replace("transformer_models.", "")
+        if "transformer" in self.base:
+            self.base = self.base.replace("transformer.", "")
         self.model_path = config.get("model_path")
         self.config_path = config.get("config_path")
         self.config = config.get("config", {})

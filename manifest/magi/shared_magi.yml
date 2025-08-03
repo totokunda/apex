@@ -1,0 +1,17 @@
+name: "Shared MAGI Components"
+description: "Shared MAGI Components"
+
+components:
+  - type: text_encoder
+    name: "magi/text_encoder"
+    base: "T5EncoderModel"
+    model_path: sand-ai/MAGI-1/ckpt/t5/t5-v1_1-xxl
+    tokenizer_class: T5Tokenizer
+    tokenizer_name: google/t5-v1_1-xxl
+
+  - type: vae
+    name: "magi/vae"
+    base: "magi"
+    model_path: sand-ai/MAGI-1/ckpt/vae
+    config_path: vae_configs/magi/magi.json
+    tag: "magi"
