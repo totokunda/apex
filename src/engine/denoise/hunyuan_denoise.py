@@ -139,19 +139,17 @@ class HunyuanDenoise:
             infer_length = frames_per_batch
             shift_offset = 0
             latents_all = latents_all[:, :, :infer_length]
-            audio_prompts_all = audio_prompts_all[:, :infer_length * 4]
+            audio_prompts_all = audio_prompts_all[:, : infer_length * 4]
 
         if use_cfg_guidance:
             prompt_embeds_input = torch.cat([negative_prompt_embeds, prompt_embeds])
             prompt_mask_input = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask]
-            ).to(transformer_dtype)
+            )
             pooled_prompt_embeds_input = torch.cat(
                 [negative_pooled_prompt_embeds, pooled_prompt_embeds]
-            ).to(transformer_dtype)
-            ref_latents_input = torch.cat([uncond_ref_latents, ref_latents]).to(
-                transformer_dtype
             )
+            ref_latents_input = torch.cat([uncond_ref_latents, ref_latents])
 
         cache_tensor = {}
         with self._progress_bar(
@@ -189,7 +187,8 @@ class HunyuanDenoise:
                     # Ensure audio prompt list is not out of bounds
                     if max(idx_list_audio) >= audio_prompts_all.shape[1]:
                         idx_list_audio = [
-                            min(i, audio_prompts_all.shape[1] - 1) for i in idx_list_audio
+                            min(i, audio_prompts_all.shape[1] - 1)
+                            for i in idx_list_audio
                         ]
 
                     audio_prompts = audio_prompts_all[:, idx_list_audio].clone()
@@ -214,26 +213,24 @@ class HunyuanDenoise:
                             )
                             face_masks_input = torch.cat(
                                 [face_masks * 0.6] * 2, dim=0
-                            ).to(transformer_dtype)
+                            )
                         else:
                             current_guidance_scale = (1 - i / len(timesteps)) * (
                                 dynamic_guidance_end - dynamic_guidance_start
                             ) + dynamic_guidance_start
                             prompt_embeds_input = torch.cat(
                                 [prompt_embeds, prompt_embeds]
-                            ).to(transformer_dtype)
+                            )
                             prompt_mask_input = torch.cat(
                                 [prompt_attention_mask, prompt_attention_mask]
-                            ).to(transformer_dtype)
+                            )
                             pooled_prompt_embeds_input = torch.cat(
                                 [pooled_prompt_embeds, pooled_prompt_embeds]
-                            ).to(transformer_dtype)
+                            )
                             audio_prompts_input = torch.cat(
                                 [uncond_audio_prompts, audio_prompts], dim=0
-                            ).to(transformer_dtype)
-                            face_masks_input = torch.cat([face_masks] * 2, dim=0).to(
-                                transformer_dtype
                             )
+                            face_masks_input = torch.cat([face_masks] * 2, dim=0)
 
                         motion_exp_input = torch.cat([motion_exp] * 2)
                         motion_pose_input = torch.cat([motion_pose] * 2)
@@ -261,34 +258,32 @@ class HunyuanDenoise:
                         * (latent_model_input.shape[-3] + 1)
                     )
 
-                    timestep = t.repeat(latent_model_input.shape[0]).to(transformer_dtype)
+                    timestep = t.repeat(latent_model_input.shape[0])
 
                     if i in no_cache_steps:
                         use_cache = False
-                        
-                        module = torch.load('/workspace/apex/hy_debug.pt')
 
-                        noise_pred = self.transformer(
-                            hidden_states=module['latent_model_input'].to(latent_model_input),
-                            timestep=module['t_expand'].to(timestep),
-                            encoder_hidden_states=module['prompt_embeds_input'].to(prompt_embeds_input),
-                            encoder_attention_mask=module['prompt_mask_input'].to(prompt_mask_input),
-                            pooled_projections=module['prompt_embeds_2_input'].to(pooled_prompt_embeds_input),
-                            ref_latents=module['ref_latents'].to(ref_latents_input),
-                            encoder_hidden_states_face_mask=module['face_masks_input'].to(face_masks_input),
-                            encoder_hidden_states_audio=module['audio_prompts_input'].to(audio_prompts_input),
-                            encoder_hidden_states_motion=module['motion_exp_input'].to(motion_exp_input),
-                            encoder_hidden_states_pose=module['motion_pose_input'].to(motion_pose_input),
-                            encoder_hidden_states_fps=module['fps_input'].to(fps_input),
-                            freqs_cos=module['freqs_cos'].to(freqs_cis[0]),
-                            freqs_sin=module['freqs_sin'].to(freqs_cis[1]),
-                            use_cache=module['is_cache'],
-                            return_dict=False,
-                        )[0]
-                        
-                        torch.save({'noise_pred': noise_pred}, '/workspace/apex/hy_debug_working.pt')
-                        exit()
-                        
+                        with torch.autocast(
+                            device_type=self.device.type, dtype=transformer_dtype
+                        ):
+                            noise_pred = self.transformer(
+                                hidden_states=latent_model_input,
+                                timestep=timestep,
+                                encoder_hidden_states=prompt_embeds_input,
+                                encoder_attention_mask=prompt_mask_input,
+                                pooled_projections=pooled_prompt_embeds_input,
+                                ref_latents=ref_latents_input,
+                                encoder_hidden_states_face_mask=face_masks_input,
+                                encoder_hidden_states_audio=audio_prompts_input,
+                                encoder_hidden_states_motion=motion_exp_input,
+                                encoder_hidden_states_pose=motion_pose_input,
+                                encoder_hidden_states_fps=fps_input,
+                                freqs_cos=freqs_cis[0],
+                                freqs_sin=freqs_cis[1],
+                                use_cache=False,
+                                return_dict=False,
+                            )[0]
+
                         if not cache_tensor:
                             cache_tensor = {
                                 "reference_latent": torch.zeros(
@@ -370,23 +365,26 @@ class HunyuanDenoise:
                             cache_tensor["prompt_embeds"][:, idx_list][:, 0].clone()
                         )
 
-                        noise_pred = self.transformer(
-                            hidden_states=latent_model_input,
-                            timestep=timestep,
-                            encoder_hidden_states=prompt_embeds_input,
-                            encoder_attention_mask=prompt_mask_input,
-                            pooled_projections=pooled_prompt_embeds_input,
-                            ref_latents=ref_latents_input,
-                            encoder_hidden_states_face_mask=face_masks_input,
-                            encoder_hidden_states_audio=audio_prompts_input,
-                            encoder_hidden_states_motion=motion_exp_input,
-                            encoder_hidden_states_pose=motion_pose_input,
-                            encoder_hidden_states_fps=fps_input,
-                            freqs_cos=freqs_cis[0],
-                            freqs_sin=freqs_cis[1],
-                            use_cache=use_cache,
-                            return_dict=False,
-                        )[0]
+                        with torch.autocast(
+                            device_type=self.device.type, dtype=transformer_dtype
+                        ):
+                            noise_pred = self.transformer(
+                                hidden_states=latent_model_input,
+                                timestep=timestep,
+                                encoder_hidden_states=prompt_embeds_input,
+                                encoder_attention_mask=prompt_mask_input,
+                                pooled_projections=pooled_prompt_embeds_input,
+                                ref_latents=ref_latents_input,
+                                encoder_hidden_states_face_mask=face_masks_input,
+                                encoder_hidden_states_audio=audio_prompts_input,
+                                encoder_hidden_states_motion=motion_exp_input,
+                                encoder_hidden_states_pose=motion_pose_input,
+                                encoder_hidden_states_fps=fps_input,
+                                freqs_cos=freqs_cis[0],
+                                freqs_sin=freqs_cis[1],
+                                use_cache=use_cache,
+                                return_dict=False,
+                            )[0]
 
                     if use_cfg_guidance:
                         # Perform guidance

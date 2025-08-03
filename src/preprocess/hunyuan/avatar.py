@@ -81,7 +81,7 @@ class AvatarPreprocessor(BasePreprocessor, LoaderMixin, OffloadMixin):
         motion_bucket_id_exps = np.array([30] * 4)
         motion_bucket_id_heads = torch.from_numpy(motion_bucket_id_heads).unsqueeze(0)
         motion_bucket_id_exps = torch.from_numpy(motion_bucket_id_exps).unsqueeze(0)
-        fps = torch.from_numpy(np.array(fps)).unsqueeze(0)
+        fps = torch.from_numpy(np.array(fps)).unsqueeze(0).to(dtype=dtype)
 
         pixel_value_ref = rearrange(
             ref_image.clone().unsqueeze(0), "b h w c -> b c h w"

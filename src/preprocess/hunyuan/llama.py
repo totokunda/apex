@@ -213,7 +213,8 @@ class LlamaPreprocessor(BasePreprocessor):
     ):
         prompt = [prompt] if isinstance(prompt, str) else prompt
         prompt_template = (
-            self.default_prompt_template_text if image is None
+            self.default_prompt_template_text
+            if image is None
             else self.default_prompt_template_image
         )
         prompt = [prompt_template["template"].format(p) for p in prompt]
@@ -239,7 +240,7 @@ class LlamaPreprocessor(BasePreprocessor):
             crop_start -= 5
 
         max_sequence_length += crop_start
-        
+
         text_inputs = self.tokenizer(
             prompt,
             max_length=max_sequence_length,
@@ -253,7 +254,7 @@ class LlamaPreprocessor(BasePreprocessor):
 
         text_input_ids = text_inputs.input_ids.to(device=device)
         text_attention_mask = text_inputs.attention_mask.to(device=device)
-        
+
         if self.image_processor is not None:
             loaded_image = self._load_image(image)
             image_embeds = self.image_processor(
@@ -286,9 +287,9 @@ class LlamaPreprocessor(BasePreprocessor):
                 "input_ids": text_input_ids.to(self.model.device),
                 "attention_mask": text_attention_mask.to(self.model.device),
             }
-            
-        prompt_attention_mask = expanded_inputs['attention_mask']
-        
+
+        prompt_attention_mask = expanded_inputs["attention_mask"]
+
         prompt_embeds = self.model(
             **expanded_inputs,
             output_hidden_states=True,
@@ -296,7 +297,12 @@ class LlamaPreprocessor(BasePreprocessor):
 
         prompt_embeds = prompt_embeds.to(dtype=dtype)
 
-        if crop_start is not None and crop_start > 0 and image_embeds is not None and not hyavatar:
+        if (
+            crop_start is not None
+            and crop_start > 0
+            and image_embeds is not None
+            and not hyavatar
+        ):
             text_crop_start = crop_start - 1 + image_emb_len
             batch_indices, last_double_return_token_indices = torch.where(
                 text_input_ids == double_return_token_id
@@ -390,12 +396,12 @@ class LlamaPreprocessor(BasePreprocessor):
         else:
             prompt_embeds = prompt_embeds[:, crop_start:]
             prompt_attention_mask = prompt_attention_mask[:, crop_start:]
-            
+
             # duplicate text embeddings for each generation per prompt, using mps friendly method
             bs, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
             prompt_embeds = prompt_embeds.view(bs * num_videos_per_prompt, seq_len, -1)
-            
+
             bs, seq_len = prompt_attention_mask.shape
             prompt_attention_mask = prompt_attention_mask.repeat(
                 1, num_videos_per_prompt
@@ -403,5 +409,5 @@ class LlamaPreprocessor(BasePreprocessor):
             prompt_attention_mask = prompt_attention_mask.view(
                 bs * num_videos_per_prompt, seq_len
             )
-           
+
         return prompt_embeds, prompt_attention_mask
