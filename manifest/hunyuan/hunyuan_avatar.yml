@@ -14,8 +14,19 @@ components:
       reverse: true
       solver: "euler"
 
-  - !include shared:hunyuan/vae
-  - !include shared:hunyuan/text_encoder
+  - type: vae
+    base: "hunyuan"
+    model_path: tencent/HunyuanVideo-Avatar/ckpts/hunyuan-video-t2v-720p/vae
+    config_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/hunyuan-video-t2v-720p/vae/config.json
+    file_pattern: "*.pt"
+
+  - type: text_encoder
+    base: "CLIPTextModel"
+    model_path: tencent/HunyuanVideo-Avatar/ckpts/text_encoder_2
+    tokenizer_name: tencent/HunyuanVideo-Avatar
+    tokenizer_class: AutoTokenizer
+    tokenizer_kwargs:
+      subfolder: "ckpts/text_encoder_2"
   
   - type: transformer
     base: "hunyuan.avatar" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
@@ -23,14 +34,22 @@ components:
     tag: "hunyuan_avatar"
 
 preprocessors: 
-  - !include shared:hunyuan/llama/t2v
+  - type: hunyuan.llama
+    base_model: "LlavaForConditionalGeneration"
+    model_path: tencent/HunyuanVideo-Avatar/ckpts/llava_llama_image
+    image_processor_path: tencent/HunyuanVideo-Avatar/ckpts/llava_llama_image
+    config_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/llava_llama_image/config.json
+    tokenizer_class: AutoTokenizer
+    tokenizer_name: tencent/HunyuanVideo-Avatar
+    tokenizer_kwargs:
+      subfolder: "ckpts/llava_llama_image"
   - type: hunyuan.avatar
     model_path: tencent/HunyuanVideo-Avatar/ckpts/whisper-tiny
     align_pt_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/det_align/detface.pt
 
 defaults:
   run:
-    num_inference_steps: 40
+    num_inference_steps: 50
     return_latents: false
     text_encoder_kwargs: 
       output_type: "pooler_output"

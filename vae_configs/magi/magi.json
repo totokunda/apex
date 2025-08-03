@@ -1,0 +1,14 @@
+{
+    "_class_name": "Magi1AutoencoderKL",
+    "_diffusers_version": "0.32.0.dev0",
+    "patch_size": [4, 8, 8],
+    "num_attention_heads": 16,
+    "attention_head_dim": 64,
+    "z_dim": 16,
+    "height": 256,
+    "width": 256,
+    "num_frames": 16,
+    "ffn_dim": 4096,
+    "num_layers": 24,
+    "eps": 1e-6
+}

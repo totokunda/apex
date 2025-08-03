@@ -39,7 +39,7 @@ def get_vae_config(vae_tag: str, config_path: str | None = None):
 
 
 def get_model_class(
-    model_base: str, model_config: dict, model_type: str = "transformer_models"
+    model_base: str, model_config: dict, model_type: str = "transformer"
 ):
     module_type = importlib.import_module(f"src.{model_type}.{model_base}.model")
     model_class = find_class_recursive(module_type, model_config["_class_name"])

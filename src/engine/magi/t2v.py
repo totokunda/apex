@@ -27,10 +27,6 @@ class MagiT2VEngine(MagiBaseEngine):
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator = None,
-        chunk_size: int = 16,
-        timestep_transform: str = "sd3",
-        timestep_shift: float = 3.0,
-        special_token_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
         """Text-to-video generation using MAGI's chunk-based approach"""
@@ -48,11 +44,7 @@ class MagiT2VEngine(MagiBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-
-        prompt_attention_mask = None  # MAGI handles masking differently
-
         negative_prompt_embeds = None
-        negative_prompt_attention_mask = None
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
@@ -102,27 +94,9 @@ class MagiT2VEngine(MagiBaseEngine):
         self.to_device(self.scheduler)
 
         # 5. Initialize timestep schedule
-        timesteps = self.init_timestep_schedule(
+        timesteps = self._get_timesteps(
             num_steps=num_inference_steps,
             device=self.device,
-            transform_type=timestep_transform,
-            shift=timestep_shift,
-        )
-
-        # 6. Process text embeddings for chunk-based generation
-        # Calculate chunking parameters first
-        total_latent_frames = latents.shape[2]
-        infer_chunk_num = math.ceil(total_latent_frames / chunk_size)
-        clean_chunk_num = 0  # No prefix video in T2V
-
-        processed_caption_embs, processed_caption_masks = self.process_text_embeddings(
-            prompt_embeds=prompt_embeds,
-            prompt_attention_mask=prompt_attention_mask,
-            negative_prompt_embeds=negative_prompt_embeds,
-            negative_prompt_attention_mask=negative_prompt_attention_mask,
-            infer_chunk_num=infer_chunk_num,
-            clean_chunk_num=clean_chunk_num,
-            special_token_kwargs=special_token_kwargs,
         )
 
         # 7. MAGI chunk-based denoising
@@ -130,8 +104,12 @@ class MagiT2VEngine(MagiBaseEngine):
             latents=latents,
             scheduler=self.scheduler,
             timesteps=timesteps,
-            processed_caption_embs=processed_caption_embs,
-            processed_caption_masks=processed_caption_masks,
+            transformer_kwargs={
+                "encoder_hidden_states": prompt_embeds,
+            },
+            unconditional_transformer_kwargs={
+                "encoder_hidden_states": negative_prompt_embeds,
+            },
             guidance_scale=guidance_scale,
             use_cfg_guidance=use_cfg_guidance,
             num_inference_steps=num_inference_steps,
@@ -139,9 +117,6 @@ class MagiT2VEngine(MagiBaseEngine):
             render_on_step_callback=render_on_step_callback,
             attention_kwargs=attention_kwargs,
             transformer_dtype=transformer_dtype,
-            chunk_size=chunk_size,
-            temporal_downsample_factor=self.vae_scale_factor_temporal,
-            num_frames=num_frames,
             **kwargs,
         )
 

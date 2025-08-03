@@ -6,7 +6,7 @@ from pydash import get
 import os
 import safetensors
 import glob
-from src.transformer_models.base import get_transformer
+from src.transformer.base import get_transformer
 from src.vae import get_vae
 from accelerate import init_empty_weights
 from typing import List
@@ -22,6 +22,7 @@ from src.converters.transformer_converters import (
     StepVideoTransformerConverter,
     SkyReelsTransformerConverter,
     HunyuanAvatarTransformerConverter,
+    MagiTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -32,7 +33,7 @@ from src.converters.utils import (
     strip_common_prefix,
 )
 
-from src.converters.vae_converters import LTXVAEConverter
+from src.converters.vae_converters import LTXVAEConverter, MagiVAEConverter
 
 
 def get_transformer_converter(model_type: str):
@@ -60,6 +61,8 @@ def get_transformer_converter(model_type: str):
         return StepVideoTransformerConverter()
     elif model_type == "skyreels.base":
         return SkyReelsTransformerConverter()
+    elif model_type == "magi.base":
+        return MagiTransformerConverter()
     else:
         raise ValueError(f"Model type {model_type} not supported")
 
@@ -67,6 +70,8 @@ def get_transformer_converter(model_type: str):
 def get_vae_converter(vae_type: str, **additional_kwargs):
     if vae_type == "ltx":
         return LTXVAEConverter(**additional_kwargs)
+    elif vae_type == "magi":
+        return MagiVAEConverter()
     else:
         raise ValueError(f"VAE type {vae_type} not supported")
 
@@ -187,7 +192,7 @@ def convert_transformer(
         model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
     )
 
-    model_class = get_model_class(model_type, config, model_type="transformer_models")
+    model_class = get_model_class(model_type, config, model_type="transformer")
 
     converter = get_transformer_converter(model_type)
 
@@ -247,7 +252,7 @@ def get_transformer_keys(
     config = get_transformer_config(
         model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
     )
-    model_class = get_model_class(model_type, config, model_type="transformer_models")
+    model_class = get_model_class(model_type, config, model_type="transformer")
     model = get_empty_model(model_class, config)
     return model.state_dict().keys()
 

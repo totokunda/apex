@@ -18,8 +18,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         prompt_2: Union[List[str], str] = None,
         negative_prompt: Union[List[str], str] = None,
         negative_prompt_2: Union[List[str], str] = None,
-        height: int = 1024,
-        width: int = 1024,
+        image_size: int = 704,
         duration: Union[str, int] = 129,
         fps: int = 25,
         num_inference_steps: int = 50,
@@ -41,6 +40,8 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         frame_per_batch: int = 33,
         shift_offset: int = 10,
         no_cache_steps: int = None,
+        guidance_rescale: float = 0.0,
+        use_cache: bool = True,
         **kwargs,
     ):
         # 1. Load preprocessor and VAE
@@ -56,39 +57,39 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         num_frames = self._parse_num_frames(duration, fps)
 
         loaded_image = self._load_image(image)
+        w, h = loaded_image.size
+        scale = image_size / min(w, h)
+        width = round(w * scale / 64) * 64
+        height = round(h * scale / 64) * 64
 
-        if self.transformer is not None:
-            image_condition_type = getattr(
-                self.transformer.config, "image_condition_type", "token_replace"
-            )
+        if image_size == 704:
+            img_size_long = 1216 
+        elif image_size == 512:
+            img_size_long = 768
+        elif image_size == 384:
+            img_size_long = 576
+        elif image_size == 256:
+            img_size_long = 384
         else:
-            image_condition_type = (
-                "token_replace"
-                if image_condition_type is None
-                else image_condition_type
-            )
+            img_size_long = image_size * 1.5  # Default fallback
 
-        image_embed_interleave = (
-            image_embed_interleave
-            if image_embed_interleave is not None
-            else (
-                2
-                if image_condition_type == "latent_concat"
-                else 4 if image_condition_type == "token_replace" else 1
-            )
-        )
+        if height * width > image_size * img_size_long:
+            import math
+            scale = math.sqrt(image_size * img_size_long / w / h)
+            width = round(w * scale / 64) * 64
+            height = round(h * scale / 64) * 64
 
+        loaded_image = loaded_image.resize((width, height), Image.Resampling.LANCZOS)
+        
         # Preprocess image
         image_tensor = self.video_processor.preprocess(loaded_image, height, width).to(
             self.device
         )
-
+        
         # 2. Preprocess inputs
         preprocessed_inputs = hyavatar_preprocessor(
-            image=image,
+            image=loaded_image,
             audio=audio,
-            height=height,
-            width=width,
             fps=fps,
             num_frames=num_frames,
         )
@@ -107,10 +108,11 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         ) = self._encode_prompt(
             prompt=prompt,
             prompt_2=prompt_2,
-            image=image,
+            image=loaded_image,
             num_videos_per_prompt=num_videos,
             max_sequence_length=max_sequence_length,
             image_embed_interleave=image_embed_interleave,
+            hyavatar=True,
             **text_encoder_kwargs,
         )
 
@@ -122,8 +124,10 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             ) = self._encode_prompt(
                 prompt=negative_prompt,
                 prompt_2=negative_prompt_2,
+                image=loaded_image,
                 num_videos_per_prompt=num_videos,
                 max_sequence_length=max_sequence_length,
+                hyavatar=True,
                 **text_encoder_kwargs,
             )
 
@@ -157,13 +161,9 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
                 self.device, dtype=transformer_dtype
             )
 
-        if image_condition_type == "latent_concat":
-            num_channels_latents = (
-                getattr(self.transformer.config, "in_channels", 16) - 1
-            ) // 2
-        elif image_condition_type == "token_replace":
-            num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
 
+        num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
+        
         # Encode image to latents
         image_tensor_unsqueezed = image_tensor.unsqueeze(2).repeat(
             1, 1, num_frames, 1, 1
@@ -171,14 +171,6 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
 
         image_latents = self.vae_encode(
             image_tensor_unsqueezed,
-            offload=offload,
-            sample_mode="mode",
-            normalize_latents_dtype=torch.float32,
-            dtype=torch.float32,
-        )
-
-        uncond_image_latents = self.vae_encode(
-            torch.zeros_like(image_tensor_unsqueezed),
             offload=offload,
             sample_mode="mode",
             normalize_latents_dtype=torch.float32,
@@ -215,8 +207,12 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             else audio_prompts.shape[1]
         )
 
-
-        patch_size = [self.transformer.config.patch_size_t, self.transformer.config.patch_size, self.transformer.config.patch_size]
+        patch_size = [
+            self.transformer.config.patch_size_t,
+            self.transformer.config.patch_size,
+            self.transformer.config.patch_size,
+        ]
+    
         hidden_size = (
             self.transformer.config.num_attention_heads
             * self.transformer.config.attention_head_dim
@@ -233,7 +229,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             hidden_size,
             num_heads,
             rope_axes_dim,
-            concat_dict={'mode': 'timecat', 'bias': -1},
+            concat_dict={"mode": "timecat", "bias": -1},
             vae_scale_factor_temporal=self.vae_scale_factor_temporal,
             vae_scale_factor_spatial=self.vae_scale_factor_spatial,
             theta=rope_theta,
@@ -243,9 +239,15 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             freqs_cos.to(self.device, dtype=transformer_dtype),
             freqs_sin.to(self.device, dtype=transformer_dtype),
         )
+        
+        video_length = audio_prompts.shape[1] // 4 * 4 + 1
+        infer_length = (audio_prompts.shape[1] // 128 + 1) * 32 + 1
+        video_length = (video_length - 1) // 4 + 1
 
         # 8. Prepare inputs for denoising loop
         audio_prompts = audio_prompts.to(self.device, dtype=transformer_dtype)
+        pad_audio_length = (audio_prompts.shape[1] // 128 + 1) * 128 + 4 - audio_prompts.shape[1]
+        audio_prompts_all = torch.cat([audio_prompts, torch.zeros_like(audio_prompts[:, :pad_audio_length])], dim=1)
         uncond_audio_prompts = uncond_audio_prompts.to(
             self.device, dtype=transformer_dtype
         )
@@ -253,11 +255,8 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         motion_exp = motion_exp.to(self.device, dtype=transformer_dtype)
         motion_pose = motion_pose.to(self.device, dtype=transformer_dtype)
         fps_tensor = fps.to(self.device, dtype=transformer_dtype)
-
         # 9. Prepare latents
-        num_frames = audio_prompts.shape[1]
-        infer_length = (audio_prompts.shape[1] // 128 + 1) * 32 + 1
-
+        
         latents = self._get_latents(
             height=height,
             width=width,
@@ -273,18 +272,20 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
 
-        # 10. Denoising loop
-        latents_all = latents.clone()
-        infer_length = latents.shape[2]
-        video_length = infer_length
         
-        if not no_cache_steps:
-            no_cache_steps = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] + list(range(15, 42, 5)) + [41, 42, 43, 44, 45, 46, 47, 48, 49]
-
-        latents_all = self.denoise(
+        if use_cache and no_cache_steps is None:
+            no_cache_steps = (
+                [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+                + list(range(15, 42, 5))
+                + [41, 42, 43, 44, 45, 46, 47, 48, 49]
+            )
+        elif not use_cache:
+            no_cache_steps = list(range(len(timesteps)))
+            
+        latents = self.denoise(
             infer_length=infer_length,
-            latents_all=latents_all,
-            audio_prompts=audio_prompts,
+            latents_all=latents,
+            audio_prompts_all=audio_prompts_all,
             uncond_audio_prompts=uncond_audio_prompts,
             face_masks=face_masks,
             negative_prompt_embeds=negative_prompt_embeds,
@@ -294,7 +295,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             pooled_prompt_embeds=pooled_prompt_embeds,
             negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
             ref_latents=image_latents,
-            uncond_ref_latents=uncond_image_latents,
+            uncond_ref_latents=image_latents,
             timesteps=timesteps,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
@@ -311,13 +312,15 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             frame_per_batch=frame_per_batch,
             shift_offset=shift_offset,
             no_cache_steps=no_cache_steps,
+            guidance_rescale=guidance_rescale,
+            video_length=video_length,
             **kwargs,
         )
 
         if offload:
             self._offload(self.transformer)
 
-        latents = latents_all.float()[:, :, :video_length]
+        latents = latents.float()[:, :, :video_length]
 
         if return_latents:
             return latents

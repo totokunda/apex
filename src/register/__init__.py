@@ -1,3 +1,9 @@
+from typing import TypeVar, overload, Callable, Any
+import functools
+
+F = TypeVar('F', bound=Callable[..., Any])
+T = TypeVar('T', bound=type)
+
 class FunctionRegister:
     """
     An instantiable registry/decorator.
@@ -30,6 +36,12 @@ class FunctionRegister:
         self._allow_overwrite = allow_overwrite
 
     # --------------- decorator interface ------------------------------ #
+    @overload
+    def __call__(self, key_or_func: F, *, overwrite: bool | None = None) -> F: ...
+    
+    @overload
+    def __call__(self, key_or_func: str | None = None, *, overwrite: bool | None = None) -> Callable[[F], F]: ...
+    
     def __call__(self, key_or_func=None, *, overwrite: bool | None = None):
         """
         Acts as either:
@@ -48,7 +60,7 @@ class FunctionRegister:
         # Case 2: used with explicit key -- @registry("name")
         key = key_or_func
 
-        def decorator(func):
+        def decorator(func: F) -> F:
             self._add(
                 key, func, overwrite if overwrite is not None else self._allow_overwrite
             )
@@ -119,6 +131,12 @@ class ClassRegister:
         self._allow_overwrite = allow_overwrite
 
     # ---------------- decorator interface ----------------------------- #
+    @overload
+    def __call__(self, key_or_cls: T, *, overwrite: bool | None = None) -> T: ...
+    
+    @overload
+    def __call__(self, key_or_cls: str | None = None, *, overwrite: bool | None = None) -> Callable[[T], T]: ...
+    
     def __call__(self, key_or_cls=None, *, overwrite: bool | None = None):
         """
         Acts as either:
@@ -137,13 +155,13 @@ class ClassRegister:
         # Case 2 – explicit key: @registry("name")
         key = key_or_cls
 
-        def decorator(cls):
+        def decorator(cls: T) -> T:
             if not isinstance(cls, type):
                 raise TypeError("Only classes can be registered in ClassRegister.")
             self._add(
                 key, cls, overwrite if overwrite is not None else self._allow_overwrite
             )
-            return cls
+            return cls 
 
         return decorator
 

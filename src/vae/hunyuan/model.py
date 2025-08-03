@@ -489,7 +489,7 @@ class HunyuanVideoEncoder3D(nn.Module):
 
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
-            if down_block_type != "HunyuanVideoDownBlock3D":
+            if down_block_type != "HunyuanVideoDownBlock3D" and down_block_type != "DownEncoderBlockCausal3D":
                 raise ValueError(f"Unsupported down_block_type: {down_block_type}")
 
             input_channel = output_channel
@@ -621,7 +621,7 @@ class HunyuanVideoDecoder3D(nn.Module):
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
         for i, up_block_type in enumerate(up_block_types):
-            if up_block_type != "HunyuanVideoUpBlock3D":
+            if up_block_type != "HunyuanVideoUpBlock3D" and up_block_type != "UpDecoderBlockCausal3D":
                 raise ValueError(f"Unsupported up_block_type: {up_block_type}")
 
             prev_output_channel = output_channel
@@ -735,6 +735,7 @@ class AutoencoderKLHunyuanVideo(ModelMixin, ConfigMixin):
         spatial_compression_ratio: int = 8,
         temporal_compression_ratio: int = 4,
         mid_block_add_attention: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__()
 

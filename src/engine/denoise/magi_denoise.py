@@ -33,8 +33,57 @@ class MagiDenoise:
             raise ValueError(f"Denoise type {self.denoise_type} not supported")
 
     def t2v_denoise(self, *args, **kwargs) -> torch.Tensor:
-        """Text-to-video chunk-based denoising following MAGI's approach"""
-        return self._chunk_based_denoise(*args, **kwargs)
+        timesteps = kwargs.get("timesteps", None)
+        latents = kwargs.get("latents", None)
+        transformer_dtype = kwargs.get("transformer_dtype", None)
+        use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
+        render_on_step = kwargs.get("render_on_step", False)
+        render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        scheduler = kwargs.get("scheduler", None)
+        guidance_scale = kwargs.get("guidance_scale", 5.0)
+
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+
+        self.to_device(self.transformer)
+
+        model_type_str = getattr(self, "model_type", "MAGI")
+        with self._progress_bar(
+            len(timesteps), desc=f"Sampling {model_type_str}"
+        ) as pbar:
+            for i, t in enumerate(timesteps):
+
+                timestep = t.expand(latents.shape[0])
+
+                latent_model_input = latents.to(transformer_dtype)
+                # Standard denoising
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    return_dict=False,
+                    **kwargs.get("transformer_kwargs", {}),
+                )[0]
+                if use_cfg_guidance and kwargs.get(
+                    "unconditional_transformer_kwargs", None
+                ):
+                    uncond_noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        timestep=timestep,
+                        return_dict=False,
+                        **kwargs.get("unconditional_transformer_kwargs", {}),
+                    )[0]
+                    noise_pred = uncond_noise_pred + guidance_scale * (
+                        noise_pred - uncond_noise_pred
+                    )
+                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+                pbar.update(1)
+
+            self.logger.info("Denoising completed.")
+
+        return latents
 
     def i2v_denoise(self, *args, **kwargs) -> torch.Tensor:
         """Image-to-video chunk-based denoising following MAGI's approach"""
