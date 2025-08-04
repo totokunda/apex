@@ -1,4 +1,4 @@
-# Copyright 2025 The Sand AI Team and The HuggingFace Team. All rights reserved.
+# Copyright (c) 2025 SandAI. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,18 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import numpy as np
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin
-from diffusers.utils import logging
 from diffusers.utils.accelerate_utils import apply_forward_hook
-from diffusers.models.attention import FeedForward
-from diffusers.models.attention_processor import Attention
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.autoencoders.vae import (
@@ -31,466 +28,119 @@ from diffusers.models.autoencoders.vae import (
     DiagonalGaussianDistribution,
 )
 
+from .module import ViTEncoder, ViTDecoder, VideoTokenizerABC
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-
-def resize_pos_embed(posemb, src_shape, target_shape):
-    posemb = posemb.reshape(1, src_shape[0], src_shape[1], src_shape[2], -1)
-    posemb = posemb.permute(0, 4, 1, 2, 3)
-    posemb = nn.functional.interpolate(
-        posemb, size=target_shape, mode="trilinear", align_corners=False
-    )
-    posemb = posemb.permute(0, 2, 3, 4, 1)
-    posemb = posemb.reshape(1, target_shape[0] * target_shape[1] * target_shape[2], -1)
-    return posemb
-
-
-class Magi1VAELayerNorm(nn.Module):
-    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
-        super(Magi1VAELayerNorm, self).__init__()
-        self.normalized_shape = normalized_shape
-        self.eps = eps
-        self.elementwise_affine = elementwise_affine
-
-    def forward(self, x):
-        mean = x.mean(dim=-1, keepdim=True)
-        std = x.std(dim=-1, keepdim=True, unbiased=False)
-
-        x_normalized = (x - mean) / (std + self.eps)
-
-        return x_normalized
-
-
-class Magi1VAEAttnProcessor2_0:
-    def __init__(self, dim, num_heads=8):
-        if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError(
-                "WanAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0."
-            )
-
-        self.qkv_norm = Magi1VAELayerNorm(dim // num_heads, elementwise_affine=False)
-
-    def __call__(
-        self,
-        attn: Attention,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        rotary_emb: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        batch_size, time_height_width, channels = hidden_states.size()
-
-        # compute query, key, value
-        query = attn.to_q(hidden_states)
-        key = attn.to_k(hidden_states)
-        value = attn.to_v(hidden_states)
-
-        qkv = torch.cat((query, key, value), dim=2)
-        qkv = qkv.reshape(
-            batch_size, time_height_width, 3, attn.heads, channels // attn.heads
-        )
-        qkv = self.qkv_norm(qkv)
-        query, key, value = qkv.chunk(3, dim=2)
-
-        # Remove the extra dimension from chunking and transpose for scaled dot product attention
-        # Shape: (batch_size, num_heads, time_height_width, head_dim)
-        query = query.squeeze(2).transpose(1, 2)
-        key = key.squeeze(2).transpose(1, 2)
-        value = value.squeeze(2).transpose(1, 2)
-
-        hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )  # the output of sdpa = (batch_size, num_heads, seq_len, head_dim)
-        # Reshape hidden_states to (batch_size, time_height_width, channels)
-        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
-
-        hidden_states = attn.to_out[0](hidden_states)
-        hidden_states = attn.to_out[1](hidden_states)
-
-        return hidden_states
-
-
-class Magi1VAETransformerBlock(nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        num_heads: int = 8,
-        ffn_dim: int = 4 * 1024,
-        eps: float = 1e-6,
-    ):
-        super().__init__()
-        self.norm1 = nn.Identity()
-        self.attn = Attention(
-            query_dim=dim,
-            heads=num_heads,
-            kv_heads=num_heads,
-            dim_head=dim // num_heads,
-            eps=eps,
-            bias=True,
-            cross_attention_dim=None,
-            out_bias=True,
-            processor=Magi1VAEAttnProcessor2_0(dim, num_heads),
-        )
-
-        self.drop_path = nn.Identity()
-        self.norm2 = nn.LayerNorm(dim)
-
-        self.proj_out = FeedForward(dim, inner_dim=ffn_dim, activation_fn="gelu")
-
-        self.gradient_checkpointing = False
-
-    def forward(self, x):
-        x = x + self.drop_path(self.attn(self.norm1(x)))
-        x = x + self.drop_path(self.proj_out(self.norm2(x)))
-        return x
-
-
-class Magi1Encoder3d(nn.Module):
-    def __init__(
-        self,
-        inner_dim=128,
-        z_dim=4,
-        patch_size: Tuple[int] = (1, 2, 2),
-        num_frames: int = 16,
-        height: int = 256,
-        width: int = 256,
-        num_attention_heads: int = 40,
-        ffn_dim: int = 4 * 1024,
-        num_layers: int = 24,
-        eps: float = 1e-6,
-    ):
-        super().__init__()
-        self.z_dim = z_dim
-        self.height = height
-        self.width = width
-        self.num_frames = num_frames
-
-        # 1. Patch & position embedding
-        self.patch_embedding = nn.Conv3d(
-            3, inner_dim, kernel_size=patch_size, stride=patch_size
-        )
-        self.patch_size = patch_size
-
-        self.cls_token_nums = 1
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, inner_dim))
-        # `generator` as a parameter?
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-
-        p_t, p_h, p_w = patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
-        num_patches = post_patch_num_frames * post_patch_height * post_patch_width
-
-        self.pos_embed = nn.Parameter(
-            torch.zeros(1, num_patches + self.cls_token_nums, inner_dim)
-        )
-        self.pos_drop = nn.Dropout(p=0.0)
-
-        # 3. Transformer blocks
-        self.blocks = nn.ModuleList(
-            [
-                Magi1VAETransformerBlock(
-                    inner_dim,
-                    num_attention_heads,
-                    ffn_dim,
-                    eps,
-                )
-                for _ in range(num_layers)
-            ]
-        )
-
-        # output blocks
-        self.norm_out = nn.LayerNorm(inner_dim)
-        self.linear_out = nn.Linear(inner_dim, z_dim * 2)
-
-        # `generator` as a parameter?
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-
-        self.gradient_checkpointing = False
-
-    def forward(self, x):
-        B = x.shape[0]
-        # B C T H W -> B C T/pT H/pH W//pW
-        x = self.patch_embedding(x)
-        latentT, latentH, latentW = x.shape[2], x.shape[3], x.shape[4]
-        # B C T/pT H/pH W//pW -> B (T/pT H/pH W//pW) C
-        x = x.flatten(2).transpose(1, 2)
-
-        cls_tokens = self.cls_token.expand(
-            B, -1, -1
-        )  # stole cls_tokens impl from Phil Wang, thanks
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        if (
-            latentT != self.patch_size[0]
-            or latentH != self.patch_size[1]
-            or latentW != self.patch_size[2]
-        ):
-            pos_embed = resize_pos_embed(
-                self.pos_embed[:, 1:, :],
-                src_shape=(
-                    self.num_frames // self.patch_size[0],
-                    self.height // self.patch_size[1],
-                    self.width // self.patch_size[2],
-                ),
-                target_shape=(latentT, latentH, latentW),
-            )
-            pos_embed = torch.cat((self.pos_embed[:, 0:1, :], pos_embed), dim=1)
-        else:
-            pos_embed = self.pos_embed
-
-        x = x + pos_embed
-        x = self.pos_drop(x)
-
-        ## transformer blocks
-        for block in self.blocks:
-            x = block(x)
-
-        ## head
-        x = self.norm_out(x)
-        x = x[:, 1:]  # remove cls_token
-        x = self.linear_out(x)
-
-        # B L C - > B , lT, lH, lW, zC (where zC is now z_dim * 2)
-        x = x.reshape(B, latentT, latentH, latentW, self.z_dim * 2)
-
-        # B , lT, lH, lW, zC -> B, zC, lT, lH, lW
-        x = x.permute(0, 4, 1, 2, 3)
-
-        return x
-
-
-class Magi1Decoder3d(nn.Module):
-    def __init__(
-        self,
-        inner_dim=1024,
-        z_dim=16,
-        patch_size: Tuple[int] = (4, 8, 8),
-        num_frames: int = 16,
-        height: int = 256,
-        width: int = 256,
-        num_attention_heads: int = 16,
-        ffn_dim: int = 4 * 1024,
-        num_layers: int = 24,
-        eps: float = 1e-6,
-    ):
-        super().__init__()
-        self.z_dim = z_dim
-        self.patch_size = patch_size
-        self.height = height
-        self.width = width
-        self.num_frames = num_frames
-
-        # init block
-        self.proj_in = nn.Linear(z_dim, inner_dim)
-
-        self.cls_token_nums = 1
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, inner_dim))
-        # `generator` as a parameter?
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-
-        p_t, p_h, p_w = patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
-        num_patches = post_patch_num_frames * post_patch_height * post_patch_width
-
-        self.pos_embed = nn.Parameter(
-            torch.zeros(1, num_patches + self.cls_token_nums, inner_dim)
-        )
-        self.pos_drop = nn.Dropout(p=0.0)
-
-        # 3. Transformer blocks
-        self.blocks = nn.ModuleList(
-            [
-                Magi1VAETransformerBlock(
-                    inner_dim,
-                    num_attention_heads,
-                    ffn_dim,
-                    eps,
-                )
-                for _ in range(num_layers)
-            ]
-        )
-
-        # output blocks
-        self.norm_out = nn.LayerNorm(inner_dim)
-        self.unpatch_channels = inner_dim // (
-            patch_size[0] * patch_size[1] * patch_size[2]
-        )
-        self.conv_out = nn.Conv3d(self.unpatch_channels, 3, 3, padding=1)
-
-        # `generator` as a parameter?
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-
-        self.gradient_checkpointing = False
-
-    def forward(self, x):
-        B, C, latentT, latentH, latentW = x.shape
-        x = x.permute(0, 2, 3, 4, 1)
-
-        x = x.reshape(B, -1, C)
-
-        x = self.proj_in(x)
-
-        cls_tokens = self.cls_token.expand(
-            B, -1, -1
-        )  # stole cls_tokens impl from Phil Wang, thanks
-        x = torch.cat((cls_tokens, x), dim=1)
-
-        if (
-            latentT != self.patch_size[0]
-            or latentH != self.patch_size[1]
-            or latentW != self.patch_size[2]
-        ):
-            pos_embed = resize_pos_embed(
-                self.pos_embed[:, 1:, :],
-                src_shape=(
-                    self.num_frames // self.patch_size[0],
-                    self.height // self.patch_size[1],
-                    self.width // self.patch_size[2],
-                ),
-                target_shape=(latentT, latentH, latentW),
-            )
-            pos_embed = torch.cat((self.pos_embed[:, 0:1, :], pos_embed), dim=1)
-        else:
-            pos_embed = self.pos_embed
-
-        x = x + pos_embed
-        x = self.pos_drop(x)
-
-        ## transformer blocks
-        for block in self.blocks:
-            x = block(x)
-
-        ## head
-        x = self.norm_out(x)
-        x = x[:, 1:]  # remove cls_token
-
-        x = x.reshape(
-            B,
-            latentT,
-            latentH,
-            latentW,
-            self.patch_size[0],
-            self.patch_size[1],
-            self.patch_size[2],
-            self.unpatch_channels,
-        )
-        # Rearrange from (B, lT, lH, lW, pT, pH, pW, C) to (B, C, lT*pT, lH*pH, lW*pW)
-        x = x.permute(0, 7, 1, 4, 2, 5, 3, 6)  # (B, C, lT, pT, lH, pH, lW, pW)
-        x = x.reshape(
-            B,
-            self.unpatch_channels,
-            latentT * self.patch_size[0],
-            latentH * self.patch_size[1],
-            latentW * self.patch_size[2],
-        )
-
-        x = self.conv_out(x)
-        return x
-
-
-class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
+class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin, VideoTokenizerABC):
     r"""
     A VAE model with KL loss for encoding videos into latents and decoding latent representations into videos.
-    Introduced in [Magi1](https://arxiv.org/abs/2505.13211).
+    Used in MAGI.
 
-    This model inherits from [`ModelMixin`]. Check the superclass documentation for it's generic methods implemented
+    This model inherits from [`ModelMixin`]. Check the superclass documentation for its generic methods implemented
     for all models (such as downloading or saving).
+
+    Args:
+        video_size (`int`, defaults to `256`):
+            The size of the input video frames.
+        video_length (`int`, defaults to `16`):
+            The number of frames in the input video.
+        patch_size (`int`, defaults to `8`):
+            The size of the spatial patches.
+        patch_length (`int`, defaults to `4`):
+            The size of the temporal patches.
+        in_chans (`int`, defaults to `3`):
+            Number of input channels.
+        z_chans (`int`, defaults to `4`):
+            Number of latent channels.
+        double_z (`bool`, defaults to `True`):
+            Whether to double the latent channels for mean and variance.
+        embed_dim (`int`, defaults to `768`):
+            The embedding dimension.
+        depth (`int`, defaults to `12`):
+            The number of transformer layers.
+        num_heads (`int`, defaults to `12`):
+            The number of attention heads.
+        mlp_ratio (`float`, defaults to `4.0`):
+            The ratio of MLP hidden dimension to embedding dimension.
+        scaling_factor (`float`, defaults to `1.0`):
+            The component-wise standard deviation of the trained latent space.
     """
 
-    _supports_gradient_checkpointing = False
-    _skip_layerwise_casting_patterns = ["patch_embedding", "norm"]
-    _no_split_modules = ["Magi1VAETransformerBlock"]
-    # _keep_in_fp32_modules = ["qkv_norm", "norm1", "norm2"]
-    _keys_to_ignore_on_load_unexpected = ["norm_added_q"]
+    _supports_gradient_checkpointing = True
 
     @register_to_config
     def __init__(
         self,
-        patch_size: Tuple[int] = (4, 8, 8),
-        num_attention_heads: int = 16,
-        attention_head_dim: int = 64,
-        z_dim: int = 16,
-        height: int = 256,
-        width: int = 256,
-        num_frames: int = 16,
-        ffn_dim: int = 4 * 1024,
-        num_layers: int = 24,
-        eps: float = 1e-6,
-        latents_mean: List[float] = [
-            -0.7571,
-            -0.7089,
-            -0.9113,
-            0.1075,
-            -0.1745,
-            0.9653,
-            -0.1517,
-            1.5508,
-            0.4134,
-            -0.0715,
-            0.5517,
-            -0.3632,
-            -0.1922,
-            -0.9497,
-            0.2503,
-            -0.2921,
-        ],
-        latents_std: List[float] = [
-            2.8184,
-            1.4541,
-            2.3275,
-            2.6558,
-            1.2196,
-            1.7708,
-            2.6052,
-            2.0743,
-            3.2687,
-            2.1526,
-            2.8652,
-            1.5579,
-            1.6382,
-            1.1253,
-            2.8251,
-            1.9160,
-        ],
+        video_size: int = 256,
+        video_length: int = 16,
+        patch_size: int = 8,
+        patch_length: int = 4,
+        in_chans: int = 3,
+        z_chans: int = 4,
+        double_z: bool = True,
+        embed_dim: int = 768,
+        depth: int = 12,
+        num_heads: int = 12,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = False,
+        qk_scale: Optional[float] = None,
+        drop_rate: float = 0.0,
+        attn_drop_rate: float = 0.0,
+        drop_path_rate: float = 0.0,
+        with_cls_token: bool = True,
+        norm_code: bool = False,
+        ln_in_attn: bool = False,
+        conv_last_layer: bool = False,
+        use_rope: bool = False,
+        use_final_proj: bool = False,
+        scaling_factor: float = 1.0,
+        spatial_compression_ratio: Optional[int] = None,
+        temporal_compression_ratio: Optional[int] = None,
     ) -> None:
         super().__init__()
 
-        inner_dim = num_attention_heads * attention_head_dim
-        self.z_dim = z_dim
+        # Create encoder and decoder config
+        ddconfig = {
+            "video_size": video_size,
+            "video_length": video_length,
+            "patch_size": patch_size,
+            "patch_length": patch_length,
+            "in_chans": in_chans,
+            "z_chans": z_chans,
+            "double_z": double_z,
+            "embed_dim": embed_dim,
+            "depth": depth,
+            "num_heads": num_heads,
+            "mlp_ratio": mlp_ratio,
+            "qkv_bias": qkv_bias,
+            "qk_scale": qk_scale,
+            "drop_rate": drop_rate,
+            "attn_drop_rate": attn_drop_rate,
+            "drop_path_rate": drop_path_rate,
+            "with_cls_token": with_cls_token,
+            "norm_code": norm_code,
+            "ln_in_attn": ln_in_attn,
+            "conv_last_layer": conv_last_layer,
+            "use_rope": use_rope,
+            "use_final_proj": use_final_proj,
+        }
 
-        self.encoder = Magi1Encoder3d(
-            inner_dim,
-            z_dim,
-            patch_size,
-            num_frames,
-            height,
-            width,
-            num_attention_heads,
-            ffn_dim,
-            num_layers,
-            eps,
+        self.encoder = ViTEncoder(**ddconfig)
+        self.decoder = ViTDecoder(**ddconfig)
+
+        self._temporal_downsample_factor = patch_length
+        self._spatial_downsample_factor = patch_size
+
+        self.spatial_compression_ratio = (
+            patch_size
+            if spatial_compression_ratio is None
+            else spatial_compression_ratio
         )
-
-        self.decoder = Magi1Decoder3d(
-            inner_dim,
-            z_dim,
-            patch_size,
-            num_frames,
-            height,
-            width,
-            num_attention_heads,
-            ffn_dim,
-            num_layers,
-            eps,
+        self.temporal_compression_ratio = (
+            patch_length
+            if temporal_compression_ratio is None
+            else temporal_compression_ratio
         )
-
-        self.spatial_compression_ratio = patch_size[1] or patch_size[2]
-        self.temporal_compression_ratio = patch_size[0]
 
         # When decoding a batch of video latents at a time, one can save memory by slicing across the batch dimension
         # to perform decoding of a single video latent at a time.
@@ -501,48 +151,77 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         # intermediate tiles together, the memory requirement can be lowered.
         self.use_tiling = False
 
+        # When decoding temporally long video latents, the memory requirement is very high. By decoding latent frames
+        # at a fixed frame batch size, the memory requirement can be lowered.
+        self.use_framewise_encoding = False
+        self.use_framewise_decoding = False
+
+        # This can be configured based on the amount of GPU memory available.
+        self.num_sample_frames_batch_size = 16
+        self.num_latent_frames_batch_size = 2
+
         # The minimal tile height and width for spatial tiling to be used
         self.tile_sample_min_height = 256
         self.tile_sample_min_width = 256
+        self.tile_sample_min_num_frames = 16
 
         # The minimal distance between two spatial tiles
-        self.tile_sample_stride_height = 192
-        self.tile_sample_stride_width = 192
+        self.tile_sample_stride_height = 224
+        self.tile_sample_stride_width = 224
+        self.tile_sample_stride_num_frames = 8
+
+    @property
+    def spatial_downsample_factor(self):
+        return self._spatial_downsample_factor
+
+    @property
+    def temporal_downsample_factor(self):
+        return self._temporal_downsample_factor
+
+    @property
+    def first_frame_as_image(self):
+        """
+        Property representing the first frame as image.
+        """
+        return False
+
+    @property
+    def allow_spatial_tiling(self):
+        """
+        Determines whether spatial tiling is allowed or not.
+        """
+        return False
 
     def enable_tiling(
         self,
         tile_sample_min_height: Optional[int] = None,
         tile_sample_min_width: Optional[int] = None,
+        tile_sample_min_num_frames: Optional[int] = None,
         tile_sample_stride_height: Optional[float] = None,
         tile_sample_stride_width: Optional[float] = None,
+        tile_sample_stride_num_frames: Optional[float] = None,
     ) -> None:
         r"""
         Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
         compute decoding and encoding in several steps. This is useful for saving a large amount of memory and to allow
-        processing larger images.
-
-        Args:
-            tile_sample_min_height (`int`, *optional*):
-                The minimum height required for a sample to be separated into tiles across the height dimension.
-            tile_sample_min_width (`int`, *optional*):
-                The minimum width required for a sample to be separated into tiles across the width dimension.
-            tile_sample_stride_height (`int`, *optional*):
-                The minimum amount of overlap between two consecutive vertical tiles. This is to ensure that there are
-                no tiling artifacts produced across the height dimension.
-            tile_sample_stride_width (`int`, *optional*):
-                The stride between two consecutive horizontal tiles. This is to ensure that there are no tiling
-                artifacts produced across the width dimension.
+        processing larger videos.
         """
         self.use_tiling = True
         self.tile_sample_min_height = (
             tile_sample_min_height or self.tile_sample_min_height
         )
         self.tile_sample_min_width = tile_sample_min_width or self.tile_sample_min_width
+        self.tile_sample_min_num_frames = (
+            tile_sample_min_num_frames or self.tile_sample_min_num_frames
+        )
         self.tile_sample_stride_height = (
             tile_sample_stride_height or self.tile_sample_stride_height
         )
         self.tile_sample_stride_width = (
             tile_sample_stride_width or self.tile_sample_stride_width
+        )
+        self.tile_sample_stride_num_frames = (
+            tile_sample_stride_num_frames or self.tile_sample_stride_num_frames
         )
 
     def disable_tiling(self) -> None:
@@ -566,27 +245,30 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         """
         self.use_slicing = False
 
-    def _encode(self, x: torch.Tensor):
-        _, _, num_frame, height, width = x.shape
-
-        if self.use_tiling and (
-            width > self.tile_sample_min_width or height > self.tile_sample_min_height
-        ):
-            return self.tiled_encode(x)
-
-        out = self.encoder(x)
-
-        return out
+    def _encode(self, x: torch.Tensor) -> torch.Tensor:
+        """Internal encode method"""
+        N, C, T, H, W = x.shape
+        if T == 1 and self._temporal_downsample_factor > 1:
+            x = x.expand(-1, -1, 4, -1, -1)
+            x = self.encoder(x)
+            posterior = DiagonalGaussianDistribution(x)
+            z = posterior.mode()
+            return z[:, :, :1, :, :].type(x.dtype)
+        else:
+            x = self.encoder(x)
+            posterior = DiagonalGaussianDistribution(x)
+            z = posterior.mode()
+            return z.type(x.dtype)
 
     @apply_forward_hook
     def encode(
         self, x: torch.Tensor, return_dict: bool = True
     ) -> Union[AutoencoderKLOutput, Tuple[DiagonalGaussianDistribution]]:
-        r"""
-        Encode a batch of images into latents.
+        """
+        Encode a batch of videos into latents.
 
         Args:
-            x (`torch.Tensor`): Input batch of images.
+            x (`torch.Tensor`): Input batch of videos.
             return_dict (`bool`, *optional*, defaults to `True`):
                 Whether to return a [`~models.autoencoder_kl.AutoencoderKLOutput`] instead of a plain tuple.
 
@@ -599,38 +281,39 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             h = torch.cat(encoded_slices)
         else:
             h = self._encode(x)
+
         posterior = DiagonalGaussianDistribution(h)
 
         if not return_dict:
             return (posterior,)
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def _decode(self, z: torch.Tensor, return_dict: bool = True):
-        _, _, num_frame, height, width = z.shape
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
-
-        if self.use_tiling and (
-            width > tile_latent_min_width or height > tile_latent_min_height
-        ):
-            return self.tiled_decode(z, return_dict=return_dict)
-
-        out = self.decoder(z)
+    def _decode(
+        self,
+        z: torch.Tensor,
+        return_dict: bool = True,
+    ) -> Union[DecoderOutput, torch.Tensor]:
+        """Internal decode method"""
+        N, C, T, H, W = z.shape
+        if T == 1:
+            z = z.expand(-1, -1, 1, -1, -1)
+            dec = self.decoder(z)
+            dec = dec[:, :, :1, :, :]
+        else:
+            dec = self.decoder(z)
 
         if not return_dict:
-            return (out,)
+            return (dec,)
 
-        return DecoderOutput(sample=out)
+        return DecoderOutput(sample=dec)
 
     @apply_forward_hook
     def decode(
-        self, z: torch.Tensor, return_dict: bool = True
+        self,
+        z: torch.Tensor,
+        return_dict: bool = True,
     ) -> Union[DecoderOutput, torch.Tensor]:
-        r"""
+        """
         Decode a batch of images.
 
         Args:
@@ -651,233 +334,32 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         if not return_dict:
             return (decoded,)
+
         return DecoderOutput(sample=decoded)
-
-    def blend_v(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
-        blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
-        for y in range(blend_extent):
-            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (
-                1 - y / blend_extent
-            ) + b[:, :, :, y, :] * (y / blend_extent)
-        return b
-
-    def blend_h(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
-        blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
-        for x in range(blend_extent):
-            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (
-                1 - x / blend_extent
-            ) + b[:, :, :, :, x] * (x / blend_extent)
-        return b
-
-    def tiled_encode(self, x: torch.Tensor) -> AutoencoderKLOutput:
-        r"""Encode a batch of images using a tiled encoder.
-
-        Args:
-            x (`torch.Tensor`): Input batch of videos.
-
-        Returns:
-            `torch.Tensor`:
-                The latent representation of the encoded videos.
-        """
-        _, _, num_frames, height, width = x.shape
-        latent_height = height // self.spatial_compression_ratio
-        latent_width = width // self.spatial_compression_ratio
-
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
-        tile_latent_stride_height = (
-            self.tile_sample_stride_height // self.spatial_compression_ratio
-        )
-        tile_latent_stride_width = (
-            self.tile_sample_stride_width // self.spatial_compression_ratio
-        )
-
-        blend_height = tile_latent_min_height - tile_latent_stride_height
-        blend_width = tile_latent_min_width - tile_latent_stride_width
-
-        # Split x into overlapping tiles and encode them separately.
-        # The tiles have an overlap to avoid seams between tiles.
-        rows = []
-        for i in range(0, height, self.tile_sample_stride_height):
-            row = []
-            for j in range(0, width, self.tile_sample_stride_width):
-                time = []
-                frame_range = 1 + (num_frames - 1) // 4
-                for k in range(frame_range):
-                    if k == 0:
-                        tile = x[
-                            :,
-                            :,
-                            :1,
-                            i : i + self.tile_sample_min_height,
-                            j : j + self.tile_sample_min_width,
-                        ]
-                    else:
-                        tile = x[
-                            :,
-                            :,
-                            1 + 4 * (k - 1) : 1 + 4 * k,
-                            i : i + self.tile_sample_min_height,
-                            j : j + self.tile_sample_min_width,
-                        ]
-                    tile = self.encoder(tile)
-                    time.append(tile)
-                row.append(torch.cat(time, dim=2))
-            rows.append(row)
-
-        result_rows = []
-        for i, row in enumerate(rows):
-            result_row = []
-            for j, tile in enumerate(row):
-                # blend the above tile and the left tile
-                # to the current tile and add the current tile to the result row
-                if i > 0:
-                    tile = self.blend_v(rows[i - 1][j], tile, blend_height)
-                if j > 0:
-                    tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(
-                    tile[:, :, :, :tile_latent_stride_height, :tile_latent_stride_width]
-                )
-            result_rows.append(torch.cat(result_row, dim=-1))
-
-        enc = torch.cat(result_rows, dim=3)[:, :, :, :latent_height, :latent_width]
-        return enc
-
-    def tiled_decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
-        r"""
-        Decode a batch of images using a tiled decoder.
-
-        Args:
-            z (`torch.Tensor`): Input batch of latent vectors.
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.vae.DecoderOutput`] instead of a plain tuple.
-
-        Returns:
-            [`~models.vae.DecoderOutput`] or `tuple`:
-                If return_dict is True, a [`~models.vae.DecoderOutput`] is returned, otherwise a plain `tuple` is
-                returned.
-        """
-        _, _, num_frames, height, width = z.shape
-        sample_height = height * self.spatial_compression_ratio
-        sample_width = width * self.spatial_compression_ratio
-
-        tile_latent_min_height = (
-            self.tile_sample_min_height // self.spatial_compression_ratio
-        )
-        tile_latent_min_width = (
-            self.tile_sample_min_width // self.spatial_compression_ratio
-        )
-        tile_latent_stride_height = (
-            self.tile_sample_stride_height // self.spatial_compression_ratio
-        )
-        tile_latent_stride_width = (
-            self.tile_sample_stride_width // self.spatial_compression_ratio
-        )
-
-        blend_height = self.tile_sample_min_height - self.tile_sample_stride_height
-        blend_width = self.tile_sample_min_width - self.tile_sample_stride_width
-
-        # Split z into overlapping tiles and decode them separately.
-        # The tiles have an overlap to avoid seams between tiles.
-        rows = []
-        for i in range(0, height, tile_latent_stride_height):
-            row = []
-            for j in range(0, width, tile_latent_stride_width):
-                time = []
-                for k in range(num_frames):
-                    tile = z[
-                        :,
-                        :,
-                        k : k + 1,
-                        i : i + tile_latent_min_height,
-                        j : j + tile_latent_min_width,
-                    ]
-                    decoded = self.decoder(tile)
-                    time.append(decoded)
-                row.append(torch.cat(time, dim=2))
-            rows.append(row)
-
-        result_rows = []
-        for i, row in enumerate(rows):
-            result_row = []
-            for j, tile in enumerate(row):
-                # blend the above tile and the left tile
-                # to the current tile and add the current tile to the result row
-                if i > 0:
-                    tile = self.blend_v(rows[i - 1][j], tile, blend_height)
-                if j > 0:
-                    tile = self.blend_h(row[j - 1], tile, blend_width)
-                result_row.append(
-                    tile[
-                        :,
-                        :,
-                        :,
-                        : self.tile_sample_stride_height,
-                        : self.tile_sample_stride_width,
-                    ]
-                )
-            result_rows.append(torch.cat(result_row, dim=-1))
-
-        dec = torch.cat(result_rows, dim=3)[:, :, :, :sample_height, :sample_width]
-
-        if not return_dict:
-            return (dec,)
-        return DecoderOutput(sample=dec)
 
     def forward(
         self,
         sample: torch.Tensor,
-        sample_posterior: bool = True,
+        sample_posterior: bool = False,
         return_dict: bool = True,
         generator: Optional[torch.Generator] = None,
-    ) -> Union[DecoderOutput, torch.Tensor]:
-        """
-        Args:
-            sample (`torch.Tensor`): Input sample.
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`DecoderOutput`] instead of a plain tuple.
-        """
+    ) -> Union[torch.Tensor, torch.Tensor]:
         x = sample
         posterior = self.encode(x).latent_dist
         if sample_posterior:
             z = posterior.sample(generator=generator)
         else:
             z = posterior.mode()
-        dec = self.decode(z, return_dict=return_dict)
+        dec = self.decode(z)
+        if not return_dict:
+            return (dec.sample,)
         return dec
 
-    @torch.no_grad()
-    def denormalize_latents(self, latents: torch.Tensor):
-        latents_mean = latents_mean = (
-            torch.tensor(self.config.latents_mean)
-            .view(1, self.config.z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
-            1, self.config.z_dim, 1, 1, 1
-        ).to(latents.device, latents.dtype)
-        latents = (latents / latents_std) + latents_mean
-        return latents
+    def get_last_layer(self):
+        """
+        Get the last layer of the decoder.
 
-    @torch.no_grad()
-    def normalize_latents(self, latents: torch.Tensor):
-        latents_mean = (
-            torch.tensor(self.config.latents_mean)
-            .view(1, self.config.z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.config.latents_std).view(
-            1, self.config.z_dim, 1, 1, 1
-        ).to(latents.device, latents.dtype)
-        latents = (latents - latents_mean) * latents_std
-        return latents
+        Returns:
+            torch.Tensor: Last layer of the decoder.
+        """
+        return self.decoder.last_layer.weight
