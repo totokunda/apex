@@ -5,13 +5,14 @@ components:
   - type: text_encoder
     name: "magi/text_encoder"
     base: "T5EncoderModel"
-    model_path: sand-ai/MAGI-1/ckpt/t5/t5-v1_1-xxl
+    model_path: tolgacangoz/MAGI-1-T2V-4.5B-distill-Diffusers/text_encoder
     tokenizer_class: T5Tokenizer
-    tokenizer_name: google/t5-v1_1-xxl
+    tokenizer_name: tolgacangoz/MAGI-1-T2V-4.5B-distill-Diffusers
+    tokenizer_kwargs: 
+      subfolder: "tokenizer"
 
   - type: vae
     name: "magi/vae"
     base: "magi"
     model_path: sand-ai/MAGI-1/ckpt/vae
     config_path: vae_configs/magi/magi.json
-    tag: "magi"

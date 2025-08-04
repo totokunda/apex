@@ -1,5 +1,5 @@
-name: "MAGI X2V 4.5B"
-description: "MAGI X2V 4.5B is a 4.5B parameter model for any-to-video generation."
+name: "MAGI 1 X2V 4.5B"
+description: "MAGI 1 X2V 4.5B is a 4.5B parameter model for any-to-video generation."
 engine: magi
 type: x2v
 
@@ -31,7 +31,6 @@ defaults:
     text_encoder_kwargs: {}
     offload: true
     render_on_step: false
-
 
 save_kwargs:
   safe_serialization: true

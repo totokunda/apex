@@ -1,14 +1,20 @@
 {
-    "_class_name": "Magi1AutoencoderKL",
-    "_diffusers_version": "0.32.0.dev0",
-    "patch_size": [4, 8, 8],
-    "num_attention_heads": 16,
-    "attention_head_dim": 64,
-    "z_dim": 16,
-    "height": 256,
-    "width": 256,
-    "num_frames": 16,
-    "ffn_dim": 4096,
-    "num_layers": 24,
-    "eps": 1e-6
-}
+    "_class_name": "AutoencoderKLMagi1",
+    "_diffusers_version": "0.35.0.dev0",
+    "conv_last_layer": true,
+    "depth": 24,
+    "double_z": true,
+    "embed_dim": 1024,
+    "in_chans": 3,
+    "ln_in_attn": true,
+    "mlp_ratio": 4,
+    "norm_code": false,
+    "num_heads": 16,
+    "patch_length": 4,
+    "patch_size": 8,
+    "qkv_bias": true,
+    "video_length": 16,
+    "video_size": 256,
+    "z_chans": 16
+  }
+  

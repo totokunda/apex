@@ -204,10 +204,17 @@ def convert_transformer(
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
 
     model = get_empty_model(model_class, config)
+    
+    model_keys = model.state_dict().keys()
+    #print(model_keys)
+    #exit()
 
     converter.convert(state_dict)
 
     state_dict = strip_common_prefix(state_dict, model.state_dict())
+    
+    
+    
 
     model.load_state_dict(state_dict, strict=True, assign=True)
 
