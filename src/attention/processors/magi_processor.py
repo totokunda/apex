@@ -1,11 +1,14 @@
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 
 import torch
 import torch.nn.functional as F
-from diffusers.models.attention import Attention
+
 from einops import rearrange
 from src.attention import attention_register
 import math
+import torch.nn as nn
+import numbers
+from torch import Tensor
 
 try:
     from flash_attn.layers.rotary import apply_rotary_emb
@@ -14,6 +17,71 @@ try:
 except:
     HAS_FLASH_ATTN = False
     from diffusers.models.embeddings import apply_rotary_emb
+    
+class LayerNorm(torch.nn.Module):
+    """
+    Layer Norm, fused into a single CUDA kernel.
+    Borrow from: https://github.com/NVIDIA/Megatron-LM/blob/6501752396e9cc360ce894cda4b2217a58c1c09d/megatron/core/fusions/fused_layer_norm.py#L30
+
+    Args:
+      hidden_size (int): Transformer hidden dimension.
+
+      eps (float): Epsilon added to denominator, for numerical stability.
+
+      zero_centered_gamma (bool): Adjust LayerNorm weights such that they are
+      centered around zero. This improves numerical stability.
+
+      model_config (ModelConfig): Transformer config. Include to match custom
+      layer norm interfaces.
+
+      normalization (str): Normalization type, used for Transformer Engine.
+      Must equal 'LayerNorm' here.
+    """
+
+    def __init__(self, zero_centered_gamma: bool, hidden_dim: int, eps: float):
+        super().__init__()
+
+        self.zero_centered_gamma = zero_centered_gamma
+        if isinstance(hidden_dim, numbers.Integral):
+            hidden_dim = (hidden_dim,)
+        self.hidden_dim = torch.Size(hidden_dim)
+        self.eps = eps
+        self.weight = nn.Parameter(torch.empty(*hidden_dim))
+        self.bias = nn.Parameter(torch.empty(*hidden_dim))
+
+    def forward(self, input: Tensor) -> Tensor:
+        weight = self.weight + 1 if self.zero_centered_gamma else self.weight
+        return torch.nn.functional.layer_norm(
+            input, self.hidden_dim, weight, self.bias, self.eps
+        )
+
+class Attention(nn.Module):
+    def __init__(self, query_dim: int, cross_attention_dim: int, fuse_cross_attention: bool, heads: int, dim_head: int, eps: float, processor:Callable):
+        super().__init__()
+        self.query_dim = query_dim
+        self.cross_attention_dim = cross_attention_dim
+        self.heads = heads
+        self.dim_head = dim_head
+        self.eps = eps
+        self.processor = processor
+        self.inner_dim = dim_head * heads
+        self.heads = heads
+        
+        self.fuse_cross_attention = fuse_cross_attention
+        
+        self.to_q = nn.Linear(query_dim, self.inner_dim, bias=False)
+        if fuse_cross_attention:
+            self.to_kv = nn.Linear(cross_attention_dim, self.inner_dim * 2, bias=False)
+        else:
+            self.to_k = nn.Linear(cross_attention_dim, self.inner_dim, bias=False)
+            self.to_v = nn.Linear(cross_attention_dim, self.inner_dim, bias=False)
+            
+        self.norm_q = LayerNorm(zero_centered_gamma=True, hidden_dim=self.inner_dim, eps=eps)
+        self.norm_k = LayerNorm(zero_centered_gamma=True, hidden_dim=self.inner_dim, eps=eps)
+
+
+    def forward(self, *args, **kwargs):
+        return self.processor(*args, **kwargs)
 
 
 class MagiSelfAttentionProcessor:

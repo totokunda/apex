@@ -51,7 +51,7 @@ from .module import (
 
 @TRANSFORMERS_REGISTRY("magi.base")
 class MagiTransformer3DModel(
-    ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin, CacheMixin, ModelMixin
+    ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
 ):
     """MagiTransformer3D model for video diffusion.
 
@@ -63,35 +63,49 @@ class MagiTransformer3DModel(
 
     _no_split_modules = ["MagiTransformerBlock"]
     _keep_in_fp32_modules = [
-        "_xattn",
-        "q_layer_norm",
-        "k_layer_norm",
-        "self_attn_post_norm",
-        "mlp_post_norm",
-        "final_layernorm",
+        "attn1.norm_q",
+        "attn1.norm_k",
+        "norm2",
+        "norm3",
+        "norm_out",
+        "patch_embedding",
+        "timestep_embedding",
+        "caption_embedding",
+        "rope",
+        "proj_out",
     ]
 
     @register_to_config
     def __init__(
         self,
+        num_layers: int = 24,
+        ffn_dim: int = 1024,
+        num_attention_heads: int = 16,
+        attention_head_dim: int = 128,
+        eps: float = 1e-5,
+        x_rescale_factor: float = 1,
+        half_channel_vae: bool = False,
         in_channels: int = 16,
         out_channels: int = 16,
         patch_size: int = 16,
         t_patch_size: int = 16,
-        caption_max_length: int = 128,
-        num_layers: int = 24,
-        num_frames: int = 16,
-        num_channels: int = 16,
-        num_attention_heads: int = 16,
-        attention_head_dim: int = 128,
         cond_hidden_ratio: float = 0.125,
         frequency_embedding_size: int = 256,
         xattn_cond_hidden_ratio: float = 0.125,
+        num_query_groups: int = 8,
+        gate_num_chunks: int = 2,
         distill: bool = False,
+        zero_centered_gamma: bool = True,
+        caption_channels: int = 4096,
+        caption_max_length: int = 128,
+        cond_gating_ratio: float = 1.0,
+        gated_linear_unit: bool = False,
     ) -> None:
         super().__init__()
 
         hidden_dim = num_attention_heads * attention_head_dim
+        cross_attention_dim = num_query_groups * attention_head_dim
+        self.half_channel_vae = half_channel_vae
 
         self.patch_embedding = nn.Conv3d(
             in_channels,
@@ -108,7 +122,7 @@ class MagiTransformer3DModel(
         )
 
         self.caption_embedding = CaptionEmbedder(
-            caption_channels=in_channels,
+            caption_channels=caption_channels,
             hidden_dim=hidden_dim,
             xattn_cond_hidden_ratio=xattn_cond_hidden_ratio,
             cond_hidden_ratio=cond_hidden_ratio,
@@ -125,19 +139,30 @@ class MagiTransformer3DModel(
             [
                 MagiTransformerBlock(
                     layer_number=i,
+                    hidden_dim=hidden_dim,
+                    cross_attention_dim=cross_attention_dim,
+                    ffn_hidden_dim=ffn_dim,
+                    cond_hidden_ratio=cond_hidden_ratio,
+                    xattn_cond_hidden_ratio=xattn_cond_hidden_ratio,
+                    num_attention_heads=num_attention_heads,
+                    gate_num_chunks=gate_num_chunks,
+                    zero_centered_gamma=zero_centered_gamma,
+                    cond_gating_ratio=cond_gating_ratio,
+                    gated_linear_unit=gated_linear_unit,
+                    eps=eps,
                 )
                 for i in range(num_layers)
             ]
         )
 
-        self.final_layernorm = FusedLayerNorm(
-            zero_centered_gamma=True,
-            hidden_size=hidden_dim,
-            eps=1e-5,
+        self.norm_out = FusedLayerNorm(
+            zero_centered_gamma=zero_centered_gamma,
+            hidden_dim=hidden_dim,
+            eps=eps,
         )
 
-        self.final_linear = FinalLinear(
-            hidden_size=hidden_dim,
+        self.proj_out = FinalLinear(
+            hidden_dim=hidden_dim,
             patch_size=patch_size,
             t_patch_size=t_patch_size,
             out_channels=out_channels,
@@ -401,6 +426,7 @@ class MagiTransformer3DModel(
         slice_point: int = 0,
         num_steps: int = 12,
         distill_interval: int = 4,
+        transformer_dtype: torch.dtype = torch.bfloat16,
         return_dict: bool = False,
         attention_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
@@ -423,21 +449,20 @@ class MagiTransformer3DModel(
                 logger.warning(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
-
-        B, C, T, H, W = hidden_states.shape
+        
 
         hidden_states = hidden_states * self.config.x_rescale_factor
 
         if kv_cache_params is None:
             kv_cache_params = {}
 
-        if self.config.half_channel_vae:
+        if self.half_channel_vae:
             assert hidden_states.shape[1] == 16
             hidden_states = torch.cat([hidden_states, hidden_states], dim=1)
 
-        hidden_states = hidden_states.float()
-        timestep = timestep.float()
-        encoder_hidden_states = encoder_hidden_states.float()
+        hidden_states = hidden_states.to(torch.float32)
+        timestep = timestep.to(torch.float32)
+        encoder_hidden_states = encoder_hidden_states.to(torch.float32)
 
         with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
             (
@@ -471,6 +496,10 @@ class MagiTransformer3DModel(
             hidden_states, "N C T H W -> (T H W) N C"
         ).contiguous()  # (thw, N, D)
         hidden_states = hidden_states.clone()
+        
+        hidden_states = hidden_states.to(transformer_dtype)
+        condition = condition.to(transformer_dtype)
+        encoder_hidden_states_flat = encoder_hidden_states_flat.to(transformer_dtype)
 
         for block in self.blocks:
             hidden_states = block(
@@ -485,9 +514,11 @@ class MagiTransformer3DModel(
                 **kwargs,
             )
 
+        hidden_states = hidden_states.to(torch.float32)
+        
         with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
-            hidden_states = self.final_linear(
-                hidden_states
+            hidden_states = self.proj_out(
+                self.norm_out(hidden_states)
             )  # (thw/cp, N, patch_size ** 2 * out_channels)
 
         # N C T H W

@@ -22,7 +22,7 @@ class MagiEngine(BaseEngine, MagiDenoise):
         self,
         yaml_path: str,
         model_type: ModelType = ModelType.T2V,
-        denoise_type: MagiDenoiseType = MagiDenoiseType.T2V,
+        denoise_type: MagiDenoiseType = MagiDenoiseType.BASE,
         **kwargs,
     ):
 

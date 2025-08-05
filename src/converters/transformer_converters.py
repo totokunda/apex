@@ -580,3 +580,31 @@ class MochiTransformerConverter(TransformerConverter):
 class MagiTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
+        self.rename_dict = {
+            "videodit_blocks.layers": "blocks",
+            "x_embedder": "patch_embedding",
+            "t_embedder": "timestep_embedding",
+            "y_embedder": "caption_embedding",
+            "videodit_blocks.final_linear": "proj_out",
+            "videodit_blocks.final_layernorm": "norm_out",
+            "ada_modulate_layer": "adaln",
+            "self_attention.linear_qkv.layer_norm": "norm1",
+            "self_attn_post_norm": "norm2",
+            "mlp_post_norm": "norm3",
+            "mlp.layer_norm": "ffn.norm",
+            "mlp.linear_fc1": "ffn.proj1",
+            "mlp.linear_fc2": "ffn.proj2",
+            "k_layernorm_xattn.bias": "attn2.norm_k.bias",
+            "k_layernorm_xattn.weight": "attn2.norm_k.weight",
+            "k_layernorm.bias": "attn1.norm_k.bias",
+            "k_layernorm.weight": "attn1.norm_k.weight",
+            "q_layernorm_xattn.bias": "attn2.norm_q.bias",
+            "q_layernorm_xattn.weight": "attn2.norm_q.weight",
+            "q_layernorm.bias": "attn1.norm_q.bias",
+            "q_layernorm.weight": "attn1.norm_q.weight",
+            "self_attention.linear_qkv.k": "attn1.to_k",
+            "self_attention.linear_qkv.q": "attn1.to_q",
+            "self_attention.linear_qkv.v": "attn1.to_v",
+            "self_attention.linear_qkv.qx": "attn2.to_q",
+            "self_attention.linear_kv_xattn": "attn2.to_kv",
+        }

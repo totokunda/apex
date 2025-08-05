@@ -23,7 +23,7 @@ class MagiSchedulerOutput(BaseOutput):
 class MagiScheduler(SchedulerInterface):
     def __init__(
         self,
-        num_inference_steps=50,
+        num_inference_steps=64,
         num_train_timesteps=1000,
         shift=3.0,
         scheduler_type="sd3",
