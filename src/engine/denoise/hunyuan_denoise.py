@@ -211,9 +211,7 @@ class HunyuanDenoise:
                             audio_prompts_input = torch.cat(
                                 [uncond_audio_prompts, audio_prompts], dim=0
                             )
-                            face_masks_input = torch.cat(
-                                [face_masks * 0.6] * 2, dim=0
-                            )
+                            face_masks_input = torch.cat([face_masks * 0.6] * 2, dim=0)
                         else:
                             current_guidance_scale = (1 - i / len(timesteps)) * (
                                 dynamic_guidance_end - dynamic_guidance_start

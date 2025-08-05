@@ -1,4 +1,7 @@
 import torch
+import torch
+import torch.nn.functional as F
+
 from src.register import FunctionRegister
 import math
 import warnings
@@ -43,7 +46,7 @@ attention_register = FunctionRegister()
 
 
 @attention_register("sdpa")
-def sdpa_attention(
+def sdpa(
     q,
     k,
     v,
@@ -53,7 +56,7 @@ def sdpa_attention(
     softmax_scale=None,
     **kwargs,
 ):
-    return torch.nn.functional.scaled_dot_product_attention(
+    return F.scaled_dot_product_attention(
         q,
         k,
         v,
@@ -62,6 +65,76 @@ def sdpa_attention(
         is_causal=is_causal,
         scale=softmax_scale,
     )
+
+
+@attention_register("sdpa_varlen")
+def sdpa_varlen(
+    q,  # [total_q, n_heads, head_dim]
+    k,  # [total_k, n_heads, head_dim]
+    v,  # [total_k, n_heads, head_dim]
+    cu_seqlens_q,  # 1-D (B+1) cumulative -> 0, sq1, sq1+sq2, …
+    cu_seqlens_kv,  # 1-D (B+1)
+    max_seqlen_q: int,
+    max_seqlen_kv: int,
+    deterministic: bool = False,  # same flag you forwarded to flash-attn
+    is_causal: bool = False,  # set True for decoder causal attention
+    **kwargs,
+):
+    """
+    Drop-in replacement for flash_attn_varlen_func that calls
+    torch.scaled_dot_product_attention instead.
+    Returns: packed tensor with shape [total_q, n_heads, head_dim]
+    """
+    if deterministic:
+        torch.use_deterministic_algorithms(True)
+
+    B = cu_seqlens_q.numel() - 1
+    n_heads, head_dim = q.shape[1:]
+
+    # 1. recover individual sequence lengths
+    seq_lens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
+    seq_lens_k = (cu_seqlens_kv[1:] - cu_seqlens_kv[:-1]).tolist()
+
+    # 2. pad into (B, H, L, D)
+    q_pad = q.new_zeros(B, n_heads, max_seqlen_q, head_dim)
+    k_pad = k.new_zeros(B, n_heads, max_seqlen_kv, head_dim)
+    v_pad = v.new_zeros(B, n_heads, max_seqlen_kv, head_dim)
+
+    q_splits = torch.split(q, seq_lens_q, dim=0)
+    k_splits = torch.split(k, seq_lens_k, dim=0)
+    v_splits = torch.split(v, seq_lens_k, dim=0)
+
+    for b in range(B):
+        # flash-attn layout is (L, H, D) –> transpose to (H, L, D)
+        q_pad[b, :, : seq_lens_q[b]] = q_splits[b].transpose(0, 1)
+        k_pad[b, :, : seq_lens_k[b]] = k_splits[b].transpose(0, 1)
+        v_pad[b, :, : seq_lens_k[b]] = v_splits[b].transpose(0, 1)
+
+    # 3. build additive mask: 0 for valid tokens, −inf for pads
+    attn_mask = torch.full(
+        (B, 1, max_seqlen_q, max_seqlen_kv),
+        float("-inf"),
+        device=q.device,
+        dtype=q.dtype,
+    )
+    for b in range(B):
+        attn_mask[b, :, : seq_lens_q[b], : seq_lens_k[b]] = 0.0
+
+    # 4. SDPA call
+    out_pad = F.scaled_dot_product_attention(
+        q_pad,
+        k_pad,
+        v_pad,
+        attn_mask=attn_mask,
+        dropout_p=0.0,
+        is_causal=is_causal,
+    )  # → (B, H, Lq, D)
+
+    # 5. strip padding and repack to (∑Lq, H, D)
+    packed_out = [
+        out_pad[b, :, : seq_lens_q[b]].transpose(0, 1) for b in range(B)  # (Lq, H, D)
+    ]
+    return torch.cat(packed_out, dim=0)
 
 
 def flash_attention_padded(
@@ -177,12 +250,13 @@ def flash_attention_varlen(
 
     Parameters
     ----------
-    q : (Bq, H, Sq, D) tensor
-    k : (Bk, H, Sk, D) tensor
-    v : (Bk, H, Sk, D) tensor
+    q : (Bq, H, Sq, D) or (T, H, D) tensor
+    k : (Bk, H, Sk, D) or (T, H, D) tensor
+    v : (Bk, H, Sk, D) or (T, H, D) tensor
         *H* (num heads) and *D* (head dim) must match across all three tensors.
         Usually `Bq == Bk`, but the wrapper only assumes `Bk >= Bq`
         (common case in encoder–decoder cross-attn with packed memory).
+        If tensors are already in (T, H, D) format, no reshaping is performed.
     cu_seqlens_q, cu_seqlens_k : (batch+1,) int32 tensors, optional
         Cumulative sequence-length vectors:
           `[0, len₀, len₀+len₁, …]`.
@@ -198,7 +272,7 @@ def flash_attention_varlen(
 
     Returns
     -------
-    out : (Bq, H, Sq, D) tensor
+    out : tensor with same shape as q
     """
     # -------------------- checks & dtype sanitisation -------------------- #
     if flash_attn_varlen_func is None:
@@ -206,15 +280,27 @@ def flash_attention_varlen(
             "flash_attn is not installed or flash_attn_varlen_func is undefined."
         )
 
-    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError("q, k, v must have shape (B, H, S, D)")
+    # Check if inputs are already in varlen format (T, H, D)
+    is_varlen_format = q.ndim == 3 and k.ndim == 3 and v.ndim == 3
 
-    Bq, Hq, Sq, Dq = q.shape
-    Bk, Hk, Sk, Dk = k.shape
-    Bv, Hv, Sv, Dv = v.shape
+    if not is_varlen_format:
+        if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+            raise ValueError("q, k, v must have shape (B, H, S, D) or (T, H, D)")
 
-    if not (Hq == Hk == Hv and Dq == Dk == Dv and Sk == Sv):
-        raise ValueError("Mismatched head counts / head dims or K ≠ V shapes")
+        Bq, Hq, Sq, Dq = q.shape
+        Bk, Hk, Sk, Dk = k.shape
+        Bv, Hv, Sv, Dv = v.shape
+
+        if not (Hq == Hk == Hv and Dq == Dk == Dv and Sk == Sv):
+            raise ValueError("Mismatched head counts / head dims or K ≠ V shapes")
+    else:
+        # For varlen format (T, H, D)
+        Tq, Hq, Dq = q.shape
+        Tk, Hk, Dk = k.shape
+        Tv, Hv, Dv = v.shape
+
+        if not (Hq == Hk == Hv and Dq == Dk == Dv and Tk == Tv):
+            raise ValueError("Mismatched head counts / head dims or K ≠ V shapes")
 
     accepted = {torch.bfloat16, torch.float16}
     for name, t in (("q", q), ("k", k), ("v", v)):
@@ -230,32 +316,55 @@ def flash_attention_varlen(
 
     # ------------------ build (or validate) cu_seqlens ------------------- #
     device = q.device
-    if cu_seqlens_q is None:
-        cu_seqlens_q = torch.arange(
-            0, (Bq + 1) * Sq, Sq, dtype=torch.int32, device=device
-        )
-    if cu_seqlens_k is None:
-        cu_seqlens_k = torch.arange(
-            0, (Bk + 1) * Sk, Sk, dtype=torch.int32, device=device
-        )
 
-    if cu_seqlens_q.dtype != torch.int32 or cu_seqlens_k.dtype != torch.int32:
-        raise TypeError("cu_seqlens tensors must be int32")
+    if not is_varlen_format:
+        if cu_seqlens_q is None:
+            cu_seqlens_q = torch.arange(
+                0, (Bq + 1) * Sq, Sq, dtype=torch.int32, device=device
+            )
+        if cu_seqlens_k is None:
+            cu_seqlens_k = torch.arange(
+                0, (Bk + 1) * Sk, Sk, dtype=torch.int32, device=device
+            )
 
-    if max_seqlen_q is None:
-        max_seqlen_q = int((cu_seqlens_q[1:] - cu_seqlens_q[:-1]).max().item())
-    if max_seqlen_k is None:
-        max_seqlen_k = int((cu_seqlens_k[1:] - cu_seqlens_k[:-1]).max().item())
+        if cu_seqlens_q.dtype != torch.int32 or cu_seqlens_k.dtype != torch.int32:
+            raise TypeError("cu_seqlens tensors must be int32")
 
-    if softmax_scale is None:
-        softmax_scale = 1.0 / math.sqrt(Dq)
+        if max_seqlen_q is None:
+            max_seqlen_q = int((cu_seqlens_q[1:] - cu_seqlens_q[:-1]).max().item())
+        if max_seqlen_k is None:
+            max_seqlen_k = int((cu_seqlens_k[1:] - cu_seqlens_k[:-1]).max().item())
 
-    # --------------------- flatten to (T, H, D) -------------------------- #
-    # FlashAttention-2 expects contiguous `(total_tokens, num_heads, head_dim)`
-    #
-    q_flat = q.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
-    k_flat = k.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
-    v_flat = v.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
+        if softmax_scale is None:
+            softmax_scale = 1.0 / math.sqrt(Dq)
+
+        # --------------------- flatten to (T, H, D) -------------------------- #
+        # FlashAttention-2 expects contiguous `(total_tokens, num_heads, head_dim)`
+        #
+        q_flat = q.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
+        k_flat = k.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
+        v_flat = v.permute(0, 2, 1, 3).reshape(-1, Hq, Dq)
+    else:
+        # Already in varlen format - use directly
+        if cu_seqlens_q is None or cu_seqlens_k is None:
+            raise ValueError(
+                "cu_seqlens_q and cu_seqlens_k must be provided for varlen format inputs"
+            )
+
+        if cu_seqlens_q.dtype != torch.int32 or cu_seqlens_k.dtype != torch.int32:
+            raise TypeError("cu_seqlens tensors must be int32")
+
+        if max_seqlen_q is None:
+            max_seqlen_q = int((cu_seqlens_q[1:] - cu_seqlens_q[:-1]).max().item())
+        if max_seqlen_k is None:
+            max_seqlen_k = int((cu_seqlens_k[1:] - cu_seqlens_k[:-1]).max().item())
+
+        if softmax_scale is None:
+            softmax_scale = 1.0 / math.sqrt(Dq)
+
+        q_flat = q
+        k_flat = k
+        v_flat = v
 
     # ----------------------- kernel invocation --------------------------- #
     out_flat = flash_attn_varlen_func(
@@ -272,11 +381,16 @@ def flash_attention_varlen(
     )
 
     # --------------------------- re-shape -------------------------------- #
-    out = (
-        out_flat.reshape(Bq, Sq, Hq, Dq)
-        .permute(0, 2, 1, 3)  # (Bq, H, Sq, D)
-        .to(q.dtype)  # preserve caller’s dtype
-    )
+    if not is_varlen_format:
+        out = (
+            out_flat.reshape(Bq, Sq, Hq, Dq)
+            .permute(0, 2, 1, 3)  # (Bq, H, Sq, D)
+            .to(q.dtype)  # preserve caller's dtype
+        )
+    else:
+        # Return in same shape as query (varlen format)
+        out = out_flat.to(q.dtype)
+
     return out
 
 
