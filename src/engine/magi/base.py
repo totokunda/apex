@@ -7,6 +7,7 @@ import numpy as np
 SPECIAL_TOKEN_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
     "assets",
+    "magi",
     "special_tokens.npz",
 )
 SPECIAL_TOKEN = np.load(SPECIAL_TOKEN_PATH)

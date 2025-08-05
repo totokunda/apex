@@ -17,18 +17,24 @@ components:
     tag: "magi_4.5b"
   
   - type: scheduler
-    base: "diffusers.FlowMatchEulerDiscreteScheduler"
+    base: "src.scheduler.magi.MagiScheduler"
     config:
-      shift: 7.0
+      shift: 3.0
+      scheduler_type: "sd3"
+      shortcut_mode: "16,16,8"
 
 preprocessors: null
 
 defaults:
   run:
-    num_inference_steps: 30
-    guidance_scale: 5.0
+    num_inference_steps: 64
     return_latents: false
-    text_encoder_kwargs: {}
+    text_encoder_kwargs:
+      max_sequence_length: 800
+      pad_to_max_length: true
+      use_mask_in_input: true
+      pad_with_zero: false
+
     offload: true
     render_on_step: false
 

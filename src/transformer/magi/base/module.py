@@ -17,6 +17,7 @@ import numbers
 from functools import partial
 from typing import Callable, List, Optional, Tuple, Dict, Any
 
+
 try:
     import flashinfer
     from flashinfer.gemm import bmm_fp8
@@ -33,14 +34,17 @@ from einops import rearrange
 from flash_attn import flash_attn_varlen_func
 from flash_attn.flash_attn_interface import flash_attn_func
 from flash_attn.layers.rotary import apply_rotary_emb as flash_apply_rotary_emb
-from diffusers.models.attention import Attention
 from torch import Tensor
 from torch.nn import Parameter
 
 from src.attention.processors.magi_processor import (
+    Attention,
     MagiCrossAttentionProcessor,
     MagiSelfAttentionProcessor,
 )
+
+
+        
 
 
 ##########################################################
@@ -180,10 +184,10 @@ class FinalLinear(nn.Module):
     The final linear layer of DiT.
     """
 
-    def __init__(self, hidden_size, patch_size, t_patch_size, out_channels):
+    def __init__(self, hidden_dim, patch_size, t_patch_size, out_channels):
         super().__init__()
         self.linear = nn.Linear(
-            hidden_size,
+            hidden_dim,
             patch_size * patch_size * t_patch_size * out_channels,
             bias=False,
         )
@@ -199,7 +203,7 @@ class FinalLinear(nn.Module):
 class AdaModulateLayer(torch.nn.Module):
     def __init__(
         self,
-        hidden_size: int,
+        hidden_dim: int,
         cond_hidden_ratio: float,
         cond_gating_ratio: float,
         gate_num_chunks: int = 2,
@@ -212,8 +216,8 @@ class AdaModulateLayer(torch.nn.Module):
         self.act = nn.SiLU()
         self.proj = nn.Sequential(
             nn.Linear(
-                int(hidden_size * cond_hidden_ratio),
-                int(hidden_size * cond_gating_ratio * self.gate_num_chunks),
+                int(hidden_dim * cond_hidden_ratio),
+                int(hidden_dim * cond_gating_ratio * self.gate_num_chunks),
                 bias=True,
             )
         )
@@ -424,145 +428,6 @@ def div_clamp_to(x: torch.Tensor, scale: torch.Tensor):
         .contiguous()
     )
 
-
-class CustomLayerNormLinear(torch.nn.Module):
-    def __init__(
-        self,
-        input_size: int,
-        output_size_q: int,
-        output_size_kv: int,
-        layer_number: int,
-        layernorm_epsilon: float,
-        fp8_quant: bool,
-        num_layers: int,
-    ):
-        super().__init__()
-        self.layer_norm = torch.nn.LayerNorm(
-            input_size,
-            eps=layernorm_epsilon,
-        )
-
-        self.layer_number = layer_number
-        layers = {
-            "q": output_size_q,
-            "qx": output_size_q,
-            "k": output_size_kv,
-            "v": output_size_kv,
-        }
-
-        for name, output_size in layers.items():
-            if (
-                not fp8_quant
-                or self.layer_number == 0
-                or self.layer_number == num_layers - 1
-            ):
-                setattr(
-                    self,
-                    name,
-                    torch.nn.Linear(
-                        input_size,
-                        output_size,
-                        bias=False,
-                    ),
-                )
-            else:
-                setattr(
-                    self, name, PerTensorQuantizedFp8Linear(input_size, output_size)
-                )
-
-    def forward_ln(self, hidden_states):
-        return self.layer_norm(hidden_states)
-
-    def forward_q(self, hidden_states):
-        return self.q(hidden_states)
-
-    def forward_qx(self, hidden_states):
-        return self.qx(hidden_states)
-
-    def forward_k(self, hidden_states):
-        return self.k(hidden_states)
-
-    def forward_v(self, hidden_states):
-        return self.v(hidden_states)
-
-
-##########################################################
-# PerTensorQuantizedFp8Linear
-##########################################################
-class PerTensorQuantizedFp8Linear(torch.nn.Module):
-    # The bias and device parameter is not used; it is included for compatibility with Linear's parameters.
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        bias=False,
-        dtype=torch.bfloat16,
-        device=None,
-    ) -> None:
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.finfo = torch.finfo(torch.float8_e4m3fn)
-        self.output_dtype = dtype
-
-        self.weight = Parameter(
-            torch.empty((1, out_features, in_features), dtype=torch.float8_e4m3fn)
-        )
-        self.weight_scale = Parameter(torch.empty(1, dtype=torch.float32))
-        self.input_scale = Parameter(torch.empty(in_features, dtype=torch.float32))
-
-    def forward(self, input: torch.Tensor):
-        input = div_clamp_to(input, self.input_scale)
-
-        prefix_shape = input.shape[:-1]
-        # column major weight
-        return bmm_fp8(
-            input.reshape(1, -1, self.in_features),
-            self.weight.transpose(-2, -1),
-            self.input_scale,
-            self.weight_scale,
-            dtype=self.output_dtype,
-        ).reshape(prefix_shape + (self.out_features,))
-
-
-class PerChannelQuantizedFp8Linear(torch.nn.Module):
-    # The bias and device parameter is not used; it is included for compatibility with Linear's parameters.
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        bias=False,
-        dtype=torch.bfloat16,
-        device=None,
-    ) -> None:
-        super().__init__()
-
-        self.in_features = in_features
-        self.out_features = out_features
-        self.output_dtype = dtype
-        self.finfo = torch.finfo(torch.float8_e4m3fn)
-
-        self.weight = Parameter(
-            torch.empty((1, out_features, in_features), dtype=torch.float8_e4m3fn)
-        )
-        self.weight_scale = Parameter(torch.empty(1, dtype=torch.float32))
-        self.input_scale = Parameter(torch.empty(1, dtype=torch.float32))
-        self.smooth_scale = Parameter(torch.empty(1, in_features, dtype=torch.float32))
-
-    def forward(self, x):
-        x = div_clamp_to(x, self.smooth_scale.to(torch.float32))
-
-        prefix_shape = x.shape[:-1]
-        return bmm_fp8(
-            x.reshape(1, -1, self.in_features),
-            self.weight.transpose(-2, -1),
-            self.input_scale,
-            self.weight_scale,
-            dtype=self.output_dtype,
-        ).reshape(prefix_shape + (self.out_features,))
-
-
 class FeedForward(torch.nn.Module):
     """
     FeedForward will take the input with h hidden state, project it to 4*h
@@ -590,10 +455,7 @@ class FeedForward(torch.nn.Module):
         hidden_dim: int,
         ffn_hidden_dim: int,
         layernorm_epsilon: float,
-        params_dtype: torch.dtype,
         gated_linear_unit: bool,
-        num_layers: int,
-        fp8_quant: bool = False,
         layer_number: int = None,
         input_size: int = None,
     ):
@@ -604,43 +466,38 @@ class FeedForward(torch.nn.Module):
         self.input_size = input_size if input_size != None else hidden_dim
         self.gated_linear_unit = gated_linear_unit
 
-        self.layer_norm = torch.nn.LayerNorm(self.input_size, eps=layernorm_epsilon)
+        self.norm = torch.nn.LayerNorm(self.input_size, eps=layernorm_epsilon)
 
-        submodules_linear_fc1 = torch.nn.Linear
-        if fp8_quant and self.layer_number != 0 and self.layer_number != num_layers - 1:
-            submodules_linear_fc1 = PerTensorQuantizedFp8Linear
+        self.act = torch.nn.GELU()
+
 
         if gated_linear_unit:
-            self.linear_fc1 = submodules_linear_fc1(
+            self.proj1 = torch.nn.Linear(
                 self.input_size,
                 2 * ffn_hidden_dim,
                 bias=False,
             )
         else:
-            self.linear_fc1 = submodules_linear_fc1(
+            self.proj1 = torch.nn.Linear(
                 self.input_size,
                 ffn_hidden_dim,
                 bias=False,
             )
 
-        submodules_linear_fc2 = torch.nn.Linear
-        if fp8_quant and self.layer_number != 0 and self.layer_number != num_layers - 1:
-            submodules_linear_fc2 = PerChannelQuantizedFp8Linear
-
-        self.linear_fc2 = submodules_linear_fc2(
+        self.proj2 = torch.nn.Linear(
             ffn_hidden_dim,
             hidden_dim,
             bias=False,
         )
 
     def forward(self, hidden_states):
-        hidden_states = self.layer_norm(hidden_states)
-        hidden_states = self.linear_fc1(hidden_states)
+        hidden_states = self.norm(hidden_states)
+        hidden_states = self.proj1(hidden_states)
         if self.gated_linear_unit:
             hidden_states = flashinfer.activation.silu_and_mul(hidden_states)
         else:
-            hidden_states = torch.nn.functional.gelu(hidden_states)
-        hidden_states = self.linear_fc2(hidden_states)
+            hidden_states = self.act(hidden_states)
+        hidden_states = self.proj2(hidden_states)
 
         return hidden_states
 
@@ -912,6 +769,7 @@ class MagiTransformerBlock(torch.nn.Module):
     def __init__(
         self,
         hidden_dim: int,
+        cross_attention_dim: int,
         ffn_hidden_dim: int,
         cond_hidden_ratio: float,
         cond_gating_ratio: float,
@@ -921,18 +779,15 @@ class MagiTransformerBlock(torch.nn.Module):
         eps: float = 1e-5,
         layer_number: int = 1,
         gated_linear_unit: bool = True,
-        kv_channels: int = 128,
         num_attention_heads: int = 16,
-        num_query_groups: int = 1,
-        num_layers: int = None,
-        fp8_quant: bool = False,
     ):
         super().__init__()
 
         self.layer_number = layer_number
         ## [Module 1: ada_modulate_layer
+        dim_head = hidden_dim // num_attention_heads
         self.adaln = AdaModulateLayer(
-            hidden_size=hidden_dim,
+            hidden_dim=hidden_dim,
             cond_hidden_ratio=cond_hidden_ratio,
             cond_gating_ratio=cond_gating_ratio,
             gate_num_chunks=gate_num_chunks,
@@ -940,31 +795,30 @@ class MagiTransformerBlock(torch.nn.Module):
 
         self.norm1 = FusedLayerNorm(
             zero_centered_gamma=zero_centered_gamma,
-            hidden_size=hidden_dim,
+            hidden_dim=hidden_dim,
             eps=eps,
         )
 
         ## [Module 2: SelfAttention]
         self.attn1 = Attention(
-            dim=hidden_dim,
-            cross_attention_dim=hidden_dim,
+            query_dim=hidden_dim,
+            cross_attention_dim=cross_attention_dim,
             heads=num_attention_heads,
-            dim_head=hidden_dim // num_attention_heads,
+            dim_head=dim_head,
             eps=eps,
-            cross_attention_dim_head=hidden_dim // num_attention_heads,
             processor=MagiSelfAttentionProcessor(),
         )
 
         self.attn2 = Attention(
-            dim=hidden_dim,
-            cross_attention_dim=hidden_dim,
+            query_dim=hidden_dim,
+            cross_attention_dim=cross_attention_dim,
+            fuse_cross_attention=True,
             heads=num_attention_heads,
-            dim_head=hidden_dim // num_attention_heads,
+            dim_head=dim_head,
             eps=eps,
-            cross_attention_dim_head=hidden_dim // num_attention_heads,
             processor=MagiCrossAttentionProcessor(),
         )
-
+        
         self.linear_proj = torch.nn.Linear(
             hidden_dim * 2,
             hidden_dim,
@@ -974,7 +828,7 @@ class MagiTransformerBlock(torch.nn.Module):
         ## [Module 3: SelfAttention PostNorm]
         self.norm2 = FusedLayerNorm(
             zero_centered_gamma=zero_centered_gamma,
-            hidden_size=hidden_dim,
+            hidden_dim=hidden_dim,
             eps=eps,
         )
 
@@ -984,8 +838,6 @@ class MagiTransformerBlock(torch.nn.Module):
             ffn_hidden_dim=ffn_hidden_dim,
             layernorm_epsilon=eps,
             gated_linear_unit=gated_linear_unit,
-            num_layers=num_layers,
-            fp8_quant=fp8_quant,
             layer_number=self.layer_number,
         )
 

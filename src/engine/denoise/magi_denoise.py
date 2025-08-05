@@ -70,6 +70,7 @@ class MagiDenoise:
         text_scales = kwargs.get("text_scales", None)
         prev_chunk_scales = kwargs.get("prev_chunk_scales", None)
         cfg_t_range = kwargs.get("cfg_t_range", None)
+        transformer_dtype = kwargs.get("transformer_dtype", None)
 
         total_steps = num_inference_steps * num_chunks
         denoise_step_per_stage = num_inference_steps // window_size
@@ -114,6 +115,7 @@ class MagiDenoise:
                     "chunk_width": chunk_width,
                     "num_steps": num_inference_steps,
                     "fwd_extra_1st_chunk": False,
+                    "transformer_dtype": transformer_dtype,
                 }
 
                 if prefix_video is not None and denoise_step == 0 and chunk_offset > 0:
