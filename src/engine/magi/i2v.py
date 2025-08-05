@@ -38,5 +38,3 @@ class MagiI2VEngine(MagiBaseEngine):
         **kwargs,
     ):
         """Image-to-video generation using MAGI's chunk-based approach"""
-
-        

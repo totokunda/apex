@@ -81,6 +81,7 @@ class WanAttnProcessor2_0:
                 dropout_p=0.0,
                 is_causal=False,
             ).transpose(1, 2)
+
             hidden_states_img = hidden_states_img.flatten(2, 3)
             hidden_states_img = hidden_states_img.type_as(query)
 

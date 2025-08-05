@@ -31,7 +31,9 @@ from diffusers.models.autoencoders.vae import (
 from .module import ViTEncoder, ViTDecoder, VideoTokenizerABC
 
 
-class AutoencoderKLMagi(ModelMixin, ConfigMixin, FromOriginalModelMixin, VideoTokenizerABC):
+class AutoencoderKLMagi(
+    ModelMixin, ConfigMixin, FromOriginalModelMixin, VideoTokenizerABC
+):
     r"""
     A VAE model with KL loss for encoding videos into latents and decoding latent representations into videos.
     Used in MAGI.

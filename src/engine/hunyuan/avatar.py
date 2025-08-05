@@ -175,14 +175,11 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             dtype=torch.float32,
         )
 
-        face_masks = (
-            F.interpolate(
-                face_masks.to(self.device).squeeze(2),
-                size=(image_latents.shape[-2], image_latents.shape[-1]),
-                mode="bilinear",
-            )
-            .unsqueeze(2)
-        )
+        face_masks = F.interpolate(
+            face_masks.to(self.device).squeeze(2),
+            size=(image_latents.shape[-2], image_latents.shape[-1]),
+            mode="bilinear",
+        ).unsqueeze(2)
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -251,9 +248,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             [audio_prompts, torch.zeros_like(audio_prompts[:, :pad_audio_length])],
             dim=1,
         )
-        uncond_audio_prompts = uncond_audio_prompts.to(
-            self.device
-        )
+        uncond_audio_prompts = uncond_audio_prompts.to(self.device)
 
         motion_exp = motion_exp.to(self.device)
         motion_pose = motion_pose.to(self.device)
@@ -270,7 +265,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             seed=seed,
             generator=generator,
             parse_frames=False,
-            dtype=torch.float32
+            dtype=torch.float32,
         )
 
         if hasattr(self.scheduler, "init_noise_sigma"):

@@ -27,7 +27,8 @@ from abc import ABC, abstractmethod
 from tqdm import tqdm
 
 from src.attention import attention_register
-# import OrderedDict    
+
+# import OrderedDict
 from collections import OrderedDict
 
 ###################################################
@@ -934,14 +935,14 @@ class DiagonalGaussianDistribution(object):
         return self.mean
 
 
-
 class ParallelHelper:
     def __init__(self):
         pass
 
     @staticmethod
     def split_tile_list(
-        tile_numel_dict: OrderedDict[int, int], parallel_group: torch.distributed.ProcessGroup = None
+        tile_numel_dict: OrderedDict[int, int],
+        parallel_group: torch.distributed.ProcessGroup = None,
     ) -> List[int]:
         """
         Splits the given tile size into a list of sizes that each rank should handle.
@@ -965,15 +966,24 @@ class ParallelHelper:
         if not torch.distributed.is_initialized():
             return list(range(len(tile_numel_dict))), list(range(len(tile_numel_dict)))
         else:
-            tile_idxs = list(OrderedDict(sorted(tile_numel_dict.items(), key=lambda x: x[1], reverse=True)).keys())
+            tile_idxs = list(
+                OrderedDict(
+                    sorted(tile_numel_dict.items(), key=lambda x: x[1], reverse=True)
+                ).keys()
+            )
             world_size = torch.distributed.get_world_size(group=parallel_group)
             cur_rank = torch.distributed.get_rank(group=parallel_group)
             global_tile_idxs = []
             cur_rank_tile_idxs = []
             for rank in range(world_size):
-                rank_tile_idxs = [tile_idxs[rank + world_size * i] for i in range(len(tile_idxs) // world_size)]
+                rank_tile_idxs = [
+                    tile_idxs[rank + world_size * i]
+                    for i in range(len(tile_idxs) // world_size)
+                ]
                 if rank < len(tile_idxs) % world_size:
-                    rank_tile_idxs.append(tile_idxs[len(tile_idxs) // world_size * world_size + rank])
+                    rank_tile_idxs.append(
+                        tile_idxs[len(tile_idxs) // world_size * world_size + rank]
+                    )
                 if rank == cur_rank:
                     cur_rank_tile_idxs = rank_tile_idxs
                 global_tile_idxs = global_tile_idxs + rank_tile_idxs
@@ -981,7 +991,9 @@ class ParallelHelper:
 
     @staticmethod
     def gather_frames(
-        frames: List[torch.Tensor], global_tile_idxs: List[int], parallel_group: torch.distributed.ProcessGroup = None
+        frames: List[torch.Tensor],
+        global_tile_idxs: List[int],
+        parallel_group: torch.distributed.ProcessGroup = None,
     ) -> List[torch.Tensor]:
         """
         Gathers frame data from all ranks in a distributed environment.
@@ -1007,8 +1019,12 @@ class ParallelHelper:
                 cur_rank_shapes = []
             else:
                 cur_rank_shapes = [frame.shape for frame in frames]
-            all_rank_shapes = [None] * torch.distributed.get_world_size(group=parallel_group)
-            torch.distributed.all_gather_object(all_rank_shapes, cur_rank_shapes, group=parallel_group)
+            all_rank_shapes = [None] * torch.distributed.get_world_size(
+                group=parallel_group
+            )
+            torch.distributed.all_gather_object(
+                all_rank_shapes, cur_rank_shapes, group=parallel_group
+            )
 
             all_rank_sizes = []
             total_size = []
@@ -1016,8 +1032,12 @@ class ParallelHelper:
                 per_rank_sizes = []
                 per_rank_total_size = 0
                 for shape in per_rank_shapes:
-                    per_rank_sizes.append(shape[0] * shape[1] * shape[2] * shape[3] * shape[4])
-                    per_rank_total_size += shape[0] * shape[1] * shape[2] * shape[3] * shape[4]
+                    per_rank_sizes.append(
+                        shape[0] * shape[1] * shape[2] * shape[3] * shape[4]
+                    )
+                    per_rank_total_size += (
+                        shape[0] * shape[1] * shape[2] * shape[3] * shape[4]
+                    )
                 all_rank_sizes.append(per_rank_sizes)
                 total_size.append(per_rank_total_size)
 
@@ -1025,22 +1045,34 @@ class ParallelHelper:
             if len(frames) == 0:
                 flattened_frames = torch.zeros([0], dtype=torch.bfloat16, device="cuda")
             else:
-                flattened_frames = torch.cat([frame.flatten().contiguous() for frame in frames], dim=0)
+                flattened_frames = torch.cat(
+                    [frame.flatten().contiguous() for frame in frames], dim=0
+                )
                 assert flattened_frames.dtype == torch.bfloat16
             gather_tensors = [
                 torch.zeros(total_size[i], dtype=torch.bfloat16, device="cuda")
                 for i in range(torch.distributed.get_world_size(group=parallel_group))
             ]
-            torch.distributed.all_gather(gather_tensors, flattened_frames, group=parallel_group)
+            torch.distributed.all_gather(
+                gather_tensors, flattened_frames, group=parallel_group
+            )
 
             result_frames = []
             for idx, per_rank_shapes in enumerate(all_rank_shapes):
                 offset = 0
                 for j, shape in enumerate(per_rank_shapes):
-                    result_frames.append(gather_tensors[idx][offset : offset + all_rank_sizes[idx][j]].view(shape))
+                    result_frames.append(
+                        gather_tensors[idx][
+                            offset : offset + all_rank_sizes[idx][j]
+                        ].view(shape)
+                    )
                     offset += all_rank_sizes[idx][j]
-            result_frames_dict = OrderedDict((idx, frame) for idx, frame in zip(global_tile_idxs, result_frames))
-            result_frames = list(OrderedDict(sorted(result_frames_dict.items())).values())
+            result_frames_dict = OrderedDict(
+                (idx, frame) for idx, frame in zip(global_tile_idxs, result_frames)
+            )
+            result_frames = list(
+                OrderedDict(sorted(result_frames_dict.items())).values()
+            )
             return result_frames
 
     @staticmethod
@@ -1093,6 +1125,7 @@ class ParallelHelper:
             dot_index += index[i] * strides[i]
         return dot_index
 
+
 class TileProcessor:
     def __init__(
         self,
@@ -1130,10 +1163,14 @@ class TileProcessor:
         self.tile_sample_min_height = tile_sample_min_height
         self.tile_sample_min_width = tile_sample_min_width
         self.tile_sample_min_length = tile_sample_min_length
-        self.tile_latent_min_height = tile_sample_min_height // spatial_downsample_factor
+        self.tile_latent_min_height = (
+            tile_sample_min_height // spatial_downsample_factor
+        )
         self.tile_latent_min_width = tile_sample_min_width // spatial_downsample_factor
 
-        self.tile_latent_min_length = tile_sample_min_length // temporal_downsample_factor
+        self.tile_latent_min_length = (
+            tile_sample_min_length // temporal_downsample_factor
+        )
         if first_frame_as_image:
             self.tile_latent_min_length += 1
 
@@ -1142,37 +1179,55 @@ class TileProcessor:
         self.sr_ratio = sr_ratio
         self.parallel_group = parallel_group
 
-    def blend_t(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    def blend_t(
+        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
+    ) -> torch.Tensor:
         blend_extent = min(a.shape[2], b.shape[2], blend_extent)
         for t in range(blend_extent):
-            b[:, :, t, :, :] = a[:, :, -blend_extent + t, :, :] * (1 - t / blend_extent) + b[:, :, t, :, :] * (
-                t / blend_extent
-            )
+            b[:, :, t, :, :] = a[:, :, -blend_extent + t, :, :] * (
+                1 - t / blend_extent
+            ) + b[:, :, t, :, :] * (t / blend_extent)
         return b
 
-    def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    def blend_v(
+        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
+    ) -> torch.Tensor:
         blend_extent = min(a.shape[3], b.shape[3], blend_extent)
         for y in range(blend_extent):
-            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, :, y, :] * (
-                y / blend_extent
-            )
+            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (
+                1 - y / blend_extent
+            ) + b[:, :, :, y, :] * (y / blend_extent)
         return b
 
-    def blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    def blend_h(
+        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
+    ) -> torch.Tensor:
         blend_extent = min(a.shape[4], b.shape[4], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, :, x] * (
-                x / blend_extent
-            )
+            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (
+                1 - x / blend_extent
+            ) + b[:, :, :, :, x] * (x / blend_extent)
         return b
 
     def tiled_encode(self, x: torch.FloatTensor, verbose: bool = False):
-        overlap_height = int(self.tile_sample_min_height * (1 - self.spatial_tile_overlap_factor))
-        overlap_width = int(self.tile_sample_min_width * (1 - self.spatial_tile_overlap_factor))
-        overlap_length = int(self.tile_sample_min_length * (1 - self.temporal_tile_overlap_factor))
-        blend_extent_h = int(self.tile_latent_min_height * self.spatial_tile_overlap_factor)
-        blend_extent_w = int(self.tile_latent_min_width * self.spatial_tile_overlap_factor)
-        blend_extent_t = int(self.tile_latent_min_length * self.temporal_tile_overlap_factor)
+        overlap_height = int(
+            self.tile_sample_min_height * (1 - self.spatial_tile_overlap_factor)
+        )
+        overlap_width = int(
+            self.tile_sample_min_width * (1 - self.spatial_tile_overlap_factor)
+        )
+        overlap_length = int(
+            self.tile_sample_min_length * (1 - self.temporal_tile_overlap_factor)
+        )
+        blend_extent_h = int(
+            self.tile_latent_min_height * self.spatial_tile_overlap_factor
+        )
+        blend_extent_w = int(
+            self.tile_latent_min_width * self.spatial_tile_overlap_factor
+        )
+        blend_extent_t = int(
+            self.tile_latent_min_length * self.temporal_tile_overlap_factor
+        )
         height_limit = self.tile_latent_min_height - blend_extent_h
         width_limit = self.tile_latent_min_width - blend_extent_w
         frame_limit = self.tile_latent_min_length - blend_extent_t
@@ -1220,7 +1275,9 @@ class TileProcessor:
             progress_bar.update(1)
 
         # Gather all decoded frames from different ranks
-        frames = ParallelHelper.gather_frames(frames, global_tile_index_list, parallel_group=self.parallel_group)
+        frames = ParallelHelper.gather_frames(
+            frames, global_tile_index_list, parallel_group=self.parallel_group
+        )
         assert len(frames) == total_tile_size
         progress_bar.close()
 
@@ -1261,17 +1318,35 @@ class TileProcessor:
         return result
 
     def tiled_decode(self, z: torch.FloatTensor, verbose: bool = False):
-        overlap_height = int(self.tile_latent_min_height * (1 - self.spatial_tile_overlap_factor))
-        overlap_width = int(self.tile_latent_min_width * (1 - self.spatial_tile_overlap_factor))
-        overlap_length = int(self.tile_latent_min_length * (1 - self.temporal_tile_overlap_factor))
+        overlap_height = int(
+            self.tile_latent_min_height * (1 - self.spatial_tile_overlap_factor)
+        )
+        overlap_width = int(
+            self.tile_latent_min_width * (1 - self.spatial_tile_overlap_factor)
+        )
+        overlap_length = int(
+            self.tile_latent_min_length * (1 - self.temporal_tile_overlap_factor)
+        )
 
-        real_tile_sample_min_height = int(self.tile_latent_min_height * self.spatial_downsample_factor * self.sr_ratio)
-        real_tile_sample_min_width = int(self.tile_latent_min_width * self.spatial_downsample_factor * self.sr_ratio)
-        real_tile_sample_min_length = int(self.tile_latent_min_length * self.temporal_downsample_factor)
+        real_tile_sample_min_height = int(
+            self.tile_latent_min_height * self.spatial_downsample_factor * self.sr_ratio
+        )
+        real_tile_sample_min_width = int(
+            self.tile_latent_min_width * self.spatial_downsample_factor * self.sr_ratio
+        )
+        real_tile_sample_min_length = int(
+            self.tile_latent_min_length * self.temporal_downsample_factor
+        )
 
-        blend_extent_h = int(real_tile_sample_min_height * self.spatial_tile_overlap_factor)
-        blend_extent_w = int(real_tile_sample_min_width * self.spatial_tile_overlap_factor)
-        blend_extent_t = int(real_tile_sample_min_length * self.temporal_tile_overlap_factor)
+        blend_extent_h = int(
+            real_tile_sample_min_height * self.spatial_tile_overlap_factor
+        )
+        blend_extent_w = int(
+            real_tile_sample_min_width * self.spatial_tile_overlap_factor
+        )
+        blend_extent_t = int(
+            real_tile_sample_min_length * self.temporal_tile_overlap_factor
+        )
 
         height_limit = real_tile_sample_min_height - blend_extent_h
         width_limit = real_tile_sample_min_width - blend_extent_w
@@ -1321,7 +1396,9 @@ class TileProcessor:
 
         progress_bar.close()
         # Gather all decoded frames from different ranks
-        frames = ParallelHelper.gather_frames(frames, global_tile_index_list, parallel_group=self.parallel_group)
+        frames = ParallelHelper.gather_frames(
+            frames, global_tile_index_list, parallel_group=self.parallel_group
+        )
         assert len(frames) == total_tile_size
 
         result_frames = []
@@ -1334,17 +1411,25 @@ class TileProcessor:
             # Blend with previous tiles if applicable
             if f > 0:
                 idx = ParallelHelper.index_dot([f - 1, i, j], for_loop_size)
-                tile = torch.compile(self.blend_t, dynamic=False)(frames[idx], tile, blend_extent_t)
+                tile = torch.compile(self.blend_t, dynamic=False)(
+                    frames[idx], tile, blend_extent_t
+                )
             if i > 0:
                 idx = ParallelHelper.index_dot([f, i - 1, j], for_loop_size)
-                tile = torch.compile(self.blend_v, dynamic=False)(frames[idx], tile, blend_extent_h)
+                tile = torch.compile(self.blend_v, dynamic=False)(
+                    frames[idx], tile, blend_extent_h
+                )
             if j > 0:
                 idx = ParallelHelper.index_dot([f, i, j - 1], for_loop_size)
-                tile = torch.compile(self.blend_h, dynamic=False)(frames[idx], tile, blend_extent_w)
+                tile = torch.compile(self.blend_h, dynamic=False)(
+                    frames[idx], tile, blend_extent_w
+                )
             result_frames.append(tile[:, :, :frame_limit, :height_limit, :width_limit])
 
         # Gather and concatenate the final result frames
-        result_frames = ParallelHelper.gather_frames(result_frames, global_tile_index_list, parallel_group=self.parallel_group)
+        result_frames = ParallelHelper.gather_frames(
+            result_frames, global_tile_index_list, parallel_group=self.parallel_group
+        )
         assert len(result_frames) == total_tile_size
 
         concat_frames = []
@@ -1361,6 +1446,7 @@ class TileProcessor:
         # Concatenate all result frames along the temporal dimension
         result = torch.cat(concat_frames, dim=2)
         return result
+
 
 class VideoTokenizerABC(ABC):
     """
@@ -1463,7 +1549,7 @@ class VideoTokenizerABC(ABC):
             tile_sample_min_length=tile_sample_min_length,
             spatial_tile_overlap_factor=spatial_tile_overlap_factor,
             temporal_tile_overlap_factor=temporal_tile_overlap_factor,
-            sr_ratio=getattr(self, 'sr_ratio', 1),
+            sr_ratio=getattr(self, "sr_ratio", 1),
             spatial_downsample_factor=self.spatial_downsample_factor,
             temporal_downsample_factor=self.temporal_downsample_factor,
             first_frame_as_image=self.first_frame_as_image,
@@ -1499,7 +1585,11 @@ class VideoTokenizerABC(ABC):
         Returns:
             torch.Tensor: The encoded tensor.
         """
-        allow_spatial_tiling = allow_spatial_tiling if allow_spatial_tiling is not None else self.allow_spatial_tiling
+        allow_spatial_tiling = (
+            allow_spatial_tiling
+            if allow_spatial_tiling is not None
+            else self.allow_spatial_tiling
+        )
         if not allow_spatial_tiling:
             tile_sample_min_height = 100000
             tile_sample_min_width = 100000
@@ -1541,7 +1631,11 @@ class VideoTokenizerABC(ABC):
         Returns:
             torch.Tensor shape:[N C T H W]: The decoded tensor.
         """
-        allow_spatial_tiling = allow_spatial_tiling if allow_spatial_tiling is not None else self.allow_spatial_tiling
+        allow_spatial_tiling = (
+            allow_spatial_tiling
+            if allow_spatial_tiling is not None
+            else self.allow_spatial_tiling
+        )
         if not allow_spatial_tiling:
             tile_sample_min_height = 100000
             tile_sample_min_width = 100000
