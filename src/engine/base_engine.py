@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional, Literal, Union
 from diffusers.utils.dummy_pt_objects import SchedulerMixin
 import torch
 from loguru import logger
@@ -47,6 +47,7 @@ from torchvision import transforms as TF
 import inspect
 from src.preprocess import preprocessor_registry
 from src.postprocess import postprocessor_registry
+from src.quantize.quantizer import ModelQuantizer, quantize_model, quant_type
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -1101,6 +1102,217 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         b = base_shift - m * base_seq_len
         mu = image_seq_len * m + b
         return mu
+
+    # ------------------------------------------------------------------------- #
+    # Quantization Methods
+    # ------------------------------------------------------------------------- #
+    def quantize(
+        self,
+        model: torch.nn.Module,
+        quant_method: quant_type = "basic_fp16",
+        target_memory_gb: Optional[float] = None,
+        max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None,
+        auto_optimize: bool = True,
+        component_type: Optional[str] = None,
+        preserve_dtypes: Optional[Union[Dict[str, torch.dtype], str]] = None
+    ) -> torch.nn.Module:
+        """
+        Quantize any PyTorch model with optimal performance settings.
+        
+        This method integrates seamlessly with the engine's memory management
+        and component loading system, automatically handling device placement
+        and optimization based on the model's requirements.
+        
+        Parameters
+        ----------
+        model : torch.nn.Module
+            Model to quantize (transformer, text_encoder, vae, etc.)
+        quant_method : str
+            Quantization method to use (default: quanto_config_int8)
+        target_memory_gb : Optional[float]
+            Target memory usage in GB for automatic optimization
+        max_memory : Optional[Dict]
+            Manual memory constraints per device
+        auto_optimize : bool
+            Enable automatic optimization for performance
+        component_type : Optional[str]
+            Component type for logging (transformer, text_encoder, etc.)
+        preserve_dtypes : Optional[Union[Dict, str]]
+            Dtypes to preserve during quantization
+            
+        Returns
+        -------
+        torch.nn.Module
+            Quantized model ready for inference
+        """
+        self.logger.info(
+            f"Quantizing {component_type or 'model'} using {quant_method}"
+            + (f" with target memory {target_memory_gb}GB" if target_memory_gb else "")
+        )
+        
+        # Use our improved quantizer
+        quantized_model = quantize_model(
+            model=model,
+            quant_method=quant_method,
+            target_memory_gb=target_memory_gb,
+            max_memory=max_memory,
+            auto_optimize=auto_optimize,
+            preserve_dtypes=preserve_dtypes
+        )
+        
+        # Update component if it's tracked
+        if component_type == "transformer" and hasattr(self, 'transformer'):
+            self.transformer = quantized_model
+        elif component_type == "text_encoder" and hasattr(self, 'text_encoder'):
+            self.text_encoder = quantized_model
+        elif component_type == "vae" and hasattr(self, 'vae'):
+            self.vae = quantized_model
+            
+        self.logger.info(f"Successfully quantized {component_type or 'model'}")
+        return quantized_model
+
+    def quantize_component(
+        self,
+        component_type: str,
+        quant_method: quant_type = "basic_fp16",
+        target_memory_gb: Optional[float] = None,
+        max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None,
+        auto_optimize: bool = True,
+        preserve_dtypes: Optional[Union[Dict[str, torch.dtype], str]] = None
+    ) -> torch.nn.Module:
+        """
+        Quantize a specific engine component by type.
+        
+        Parameters
+        ----------
+        component_type : str
+            Type of component to quantize (transformer, text_encoder, vae)
+        quant_method : str
+            Quantization method to use
+        target_memory_gb : Optional[float]
+            Target memory usage in GB
+        max_memory : Optional[Dict]
+            Manual memory constraints
+        auto_optimize : bool
+            Enable automatic optimization
+        preserve_dtypes : Optional[Union[Dict, str]]
+            Dtypes to preserve during quantization
+            
+        Returns
+        -------
+        torch.nn.Module
+            Quantized component
+        """
+        # Load component if not already loaded
+        if not hasattr(self, component_type) or getattr(self, component_type) is None:
+            self.load_component_by_type(component_type)
+        
+        component = getattr(self, component_type)
+        if component is None:
+            raise ValueError(f"Component {component_type} not available for quantization")
+        
+        # Apply quantization
+        return self.quantize(
+            model=component,
+            quant_method=quant_method,
+            target_memory_gb=target_memory_gb,
+            max_memory=max_memory,
+            auto_optimize=auto_optimize,
+            component_type=component_type,
+            preserve_dtypes=preserve_dtypes
+        )
+
+    def save_quantized_component(
+        self,
+        component_type: str,
+        save_path: str,
+        quant_method: quant_type = "basic_fp16",
+        target_memory_gb: Optional[float] = None,
+        save_config: bool = True,
+        save_tokenizer: bool = True,
+        preserve_dtypes: Optional[Union[Dict[str, torch.dtype], str]] = None
+    ) -> None:
+        """
+        Quantize and save a component to a specified location.
+        
+        Parameters
+        ----------
+        component_type : str
+            Type of component to quantize and save
+        save_path : str
+            Directory to save the quantized component
+        quant_method : str
+            Quantization method to use
+        target_memory_gb : Optional[float]
+            Target memory usage in GB
+        save_config : bool
+            Whether to save model config
+        save_tokenizer : bool
+            Whether to save tokenizer if present
+        preserve_dtypes : Optional[Union[Dict, str]]
+            Dtypes to preserve during quantization
+        """
+        # Quantize the component
+        quantized_component = self.quantize_component(
+            component_type=component_type,
+            quant_method=quant_method,
+            target_memory_gb=target_memory_gb,
+            preserve_dtypes=preserve_dtypes
+        )
+        
+        # Create quantizer for saving
+        quantizer = ModelQuantizer(
+            quant_method=quant_method,
+            target_memory_gb=target_memory_gb,
+            preserve_dtypes=preserve_dtypes
+        )
+        
+        # Save the quantized model
+        quantizer.save_quantized_model(
+            model=quantized_component,
+            save_path=save_path,
+            save_config=save_config,
+            save_tokenizer=save_tokenizer
+        )
+        
+        self.logger.info(f"Saved quantized {component_type} to {save_path}")
+
+    def load_quantized_component(
+        self,
+        component_type: str,
+        load_path: str,
+        model_class: Optional[type] = None
+    ) -> torch.nn.Module:
+        """
+        Load a quantized component from a saved location.
+        
+        Parameters
+        ----------
+        component_type : str
+            Type of component to load
+        load_path : str
+            Path to the saved quantized component
+        model_class : Optional[type]
+            Model class for instantiation
+            
+        Returns
+        -------
+        torch.nn.Module
+            Loaded quantized component
+        """
+        self.logger.info(f"Loading quantized {component_type} from {load_path}")
+        
+        # Load the quantized model
+        quantized_component = ModelQuantizer.load_quantized_model(
+            load_path=load_path,
+            model_class=model_class
+        )
+        
+        # Update component reference
+        setattr(self, component_type, quantized_component)
+        
+        self.logger.info(f"Successfully loaded quantized {component_type}")
+        return quantized_component
 
     def __str__(self):
         return f"BaseEngine(config={self.config}, device={self.device})"
