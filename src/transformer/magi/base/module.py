@@ -28,8 +28,16 @@ except:
 import torch
 import torch.distributed
 import torch.nn as nn
-import triton
-import triton.language as tl
+
+try:
+    import triton
+    import triton.language as tl
+
+    TRITON_AVAILABLE = True
+except ImportError:
+    triton = None
+    tl = None
+    TRITON_AVAILABLE = False
 from einops import rearrange
 from flash_attn import flash_attn_varlen_func
 from flash_attn.flash_attn_interface import flash_attn_func
@@ -38,13 +46,11 @@ from torch import Tensor
 from torch.nn import Parameter
 
 from src.attention.processors.magi_processor import (
+    FusedLayerNorm,
     Attention,
     MagiCrossAttentionProcessor,
     MagiSelfAttentionProcessor,
 )
-
-
-        
 
 
 ##########################################################
@@ -108,7 +114,7 @@ class TimestepEmbedder(nn.Module):
             self.frequency_embedding_size,
             timestep_rescale_factor=self.timestep_rescale_factor,
         )
-        t_emb = self.mlp(t_freq.to(self.data_type))
+        t_emb = self.mlp(t_freq)
         return t_emb
 
 
@@ -230,95 +236,127 @@ class AdaModulateLayer(torch.nn.Module):
 ##########################################################
 # bias_modulate_add
 ##########################################################
-@triton.jit
-def range_mod_kernel_fwd(
-    X,  # pointer to the input
-    MAP,  # map x index to gating index
-    GATINGS,  # pointer to the gatings
-    Y,  # pointer to the output
-    M,  # number of rows in X, unused
-    N,  # number of columns in X
-    stride_xm,  # how much to increase the pointer when moving by 1 row in X
-    stride_xn,  # how much to increase the pointer when moving by 1 column in X
-    stride_gm,  # how much to increase the pointer when moving by 1 row in GATINGS
-    stride_gn,  # how much to increase the pointer when moving by 1 column in GATINGS
-    stride_ym,  # how much to increase the pointer when moving by 1 row in Y
-    stride_yn,  # how much to increase the pointer when moving by 1 column in Y
-    BLOCK_SIZE: tl.constexpr,  # number of columns in a block
-):
-    # Map the program id to the row of X and Y it should compute.
-    row = tl.program_id(0)
+if TRITON_AVAILABLE:
 
-    cur_X = X + row * stride_xm
-    x_cols = tl.arange(0, BLOCK_SIZE) * stride_xn
-    x_mask = x_cols < N * stride_xn
-    x = tl.load(cur_X + x_cols, mask=x_mask, other=0.0)
+    @triton.jit
+    def range_mod_kernel_fwd(
+        X,  # pointer to the input
+        MAP,  # map x index to gating index
+        GATINGS,  # pointer to the gatings
+        Y,  # pointer to the output
+        M,  # number of rows in X, unused
+        N,  # number of columns in X
+        stride_xm,  # how much to increase the pointer when moving by 1 row in X
+        stride_xn,  # how much to increase the pointer when moving by 1 column in X
+        stride_gm,  # how much to increase the pointer when moving by 1 row in GATINGS
+        stride_gn,  # how much to increase the pointer when moving by 1 column in GATINGS
+        stride_ym,  # how much to increase the pointer when moving by 1 row in Y
+        stride_yn,  # how much to increase the pointer when moving by 1 column in Y
+        BLOCK_SIZE: tl.constexpr,  # number of columns in a block
+    ):
+        # Map the program id to the row of X and Y it should compute.
+        row = tl.program_id(0)
 
-    cur_MAP = MAP + row
-    gating_index = tl.load(cur_MAP)
-    cur_GATING = GATINGS + gating_index * stride_gm
-    gating_cols = tl.arange(0, BLOCK_SIZE) * stride_gn
-    gating_mask = gating_cols < N * stride_gn
-    gating = tl.load(cur_GATING + gating_cols, mask=gating_mask, other=0.0)
+        cur_X = X + row * stride_xm
+        x_cols = tl.arange(0, BLOCK_SIZE) * stride_xn
+        x_mask = x_cols < N * stride_xn
+        x = tl.load(cur_X + x_cols, mask=x_mask, other=0.0)
 
-    cur_Y = Y + row * stride_ym
-    y_cols = tl.arange(0, BLOCK_SIZE) * stride_yn
-    y_mask = y_cols < N * stride_yn
-    tl.store(cur_Y + y_cols, x * gating, mask=y_mask)
+        cur_MAP = MAP + row
+        gating_index = tl.load(cur_MAP)
+        cur_GATING = GATINGS + gating_index * stride_gm
+        gating_cols = tl.arange(0, BLOCK_SIZE) * stride_gn
+        gating_mask = gating_cols < N * stride_gn
+        gating = tl.load(cur_GATING + gating_cols, mask=gating_mask, other=0.0)
+
+        cur_Y = Y + row * stride_ym
+        y_cols = tl.arange(0, BLOCK_SIZE) * stride_yn
+        y_mask = y_cols < N * stride_yn
+        tl.store(cur_Y + y_cols, x * gating, mask=y_mask)
+
+    def range_mod_triton(x, c_mapping, gatings):
+        """
+        Inputs:
+            x: (s, b, h). Tensor of inputs embedding (images or latent representations of images)
+            c_mapping: (s, b). Tensor of condition map
+            gatings: (b, denoising_range_num, h). Tensor of condition embedding
+        """
+
+        assert x.is_cuda, "x is not on cuda"
+        assert c_mapping.is_cuda, "c_mapping is not on cuda"
+        assert gatings.is_cuda, "gatings is not on cuda"
+
+        # TODO: use 3D tensor for x, c_mapping, and gatings
+        s, b, h = x.shape
+        x = x.transpose(0, 1).flatten(0, 1)
+        c_mapping = c_mapping.transpose(0, 1).flatten(0, 1)
+        gatings = gatings.flatten(0, 1)
+
+        assert x.dim() == 2, f"x must be a 2D tensor but got {x.dim()}D"
+        assert (
+            c_mapping.dim() == 1
+        ), f"c_mapping must be a 1D tensor but got {c_mapping.dim()}D"
+        assert (
+            gatings.dim() == 2
+        ), f"gatings must be a 2D tensor but got {gatings.dim()}D"
+
+        M, N = x.shape
+        assert (
+            c_mapping.size(0) == M
+        ), "c_mapping must have the same number of rows as x"
+
+        # Less than 64KB per feature: enqueue fused kernel
+        MAX_FUSED_SIZE = 65536 // x.element_size()
+        BLOCK_SIZE = min(MAX_FUSED_SIZE, triton.next_power_of_2(N))
+        if N > BLOCK_SIZE:
+            raise RuntimeError("range_mod_triton doesn't support feature dim >= 64KB.")
+
+        MAP = c_mapping
+        y = torch.empty_like(x)
+
+        range_mod_kernel_fwd[(M,)](
+            x,
+            MAP,
+            gatings,
+            y,
+            M,
+            N,
+            x.stride(0),
+            x.stride(1),
+            gatings.stride(0),
+            gatings.stride(1),
+            y.stride(0),
+            y.stride(1),
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        y = y.reshape(b, s, h).transpose(0, 1)
+
+        return y
 
 
-def range_mod_triton(x, c_mapping, gatings):
+def range_mod_torch(x, c_mapping, gatings):
     """
+    PyTorch fallback implementation for range_mod_triton.
+
     Inputs:
         x: (s, b, h). Tensor of inputs embedding (images or latent representations of images)
         c_mapping: (s, b). Tensor of condition map
         gatings: (b, denoising_range_num, h). Tensor of condition embedding
     """
-
-    assert x.is_cuda, "x is not on cuda"
-    assert c_mapping.is_cuda, "c_mapping is not on cuda"
-    assert gatings.is_cuda, "gatings is not on cuda"
-
-    # TODO: use 3D tensor for x, c_mapping, and gatings
     s, b, h = x.shape
-    x = x.transpose(0, 1).flatten(0, 1)
-    c_mapping = c_mapping.transpose(0, 1).flatten(0, 1)
-    gatings = gatings.flatten(0, 1)
+    _, denoising_range_num, _ = gatings.shape
 
-    assert x.dim() == 2, f"x must be a 2D tensor but got {x.dim()}D"
-    assert (
-        c_mapping.dim() == 1
-    ), f"c_mapping must be a 1D tensor but got {c_mapping.dim()}D"
-    assert gatings.dim() == 2, f"gatings must be a 2D tensor but got {gatings.dim()}D"
+    # Flatten for easier indexing
+    x_flat = x.transpose(0, 1).flatten(0, 1)  # (b*s, h)
+    c_mapping_flat = c_mapping.transpose(0, 1).flatten(0, 1)  # (b*s,)
+    gatings_flat = gatings.flatten(0, 1)  # (b*denoising_range_num, h)
 
-    M, N = x.shape
-    assert c_mapping.size(0) == M, "c_mapping must have the same number of rows as x"
+    # Use advanced indexing to apply gating
+    y_flat = x_flat * gatings_flat[c_mapping_flat]  # (b*s, h)
 
-    # Less than 64KB per feature: enqueue fused kernel
-    MAX_FUSED_SIZE = 65536 // x.element_size()
-    BLOCK_SIZE = min(MAX_FUSED_SIZE, triton.next_power_of_2(N))
-    if N > BLOCK_SIZE:
-        raise RuntimeError("range_mod_triton doesn't support feature dim >= 64KB.")
-
-    MAP = c_mapping
-    y = torch.empty_like(x)
-
-    range_mod_kernel_fwd[(M,)](
-        x,
-        MAP,
-        gatings,
-        y,
-        M,
-        N,
-        x.stride(0),
-        x.stride(1),
-        gatings.stride(0),
-        gatings.stride(1),
-        y.stride(0),
-        y.stride(1),
-        BLOCK_SIZE=BLOCK_SIZE,
-    )
-    y = y.reshape(b, s, h).transpose(0, 1)
+    # Reshape back to original dimensions
+    y = y_flat.reshape(b, s, h).transpose(0, 1)  # (s, b, h)
 
     return y
 
@@ -337,7 +375,12 @@ def bias_modulate_add(
     residual = residual.float()
     gate = gate.float()
 
-    x = range_mod_triton(x, condition_map, gate)
+    # Use Triton implementation if available, otherwise fall back to PyTorch
+    if TRITON_AVAILABLE and x.is_cuda:
+        x = range_mod_triton(x, condition_map, gate)
+    else:
+        x = range_mod_torch(x, condition_map, gate)
+
     x = post_norm(x)
     x = x + residual
     x = x.to(original_dtype)
@@ -358,44 +401,6 @@ def make_viewless_tensor(inp, requires_grad):
     )
     out.data = inp.data
     return out
-
-
-class FusedLayerNorm(torch.nn.Module):
-    """
-    Layer Norm, fused into a single CUDA kernel.
-    Borrow from: https://github.com/NVIDIA/Megatron-LM/blob/6501752396e9cc360ce894cda4b2217a58c1c09d/megatron/core/fusions/fused_layer_norm.py#L30
-
-    Args:
-      hidden_size (int): Transformer hidden dimension.
-
-      eps (float): Epsilon added to denominator, for numerical stability.
-
-      zero_centered_gamma (bool): Adjust LayerNorm weights such that they are
-      centered around zero. This improves numerical stability.
-
-      model_config (ModelConfig): Transformer config. Include to match custom
-      layer norm interfaces.
-
-      normalization (str): Normalization type, used for Transformer Engine.
-      Must equal 'LayerNorm' here.
-    """
-
-    def __init__(self, zero_centered_gamma: bool, hidden_dim: int, eps: float):
-        super().__init__()
-
-        self.zero_centered_gamma = zero_centered_gamma
-        if isinstance(hidden_dim, numbers.Integral):
-            hidden_dim = (hidden_dim,)
-        self.hidden_dim = torch.Size(hidden_dim)
-        self.eps = eps
-        self.weight = Parameter(torch.empty(*hidden_dim))
-        self.bias = Parameter(torch.empty(*hidden_dim))
-
-    def forward(self, input: Tensor) -> Tensor:
-        weight = self.weight + 1 if self.zero_centered_gamma else self.weight
-        return torch.nn.functional.layer_norm(
-            input, self.hidden_dim, weight, self.bias, self.eps
-        )
 
 
 def softcap(x: torch.Tensor, cap: int):
@@ -427,6 +432,7 @@ def div_clamp_to(x: torch.Tensor, scale: torch.Tensor):
         .reshape(*prefix_shape, last_shape)
         .contiguous()
     )
+
 
 class FeedForward(torch.nn.Module):
     """
@@ -470,7 +476,6 @@ class FeedForward(torch.nn.Module):
 
         self.act = torch.nn.GELU()
 
-
         if gated_linear_unit:
             self.proj1 = torch.nn.Linear(
                 self.input_size,
@@ -492,6 +497,7 @@ class FeedForward(torch.nn.Module):
 
     def forward(self, hidden_states):
         hidden_states = self.norm(hidden_states)
+
         hidden_states = self.proj1(hidden_states)
         if self.gated_linear_unit:
             hidden_states = flashinfer.activation.silu_and_mul(hidden_states)
@@ -780,6 +786,7 @@ class MagiTransformerBlock(torch.nn.Module):
         layer_number: int = 1,
         gated_linear_unit: bool = True,
         num_attention_heads: int = 16,
+        num_query_groups: int = 1,
     ):
         super().__init__()
 
@@ -804,6 +811,7 @@ class MagiTransformerBlock(torch.nn.Module):
             query_dim=hidden_dim,
             cross_attention_dim=cross_attention_dim,
             heads=num_attention_heads,
+            num_query_groups=num_query_groups,
             dim_head=dim_head,
             eps=eps,
             processor=MagiSelfAttentionProcessor(),
@@ -814,12 +822,13 @@ class MagiTransformerBlock(torch.nn.Module):
             cross_attention_dim=cross_attention_dim,
             fuse_cross_attention=True,
             heads=num_attention_heads,
+            num_query_groups=num_query_groups,
             dim_head=dim_head,
             eps=eps,
             processor=MagiCrossAttentionProcessor(),
         )
-        
-        self.linear_proj = torch.nn.Linear(
+
+        self.proj = torch.nn.Linear(
             hidden_dim * 2,
             hidden_dim,
             bias=False,
@@ -861,21 +870,23 @@ class MagiTransformerBlock(torch.nn.Module):
     ):
         # hidden_states: [s/cp/sp, b, h]
         residual = hidden_states
+        original_dtype = hidden_states.dtype
 
-        norm_hidden_states = self.norm1(hidden_states)
+        with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
+            norm_hidden_states = self.norm1(hidden_states)
 
         device = hidden_states.device
-
+        norm_hidden_states = norm_hidden_states.to(original_dtype)
         # Self attention.
         attn_out = self.attn1(
-            norm_hidden_states,
+            hidden_states=norm_hidden_states,
             rotary_emb=rotary_pos_emb,
             kv_cache_params=kv_cache_params,
             **self_attn_params,
         )
 
         cross_attn_out = self.attn2(
-            norm_hidden_states,
+            hidden_states=norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             **cross_attn_params,
         )
@@ -885,11 +896,12 @@ class MagiTransformerBlock(torch.nn.Module):
         attn_out = rearrange(attn_out, "sq b (n hn hd) -> sq b (hn n hd)", n=2, hn=8)
 
         with torch.autocast(device_type=device.type, dtype=torch.float32):
-            attn_out = self.linear_proj(attn_out)
+            attn_out = self.proj(attn_out)
 
         hidden_states = attn_out
 
         gate_output = self.adaln(condition)
+
         softcap_gate_cap = 1.0
         gate_output = softcap(gate_output, softcap_gate_cap)
         gate_msa, gate_mlp = gate_output.chunk(2, dim=-1)
@@ -897,13 +909,13 @@ class MagiTransformerBlock(torch.nn.Module):
         # Residual connection for self-attention.
         hidden_states = bias_modulate_add(
             hidden_states, residual, condition_map, gate_msa, self.norm2
-        ).to(self.model_config.params_dtype)
+        ).to(original_dtype)
 
         residual = hidden_states
         hidden_states = self.ffn(hidden_states)
         # Residual connection for MLP.
         hidden_states = bias_modulate_add(
             hidden_states, residual, condition_map, gate_mlp, self.norm3
-        ).to(self.model_config.params_dtype)
+        ).to(original_dtype)
 
         return hidden_states

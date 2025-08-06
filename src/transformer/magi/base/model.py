@@ -145,6 +145,7 @@ class MagiTransformer3DModel(
                     cond_hidden_ratio=cond_hidden_ratio,
                     xattn_cond_hidden_ratio=xattn_cond_hidden_ratio,
                     num_attention_heads=num_attention_heads,
+                    num_query_groups=num_query_groups,
                     gate_num_chunks=gate_num_chunks,
                     zero_centered_gamma=zero_centered_gamma,
                     cond_gating_ratio=cond_gating_ratio,
@@ -244,8 +245,9 @@ class MagiTransformer3DModel(
                 NOTE: y_xattn_flat and xattn_mask with static shape
             H: int. Height of the input
             W: int. Width of the input
-            ardf_meta: dict. Meta information for ardf
-            cross_attn_params: PackedCrossAttnParams. Packed sequence parameters for cross_atten
+            self_attn_params: dict. Packed sequence parameters for self_attention
+            kv_cache_params: dict. Packed sequence parameters for kv_cache
+            cross_attn_params: PackedCrossAttnParams. Packed sequence parameters for cross_attention
         """
 
         ###################################
@@ -368,8 +370,8 @@ class MagiTransformer3DModel(
         ), f"xattn_q_ranges.shape: {xattn_q_ranges.shape}, xattn_k_ranges.shape: {xattn_k_ranges.shape}"
 
         cross_attn_params = dict(
-            q_ranges=xattn_q_ranges,
-            kv_ranges=xattn_k_ranges,
+            q_range=xattn_q_ranges,
+            kv_range=xattn_k_ranges,
             cu_seqlens_q=cu_seqlens_q,
             cu_seqlens_kv=cu_seqlens_k,
             max_seqlen_q=clip_token_nums,
@@ -387,7 +389,7 @@ class MagiTransformer3DModel(
 
         self_attn_params = dict(
             q_range=q_range,
-            k_range=kv_range,
+            kv_range=kv_range,
             max_seqlen_q=clip_token_nums,
             max_seqlen_k=max_seqlen_k,
             denoising_range_num=denoising_range_num,
@@ -449,7 +451,6 @@ class MagiTransformer3DModel(
                 logger.warning(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
-        
 
         hidden_states = hidden_states * self.config.x_rescale_factor
 
@@ -496,7 +497,7 @@ class MagiTransformer3DModel(
             hidden_states, "N C T H W -> (T H W) N C"
         ).contiguous()  # (thw, N, D)
         hidden_states = hidden_states.clone()
-        
+
         hidden_states = hidden_states.to(transformer_dtype)
         condition = condition.to(transformer_dtype)
         encoder_hidden_states_flat = encoder_hidden_states_flat.to(transformer_dtype)
@@ -504,18 +505,17 @@ class MagiTransformer3DModel(
         for block in self.blocks:
             hidden_states = block(
                 hidden_states=hidden_states,
-                condition=condition,
                 encoder_hidden_states=encoder_hidden_states_flat,
+                condition=condition,
                 condition_map=condition_map,
                 self_attn_params=self_attn_params,
                 cross_attn_params=cross_attn_params,
                 kv_cache_params=kv_cache_params,
                 rotary_pos_emb=rotary_pos_emb,
-                **kwargs,
             )
 
         hidden_states = hidden_states.to(torch.float32)
-        
+
         with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
             hidden_states = self.proj_out(
                 self.norm_out(hidden_states)

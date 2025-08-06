@@ -25,7 +25,8 @@ class MagiT2VEngine(MagiBaseEngine):
         generator: torch.Generator = None,
         chunk_width: int = 6,
         noise2clean_kvrange: List[int] = [5, 4, 3, 2],
-        cfg_number: int = 1,
+        clean_chunk_kvrange: int = 1,
+        cfg_number: int = 3,
         cfg_t_range: List[float] = [0.0, 0.0217, 0.1, 0.3, 0.999],
         text_scales: List[float] = [7.5, 7.5, 7.5, 0.0, 0.0],
         prev_chunk_scales: List[float] = [1.5, 1.5, 1.5, 1.0, 1.0],
@@ -44,6 +45,7 @@ class MagiT2VEngine(MagiBaseEngine):
             prompt,
             device=self.device,
             num_videos_per_prompt=num_videos,
+            return_attention_mask=True,
             **text_encoder_kwargs,
         )
 
@@ -54,6 +56,8 @@ class MagiT2VEngine(MagiBaseEngine):
         num_chunks = math.ceil(
             num_frames // self.vae_scale_factor_temporal / chunk_width
         )
+
+        transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -72,7 +76,7 @@ class MagiT2VEngine(MagiBaseEngine):
         prompt_embeds, prompt_embeds_mask = self._process_txt_embeddings(
             caption_embs=prompt_embeds,
             emb_masks=prompt_embeds_mask,
-            null_caption_embedding=null_caption_embeds,
+            null_emb=null_caption_embeds,
             infer_chunk_num=num_chunks,
             clean_chunk_num=0,
         )
@@ -101,10 +105,10 @@ class MagiT2VEngine(MagiBaseEngine):
             seed=seed,
         )
 
+        latent = torch.cat([latent, latent], dim=0)
+
         timesteps = self._get_timesteps(
-            self.scheduler,
-            num_steps=num_inference_steps,
-            device=self.device,
+            self.scheduler, num_inference_steps=num_inference_steps
         )
 
         time_interval = self.scheduler.set_time_interval(
@@ -115,8 +119,8 @@ class MagiT2VEngine(MagiBaseEngine):
             latents=latent,
             timesteps=timesteps,
             num_chunks=num_chunks,
-            encoder_hidden_states=prompt_embeds,
-            encoder_hidden_states_mask=prompt_embeds_mask,
+            prompt_embeds=prompt_embeds,
+            prompt_embeds_mask=prompt_embeds_mask,
             num_inference_steps=num_inference_steps,
             chunk_width=chunk_width,
             render_on_step_callback=render_on_step_callback,
@@ -129,6 +133,8 @@ class MagiT2VEngine(MagiBaseEngine):
             cfg_t_range=cfg_t_range,
             window_size=window_size,
             distill_nearly_clean_chunk_threshold=distill_nearly_clean_chunk_threshold,
+            transformer_dtype=transformer_dtype,
+            clean_chunk_kvrange=clean_chunk_kvrange,
         )
 
         if offload:

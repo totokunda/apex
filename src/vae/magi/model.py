@@ -95,7 +95,7 @@ class AutoencoderKLMagi(
         conv_last_layer: bool = False,
         use_rope: bool = False,
         use_final_proj: bool = False,
-        scaling_factor: float = 1.0,
+        scaling_factor: float = 0.18215,
         spatial_compression_ratio: Optional[int] = None,
         temporal_compression_ratio: Optional[int] = None,
     ) -> None:
@@ -365,3 +365,17 @@ class AutoencoderKLMagi(
             torch.Tensor: Last layer of the decoder.
         """
         return self.decoder.last_layer.weight
+
+    def normalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = (latents - self.config.shift_factor) * self.config.scaling_factor
+        else:
+            latents = latents * self.config.scaling_factor
+        return latents
+
+    def denormalize_latents(self, latents: torch.Tensor, **kwargs) -> torch.Tensor:
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = latents / self.config.scaling_factor + self.config.shift_factor
+        else:
+            latents = latents / self.config.scaling_factor
+        return latents

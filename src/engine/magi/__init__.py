@@ -48,9 +48,7 @@ class MagiEngine(BaseEngine, MagiDenoise):
         )
 
         # MAGI uses different channel configurations
-        self.num_channels_latents = getattr(self.vae, "config", {}).get(
-            "z_chans", 4  # MAGI default
-        )
+        self.num_channels_latents = getattr(self.vae, "config", {}).get("z_chans", 16)
 
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial

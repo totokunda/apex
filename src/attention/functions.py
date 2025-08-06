@@ -188,8 +188,6 @@ def flash_attention_padded(
 
     if not (Bq == Bk == Bv):
         raise ValueError("Batch sizes differ (q, k, v); pad or split batches first.")
-    if not (Hq == Hk == Hv and Dq == Dk == Dv):
-        raise ValueError("Head counts / head dims mismatch across q, k, v.")
     if not (Sk == Sv):
         raise ValueError("Key and value sequence lengths must match (Sk == Sv).")
 
@@ -298,9 +296,6 @@ def flash_attention_varlen(
         Tq, Hq, Dq = q.shape
         Tk, Hk, Dk = k.shape
         Tv, Hv, Dv = v.shape
-
-        if not (Hq == Hk == Hv and Dq == Dk == Dv and Tk == Tv):
-            raise ValueError("Mismatched head counts / head dims or K ≠ V shapes")
 
     accepted = {torch.bfloat16, torch.float16}
     for name, t in (("q", q), ("k", k), ("v", v)):

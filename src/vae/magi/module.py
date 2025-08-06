@@ -341,9 +341,9 @@ class Attention(nn.Module):
     def forward(self, x, feat_shape=None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
-
         qkv = self.qkv_norm(qkv)
         q, k, v = qkv.chunk(3, dim=2)
+        
 
         if self.use_rope:
             assert feat_shape is not None
@@ -353,45 +353,30 @@ class Attention(nn.Module):
                 device=x.device,
                 dtype=x.dtype,
             )
+            
             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
             q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
             k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
+            
+            
+            q = q.squeeze(2).transpose(1, 2)
+            k = k.squeeze(2).transpose(1, 2)
+            v = v.squeeze(2).transpose(1, 2)
 
-            # Use registered attention function
-            attn_fn = attention_register.get("flash")
-            if attn_fn is not None:
-                # Reshape for attention function
-                q = q.transpose(1, 2)  # (B, hn, N, hd)
-                k = k.transpose(1, 2)  # (B, hn, N, hd)
-                v = v.transpose(1, 2)  # (B, hn, N, hd)
-                x = attn_fn(q, k, v, is_causal=False)
-            else:
-                # Fallback to standard attention
-                x = torch.nn.functional.scaled_dot_product_attention(
-                    q.transpose(1, 2),
-                    k.transpose(1, 2),
-                    v.transpose(1, 2),
-                    dropout_p=self.attn_drop_rate if self.training else 0.0,
-                )
+            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+            
         else:
+            q = q.squeeze(2)
+            k = k.squeeze(2)
+            v = v.squeeze(2)
             # Use registered attention function for packed QKV
-            attn_fn = attention_register.get("flash")
-            if attn_fn is not None:
-                # Reshape for attention function
-                q = q.transpose(1, 2)  # (B, hn, N, hd)
-                k = k.transpose(1, 2)  # (B, hn, N, hd)
-                v = v.transpose(1, 2)  # (B, hn, N, hd)
-                x = attn_fn(q, k, v, is_causal=False)
-            else:
-                # Fallback to standard attention
-                x = torch.nn.functional.scaled_dot_product_attention(
-                    q.transpose(1, 2),
-                    k.transpose(1, 2),
-                    v.transpose(1, 2),
-                    dropout_p=self.attn_drop_rate if self.training else 0.0,
-                )
-
+            q = q.transpose(1, 2)  # (B, hn, N, hd)
+            k = k.transpose(1, 2)  # (B, hn, N, hd)
+            v = v.transpose(1, 2)  # (B, hn, N, hd)
+        
+            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+            
         x = x.reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -994,6 +979,7 @@ class ParallelHelper:
         frames: List[torch.Tensor],
         global_tile_idxs: List[int],
         parallel_group: torch.distributed.ProcessGroup = None,
+        device: torch.device = torch.device('cuda'),
     ) -> List[torch.Tensor]:
         """
         Gathers frame data from all ranks in a distributed environment.
@@ -1043,14 +1029,14 @@ class ParallelHelper:
 
             # Gather all frames
             if len(frames) == 0:
-                flattened_frames = torch.zeros([0], dtype=torch.bfloat16, device="cuda")
+                flattened_frames = torch.zeros([0], dtype=torch.bfloat16, device=device)
             else:
                 flattened_frames = torch.cat(
                     [frame.flatten().contiguous() for frame in frames], dim=0
                 )
                 assert flattened_frames.dtype == torch.bfloat16
             gather_tensors = [
-                torch.zeros(total_size[i], dtype=torch.bfloat16, device="cuda")
+                torch.zeros(total_size[i], dtype=torch.bfloat16, device=device)
                 for i in range(torch.distributed.get_world_size(group=parallel_group))
             ]
             torch.distributed.all_gather(
@@ -1399,6 +1385,7 @@ class TileProcessor:
         frames = ParallelHelper.gather_frames(
             frames, global_tile_index_list, parallel_group=self.parallel_group
         )
+        
         assert len(frames) == total_tile_size
 
         result_frames = []
