@@ -10,6 +10,7 @@ SPECIAL_TOKEN_PATH = os.path.join(
     "magi",
     "special_tokens.npz",
 )
+
 SPECIAL_TOKEN = np.load(SPECIAL_TOKEN_PATH)
 CAPTION_TOKEN = torch.tensor(SPECIAL_TOKEN["caption_token"].astype(np.float16))
 LOGO_TOKEN = torch.tensor(SPECIAL_TOKEN["logo_token"].astype(np.float16))
@@ -143,6 +144,15 @@ class MagiBaseEngine:
         """Denoise function"""
         return self.main_engine.denoise(*args, **kwargs)
 
+    def pad_duration_token_keys(
+        self, special_token_keys: List[str], pad_duration: bool = True
+    ) -> List[str]:
+        if "DURATION_TOKEN" in set(special_token_keys):
+            return special_token_keys
+        if pad_duration:
+            return special_token_keys + ["DURATION_TOKEN"]
+        return special_token_keys
+
     def get_special_token_keys(
         self,
         add_pad_static: bool = True,
@@ -151,6 +161,7 @@ class MagiBaseEngine:
         add_pad_hq: bool = True,
         add_pad_three_d_model: bool = True,
         add_pad_two_d_anime: bool = True,
+        pad_duration: bool = True,
     ) -> List[str]:
         special_token_keys = []
         if add_pad_static:
@@ -166,13 +177,15 @@ class MagiBaseEngine:
         if add_pad_two_d_anime:
             special_token_keys.append("TWO_D_ANIME_TOKEN")
 
-        special_token_keys = self.pad_duration_token_keys(special_token_keys)
+        special_token_keys = self.pad_duration_token_keys(
+            special_token_keys, pad_duration
+        )
         return special_token_keys
 
     def get_negative_special_token_keys(self) -> List[str]:
         return ["CAPTION_TOKEN", "LOGO_TOKEN", "TRANS_TOKEN", "BORDERNESS_TOKEN"]
 
-    def pad_special_token(
+    def pad_special_token_tensor(
         self,
         special_token: torch.Tensor,
         txt_feat: torch.Tensor,
@@ -194,7 +207,11 @@ class MagiBaseEngine:
         )[:, :, :800, :]
         if attn_mask is not None:
             attn_mask = torch.cat(
-                [torch.ones(N, C, 1, dtype=_dtype, device=_device), attn_mask], dim=-1
+                [
+                    torch.ones(N, C, 1, dtype=_dtype, device=_device),
+                    attn_mask.to(_dtype).to(_device),
+                ],
+                dim=-1,
             )[:, :, :800]
         return txt_feat, attn_mask
 
@@ -204,7 +221,7 @@ class MagiBaseEngine:
         caption_embs: torch.Tensor,
         emb_masks: torch.Tensor,
     ):
-        device = f"cuda:{torch.cuda.current_device()}"
+        device = self.device
         if not special_token_keys:
             return caption_embs, emb_masks
         for special_token_key in special_token_keys:
@@ -212,7 +229,7 @@ class MagiBaseEngine:
                 new_caption_embs, new_emb_masks = [], []
                 num_chunks = caption_embs.size(1)
                 for i in range(num_chunks):
-                    chunk_caption_embs, chunk_emb_masks = self.pad_special_token(
+                    chunk_caption_embs, chunk_emb_masks = self.pad_special_token_tensor(
                         DURATION_TOKEN_LIST[min(num_chunks - i - 1, 7)].to(device),
                         caption_embs[:, i : i + 1],
                         emb_masks[:, i : i + 1],
@@ -224,7 +241,7 @@ class MagiBaseEngine:
             else:
                 special_token = SPECIAL_TOKEN_DICT.get(special_token_key)
                 if special_token is not None:
-                    caption_embs, emb_masks = self.pad_special_token(
+                    caption_embs, emb_masks = self.pad_special_token_tensor(
                         special_token.to(device), caption_embs, emb_masks
                     )
         return caption_embs, emb_masks
@@ -244,6 +261,7 @@ class MagiBaseEngine:
         emb_masks = emb_masks.unsqueeze(1).repeat(
             1, infer_chunk_num - clean_chunk_num, 1
         )
+
         caption_embs, emb_masks = self.pad_special_token(
             special_token_keys, caption_embs, emb_masks
         )

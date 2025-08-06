@@ -15,6 +15,7 @@
     "qkv_bias": true,
     "video_length": 16,
     "video_size": 256,
-    "z_chans": 16
+    "z_chans": 16,
+    "scaling_factor": 0.18215
   }
   

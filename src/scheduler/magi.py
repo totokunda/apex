@@ -28,6 +28,7 @@ class MagiScheduler(SchedulerInterface):
         shift=3.0,
         scheduler_type="sd3",
         shortcut_mode="16,16,8",
+        clean_t: float = 0.9999,
     ):
         self.num_train_timesteps = num_train_timesteps
         self.shift = shift
@@ -35,7 +36,14 @@ class MagiScheduler(SchedulerInterface):
         self.time_interval = None
         self.timesteps = None
         self.denoise_step_per_stage = None
+        self.chunk_width = None
         self.set_timesteps(num_inference_steps, shortcut_mode=shortcut_mode)
+        self.clean_t = clean_t
+        self.device = None
+
+    def set_scheduler_params(self, chunk_width: int, denoise_step_per_stage: int):
+        self.chunk_width = chunk_width
+        self.denoise_step_per_stage = denoise_step_per_stage
 
     def set_timesteps(
         self,
@@ -43,6 +51,10 @@ class MagiScheduler(SchedulerInterface):
         device=None,
         shortcut_mode="16,16,8",
     ):
+
+        if device is not None:
+            self.device = device
+
         if num_inference_steps == 12:
             base_t = torch.linspace(0, 1, 4 + 1, device=device) / 4
             accu_num = torch.linspace(0, 1, 4 + 1, device=device)
@@ -123,7 +135,7 @@ class MagiScheduler(SchedulerInterface):
         t_index.reverse()
         timestep = self.timesteps[t_index]
         if has_clean_t:
-            ones = torch.ones(1, device=self.device) * self.clean_t
+            ones = torch.ones(1, device=timestep.device) * self.clean_t
             timestep = torch.cat([ones, timestep], 0)
         return timestep
 

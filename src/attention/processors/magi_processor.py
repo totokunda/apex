@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from einops import rearrange
 from src.attention import attention_register
-import math
+from diffusers.models.attention import Attention
 import torch.nn as nn
 import numbers
 from torch import Tensor
@@ -17,8 +17,9 @@ try:
 except:
     HAS_FLASH_ATTN = False
     from diffusers.models.embeddings import apply_rotary_emb
-    
-class LayerNorm(torch.nn.Module):
+
+
+class FusedLayerNorm(torch.nn.Module):
     """
     Layer Norm, fused into a single CUDA kernel.
     Borrow from: https://github.com/NVIDIA/Megatron-LM/blob/6501752396e9cc360ce894cda4b2217a58c1c09d/megatron/core/fusions/fused_layer_norm.py#L30
@@ -55,8 +56,19 @@ class LayerNorm(torch.nn.Module):
             input, self.hidden_dim, weight, self.bias, self.eps
         )
 
+
 class Attention(nn.Module):
-    def __init__(self, query_dim: int, cross_attention_dim: int, fuse_cross_attention: bool, heads: int, dim_head: int, eps: float, processor:Callable):
+    def __init__(
+        self,
+        query_dim: int,
+        cross_attention_dim: int = None,
+        fuse_cross_attention: bool = False,
+        heads: int = 8,
+        num_query_groups: int = 1,
+        dim_head: int = 64,
+        eps: float = 1e-5,
+        processor: Callable = None,
+    ):
         super().__init__()
         self.query_dim = query_dim
         self.cross_attention_dim = cross_attention_dim
@@ -66,22 +78,30 @@ class Attention(nn.Module):
         self.processor = processor
         self.inner_dim = dim_head * heads
         self.heads = heads
-        
-        self.fuse_cross_attention = fuse_cross_attention
-        
-        self.to_q = nn.Linear(query_dim, self.inner_dim, bias=False)
-        if fuse_cross_attention:
-            self.to_kv = nn.Linear(cross_attention_dim, self.inner_dim * 2, bias=False)
-        else:
-            self.to_k = nn.Linear(cross_attention_dim, self.inner_dim, bias=False)
-            self.to_v = nn.Linear(cross_attention_dim, self.inner_dim, bias=False)
-            
-        self.norm_q = LayerNorm(zero_centered_gamma=True, hidden_dim=self.inner_dim, eps=eps)
-        self.norm_k = LayerNorm(zero_centered_gamma=True, hidden_dim=self.inner_dim, eps=eps)
+        self.num_query_groups = num_query_groups
 
+        self.fuse_cross_attention = fuse_cross_attention
+
+        self.to_kv = None
+        self.to_k = None
+        self.to_v = None
+
+        self.to_q = nn.Linear(query_dim, self.inner_dim, bias=False)
+        if fuse_cross_attention and cross_attention_dim is not None:
+            self.to_kv = nn.Linear(self.inner_dim, cross_attention_dim * 2, bias=False)
+        elif cross_attention_dim is not None:
+            self.to_k = nn.Linear(self.inner_dim, cross_attention_dim, bias=False)
+            self.to_v = nn.Linear(self.inner_dim, cross_attention_dim, bias=False)
+
+        self.norm_q = FusedLayerNorm(
+            zero_centered_gamma=True, hidden_dim=dim_head, eps=eps
+        )
+        self.norm_k = FusedLayerNorm(
+            zero_centered_gamma=True, hidden_dim=dim_head, eps=eps
+        )
 
     def forward(self, *args, **kwargs):
-        return self.processor(*args, **kwargs)
+        return self.processor(self, *args, **kwargs)
 
 
 class MagiSelfAttentionProcessor:
@@ -118,10 +138,11 @@ class MagiSelfAttentionProcessor:
 
         query_dtype = query.dtype
 
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)  # S, B, H
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)  # S, B, H
+        with torch.autocast(device_type=query.device.type, dtype=torch.float32):
+            if attn.norm_q is not None:
+                query = attn.norm_q(query)  # S, B, H
+            if attn.norm_k is not None:
+                key = attn.norm_k(key)  # S, B, H
 
         # reshape query, key, value
         query = query.transpose(0, 1).contiguous()  # B, S, H/heads, heads
@@ -134,10 +155,10 @@ class MagiSelfAttentionProcessor:
             query = apply_rotary_emb(query, (cos_emb, sin_emb))
             key = apply_rotary_emb(key, (cos_emb, sin_emb))
 
-        query = rearrange(query, "b, sq, hn hd -> (sq, b) hn hd").contiguous()
-        key = rearrange(key, "b, sq, hn hd -> (sq, b) hn hd").contiguous()
+        query = rearrange(query, "b sq hn hd -> (sq b) hn hd").contiguous()
+        key = rearrange(key, "b sq hn hd -> (sq b) hn hd").contiguous()
         value = rearrange(
-            value, "sq, b, (hn, hd) -> (sq, b) hn hd", hd=attn_head_dim
+            value, "sq b (hn hd) -> (sq b) hn hd", hd=attn_head_dim
         ).contiguous()
 
         query = query.to(dtype=query_dtype)
@@ -148,6 +169,7 @@ class MagiSelfAttentionProcessor:
             extract_prefix_video_feature = kv_cache_params.get(
                 "extract_prefix_video_feature", False
             )
+
             fwd_extra_1st_chunk = kv_cache_params.get("fwd_extra_1st_chunk", False)
             slice_point = kv_cache_params.get("slice_point", 0)
             max_sequence_length = kv_cache_params.get("max_sequence_length", 0)
@@ -158,6 +180,7 @@ class MagiSelfAttentionProcessor:
             distill_nearly_clean_chunk = kv_cache_params.get(
                 "distill_nearly_clean_chunk", False
             )
+
             update_kv_cache = kv_cache_params.get("update_kv_cache", False)
             key_value = torch.cat([key, value], dim=-1)
 
@@ -172,7 +195,7 @@ class MagiSelfAttentionProcessor:
                     distill_nearly_clean_chunk,
                     update_kv_cache,
                     slice_point,
-                    attn.heads,
+                    attn.num_query_groups,
                     attn_head_dim,
                 )
 
@@ -209,18 +232,21 @@ class MagiSelfAttentionProcessor:
                 q = query[:, q_range[0, 0] : q_range[0, 1]]
                 k = key[:, kv_range[0, 0] : kv_range[0, 1]]
                 v = value[:, kv_range[0, 0] : kv_range[0, 1]]
+
             o = attention_register.call(
                 q=q.transpose(1, 2),
                 k=k.transpose(1, 2),
                 v=v.transpose(1, 2),
                 deterministic=torch.are_deterministic_algorithms_enabled(),
             )
-            o = rearrange(o, "b h, sq d -> (sq b) h d", b=batch_size)
+            o = rearrange(o, "b h sq d -> (sq b) h d", b=batch_size)
             core_attn_outs.append(o)
         core_attn_out = torch.cat(core_attn_outs, dim=0)
         core_attn_out = rearrange(
             core_attn_out, "(sq b) hn hd -> sq b (hn hd)", b=batch_size
         )
+
+        return core_attn_out
 
     def _full_adjust_key_and_value(
         self,
@@ -262,7 +288,9 @@ class MagiSelfAttentionProcessor:
             inference_key_and_value_memory = key_value_memory_dict[layer_number]
 
         sequence_start = slice_point * clip_token_nums * inf_max_batch_size
-        get_key_and_value = inference_key_and_value_memory[:sequence_start, ...].cuda()
+        get_key_and_value = inference_key_and_value_memory[:sequence_start, ...].to(
+            key_and_value.device
+        )
 
         # Copy key and values.
         if update_kv_cache:
@@ -273,7 +301,9 @@ class MagiSelfAttentionProcessor:
                 if distill_nearly_clean_chunk
                 else key_and_value_total.size(0)
             )
+
             sequence_end = sequence_start + clip_size
+
             assert sequence_end <= inference_key_and_value_memory.size(0)
             # update kv cache
             inference_key_and_value_memory[sequence_start:sequence_end, ...] = (
@@ -284,17 +314,25 @@ class MagiSelfAttentionProcessor:
         return key_and_value
 
     def _allocate_key_and_value_memory(
-        self, sequence_length, batch_size, dtype, device, attn_heads, attn_head_dim
+        self,
+        sequence_length,
+        batch_size,
+        dtype,
+        device,
+        num_query_groups,
+        attn_head_dim,
     ):
         """Allocate memory to store kv cache during inference."""
-        return torch.empty(
+
+        key_and_value_memory = torch.empty(
             sequence_length * batch_size,
-            attn_heads,
+            num_query_groups,
             attn_head_dim * 2,
             dtype=dtype,
             device=device,
-            pin_memory=True,
         )
+
+        return key_and_value_memory
 
 
 class MagiCrossAttentionProcessor:
@@ -309,6 +347,7 @@ class MagiCrossAttentionProcessor:
         max_seqlen_q: Optional[int] = None,
         max_seqlen_kv: Optional[int] = None,
         chunk_size=8,
+        **kwargs,
     ) -> torch.Tensor:
 
         attn_head_dim = hidden_states.shape[-1] // attn.heads
@@ -321,8 +360,11 @@ class MagiCrossAttentionProcessor:
             hd=attn_head_dim,
         )
 
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
+        query_dtype = query.dtype
+
+        with torch.autocast(device_type=query.device.type, dtype=torch.float32):
+            if attn.norm_q is not None:
+                query = attn.norm_q(query)
 
         mixed_key_value = torch.concat(
             [
@@ -336,8 +378,14 @@ class MagiCrossAttentionProcessor:
             encoder_hidden_states.shape[0], -1, 2 * attn_head_dim
         )
         key, value = self.split_tensor_along_last_dim(mixed_key_value, 2)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
+
+        with torch.autocast(device_type=key.device.type, dtype=torch.float32):
+            if attn.norm_k is not None:
+                key = attn.norm_k(key)
+
+        query = query.to(dtype=query_dtype)
+        key = key.to(dtype=query_dtype)
+        value = value.to(dtype=query_dtype)
 
         if attention_register.is_available("flash"):
             attn_out = (
@@ -370,10 +418,14 @@ class MagiCrossAttentionProcessor:
         attn_out = rearrange(
             attn_out, "(b sq) hn hd -> sq b (hn hd)", b=batch_size
         ).contiguous()
+
         return attn_out
 
     def split_tensor_along_last_dim(
-        tensor: torch.Tensor, num_partitions: int, contiguous_split_chunks: bool = False
+        self,
+        tensor: torch.Tensor,
+        num_partitions: int,
+        contiguous_split_chunks: bool = False,
     ) -> List[torch.Tensor]:
         """Split a tensor along its last dimension.
 

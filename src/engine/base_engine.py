@@ -321,7 +321,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
                     f"Saving converted vae weights to {component.get('model_path', None)}"
                 )
                 model_path = component.get("model_path", None)
-                tmp_dir = tempfile.mkdtemp(dir="/mnt/localssd")
+                tmp_dir = tempfile.mkdtemp()
                 try:
                     self.save_component(
                         vae, tmp_dir, "vae", **self.config.get("save_kwargs", {})
