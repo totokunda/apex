@@ -2,7 +2,9 @@ import torch
 from typing import Dict, Any, Callable, List, Union
 import math
 from .base import MagiBaseEngine
-
+from einops import rearrange
+from PIL import Image
+from tqdm import tqdm
 
 class MagiT2VEngine(MagiBaseEngine):
     """Magi Text-to-Video Engine Implementation"""
@@ -32,6 +34,8 @@ class MagiT2VEngine(MagiBaseEngine):
         prev_chunk_scales: List[float] = [1.5, 1.5, 1.5, 1.0, 1.0],
         distill_nearly_clean_chunk_threshold: float = 0.3,
         window_size: int = 4,
+        distill: bool = False,
+        kv_offload: bool = True,
         **kwargs
     ):
         """Text-to-video generation using MAGI's chunk-based approach"""
@@ -72,7 +76,7 @@ class MagiT2VEngine(MagiBaseEngine):
             device=self.device,
             num_videos_per_prompt=num_videos,
         )
-
+    
         prompt_embeds, prompt_embeds_mask = self._process_txt_embeddings(
             caption_embs=prompt_embeds,
             emb_masks=prompt_embeds_mask,
@@ -80,21 +84,21 @@ class MagiT2VEngine(MagiBaseEngine):
             infer_chunk_num=num_chunks,
             clean_chunk_num=0,
         )
-
+  
         null_emb_masks = torch.zeros_like(prompt_embeds_mask)
         null_embs, null_emb_masks = self.process_null_embeddings(
             null_caption_embedding=null_caption_embeds,
             null_emb_masks=null_emb_masks,
             infer_chunk_num=num_chunks,
         )
-
+        
         if prompt_embeds_mask.sum() == 0:
             prompt_embeds_mask = torch.cat([null_emb_masks, null_emb_masks], dim=0)
             prompt_embeds = torch.cat([null_embs, null_embs])
         else:
             prompt_embeds_mask = torch.cat([prompt_embeds_mask, null_emb_masks], dim=0)
             prompt_embeds = torch.cat([prompt_embeds, null_embs])
-
+        
         latent = self._get_latents(
             height=height,
             width=width,
@@ -135,14 +139,24 @@ class MagiT2VEngine(MagiBaseEngine):
             distill_nearly_clean_chunk_threshold=distill_nearly_clean_chunk_threshold,
             transformer_dtype=transformer_dtype,
             clean_chunk_kvrange=clean_chunk_kvrange,
+            distill=distill,
+            kv_offload=kv_offload,
         )
 
         if offload:
             self._offload(self.transformer)
 
         if return_latents:
-            return latents
+            return torch.cat(latents, dim=0)
         else:
-            video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
-            return postprocessed_video
+            videos = []
+            for latent in tqdm(latents, desc="Decoding latents"): 
+                video = self.vae_decode(latent, offload=False)
+                video = rearrange(video, "b c t h w -> (b t) c h w")
+                video = (video * 127.5 + 127.5).clamp(0, 255).to(torch.uint8)
+                videos.append(video)
+            
+            videos = torch.cat(videos, dim=0).permute(0, 2, 3, 1).cpu().numpy()
+            videos = [Image.fromarray(video) for video in videos]
+    
+            return [videos]

@@ -252,19 +252,14 @@ class AutoencoderKLMagi(
         N, C, T, H, W = x.shape
         if T == 1 and self._temporal_downsample_factor > 1:
             x = x.expand(-1, -1, 4, -1, -1)
-            x = self.encoder(x)
-            posterior = DiagonalGaussianDistribution(x)
-            z = posterior.mode()
-            return z[:, :, :1, :, :].type(x.dtype)
+            z = self.encoder(x)
         else:
-            x = self.encoder(x)
-            posterior = DiagonalGaussianDistribution(x)
-            z = posterior.mode()
-            return z.type(x.dtype)
+            z = self.encoder(x)
+        return z
 
     @apply_forward_hook
     def encode(
-        self, x: torch.Tensor, return_dict: bool = True
+        self, x: torch.Tensor, return_dict: bool = True, **tiled_kwargs
     ) -> Union[AutoencoderKLOutput, Tuple[DiagonalGaussianDistribution]]:
         """
         Encode a batch of videos into latents.
@@ -280,12 +275,14 @@ class AutoencoderKLMagi(
         """
         if self.use_slicing and x.shape[0] > 1:
             encoded_slices = [self._encode(x_slice) for x_slice in x.split(1)]
-            h = torch.cat(encoded_slices)
+            z = torch.cat(encoded_slices)
+            posterior = DiagonalGaussianDistribution(z)
+        elif self.use_tiling:
+            z = self.tiled_encode_3d(x, **tiled_kwargs)
+            posterior = DiagonalGaussianDistribution(z)
         else:
-            h = self._encode(x)
-
-        posterior = DiagonalGaussianDistribution(h)
-
+            z = self._encode(x)
+            posterior = DiagonalGaussianDistribution(z)
         if not return_dict:
             return (posterior,)
         return AutoencoderKLOutput(latent_dist=posterior)
@@ -293,8 +290,7 @@ class AutoencoderKLMagi(
     def _decode(
         self,
         z: torch.Tensor,
-        return_dict: bool = True,
-    ) -> Union[DecoderOutput, torch.Tensor]:
+    ) -> torch.Tensor:
         """Internal decode method"""
         N, C, T, H, W = z.shape
         if T == 1:
@@ -304,16 +300,14 @@ class AutoencoderKLMagi(
         else:
             dec = self.decoder(z)
 
-        if not return_dict:
-            return (dec,)
-
-        return DecoderOutput(sample=dec)
+        return dec
 
     @apply_forward_hook
     def decode(
         self,
         z: torch.Tensor,
         return_dict: bool = True,
+        **tiled_kwargs
     ) -> Union[DecoderOutput, torch.Tensor]:
         """
         Decode a batch of images.
@@ -328,11 +322,14 @@ class AutoencoderKLMagi(
                 If return_dict is True, a [`~models.vae.DecoderOutput`] is returned, otherwise a plain `tuple` is
                 returned.
         """
+     
         if self.use_slicing and z.shape[0] > 1:
-            decoded_slices = [self._decode(z_slice).sample for z_slice in z.split(1)]
+            decoded_slices = [self._decode(z_slice) for z_slice in z.split(1)]
             decoded = torch.cat(decoded_slices)
+        elif self.use_tiling:
+            decoded = self.tiled_decode_3d(z, **tiled_kwargs)
         else:
-            decoded = self._decode(z).sample
+            decoded = self._decode(z)
 
         if not return_dict:
             return (decoded,)
@@ -379,3 +376,4 @@ class AutoencoderKLMagi(
         else:
             latents = latents / self.config.scaling_factor
         return latents
+   

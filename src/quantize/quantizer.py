@@ -385,6 +385,8 @@ class ModelQuantizer:
         self,
         model: torch.nn.Module,
         max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None,
+        device: torch.device | str | None = None,
+        device_map: Optional[Dict[str, Union[str, int]]] = None,
     ) -> torch.nn.Module:
         """
         Quantize model with optimal memory allocation and performance settings.
@@ -427,7 +429,7 @@ class ModelQuantizer:
                     preserved_params[name] = param.data.clone().to(preserve_dtype)
 
             # 3) Preprocess model for quantization
-            self.quantizer.preprocess_model(model)
+            self.quantizer.preprocess_model(model, state_dict=model.state_dict(), device_map=device_map if device_map else {"": device})
 
             # 4) Restore preserved dtypes
             for name, preserved_data in preserved_params.items():
@@ -605,7 +607,9 @@ def quantize_model(
     target_memory_gb: Optional[float] = None,
     max_memory: Optional[Dict[Union[int, str], Union[int, str]]] = None,
     auto_optimize: bool = True,
-    preserve_dtypes: Optional[Union[Dict[str, torch.dtype], str, Path]] = None
+    preserve_dtypes: Optional[Union[Dict[str, torch.dtype], str, Path]] = None,
+    device: torch.device | str | None = None,
+    device_map: Optional[Dict[str, Union[str, int]]] = None,
 ) -> torch.nn.Module:
     """
     Convenience function for quantizing models with dtype preservation.
@@ -639,4 +643,4 @@ def quantize_model(
         auto_optimize=auto_optimize,
         preserve_dtypes=preserve_dtypes
     )
-    return quantizer.quantize(model, max_memory=max_memory)
+    return quantizer.quantize(model, max_memory=max_memory, device=device, device_map=device_map)

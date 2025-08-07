@@ -1,61 +1,212 @@
+from src.transformer.magi.base.model import MagiTransformer3DModel
+import sys
+import pickle
 import torch
-import ffmpeg
-import torchvision
-def ffmpeg_i2v(image_path, w=384, h=224, aspect_policy="fit"):
-    r = ffmpeg.input("pipe:0", format="image2pipe")
-    if aspect_policy == "crop":
-        r = r.filter("scale", w, h, force_original_aspect_ratio="increase").filter("crop", w, h)
-    elif aspect_policy == "pad":
-        r = r.filter("scale", w, h, force_original_aspect_ratio="decrease").filter(
-            "pad", w, h, "(ow-iw)/2", "(oh-ih)/2", color="black"
-        )
-    elif aspect_policy == "fit":
-        r = r.filter("scale", w, h)
-    else:
-        print(f"Unknown aspect policy: {aspect_policy}, using fit as fallback")
-        r = r.filter("scale", w, h)
-    image_byte = open(image_path, "rb").read()
-    try:
-        out, _ = r.output("pipe:", format="rawvideo", pix_fmt="rgb24", vframes=1).run(
-            input=image_byte, capture_stdout=True, capture_stderr=True
-        )
-    except ffmpeg.Error as e:
-        print(f"Error occurred: {e.stderr.decode()}")
-        raise e
+from src.attention import attention_register
 
-    video = torch.frombuffer(out, dtype=torch.uint8).view(1, h, w, 3)
-    return video
+from torch.distributed import destroy_process_group
 
+sys.path.append("/workspace/apex/MAGI-1")
+from inference.infra.distributed import dist_init
+from inference.model.dit import get_dit
+from einops import rearrange
+from inference.common import MagiConfig
+from inference.common import (
+    InferenceParams,
+    MagiConfig,
+    ModelMetaArgs,
+    PackedCoreAttnParams,
+    PackedCrossAttnParams
+)
 
-def ffmpeg_v2v(video_path, fps, w=384, h=224, prefix_frame=None, prefix_video_max_chunk=5):
-    if video_path is None:
-        return None
-    out, _ = (
-        ffmpeg.input(video_path, ss=0, format="mp4")
-        .filter("fps", fps=fps)
-        .filter("scale", w, h)
-        .output("pipe:", format="rawvideo", pix_fmt="rgb24", nostdin=None)
-        .run(capture_stdout=True, capture_stderr=True)
+config = MagiConfig.from_json(
+    "/workspace/apex/MAGI-1/example/4.5B/4.5B_base_config.json"
+)
+
+dist_init(config)
+attention_register.set_default('flash')
+
+inputs = pickle.load(open("/workspace/apex/forward_3cfg.pkl", "rb"))
+modela: MagiTransformer3DModel = (
+    MagiTransformer3DModel.from_pretrained(
+        "/workspace/models/components/sand-ai_MAGI-1_ckpt_magi_4.5B_base_inference_weight/ckpt/magi/4.5B_base/inference_weight/transformer",
+        torch_dtype=torch.bfloat16,
     )
+    .cuda()
+    .eval()
+)
 
-    video = torch.frombuffer(out, dtype=torch.uint8).view(-1, h, w, 3)
+for name, param in modela.named_parameters():
+    if "attn2.norm_q" in name or "attn2.norm_k" in name:
+        # make param bfloat16
+        param.data = param.data.to(torch.bfloat16)
 
-    if prefix_frame is not None:
-        return video[:prefix_frame]
-    else:
-        num_frames_to_read = video.shape[0]
-        if num_frames_to_read < fps:
-            clip_length = 1
-        else:
-            PREFIX_VIDEO_MAX_FRAMES = prefix_video_max_chunk * fps
-            clip_length = min(num_frames_to_read // fps * fps, PREFIX_VIDEO_MAX_FRAMES)
-        return video[-clip_length:]
+modelb = get_dit(config).eval()
+
+for k, v in inputs.items():
+    if isinstance(v, torch.Tensor):
+        inputs[k] = v.cuda()
+
+out = inputs.pop("out_cond_pre_and_text")
+x = inputs.pop("x")
+t = inputs.pop("timestep")
+y = inputs.pop("y")
+caption_dropout_mask = inputs.pop("caption_dropout_mask")
+xattn_mask = inputs.pop("xattn_mask")
+kv_range = inputs.pop("kv_range")
+inference_params: InferenceParams = inputs.pop("inference_params")
+
+dtype = torch.bfloat16
+
+kv_cache_params_a = {
+    "max_sequence_length": inference_params.max_sequence_length,
+    "max_batch_size": inference_params.max_batch_size,
+    "key_value_memory_dict": inference_params.key_value_memory_dict,
+    "sequence_length_offset": inference_params.sequence_len_offset,
+}
+
+with torch.no_grad():
+    out_b = modelb(
+        x=x,
+        t=t,
+        y=y,
+        xattn_mask=xattn_mask,
+        caption_dropout_mask=caption_dropout_mask,
+        kv_range=kv_range,
+        inference_params=inference_params,
+        **inputs
+    )
+    
+    out_a = modela(
+        hidden_states=x,
+        timestep=t,
+        encoder_hidden_states=y,
+        encoder_hidden_states_mask=xattn_mask,
+        caption_dropout_mask=caption_dropout_mask,
+        kv_cache_params=kv_cache_params_a,
+        kv_range=kv_range,
+        return_dict=False,
+        **inputs
+    )[0]
+    
+    torch.testing.assert_close(out_a, out_b, atol=1e-4, rtol=1e-1)
+    exit()
+
+    x = x * config.model_config.x_rescale_factor
+    x = x.float()
+    t = t.float()
+    y = y.float()
+
+    with torch.autocast(device_type="cuda", dtype=torch.float32):
+        (
+            hidden_states_a,
+            condition_a,
+            condition_map_a,
+            rotary_pos_emb_a,
+            encoder_hidden_states_flat_a,
+            H_a,
+            W_a,
+            kv_cache_params_meta_a,
+            cross_attn_params_a,
+            self_attn_params_a,
+        ) = modela.get_embedding_and_meta(
+            x, t, y, caption_dropout_mask, xattn_mask, kv_range, **inputs
+        )
     
     
     
-img = "/workspace/apex/assets/images/IMG_6954.JPG"
+    kv_cache_params_a.update(kv_cache_params_meta_a)
+    hidden_states_a = hidden_states_a.to(dtype)
+    hidden_states_a = rearrange(hidden_states_a, "N C T H W -> (T H W) N C").contiguous()  # (thw, N, D)
+    # condition and y_xattn_flat will be downcast to bfloat16 in transformer block.
+    condition_a = condition_a.to(dtype)
+    encoder_hidden_states_flat_a = encoder_hidden_states_flat_a.to(dtype)
+    block_hidden_states_a = hidden_states_a.clone()
+    
+    for block in modela.blocks:
+        block_hidden_states_a = block(
+            hidden_states=block_hidden_states_a,
+            condition=condition_a,
+            condition_map=condition_map_a,
+            rotary_pos_emb=rotary_pos_emb_a,
+            encoder_hidden_states=encoder_hidden_states_flat_a,
+            self_attn_params=self_attn_params_a,
+            cross_attn_params=cross_attn_params_a,
+            kv_cache_params=kv_cache_params_a,
+        )
+        
+    block_hidden_states_a = block_hidden_states_a.to(torch.float32)
+    out_a = modela.norm_out(block_hidden_states_a)
+    with torch.autocast(device_type="cuda", dtype=torch.float32):
+        out_a = modela.proj_out(out_a)
+    
 
-img_tensor = ffmpeg_i2v(img).squeeze(0).permute(2, 0, 1)
-print(img_tensor.shape)
-# save img_tensor as png
-torchvision.io.write_png(img_tensor, "img.png")
+    with torch.autocast(device_type="cuda", dtype=torch.float32):
+        (
+            x_b,
+            condition_b,
+            condition_map_b,
+            rotary_pos_emb_b,
+            y_xattn_flat_b,
+            xattn_mask_for_cuda_graph_b,
+            H_b,
+            W_b,
+            ardf_meta_b,
+            cross_attn_params_b,
+        ) = modelb.get_embedding_and_meta(
+            x, t, y, caption_dropout_mask, xattn_mask, kv_range, **inputs
+        )
+    
+    x_b = x_b.to(dtype)
+    x_b = rearrange(x_b, "N C T H W -> (T H W) N C").contiguous()  # (thw, N, D)
+    # condition and y_xattn_flat will be downcast to bfloat16 in transformer block.
+    condition_b = condition_b.to(dtype)
+    y_xattn_flat_b = y_xattn_flat_b.to(dtype)
+    core_attn_params = PackedCoreAttnParams(
+        q_range=ardf_meta_b["q_range"],
+        k_range=ardf_meta_b["k_range"],
+        np_q_range=ardf_meta_b["q_range"].cpu().numpy(),
+        np_k_range=ardf_meta_b["k_range"].cpu().numpy(),
+        max_seqlen_q=ardf_meta_b["max_seqlen_q"],
+        max_seqlen_k=ardf_meta_b["max_seqlen_k"],
+    )
+    
+    meta_args = ModelMetaArgs(
+        H=H_b,
+        W=W_b,
+        cp_pad_size=None,
+        cp_split_sizes=None,
+        slice_point=ardf_meta_b["slice_point"],
+        denoising_range_num=ardf_meta_b["denoising_range_num"],
+        range_num=ardf_meta_b["range_num"],
+        extract_prefix_video_feature=inputs.get("extract_prefix_video_feature", False),
+        fwd_extra_1st_chunk=inputs["fwd_extra_1st_chunk"],
+        distill_nearly_clean_chunk=inputs.get("distill_nearly_clean_chunk", False),
+        clip_token_nums=ardf_meta_b["clip_token_nums"],
+        enable_cuda_graph=False,
+        core_attn_params=core_attn_params,
+        cross_attn_params=cross_attn_params_b,
+    )
+    
+    out_b = modelb.videodit_blocks(
+        hidden_states=x_b,
+        condition=condition_b,
+        condition_map=condition_map_b,
+        rotary_pos_emb=rotary_pos_emb_b,
+        y_xattn_flat=y_xattn_flat_b,
+        meta_args=meta_args,
+        inference_params=inference_params,
+    )
+    
+    with torch.autocast(device_type="cuda", dtype=torch.float32):
+        out_b = modelb.final_linear(out_b)
+    
+    print(torch.allclose(hidden_states_a, x_b))
+    print(torch.allclose(condition_a, condition_b))
+    print(torch.allclose(condition_map_a, condition_map_b))
+    print(torch.allclose(rotary_pos_emb_a, rotary_pos_emb_b))
+    print(torch.allclose(encoder_hidden_states_flat_a, y_xattn_flat_b))
+    torch.testing.assert_close(out_a, out_b, atol=1e-4, rtol=1e-1)
+        
+
+destroy_process_group()

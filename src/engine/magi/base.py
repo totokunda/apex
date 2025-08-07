@@ -3,6 +3,9 @@ from typing import Dict, Any, Callable, List, Union, Optional, Tuple
 import math
 import os
 import numpy as np
+from PIL import Image
+import io
+import ffmpeg
 
 SPECIAL_TOKEN_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
@@ -116,10 +119,6 @@ class MagiBaseEngine:
         """Aspect ratio resize"""
         return self.main_engine._aspect_ratio_resize(*args, **kwargs)
 
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
     def _load_video(self, *args, **kwargs):
         """Load video"""
         return self.main_engine._load_video(*args, **kwargs)
@@ -155,12 +154,12 @@ class MagiBaseEngine:
 
     def get_special_token_keys(
         self,
-        add_pad_static: bool = True,
-        add_pad_dynamic: bool = True,
-        add_pad_borderness: bool = True,
+        add_pad_static: bool = False,
+        add_pad_dynamic: bool = False,
+        add_pad_borderness: bool = False,
         add_pad_hq: bool = True,
-        add_pad_three_d_model: bool = True,
-        add_pad_two_d_anime: bool = True,
+        add_pad_three_d_model: bool = False,
+        add_pad_two_d_anime: bool = False,
         pad_duration: bool = True,
     ) -> List[str]:
         special_token_keys = []
@@ -182,8 +181,10 @@ class MagiBaseEngine:
         )
         return special_token_keys
 
-    def get_negative_special_token_keys(self) -> List[str]:
-        return ["CAPTION_TOKEN", "LOGO_TOKEN", "TRANS_TOKEN", "BORDERNESS_TOKEN"]
+    def get_negative_special_token_keys(self, is_negative_prompt: bool = False) -> List[str]:
+        if is_negative_prompt:
+            return ["CAPTION_TOKEN", "LOGO_TOKEN", "TRANS_TOKEN", "BORDERNESS_TOKEN"]
+        return None
 
     def pad_special_token_tensor(
         self,
@@ -261,11 +262,11 @@ class MagiBaseEngine:
         emb_masks = emb_masks.unsqueeze(1).repeat(
             1, infer_chunk_num - clean_chunk_num, 1
         )
-
+        
         caption_embs, emb_masks = self.pad_special_token(
             special_token_keys, caption_embs, emb_masks
         )
-
+        
         # clean chunk with null_emb
         caption_embs = torch.cat(
             [null_emb.repeat(1, clean_chunk_num, 1, 1), caption_embs], dim=1
@@ -283,6 +284,7 @@ class MagiBaseEngine:
             ],
             dim=1,
         )
+        
         return caption_embs, emb_masks
 
     def process_null_embeddings(
@@ -291,8 +293,10 @@ class MagiBaseEngine:
         null_emb_masks: torch.Tensor,
         infer_chunk_num: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+
         null_embs = null_caption_embedding.repeat(1, infer_chunk_num, 1, 1)
         negative_special_token_keys = self.get_negative_special_token_keys()
+
         if negative_special_token_keys:
             null_embs, _ = self.pad_special_token(
                 negative_special_token_keys, null_embs, None
@@ -303,3 +307,32 @@ class MagiBaseEngine:
         null_emb_masks[:, :, null_token_length:] = 0
 
         return null_embs, null_emb_masks
+    
+    def _load_image(self, image, w=384, h=224, aspect_policy="fit"):
+        loaded_image: Image.Image = self.main_engine._load_image(image)
+        image_bytes = io.BytesIO()
+        loaded_image.save(image_bytes, format="PNG")
+        image_bytes = image_bytes.getvalue()
+        r = ffmpeg.input("pipe:0", format="image2pipe")
+        if aspect_policy == "crop":
+            r = r.filter("scale", w, h, force_original_aspect_ratio="increase").filter(
+                "crop", w, h
+            )
+        elif aspect_policy == "pad":
+            r = r.filter("scale", w, h, force_original_aspect_ratio="decrease").filter(
+                "pad", w, h, "(ow-iw)/2", "(oh-ih)/2", color="black"
+            )
+        elif aspect_policy == "fit":
+            r = r.filter("scale", w, h)
+        else:
+            r = r.filter("scale", w, h)
+        try:
+            out, _ = r.output("pipe:", format="rawvideo", pix_fmt="rgb24", vframes=1).run(
+                input=image_bytes, capture_stdout=True, capture_stderr=True
+            )
+        except ffmpeg.Error as e:
+            print(f"Error occurred: {e.stderr.decode()}")
+            raise e
+
+        video = torch.frombuffer(out, dtype=torch.uint8).view(1, h, w, 3)
+        return video

@@ -24,6 +24,7 @@ from timm.models.layers import to_2tuple, trunc_normal_
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.attention_processor import Attention
 from abc import ABC, abstractmethod
+from flash_attn import flash_attn_func, flash_attn_qkvpacked_func
 from tqdm import tqdm
 
 from src.attention import attention_register
@@ -311,6 +312,89 @@ def cache_rotary_emb(
         dtype=dtype,
     )
 
+###################################################
+@lru_cache(maxsize=50)
+def cache_rotary_emb(feat_shape, device='cuda', dim=64, dtype=torch.bfloat16, max_res=512, ref_feat_shape=(4, 16, 16)):
+    return build_rotary_pos_embed(
+        feat_shape=feat_shape,
+        dim=dim,
+        max_res=max_res,
+        in_pixels=False,
+        ref_feat_shape=ref_feat_shape,
+        device=device,
+        dtype=dtype,
+    )
+
+
+# class Attention(nn.Module):
+#     def __init__(
+#         self,
+#         dim,
+#         num_heads=8,
+#         qkv_bias=False,
+#         qk_scale=None,
+#         attn_drop=0.0,
+#         proj_drop=0.0,
+#         ln_in_attn=False,
+#         use_rope=False,
+#     ):
+#         super().__init__()
+#         self.num_heads = num_heads
+#         head_dim = dim // num_heads
+# 
+#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+#         self.attn_drop_rate = attn_drop
+#         self.proj = nn.Linear(dim, dim)
+#         self.proj_drop = nn.Dropout(proj_drop)
+#         if ln_in_attn:
+#             self.qkv_norm = ManualLayerNorm(head_dim, elementwise_affine=False)
+#         else:
+#             self.qkv_norm = nn.Identity()
+#         self.use_rope = use_rope
+# 
+#     def forward(self, x, feat_shape=None):
+#         B, N, C = x.shape
+#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+#         qkv = self.qkv_norm(qkv)
+#         q, k, v = qkv.chunk(3, dim=2)
+#         
+#         if self.use_rope:
+#             assert feat_shape is not None
+#             rope_emb = cache_rotary_emb(
+#                 feat_shape=feat_shape,
+#                 dim=C // self.num_heads,
+#                 device=x.device,
+#                 dtype=x.dtype,
+#             )
+#             
+#             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
+#             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
+#             q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
+#             k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
+#             
+#             
+#             q = q.squeeze(2).transpose(1, 2)
+#             k = k.squeeze(2).transpose(1, 2)
+#             v = v.squeeze(2).transpose(1, 2)
+# 
+#             x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+#             
+#         else:
+#             q = q.squeeze(2)
+#             k = k.squeeze(2)
+#             v = v.squeeze(2)
+#             # Use registered attention function for packed QKV
+#             q = q.transpose(1, 2)  # (B, hn, N, hd)
+#             k = k.transpose(1, 2)  # (B, hn, N, hd)
+#             v = v.transpose(1, 2)  # (B, hn, N, hd)
+#         
+#             x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+#             
+#         x = x.reshape(B, N, C)
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
+#         return x
+# 
 
 class Attention(nn.Module):
     def __init__(
@@ -341,47 +425,35 @@ class Attention(nn.Module):
     def forward(self, x, feat_shape=None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
         qkv = self.qkv_norm(qkv)
         q, k, v = qkv.chunk(3, dim=2)
-        
 
         if self.use_rope:
             assert feat_shape is not None
+            q, k, v = qkv.chunk(3, dim=2)
             rope_emb = cache_rotary_emb(
                 feat_shape=feat_shape,
                 dim=C // self.num_heads,
                 device=x.device,
                 dtype=x.dtype,
             )
-            
             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
-            q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
-            k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
-            
-            
-            q = q.squeeze(2).transpose(1, 2)
-            k = k.squeeze(2).transpose(1, 2)
-            v = v.squeeze(2).transpose(1, 2)
 
-            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-            
+            q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb).bfloat16()
+            k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb).bfloat16()
+            x = flash_attn_func(q, k, v, dropout_p=self.attn_drop_rate)
         else:
-            q = q.squeeze(2)
-            k = k.squeeze(2)
-            v = v.squeeze(2)
-            # Use registered attention function for packed QKV
-            q = q.transpose(1, 2)  # (B, hn, N, hd)
-            k = k.transpose(1, 2)  # (B, hn, N, hd)
-            v = v.transpose(1, 2)  # (B, hn, N, hd)
-        
-            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-            
+            x = flash_attn_qkvpacked_func(
+                qkv=qkv.bfloat16(), dropout_p=self.attn_drop_rate
+            )
+        # x = v
         x = x.reshape(B, N, C)
+        # import ipdb; ipdb.set_trace()
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
-
 
 ###################################################
 # Block
