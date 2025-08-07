@@ -21,17 +21,9 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from timm.models.layers import to_2tuple, trunc_normal_
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.attention_processor import Attention
-from abc import ABC, abstractmethod
-from flash_attn import flash_attn_func, flash_attn_qkvpacked_func
-from tqdm import tqdm
-
-from src.attention import attention_register
-
-# import OrderedDict
 from collections import OrderedDict
-
+from tqdm import tqdm
+from src.attention import attention_register
 ###################################################
 #     modified 3D rotary embedding from timm
 ###################################################
@@ -241,6 +233,75 @@ def build_rotary_pos_embed(
     cos_emb = cos_emb.reshape(num_spatial_dim, -1).repeat_interleave(2, -1)
     return sin_emb, cos_emb
 
+class Attention(nn.Module):
+    def __init__(
+        self,
+        dim,
+        num_heads=8,
+        qkv_bias=False,
+        qk_scale=None,
+        attn_drop=0.0,
+        proj_drop=0.0,
+        ln_in_attn=False,
+        use_rope=False,
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop_rate = attn_drop
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        if ln_in_attn:
+            self.qkv_norm = ManualLayerNorm(head_dim, elementwise_affine=False)
+        else:
+            self.qkv_norm = nn.Identity()
+        self.use_rope = use_rope
+
+    def forward(self, x, feat_shape=None):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        qkv = self.qkv_norm(qkv)
+        q, k, v = qkv.chunk(3, dim=2)
+        
+        if self.use_rope:
+            assert feat_shape is not None
+            rope_emb = cache_rotary_emb(
+                feat_shape=feat_shape,
+                dim=C // self.num_heads,
+                device=x.device,
+                dtype=x.dtype,
+            )
+            
+            sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
+            cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
+            q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
+            k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
+            
+            
+            q = q.squeeze(2).transpose(1, 2)
+            k = k.squeeze(2).transpose(1, 2)
+            v = v.squeeze(2).transpose(1, 2)
+
+            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+            
+        else:
+            q = q.squeeze(2)
+            k = k.squeeze(2)
+            v = v.squeeze(2)
+            # Use registered attention function for packed QKV
+            q = q.transpose(1, 2)  # (B, hn, N, hd)
+            k = k.transpose(1, 2)  # (B, hn, N, hd)
+            v = v.transpose(1, 2)  # (B, hn, N, hd)
+        
+            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
+            
+        x = x.reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
 
 ###################################################
 # Mlp
@@ -312,148 +373,7 @@ def cache_rotary_emb(
         dtype=dtype,
     )
 
-###################################################
-@lru_cache(maxsize=50)
-def cache_rotary_emb(feat_shape, device='cuda', dim=64, dtype=torch.bfloat16, max_res=512, ref_feat_shape=(4, 16, 16)):
-    return build_rotary_pos_embed(
-        feat_shape=feat_shape,
-        dim=dim,
-        max_res=max_res,
-        in_pixels=False,
-        ref_feat_shape=ref_feat_shape,
-        device=device,
-        dtype=dtype,
-    )
 
-
-# class Attention(nn.Module):
-#     def __init__(
-#         self,
-#         dim,
-#         num_heads=8,
-#         qkv_bias=False,
-#         qk_scale=None,
-#         attn_drop=0.0,
-#         proj_drop=0.0,
-#         ln_in_attn=False,
-#         use_rope=False,
-#     ):
-#         super().__init__()
-#         self.num_heads = num_heads
-#         head_dim = dim // num_heads
-# 
-#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-#         self.attn_drop_rate = attn_drop
-#         self.proj = nn.Linear(dim, dim)
-#         self.proj_drop = nn.Dropout(proj_drop)
-#         if ln_in_attn:
-#             self.qkv_norm = ManualLayerNorm(head_dim, elementwise_affine=False)
-#         else:
-#             self.qkv_norm = nn.Identity()
-#         self.use_rope = use_rope
-# 
-#     def forward(self, x, feat_shape=None):
-#         B, N, C = x.shape
-#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
-#         qkv = self.qkv_norm(qkv)
-#         q, k, v = qkv.chunk(3, dim=2)
-#         
-#         if self.use_rope:
-#             assert feat_shape is not None
-#             rope_emb = cache_rotary_emb(
-#                 feat_shape=feat_shape,
-#                 dim=C // self.num_heads,
-#                 device=x.device,
-#                 dtype=x.dtype,
-#             )
-#             
-#             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
-#             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
-#             q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
-#             k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
-#             
-#             
-#             q = q.squeeze(2).transpose(1, 2)
-#             k = k.squeeze(2).transpose(1, 2)
-#             v = v.squeeze(2).transpose(1, 2)
-# 
-#             x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-#             
-#         else:
-#             q = q.squeeze(2)
-#             k = k.squeeze(2)
-#             v = v.squeeze(2)
-#             # Use registered attention function for packed QKV
-#             q = q.transpose(1, 2)  # (B, hn, N, hd)
-#             k = k.transpose(1, 2)  # (B, hn, N, hd)
-#             v = v.transpose(1, 2)  # (B, hn, N, hd)
-#         
-#             x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-#             
-#         x = x.reshape(B, N, C)
-#         x = self.proj(x)
-#         x = self.proj_drop(x)
-#         return x
-# 
-
-class Attention(nn.Module):
-    def __init__(
-        self,
-        dim,
-        num_heads=8,
-        qkv_bias=False,
-        qk_scale=None,
-        attn_drop=0.0,
-        proj_drop=0.0,
-        ln_in_attn=False,
-        use_rope=False,
-    ):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop_rate = attn_drop
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-        if ln_in_attn:
-            self.qkv_norm = ManualLayerNorm(head_dim, elementwise_affine=False)
-        else:
-            self.qkv_norm = nn.Identity()
-        self.use_rope = use_rope
-
-    def forward(self, x, feat_shape=None):
-        B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
-
-        qkv = self.qkv_norm(qkv)
-        q, k, v = qkv.chunk(3, dim=2)
-
-        if self.use_rope:
-            assert feat_shape is not None
-            q, k, v = qkv.chunk(3, dim=2)
-            rope_emb = cache_rotary_emb(
-                feat_shape=feat_shape,
-                dim=C // self.num_heads,
-                device=x.device,
-                dtype=x.dtype,
-            )
-            sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
-            cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
-
-            q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb).bfloat16()
-            k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb).bfloat16()
-            x = flash_attn_func(q, k, v, dropout_p=self.attn_drop_rate)
-        else:
-            x = flash_attn_qkvpacked_func(
-                qkv=qkv.bfloat16(), dropout_p=self.attn_drop_rate
-            )
-        # x = v
-        x = x.reshape(B, N, C)
-        # import ipdb; ipdb.set_trace()
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x
 
 ###################################################
 # Block
@@ -992,6 +912,9 @@ class DiagonalGaussianDistribution(object):
         return self.mean
 
 
+
+
+
 class ParallelHelper:
     def __init__(self):
         pass
@@ -1051,7 +974,6 @@ class ParallelHelper:
         frames: List[torch.Tensor],
         global_tile_idxs: List[int],
         parallel_group: torch.distributed.ProcessGroup = None,
-        device: torch.device = torch.device('cuda'),
     ) -> List[torch.Tensor]:
         """
         Gathers frame data from all ranks in a distributed environment.
@@ -1101,14 +1023,14 @@ class ParallelHelper:
 
             # Gather all frames
             if len(frames) == 0:
-                flattened_frames = torch.zeros([0], dtype=torch.bfloat16, device=device)
+                flattened_frames = torch.zeros([0], dtype=torch.bfloat16, device="cuda")
             else:
                 flattened_frames = torch.cat(
                     [frame.flatten().contiguous() for frame in frames], dim=0
                 )
                 assert flattened_frames.dtype == torch.bfloat16
             gather_tensors = [
-                torch.zeros(total_size[i], dtype=torch.bfloat16, device=device)
+                torch.zeros(total_size[i], dtype=torch.bfloat16, device="cuda")
                 for i in range(torch.distributed.get_world_size(group=parallel_group))
             ]
             torch.distributed.all_gather(
@@ -1320,7 +1242,7 @@ class TileProcessor:
         )
         progress_bar = tqdm(
             total=len(tile_index_list),
-            desc=f"[Rank {torch.distributed.get_rank(group=self.parallel_group)}] Encoding Tiles",
+            desc=f"Encoding Tiles",
             disable=not verbose,
         )
 
@@ -1440,7 +1362,7 @@ class TileProcessor:
         )
         progress_bar = tqdm(
             total=len(tile_index_list),
-            desc=f"[Rank {torch.distributed.get_rank(group=self.parallel_group)}] Decoding Tiles",
+            desc=f"Decoding Tiles",
             disable=not verbose,
         )
 
@@ -1457,7 +1379,6 @@ class TileProcessor:
         frames = ParallelHelper.gather_frames(
             frames, global_tile_index_list, parallel_group=self.parallel_group
         )
-        
         assert len(frames) == total_tile_size
 
         result_frames = []
@@ -1505,204 +1426,3 @@ class TileProcessor:
         # Concatenate all result frames along the temporal dimension
         result = torch.cat(concat_frames, dim=2)
         return result
-
-
-class VideoTokenizerABC(ABC):
-    """
-    Abstract base class for video tokenizers.
-
-    This class defines the interface for video tokenizers and provides common methods and properties.
-    """
-
-    @property
-    @abstractmethod
-    def spatial_downsample_factor(self):
-        """
-        Property representing the spatial downsample factor.
-
-        Returns:
-            int: The spatial downsample factor.
-        """
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def temporal_downsample_factor(self):
-        """
-        Property representing the temporal downsample factor.
-
-        Returns:
-            int: The temporal downsample factor.
-        """
-        raise NotImplementedError
-
-    @property
-    def first_frame_as_image(self):
-        """
-        Property representing the first frame as image.
-        For tokenizer like CausalVAE, Omnitokenizer, the first frame is treated as image.
-        in this case if the temporal downsample factor is 4, the input should be 4*x+1, and encoded tensor would be x+1.
-        for example encode 65 frames to 17 frames. and decode 17 frames to 65 frames.
-
-        Returns:
-            bool: The first frame as image.
-        """
-        return False
-
-    @property
-    def allow_spatial_tiling(self):
-        """
-        Determines whether spatial tiling is allowed or not.
-
-        Returns:
-            bool: True if spatial tiling is allowed, False otherwise.
-        """
-        return True
-
-    @abstractmethod
-    def encode(self, x) -> torch.Tensor:
-        """
-        Abstract method for encoding the input tensor.
-
-        Args:
-            x (torch.Tensor [N C T H W] range[-1, 1]): The input tensor to be encoded.
-
-        Returns:
-            torch.Tensor: The encoded tensor.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def decode(self, x) -> torch.Tensor:
-        """
-        Abstract method for decoding the input tensor.
-
-        Args:
-            x (torch.Tensor [N C T H W]): The input tensor to be decoded.
-
-        Returns:
-            torch.Tensor [N C T H W] range[-1, 1]: The decoded tensor.
-        """
-        raise NotImplementedError
-
-    def tile_processor(
-        self,
-        tile_sample_min_height=256,
-        tile_sample_min_width=256,
-        tile_sample_min_length=16,
-        spatial_tile_overlap_factor: float = 0.25,
-        temporal_tile_overlap_factor: float = 0,
-        parallel_group: torch.distributed.ProcessGroup = None,
-    ) -> TileProcessor:
-        """
-        Property representing the tiled encoder or decoder.
-
-        Returns:
-            TileProcessor: The tiled encoder or decoder.
-        """
-        return TileProcessor(
-            encode_fn=self.encode,
-            decode_fn=self.decode,
-            tile_sample_min_height=tile_sample_min_height,
-            tile_sample_min_width=tile_sample_min_width,
-            tile_sample_min_length=tile_sample_min_length,
-            spatial_tile_overlap_factor=spatial_tile_overlap_factor,
-            temporal_tile_overlap_factor=temporal_tile_overlap_factor,
-            sr_ratio=getattr(self, "sr_ratio", 1),
-            spatial_downsample_factor=self.spatial_downsample_factor,
-            temporal_downsample_factor=self.temporal_downsample_factor,
-            first_frame_as_image=self.first_frame_as_image,
-            parallel_group=parallel_group,
-        )
-
-    @torch.inference_mode()
-    def tiled_encode_3d(
-        self,
-        x,
-        tile_sample_min_height=256,
-        tile_sample_min_width=256,
-        tile_sample_min_length: int = 16,
-        spatial_tile_overlap_factor: float = 0.25,
-        temporal_tile_overlap_factor: float = 0,
-        allow_spatial_tiling: bool = None,
-        verbose: bool = False,
-        parallel_group: torch.distributed.ProcessGroup = None,
-    ) -> torch.Tensor:
-        """
-        Encodes the input tensor `x` using tiled encoding.
-
-        Args:
-            x (torch.Tensor shape:[N C T H W]): The input tensor to be encoded.
-            tile_sample_min_height (int, optional): The minimum height of each tile sample. Defaults to 256.
-            tile_sample_min_width (int, optional): The minimum width of each tile sample. Defaults to 256.
-            tile_sample_min_length (int, optional): The minimum length of each tile sample. Defaults to 16.
-            spatial_tile_overlap_factor (float, optional): Overlap factor for spatial tiles. Defaults to 0.25.
-            temporal_tile_overlap_factor (float, optional): Overlap factor for temporal tiles. Defaults to 0.
-            allow_spatial_tiling (bool, optional): Whether spatial tiling is allowed. Defaults to None.
-            verbose (bool, optional): Whether to print verbose information. Defaults to False.
-            parallel_group (torch.distributed.ProcessGroup, optional): Distributed encoding group. Defaults to None.
-        Returns:
-            torch.Tensor: The encoded tensor.
-        """
-        allow_spatial_tiling = (
-            allow_spatial_tiling
-            if allow_spatial_tiling is not None
-            else self.allow_spatial_tiling
-        )
-        if not allow_spatial_tiling:
-            tile_sample_min_height = 100000
-            tile_sample_min_width = 100000
-        return self.tile_processor(
-            tile_sample_min_height=tile_sample_min_height,
-            tile_sample_min_width=tile_sample_min_width,
-            tile_sample_min_length=tile_sample_min_length,
-            spatial_tile_overlap_factor=spatial_tile_overlap_factor,
-            temporal_tile_overlap_factor=temporal_tile_overlap_factor,
-            parallel_group=parallel_group,
-        ).tiled_encode(x, verbose)
-
-    @torch.inference_mode()
-    def tiled_decode_3d(
-        self,
-        x,
-        tile_sample_min_height=256,
-        tile_sample_min_width=256,
-        tile_sample_min_length: int = 16,
-        spatial_tile_overlap_factor: float = 0.25,
-        temporal_tile_overlap_factor: float = 0,
-        allow_spatial_tiling: bool = None,
-        verbose: bool = False,
-        parallel_group: torch.distributed.ProcessGroup = None,
-    ) -> torch.Tensor:
-        """
-        Decodes the input tensor using the tile autoencoder.
-
-        Args:
-            x (torch.Tensor): The input tensor to be decoded.
-            tile_sample_min_height (int, optional): The minimum height of each tile sample. Defaults to 256.
-            tile_sample_min_width (int, optional): The minimum width of each tile sample. Defaults to 256.
-            tile_sample_min_length (int, optional): The minimum length of each tile sample. Defaults to 16.
-            spatial_tile_overlap_factor (float, optional): Overlap factor for spatial tiles. Defaults to 0.25.
-            temporal_tile_overlap_factor (float, optional): Overlap factor for temporal tiles. Defaults to 0.
-            allow_spatial_tiling (bool, optional): Whether spatial tiling is allowed. Defaults to None.
-            verbose (bool, optional): Whether to print verbose information. Defaults to False.
-            parallel_group (torch.distributed.ProcessGroup, optional): Distributed decoding group. Defaults to None.
-        Returns:
-            torch.Tensor shape:[N C T H W]: The decoded tensor.
-        """
-        allow_spatial_tiling = (
-            allow_spatial_tiling
-            if allow_spatial_tiling is not None
-            else self.allow_spatial_tiling
-        )
-        if not allow_spatial_tiling:
-            tile_sample_min_height = 100000
-            tile_sample_min_width = 100000
-        return self.tile_processor(
-            tile_sample_min_height=tile_sample_min_height,
-            tile_sample_min_width=tile_sample_min_width,
-            tile_sample_min_length=tile_sample_min_length,
-            spatial_tile_overlap_factor=spatial_tile_overlap_factor,
-            temporal_tile_overlap_factor=temporal_tile_overlap_factor,
-            parallel_group=parallel_group,
-        ).tiled_decode(x, verbose)

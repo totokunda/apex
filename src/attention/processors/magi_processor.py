@@ -200,8 +200,7 @@ class MagiSelfAttentionProcessor:
             update_kv_cache = kv_cache_params.get("update_kv_cache", False)
             kv_offload = kv_cache_params.get("kv_offload", False)
             key_value = torch.cat([key, value], dim=-1)
-            
-
+        
             if extract_prefix_video_feature or fwd_extra_1st_chunk or slice_point > 0:
                 key_value = self._full_adjust_key_and_value(
                     max_sequence_length,

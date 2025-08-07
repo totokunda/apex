@@ -107,7 +107,8 @@ class MagiScheduler(SchedulerInterface):
         sample = sample.reshape(N, C, -1, self.chunk_width, H, W)
         model_output = model_output.reshape(N, C, -1, self.chunk_width, H, W)
         assert sample.size(2) == delta_t.size(0)
-        sample = sample + model_output * delta_t.reshape(1, 1, -1, 1, 1, 1)
+        delta_t = delta_t.reshape(1, 1, -1, 1, 1, 1)
+        sample = sample + model_output * delta_t
         sample = sample.reshape(N, C, T, H, W)
         if return_dict:
             return MagiSchedulerOutput(prev_sample=sample)

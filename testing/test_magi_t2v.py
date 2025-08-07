@@ -2,7 +2,7 @@ from src.engine import create_engine
 from diffusers.utils import export_to_video
 import torch
 
-engine = create_engine("magi", "manifest/magi/magi_x2v_4_5b.yml", "t2v", save_path="/workspace/models", attention_type="flash", components_to_load=['text_encoder', 'transformer'], component_dtypes={"text_encoder": torch.float32})
+engine = create_engine("magi", "manifest/magi/magi_x2v_distill_24b.yml", "t2v", save_path="/workspace/models", attention_type="flash", components_to_load=['text_encoder', 'transformer'], component_dtypes={"text_encoder": torch.float32})
 
 space_prompt = "A velvet-black void studded with shimmering stars. Center frame: a colossal spiral galaxy, its cerulean and rose arms rotating against cosmic darkness. In the foreground, a sleek silver spacecraft hovers silently, its hull reflecting swirling nebulae.  \
 Through panoramic windows, two astronauts drift weightlessly, their visors glowing with the light of a nearby supernova. Suddenly, iridescent plasma tendrils burst from a distant pulsar, casting rippling shadows as electric arcs dance like liquid light through glittering interstellar dust. \
@@ -10,12 +10,12 @@ Below, a ringed ice planet spins serenely, its pale rings fractured by twin moon
 
 video = engine.run(
     prompt=space_prompt,
-    height=320,
-    width=480,
-    duration=96,
+    height=480,
+    width=832,
+    duration=72,
     num_videos=1,
-    num_inference_steps=32,
+    num_inference_steps=16,
     seed=1234
 )
 
-export_to_video(video[0], "test_magi_t2v_space_32c.mp4", fps=24, quality=8)
+export_to_video(video[0], "test_magi_t2v_space_32d.mp4", fps=24, quality=8)
