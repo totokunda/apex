@@ -34,6 +34,7 @@ defaults:
       pad_to_max_length: true
       use_mask_in_input: true
       pad_with_zero: false
+      lower_case: true
 
     offload: true
     render_on_step: false

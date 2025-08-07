@@ -89,16 +89,24 @@ def sdpa_varlen(
         torch.use_deterministic_algorithms(True)
 
     B = cu_seqlens_q.numel() - 1
-    n_heads, head_dim = q.shape[1:]
+    n_heads_q, head_dim_q = q.shape[1:]
+    n_heads_k, head_dim_k = k.shape[1:]
+    n_heads_v, head_dim_v = v.shape[1:]
+    
+    # Validate shapes
+    if head_dim_q != head_dim_k or head_dim_q != head_dim_v:
+        raise ValueError(f"Head dimensions must match: q={head_dim_q}, k={head_dim_k}, v={head_dim_v}")
+    
+    head_dim = head_dim_q
 
     # 1. recover individual sequence lengths
     seq_lens_q = (cu_seqlens_q[1:] - cu_seqlens_q[:-1]).tolist()
     seq_lens_k = (cu_seqlens_kv[1:] - cu_seqlens_kv[:-1]).tolist()
 
     # 2. pad into (B, H, L, D)
-    q_pad = q.new_zeros(B, n_heads, max_seqlen_q, head_dim)
-    k_pad = k.new_zeros(B, n_heads, max_seqlen_kv, head_dim)
-    v_pad = v.new_zeros(B, n_heads, max_seqlen_kv, head_dim)
+    q_pad = q.new_zeros(B, n_heads_q, max_seqlen_q, head_dim)
+    k_pad = k.new_zeros(B, n_heads_k, max_seqlen_kv, head_dim)
+    v_pad = v.new_zeros(B, n_heads_v, max_seqlen_kv, head_dim)
 
     q_splits = torch.split(q, seq_lens_q, dim=0)
     k_splits = torch.split(k, seq_lens_k, dim=0)
@@ -110,29 +118,50 @@ def sdpa_varlen(
         k_pad[b, :, : seq_lens_k[b]] = k_splits[b].transpose(0, 1)
         v_pad[b, :, : seq_lens_k[b]] = v_splits[b].transpose(0, 1)
 
-    # 3. build additive mask: 0 for valid tokens, −inf for pads
-    attn_mask = torch.full(
-        (B, 1, max_seqlen_q, max_seqlen_kv),
-        float("-inf"),
-        device=q.device,
-        dtype=q.dtype,
-    )
+    # 3. Handle multi-query/grouped-query attention by expanding k,v if needed
+    if n_heads_k != n_heads_q:
+        if n_heads_q % n_heads_k != 0:
+            raise ValueError(f"Number of query heads ({n_heads_q}) must be divisible by key heads ({n_heads_k})")
+        expand_ratio = n_heads_q // n_heads_k
+        k_pad = k_pad.repeat_interleave(expand_ratio, dim=1)
+        v_pad = v_pad.repeat_interleave(expand_ratio, dim=1)
+
+    # 4. SDPA call with per-batch processing to avoid large mask materialization
+    out_pad = torch.zeros_like(q_pad)
+    
     for b in range(B):
-        attn_mask[b, :, : seq_lens_q[b], : seq_lens_k[b]] = 0.0
+        # Create minimal mask only for this batch item
+        if seq_lens_q[b] < max_seqlen_q or seq_lens_k[b] < max_seqlen_kv:
+            # Only create mask if we have padding
+            batch_mask = torch.full(
+                (1, 1, seq_lens_q[b], seq_lens_k[b]),
+                0.0,
+                device=q.device,
+                dtype=q.dtype,
+            )
+            batch_out = F.scaled_dot_product_attention(
+                q_pad[b:b+1, :, :seq_lens_q[b]],
+                k_pad[b:b+1, :, :seq_lens_k[b]], 
+                v_pad[b:b+1, :, :seq_lens_k[b]],
+                attn_mask=batch_mask,
+                dropout_p=0.0,
+                is_causal=is_causal,
+            )
+        else:
+            # No padding, no mask needed
+            batch_out = F.scaled_dot_product_attention(
+                q_pad[b:b+1, :, :seq_lens_q[b]],
+                k_pad[b:b+1, :, :seq_lens_k[b]],
+                v_pad[b:b+1, :, :seq_lens_k[b]],
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=is_causal,
+            )
+        out_pad[b, :, :seq_lens_q[b]] = batch_out[0]
 
-    # 4. SDPA call
-    out_pad = F.scaled_dot_product_attention(
-        q_pad,
-        k_pad,
-        v_pad,
-        attn_mask=attn_mask,
-        dropout_p=0.0,
-        is_causal=is_causal,
-    )  # → (B, H, Lq, D)
-
-    # 5. strip padding and repack to (∑Lq, H, D)
+    # 6. strip padding and repack to (∑Lq, H, D) with original query head count
     packed_out = [
-        out_pad[b, :, : seq_lens_q[b]].transpose(0, 1) for b in range(B)  # (Lq, H, D)
+        out_pad[b, :n_heads_q, : seq_lens_q[b]].transpose(0, 1) for b in range(B)  # (Lq, H, D)
     ]
     return torch.cat(packed_out, dim=0)
 

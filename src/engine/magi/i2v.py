@@ -1,10 +1,13 @@
 import torch
 from typing import Dict, Any, Callable, List, Union
 from PIL import Image
-import numpy as np
 import math
+from einops import rearrange
+from tqdm import tqdm
+import ffmpeg
 
 from .base import MagiBaseEngine
+
 
 
 class MagiI2VEngine(MagiBaseEngine):
@@ -36,9 +39,11 @@ class MagiI2VEngine(MagiBaseEngine):
         prev_chunk_scales: List[float] = [1.5, 1.5, 1.5, 1.0, 1.0],
         distill_nearly_clean_chunk_threshold: float = 0.3,
         window_size: int = 4,
+        distill: bool = False,
+        kv_offload: bool = True,
         **kwargs
     ):
-        """Text-to-video generation using MAGI's chunk-based approach"""
+        """Image-to-video generation using MAGI's chunk-based approach"""
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -52,20 +57,19 @@ class MagiI2VEngine(MagiBaseEngine):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
+        
+        loaded_image = self._load_image(image, w=width, h=height)
+            
+        transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
-        loaded_image = self._load_image(image)
-        loaded_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width
-        )
-        preprocessed_image = self.video_processor.preprocess(
-            loaded_image, height, width
-        ).unsqueeze(2)
-
+        preprocessed_image = (loaded_image.permute(3, 0, 1, 2).unsqueeze(0) / 127.5 - 1.0)
+        
         prefix_video = self.vae_encode(
             preprocessed_image,
             offload=offload,
-            dtype=torch.float32,
-            normalize_latents_dtype=torch.float32,
+            dtype=transformer_dtype,
+            normalize_latents_dtype=transformer_dtype,
+            sample_mode="mode",
         )
 
         if offload:
@@ -76,8 +80,6 @@ class MagiI2VEngine(MagiBaseEngine):
             (num_frames // self.vae_scale_factor_temporal * 1.0 + prefix_video.size(2))
             / chunk_width
         )
-
-        transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -134,6 +136,8 @@ class MagiI2VEngine(MagiBaseEngine):
         time_interval = self.scheduler.set_time_interval(
             num_inference_steps, self.device
         )
+        
+        prefix_video = torch.load('/workspace/apex/prefix_video.pt')
 
         latents = self.denoise(
             latents=latent,
@@ -156,14 +160,24 @@ class MagiI2VEngine(MagiBaseEngine):
             transformer_dtype=transformer_dtype,
             prefix_video=prefix_video,
             clean_chunk_kvrange=clean_chunk_kvrange,
+            kv_offload=kv_offload,
+            distill=distill,
         )
 
         if offload:
             self._offload(self.transformer)
 
         if return_latents:
-            return latents
+            return torch.cat(latents, dim=0)
         else:
-            video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
-            return postprocessed_video
+            videos = []
+            for latent in tqdm(latents, desc="Decoding latents"): 
+                video = self.vae_decode(latent, offload=False)
+                video = rearrange(video, "b c t h w -> (b t) c h w")
+                video = (video * 127.5 + 127.5).clamp(0, 255).to(torch.uint8)
+                videos.append(video)
+            
+            videos = torch.cat(videos, dim=0).permute(0, 2, 3, 1).cpu().numpy()
+            videos = [Image.fromarray(video) for video in videos]
+    
+            return [videos]

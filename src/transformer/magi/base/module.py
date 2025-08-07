@@ -800,9 +800,8 @@ class MagiTransformerBlock(torch.nn.Module):
             gate_num_chunks=gate_num_chunks,
         )
 
-        self.norm1 = FusedLayerNorm(
-            zero_centered_gamma=zero_centered_gamma,
-            hidden_dim=hidden_dim,
+        self.norm1 = torch.nn.LayerNorm(
+            hidden_dim,
             eps=eps,
         )
 
@@ -814,6 +813,7 @@ class MagiTransformerBlock(torch.nn.Module):
             num_query_groups=num_query_groups,
             dim_head=dim_head,
             eps=eps,
+            layer_number=self.layer_number,
             processor=MagiSelfAttentionProcessor(),
         )
 
@@ -825,6 +825,7 @@ class MagiTransformerBlock(torch.nn.Module):
             num_query_groups=num_query_groups,
             dim_head=dim_head,
             eps=eps,
+            layer_number=self.layer_number,
             processor=MagiCrossAttentionProcessor(),
         )
 
@@ -871,13 +872,15 @@ class MagiTransformerBlock(torch.nn.Module):
         # hidden_states: [s/cp/sp, b, h]
         residual = hidden_states
         original_dtype = hidden_states.dtype
+        
 
-        with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
-            norm_hidden_states = self.norm1(hidden_states)
+        
+        norm_hidden_states = self.norm1(hidden_states)
 
         device = hidden_states.device
-        norm_hidden_states = norm_hidden_states.to(original_dtype)
+
         # Self attention.
+
         attn_out = self.attn1(
             hidden_states=norm_hidden_states,
             rotary_emb=rotary_pos_emb,
@@ -890,10 +893,13 @@ class MagiTransformerBlock(torch.nn.Module):
             encoder_hidden_states=encoder_hidden_states,
             **cross_attn_params,
         )
-
+        
+        
         attn_out = torch.concat([attn_out, cross_attn_out], dim=2)
         # NOTE: hn=8 is hardcoded to align with TP8 traning and TP1 inference
         attn_out = rearrange(attn_out, "sq b (n hn hd) -> sq b (hn n hd)", n=2, hn=8)
+        
+        
 
         with torch.autocast(device_type=device.type, dtype=torch.float32):
             attn_out = self.proj(attn_out)

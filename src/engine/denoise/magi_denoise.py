@@ -1,16 +1,10 @@
 import torch
-import math
-import numpy as np
 from src.utils.type_utils import EnumType
-from typing import Optional, List, Dict, Any, Tuple
+from typing import  List, Dict, Any, Tuple
 from collections import Counter
-from tqdm import tqdm
-import gc
-
 
 class MagiDenoiseType(EnumType):
     BASE = "base"
-
 
 class UnconditionGuard:
     def __init__(self, kwargs):
@@ -34,6 +28,20 @@ class UnconditionGuard:
         self.kwargs["slice_point"] = self.prev_state["slice_point"]
         self.kwargs["fwd_extra_1st_chunk"] = self.prev_state["fwd_extra_1st_chunk"]
 
+def check_forward(module, inputs, outputs):
+    for i in inputs:
+        if isinstance(i, torch.Tensor):
+            if not torch.isfinite(i).all():
+                raise RuntimeError(f"NaN/Inf in forward of {module.__class__.__name__}")
+    if isinstance(outputs, torch.Tensor):
+        if not torch.isfinite(outputs).all():
+            raise RuntimeError(f"NaN/Inf in forward of {module.__class__.__name__}")
+    else:
+        for o in outputs:
+            if isinstance(o, torch.Tensor):
+                if not torch.isfinite(o).all():
+                    raise RuntimeError(f"NaN/Inf in forward of {module.__class__.__name__}")
+
 
 class MagiDenoise:
     def __init__(
@@ -56,26 +64,31 @@ class MagiDenoise:
         time_interval = kwargs.get("time_interval", None)
         prompt_embeds = kwargs.get("prompt_embeds", None)
         prompt_embeds_mask = kwargs.get("prompt_embeds_mask", None)
-        num_inference_steps = kwargs.get("num_inference_steps", None)
-        chunk_width = kwargs.get("chunk_width", None)
-        window_size = kwargs.get("window_size", None)
+        num_inference_steps = kwargs.get("num_inference_steps", 64)
+        chunk_width = kwargs.get("chunk_width", 6)
+        window_size = kwargs.get("window_size", 4)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
         prefix_video = kwargs.get("prefix_video", None)
-        noise2clean_kvrange = kwargs.get("noise2clean_kvrange", None)
-        clean_chunk_kvrange = kwargs.get("clean_chunk_kvrange", None)
+        noise2clean_kvrange = kwargs.get("noise2clean_kvrange", [5, 4, 3, 2])
+        clean_chunk_kvrange = kwargs.get("clean_chunk_kvrange", 1)
+        kv_offload = kwargs.get("kv_offload", True)
+        
         distill_nearly_clean_chunk_threshold = kwargs.get(
-            "distill_nearly_clean_chunk_threshold", None
+            "distill_nearly_clean_chunk_threshold", 0.3
         )
-        cfg_number = kwargs.get("cfg_number", None)
-        text_scales = kwargs.get("text_scales", None)
-        prev_chunk_scales = kwargs.get("prev_chunk_scales", None)
-        cfg_t_range = kwargs.get("cfg_t_range", None)
-        transformer_dtype = kwargs.get("transformer_dtype", None)
+        
+        cfg_number = kwargs.get("cfg_number", 3)
+        text_scales = kwargs.get("text_scales", [7.5, 7.5, 7.5, 0.0, 0.0])
+        prev_chunk_scales = kwargs.get("prev_chunk_scales", [1.5, 1.5, 1.5, 1.0, 1.0])
+        cfg_t_range = kwargs.get("cfg_t_range", [0.0, 0.0217, 0.1, 0.3, 0.999])
+        transformer_dtype = kwargs.get("transformer_dtype", torch.bfloat16)
+        distill = kwargs.get("distill", False)
 
         denoise_step_per_stage = num_inference_steps // window_size
         total_steps = self.total_steps(
-            denoise_step_per_stage, num_chunks, window_size, prefix_video
+            denoise_step_per_stage, num_chunks, chunk_width, window_size, prefix_video
         )
+        
         post_patch_height = latents.size(3) // self.transformer.config.patch_size
         post_patch_width = latents.size(4) // self.transformer.config.patch_size
         chunk_token_nums = chunk_width * post_patch_height * post_patch_width
@@ -92,13 +105,21 @@ class MagiDenoise:
         )
 
         self.scheduler.set_scheduler_params(chunk_width, denoise_step_per_stage)
-
+        self.transformer.set_distill(distill)
+        
+        for name, module in self.transformer.named_modules():
+            module.register_forward_hook(check_forward)
+        
         default_model_kwargs = {
             "chunk_width": chunk_width,
             "num_steps": num_inference_steps,
             "fwd_extra_1st_chunk": False,
             "transformer_dtype": transformer_dtype,
+            "kv_offload": kv_offload,
         }
+        
+        chunk_denoise_count = Counter()
+        clean_latents = []
 
         with self._progress_bar(total_steps, desc=f"Sampling Magi") as pbar:
             for denoise_step in range(total_steps):
@@ -141,9 +162,10 @@ class MagiDenoise:
                 latents_chunk = latents[
                     :, :, chunk_start * chunk_width : chunk_end * chunk_width
                 ].clone()
+                
                 prompt_embeds_chunk = prompt_embeds[:, chunk_start:chunk_end]
                 prompt_embeds_mask_chunk = prompt_embeds_mask[:, chunk_start:chunk_end]
-                fwd_extra_1st_chunk = chunk_start > chunk_offset and denoise_idx == 0
+                
 
                 model_kwargs.update(
                     {
@@ -152,6 +174,10 @@ class MagiDenoise:
                         "denoising_range_num": chunk_end - chunk_start,
                     }
                 )
+                
+                
+                fwd_extra_1st_chunk = chunk_start > chunk_offset and denoise_idx == 0
+
 
                 if fwd_extra_1st_chunk:
                     clean_x = latents[
@@ -212,7 +238,7 @@ class MagiDenoise:
                 timestep = timestep.unsqueeze(0).repeat(latents_chunk.size(0), 1)
 
                 kv_range = self.generate_kvrange_for_denoising_video(
-                    batch_size=latents_chunk.size(0),
+                    batch_size=latents_chunk.shape[0] // 2,
                     chunk_token_nums=chunk_token_nums,
                     num_steps=num_inference_steps,
                     slice_point=model_kwargs["slice_point"],
@@ -228,7 +254,9 @@ class MagiDenoise:
                         timestep,
                         prefix_video,
                         model_kwargs["slice_point"] * chunk_width,
+                        chunk_width,
                     )
+                    
 
                 nearly_clean_chunk_t = timestep[
                     0, int(model_kwargs["fwd_extra_1st_chunk"])
@@ -237,7 +265,7 @@ class MagiDenoise:
                     nearly_clean_chunk_t > distill_nearly_clean_chunk_threshold
                 )
                 model_kwargs["distill_interval"] = time_interval[denoise_idx]
-
+                
                 flow_pred = self.forward(
                     hidden_states=latents_chunk,
                     timestep=timestep,
@@ -251,19 +279,28 @@ class MagiDenoise:
                     cfg_t_range=cfg_t_range,
                     **model_kwargs,
                 )
+                
 
+                
                 if fwd_extra_1st_chunk:
                     latents_chunk = latents_chunk[:, :, chunk_width:]
                     flow_pred = flow_pred[:, :, chunk_width:]
 
                 latents_chunk = self.scheduler.step(
-                    flow_pred,
                     latents_chunk,
+                    flow_pred,
                     t_start,
                     t_end,
                     denoise_idx,
                     return_dict=False,
                 )[0]
+                
+
+
+                for chunk_index in range(chunk_start, chunk_end):
+                    chunk_denoise_count[chunk_index] += 1
+                    
+                
 
                 if render_on_step_callback is not None:
                     self._render_step(latents_chunk, render_on_step_callback)
@@ -271,26 +308,47 @@ class MagiDenoise:
                 latents[:, :, chunk_start * chunk_width : chunk_end * chunk_width] = (
                     latents_chunk
                 )
+                
+                if chunk_denoise_count[chunk_start] == num_inference_steps:
+                    if prefix_video is not None:
+                        prefix_video_length = prefix_video.size(2)
+                        if (chunk_start + 1) * chunk_width <= prefix_video_length:
+                            return None, None
+
+                        real_start = max(chunk_start * chunk_width, prefix_video_length)
+
+                        # Keep the first 4-frames only for I2V Job
+                        if chunk_start == 0 and prefix_video_length == 1:
+                            real_start = 0
+
+                        clean_latents_chunk, _ = latents[
+                            :, :, real_start : (chunk_start + 1) * chunk_width
+                        ].chunk(2, dim=0)
+                    else:
+                        clean_latents_chunk, _ = latents[
+                            :, :, chunk_start * chunk_width : (chunk_start + 1) * chunk_width
+                        ].chunk(2, dim=0)
+                        
+                    clean_latents.append(clean_latents_chunk)
 
                 pbar.update(1)
 
             self.logger.info("Denoising completed.")
 
-        latents, _ = torch.chunk(latents, 2, dim=0)
-
-        return latents
+        return clean_latents
 
     def total_steps(
         self,
         denoise_step_per_stage: int,
         chunk_num: int,
+        chunk_width: int,
         window_size: int,
         prefix_video: torch.Tensor | None = None,
     ) -> int:
 
         chunk_offset = 0
         if prefix_video is not None:
-            chunk_offset = prefix_video.size(2) // self.chunk_width
+            chunk_offset = prefix_video.size(2) // chunk_width
 
         total_forward_steps = denoise_step_per_stage * (
             chunk_num + window_size - 1 - chunk_offset
@@ -504,6 +562,7 @@ class MagiDenoise:
         )
 
         kv_cache_params["update_kv_cache"] = False
+        
         out_cond_pre_and_text = self.transformer(
             hidden_states[0:1],
             timestep[0:1],
@@ -517,6 +576,7 @@ class MagiDenoise:
         )[0]
 
         kv_cache_params["update_kv_cache"] = True
+        
         out_cond_pre = self.transformer(
             hidden_states[1:2],
             timestep[1:2],
@@ -919,21 +979,23 @@ class MagiDenoise:
         t: torch.Tensor,
         prefix_video: torch.Tensor,
         prefix_video_start: int,
+        chunk_width: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Non-Const Method"""
         prefix_length = prefix_video.size(2)
-
+  
         if prefix_length <= prefix_video_start:
             return x_chunk, t
 
         padding_length = min(prefix_length - prefix_video_start, x_chunk.size(2))
         prefix_video_end = prefix_video_start + padding_length
         ret = x_chunk.clone()
+        
         ret[:, :, :padding_length] = prefix_video[
             :, :, prefix_video_start:prefix_video_end
         ]
 
-        num_clean_t = (prefix_length - prefix_video_start) // self.chunk_width
+        num_clean_t = (prefix_length - prefix_video_start) // chunk_width
         if num_clean_t > 0:
             t[:, :num_clean_t] = 1.0
         return ret, t

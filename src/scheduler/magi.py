@@ -98,7 +98,7 @@ class MagiScheduler(SchedulerInterface):
         return t
 
     def step(
-        self, model_output, sample, t_start, t_end, i, return_dict=False, **kwargs
+        self, sample, model_output, t_start, t_end, i, return_dict=False, **kwargs
     ):
         t_before = self.get_timestep(t_start, t_end, i)
         t_after = self.get_timestep(t_start, t_end, i + 1)

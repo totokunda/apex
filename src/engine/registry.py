@@ -2,7 +2,7 @@ from typing import Dict, Type, Any, Optional, List, Literal
 from enum import Enum
 import torch
 from src.ui.nodes import UINode
-
+from src.engine.base_engine import BaseEngine
 
 class EngineType(Enum):
     """Supported engine types"""
@@ -163,7 +163,7 @@ class UniversalEngine:
         **kwargs,
     ):
         self.registry = EngineRegistry()
-        self.engine = self.registry.create_engine(
+        self.engine: BaseEngine = self.registry.create_engine(
             engine_type=engine_type,
             yaml_path=yaml_path,
             model_type=model_type,

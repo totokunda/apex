@@ -63,14 +63,16 @@ class MagiTransformer3DModel(
 
     _no_split_modules = ["MagiTransformerBlock"]
     _keep_in_fp32_modules = [
-        "attn1.norm_q",
-        "attn1.norm_k",
+        "norm_q",
+        "norm_k",
         "norm2",
         "norm3",
         "norm_out",
         "patch_embedding",
         "timestep_embedding",
-        "caption_embedding",
+        "y_proj_xattn",
+        "y_proj_adaln",
+        "null_caption_embedding",
         "rope",
         "proj_out",
     ]
@@ -177,6 +179,9 @@ class MagiTransformer3DModel(
         return self.caption_embedding.null_caption_embedding.to(device).repeat(
             num_videos_per_prompt, 1
         )
+    
+    def set_distill(self, distill:bool):
+        self.distill = distill
 
     def generate_kv_range_for_uncondition(self, uncond_x) -> torch.Tensor:
         device = f"cuda:{torch.cuda.current_device()}"
@@ -222,6 +227,7 @@ class MagiTransformer3DModel(
         slice_point: int = 0,
         num_steps: int = 12,
         distill_interval: int = 4,
+        **kwargs,
     ):
         """
         Forward embedding and meta for VideoDiT.
@@ -394,11 +400,12 @@ class MagiTransformer3DModel(
             max_seqlen_k=max_seqlen_k,
             denoising_range_num=denoising_range_num,
         )
-
+        
         kv_cache_params = dict(
             clip_token_nums=clip_token_nums,
             slice_point=slice_point,
             range_num=range_num,
+            **kwargs,
         )
 
         return (
@@ -489,10 +496,11 @@ class MagiTransformer3DModel(
                 slice_point=slice_point,
                 num_steps=num_steps,
                 distill_interval=distill_interval,
+                **kwargs,
             )
 
         kv_cache_params.update(kv_cache_params_meta)
-
+        
         hidden_states = rearrange(
             hidden_states, "N C T H W -> (T H W) N C"
         ).contiguous()  # (thw, N, D)
@@ -515,12 +523,10 @@ class MagiTransformer3DModel(
             )
 
         hidden_states = hidden_states.to(torch.float32)
+        norm_hidden_states = self.norm_out(hidden_states)
 
         with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
-            hidden_states = self.proj_out(
-                self.norm_out(hidden_states)
-            )  # (thw/cp, N, patch_size ** 2 * out_channels)
-
+            hidden_states = self.proj_out(norm_hidden_states)  
         # N C T H W
         hidden_states = self.unpatchify(hidden_states, H, W)
 
