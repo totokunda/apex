@@ -4,11 +4,7 @@ from PIL import Image
 import math
 from einops import rearrange
 from tqdm import tqdm
-import ffmpeg
-
 from .base import MagiBaseEngine
-
-
 
 class MagiI2VEngine(MagiBaseEngine):
     """Magi Image-to-Video Engine Implementation"""
@@ -58,12 +54,15 @@ class MagiI2VEngine(MagiBaseEngine):
             **text_encoder_kwargs,
         )
         
-        loaded_image = self._load_image(image, w=width, h=height)
+        loaded_image = self._load_image(image)
+        
+        loaded_image, height, width = self._aspect_ratio_resize(loaded_image, max_area=height * width)
             
         transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
-        preprocessed_image = (loaded_image.permute(3, 0, 1, 2).unsqueeze(0) / 127.5 - 1.0)
+        preprocessed_image = self.video_processor.preprocess(loaded_image, height=height, width=width).unsqueeze(2)
         
+
         prefix_video = self.vae_encode(
             preprocessed_image,
             offload=offload,
@@ -126,6 +125,7 @@ class MagiI2VEngine(MagiBaseEngine):
             generator=generator,
             seed=seed,
         )
+        
 
         latent = torch.cat([latent, latent], dim=0)
 
@@ -136,8 +136,6 @@ class MagiI2VEngine(MagiBaseEngine):
         time_interval = self.scheduler.set_time_interval(
             num_inference_steps, self.device
         )
-        
-        prefix_video = torch.load('/workspace/apex/prefix_video.pt')
 
         latents = self.denoise(
             latents=latent,
@@ -168,16 +166,11 @@ class MagiI2VEngine(MagiBaseEngine):
             self._offload(self.transformer)
 
         if return_latents:
-            return torch.cat(latents, dim=0)
+            return torch.cat(latents, dim=2)
         else:
             videos = []
             for latent in tqdm(latents, desc="Decoding latents"): 
                 video = self.vae_decode(latent, offload=False)
-                video = rearrange(video, "b c t h w -> (b t) c h w")
-                video = (video * 127.5 + 127.5).clamp(0, 255).to(torch.uint8)
-                videos.append(video)
-            
-            videos = torch.cat(videos, dim=0).permute(0, 2, 3, 1).cpu().numpy()
-            videos = [Image.fromarray(video) for video in videos]
-    
+                video = self._postprocess(video, output_type="pil")[0]
+                videos.extend(video)
             return [videos]

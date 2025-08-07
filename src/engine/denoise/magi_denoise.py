@@ -76,7 +76,7 @@ class MagiDenoise:
         distill_nearly_clean_chunk_threshold = kwargs.get(
             "distill_nearly_clean_chunk_threshold", 0.3
         )
-        
+
         cfg_number = kwargs.get("cfg_number", 3)
         text_scales = kwargs.get("text_scales", [7.5, 7.5, 7.5, 0.0, 0.0])
         prev_chunk_scales = kwargs.get("prev_chunk_scales", [1.5, 1.5, 1.5, 1.0, 1.0])
@@ -141,8 +141,8 @@ class MagiDenoise:
                 )
 
                 model_kwargs = default_model_kwargs.copy()
-
-                if prefix_video is not None and denoise_step == 0 and chunk_offset > 0:
+                
+                if chunk_offset > 0 and denoise_step == 0:
                     self.cache_prefix_video(
                         prefix_video,
                         prompt_embeds,
@@ -151,11 +151,11 @@ class MagiDenoise:
                         chunk_width,
                         clean_chunk_kvrange,
                         noise2clean_kvrange,
-                        chunk_offset,
                         kv_cache_params,
                         cfg_number,
                         text_scales,
                         prev_chunk_scales,
+                        cfg_t_range,
                         model_kwargs,
                     )
 
@@ -256,7 +256,6 @@ class MagiDenoise:
                         model_kwargs["slice_point"] * chunk_width,
                         chunk_width,
                     )
-                    
 
                 nearly_clean_chunk_t = timestep[
                     0, int(model_kwargs["fwd_extra_1st_chunk"])
@@ -279,7 +278,6 @@ class MagiDenoise:
                     cfg_t_range=cfg_t_range,
                     **model_kwargs,
                 )
-                
 
                 
                 if fwd_extra_1st_chunk:
@@ -295,13 +293,9 @@ class MagiDenoise:
                     return_dict=False,
                 )[0]
                 
-
-
                 for chunk_index in range(chunk_start, chunk_end):
                     chunk_denoise_count[chunk_index] += 1
                     
-                
-
                 if render_on_step_callback is not None:
                     self._render_step(latents_chunk, render_on_step_callback)
 
@@ -487,6 +481,7 @@ class MagiDenoise:
                     **kwargs,
                     return_dict=False,
                 )[0]
+                
                 near_clean_out_cond_pre_and_text = cat_out[
                     :,
                     :,
@@ -917,7 +912,6 @@ class MagiDenoise:
         chunk_width,
         clean_chunk_kvrange,
         noise2clean_kvrange,
-        range_num,
         kv_cache_params,
         cfg_number,
         text_scales,
@@ -927,21 +921,19 @@ class MagiDenoise:
     ):
         hidden_states_chunk = prefix_video[:, :, : chunk_offset * chunk_width]
         hidden_states_chunk = torch.cat(
-            [hidden_states_chunk, hidden_states_chunk], dim=2
+            [hidden_states_chunk, hidden_states_chunk], dim=0
         )
+        
         null_prompt_embeds = prompt_embeds[1:2, :chunk_offset]
         null_prompt_embeds = torch.cat([null_prompt_embeds, null_prompt_embeds], dim=0)
         null_prompt_embeds_mask = prompt_embeds_mask[1:2, :chunk_offset]
         null_prompt_embeds_mask = torch.cat(
             [null_prompt_embeds_mask, null_prompt_embeds_mask], dim=0
         )
-        kv_range = self.generate_kvrange_for_prefix_video(
-            prefix_video.shape[0],
-            chunk_width,
-            clean_chunk_kvrange,
-            noise2clean_kvrange,
-            range_num,
-        )
+        
+        null_prompt_embeds = null_prompt_embeds.flatten(start_dim=0, end_dim=1).unsqueeze(1)
+        null_prompt_embeds_mask = null_prompt_embeds_mask.flatten(start_dim=0, end_dim=1).unsqueeze(1)
+        
         timestep = torch.ones(chunk_offset, device=self.device) * self.scheduler.clean_t
         timestep = timestep.unsqueeze(0).repeat(hidden_states_chunk.size(0), 1)
 
@@ -958,7 +950,15 @@ class MagiDenoise:
                 "distill_interval": self.scheduler.time_interval[0],
             }
         )
-
+        
+        kv_range = self.generate_kvrange_for_prefix_video(
+            prefix_video.shape[0],
+            chunk_width,
+            clean_chunk_kvrange,
+            noise2clean_kvrange,
+            chunk_offset,
+        )
+        
         self.forward(
             hidden_states=hidden_states_chunk,
             timestep=timestep,
@@ -990,7 +990,7 @@ class MagiDenoise:
         padding_length = min(prefix_length - prefix_video_start, x_chunk.size(2))
         prefix_video_end = prefix_video_start + padding_length
         ret = x_chunk.clone()
-        
+
         ret[:, :, :padding_length] = prefix_video[
             :, :, prefix_video_start:prefix_video_end
         ]

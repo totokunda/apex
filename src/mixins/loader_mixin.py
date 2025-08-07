@@ -136,8 +136,12 @@ class LoaderMixin:
 
         model_path = component.get("model_path")
 
-        if not config:
-            # try to load from model_path directly
+        
+        if os.path.isdir(model_path) and os.path.exists(os.path.join(model_path, "config.json")):
+            if config: 
+                # replace the config.json with the config
+                config_path = os.path.join(model_path, "config.json")
+                self._save_config(config, config_path)
             model = model_class.from_pretrained(
                 model_path, torch_dtype=load_dtype, **extra_kwargs
             )
@@ -354,6 +358,7 @@ class LoaderMixin:
         self,
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
         fps: int = None,
+        return_fps: bool = False,
     ) -> List[Image.Image]:
 
         if isinstance(video_input, List):
@@ -408,7 +413,10 @@ class LoaderMixin:
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         frames.append(Image.fromarray(frame_rgb))
                     frame_count += 1
-                return frames
+                if return_fps:
+                    return frames, original_fps
+                else:
+                    return frames
             finally:
                 if "cap" in locals() and cap.isOpened():
                     cap.release()
@@ -442,7 +450,10 @@ class LoaderMixin:
                         frames.append(Image.fromarray(frame.squeeze(2)))
                     else:
                         frames.append(Image.fromarray(frame).convert("RGB"))
-                return frames
+                if return_fps:
+                    return frames, fps
+                else:
+                    return frames
 
             if tensor.ndim == 4 and (
                 tensor.shape[1] == 3 or tensor.shape[1] == 1
@@ -453,7 +464,7 @@ class LoaderMixin:
             if numpy_array.mean() <= 1:
                 numpy_array = (numpy_array * 255).clip(0, 255).astype(np.uint8)
 
-            return [
+            frames = [
                 (
                     Image.fromarray(frame).convert("RGB")
                     if frame.shape[2] == 3
@@ -461,5 +472,8 @@ class LoaderMixin:
                 )
                 for frame in numpy_array
             ]
-
+            if return_fps:
+                return frames, fps
+            else:
+                return frames
         raise ValueError(f"Invalid video type: {type(video_input)}")

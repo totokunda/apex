@@ -110,6 +110,14 @@ class MagiBaseEngine:
     def _get_timesteps(self, *args, **kwargs):
         """Get timesteps"""
         return self.main_engine._get_timesteps(*args, **kwargs)
+    
+    def _load_video(self, *args, **kwargs):
+        """Load video"""
+        return self.main_engine._load_video(*args, **kwargs)
+    
+    def _load_image(self, *args, **kwargs):
+        """Load image"""
+        return self.main_engine._load_image(*args, **kwargs)
 
     def _parse_num_frames(self, *args, **kwargs):
         """Parse number of frames"""
@@ -118,10 +126,6 @@ class MagiBaseEngine:
     def _aspect_ratio_resize(self, *args, **kwargs):
         """Aspect ratio resize"""
         return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
 
     def _progress_bar(self, *args, **kwargs):
         """Progress bar context manager"""
@@ -307,32 +311,3 @@ class MagiBaseEngine:
         null_emb_masks[:, :, null_token_length:] = 0
 
         return null_embs, null_emb_masks
-    
-    def _load_image(self, image, w=384, h=224, aspect_policy="fit"):
-        loaded_image: Image.Image = self.main_engine._load_image(image)
-        image_bytes = io.BytesIO()
-        loaded_image.save(image_bytes, format="PNG")
-        image_bytes = image_bytes.getvalue()
-        r = ffmpeg.input("pipe:0", format="image2pipe")
-        if aspect_policy == "crop":
-            r = r.filter("scale", w, h, force_original_aspect_ratio="increase").filter(
-                "crop", w, h
-            )
-        elif aspect_policy == "pad":
-            r = r.filter("scale", w, h, force_original_aspect_ratio="decrease").filter(
-                "pad", w, h, "(ow-iw)/2", "(oh-ih)/2", color="black"
-            )
-        elif aspect_policy == "fit":
-            r = r.filter("scale", w, h)
-        else:
-            r = r.filter("scale", w, h)
-        try:
-            out, _ = r.output("pipe:", format="rawvideo", pix_fmt="rgb24", vframes=1).run(
-                input=image_bytes, capture_stdout=True, capture_stderr=True
-            )
-        except ffmpeg.Error as e:
-            print(f"Error occurred: {e.stderr.decode()}")
-            raise e
-
-        video = torch.frombuffer(out, dtype=torch.uint8).view(1, h, w, 3)
-        return video

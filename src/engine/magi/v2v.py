@@ -1,18 +1,17 @@
 import torch
 from typing import Dict, Any, Callable, List, Union
 from PIL import Image
-import numpy as np
 import math
-
+from einops import rearrange
+from tqdm import tqdm
 from .base import MagiBaseEngine
-
 
 class MagiV2VEngine(MagiBaseEngine):
     """Magi Video-to-Video Engine Implementation"""
 
     def run(
-        self,
-        video: Union[str, torch.Tensor, Image.Image],
+        self,   
+        video: Union[str, torch.Tensor, List[Image.Image]],
         prompt: Union[List[str], str],
         height: int = 512,
         width: int = 512,
@@ -36,9 +35,13 @@ class MagiV2VEngine(MagiBaseEngine):
         prev_chunk_scales: List[float] = [1.5, 1.5, 1.5, 1.0, 1.0],
         distill_nearly_clean_chunk_threshold: float = 0.3,
         window_size: int = 4,
+        distill: bool = False,
+        kv_offload: bool = True,
+        prefix_frames: int | None = 32,
+        prefix_video_max_chunk: int = 5,
         **kwargs
     ):
-        """Text-to-video generation using MAGI's chunk-based approach"""
+        """Image-to-video generation using MAGI's chunk-based approach"""
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -52,20 +55,34 @@ class MagiV2VEngine(MagiBaseEngine):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
-
-        loaded_video = self._load_video(video)
-        loaded_video, height, width = self._aspect_ratio_resize(
-            loaded_video, max_area=height * width
-        )
-        preprocessed_video = self.video_processor.preprocess_video(
-            loaded_video, height, width
-        )
+        
+        loaded_video, fps = self._load_video(video, fps=fps, return_fps=True)
+        for i, frame in enumerate(loaded_video):
+            loaded_video[i] = self._aspect_ratio_resize(frame, max_area=height * width)[0]
+        
+        video_tensor = self.video_processor.preprocess_video(loaded_video, height=height, width=width)
+        fps = int(fps)
+        
+        if prefix_frames is not None:
+            prefix_video = video_tensor[:, :, prefix_frames:]
+        else:
+            num_frames_to_read = video_tensor.shape[2]
+            if num_frames_to_read < fps:
+                clip_length = 1
+            else:
+                PREFIX_VIDEO_MAX_FRAMES = prefix_video_max_chunk * fps
+                clip_length = min(num_frames_to_read // fps * fps, PREFIX_VIDEO_MAX_FRAMES)
+            
+            prefix_video = video_tensor[:, :, -clip_length:]
+        
+        transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         prefix_video = self.vae_encode(
-            preprocessed_video,
+            prefix_video,
             offload=offload,
-            dtype=torch.float32,
-            normalize_latents_dtype=torch.float32,
+            dtype=transformer_dtype,
+            normalize_latents_dtype=transformer_dtype,
+            sample_mode="mode",
         )
 
         if offload:
@@ -76,8 +93,6 @@ class MagiV2VEngine(MagiBaseEngine):
             (num_frames // self.vae_scale_factor_temporal * 1.0 + prefix_video.size(2))
             / chunk_width
         )
-
-        transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -156,14 +171,22 @@ class MagiV2VEngine(MagiBaseEngine):
             transformer_dtype=transformer_dtype,
             prefix_video=prefix_video,
             clean_chunk_kvrange=clean_chunk_kvrange,
+            kv_offload=kv_offload,
+            distill=distill,
         )
 
         if offload:
             self._offload(self.transformer)
 
+        if offload:
+            self._offload(self.transformer)
+
         if return_latents:
-            return latents
+            return torch.cat(latents, dim=2)
         else:
-            video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
-            return postprocessed_video
+            videos = []
+            for latent in tqdm(latents, desc="Decoding latents"): 
+                video = self.vae_decode(latent, offload=False)
+                video = self._postprocess(video, output_type="pil")[0]
+                videos.extend(video)
+            return [videos]

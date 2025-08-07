@@ -293,6 +293,7 @@ class MagiTransformer3DModel(
         ), f"Invalid t shape, got {timestep.shape[1]} != {denoising_range_num}"  # nolint
         t_flat = timestep.flatten()  # (N * denoising_range_num,)
         timestep_embed = self.timestep_embedding(t_flat)  # (N, D)
+        
 
         if self.distill:
             distill_dt_scalar = 2
@@ -303,9 +304,11 @@ class MagiTransformer3DModel(
                 )
             else:
                 distill_dt_factor = num_steps / 4 * distill_dt_scalar
+            
             distill_dt = torch.ones_like(t_flat) * distill_dt_factor
             distill_dt_embed = self.timestep_embedding(distill_dt)
             timestep_embed = timestep_embed + distill_dt_embed
+            
         timestep_embed = timestep_embed.reshape(
             batch_size, denoising_range_num, -1
         )  # (N, range_num, D)

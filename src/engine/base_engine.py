@@ -47,7 +47,6 @@ from torchvision import transforms as TF
 import inspect
 from src.preprocess import preprocessor_registry
 from src.postprocess import postprocessor_registry
-from src.quantize.quantizer import ModelQuantizer, quantize_model, quant_type
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -309,8 +308,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
-        if is_converted:
-            component["config_path"] = None
 
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
@@ -365,14 +362,18 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
 
     def enable_vae_tiling(self):
         self.vae_tiling = True
-        if self.vae is not None and hasattr(self.vae, "enable_tiling"):
+        if self.vae is None:
+            return 
+        if hasattr(self.vae, "enable_tiling"):
             self.vae.enable_tiling()
         else:
             self.logger.warning("VAE does not support tiling")
-
+ 
     def enable_vae_slicing(self):
         self.vae_slicing = True
-        if self.vae is not None and hasattr(self.vae, "enable_slicing"):
+        if self.vae is None:
+            return
+        if hasattr(self.vae, "enable_slicing"):
             self.vae.enable_slicing()
         else:
             self.logger.warning("VAE does not support slicing")
@@ -424,8 +425,6 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
-        if is_converted:
-            component["config_path"] = None
 
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")

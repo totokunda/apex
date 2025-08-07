@@ -146,17 +146,15 @@ class MagiT2VEngine(MagiBaseEngine):
         if offload:
             self._offload(self.transformer)
 
+        if offload:
+            self._offload(self.transformer)
+
         if return_latents:
-            return torch.cat(latents, dim=0)
+            return torch.cat(latents, dim=2)
         else:
             videos = []
             for latent in tqdm(latents, desc="Decoding latents"): 
                 video = self.vae_decode(latent, offload=False)
-                video = rearrange(video, "b c t h w -> (b t) c h w")
-                video = (video * 127.5 + 127.5).clamp(0, 255).to(torch.uint8)
-                videos.append(video)
-            
-            videos = torch.cat(videos, dim=0).permute(0, 2, 3, 1).cpu().numpy()
-            videos = [Image.fromarray(video) for video in videos]
-    
+                video = self._postprocess(video, output_type="pil")[0]
+                videos.extend(video)
             return [videos]
