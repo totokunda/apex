@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.transforms import Compose
 
-from .blocks import FeatureFusionBlock, _make_scratch
+from .da_blocks import FeatureFusionBlock, _make_scratch
 from .transforms import Resize, NormalizeImage, PrepareForNet
-
+from .dino import DINOv2
 
 class DepthAnythingV2(nn.Module):
     def __init__(
@@ -239,5 +239,5 @@ def _make_fusion_block(features, use_bn, size=None):
         bn=use_bn,
         expand=False,
         align_corners=True,
-        size=size,
+        size=size
     )

@@ -24,6 +24,7 @@ from timm.models.layers import to_2tuple, trunc_normal_
 from collections import OrderedDict
 from tqdm import tqdm
 from src.attention import attention_register
+
 ###################################################
 #     modified 3D rotary embedding from timm
 ###################################################
@@ -233,6 +234,7 @@ def build_rotary_pos_embed(
     cos_emb = cos_emb.reshape(num_spatial_dim, -1).repeat_interleave(2, -1)
     return sin_emb, cos_emb
 
+
 class Attention(nn.Module):
     def __init__(
         self,
@@ -264,7 +266,7 @@ class Attention(nn.Module):
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
         qkv = self.qkv_norm(qkv)
         q, k, v = qkv.chunk(3, dim=2)
-        
+
         if self.use_rope:
             assert feat_shape is not None
             rope_emb = cache_rotary_emb(
@@ -273,19 +275,20 @@ class Attention(nn.Module):
                 device=x.device,
                 dtype=x.dtype,
             )
-            
+
             sin_emb = rope_emb[0].unsqueeze(0).unsqueeze(2)
             cos_emb = rope_emb[1].unsqueeze(0).unsqueeze(2)
             q[:, 1:, :] = apply_rot_embed(q[:, 1:, :], sin_emb, cos_emb)
             k[:, 1:, :] = apply_rot_embed(k[:, 1:, :], sin_emb, cos_emb)
-            
-            
+
             q = q.squeeze(2).transpose(1, 2)
             k = k.squeeze(2).transpose(1, 2)
             v = v.squeeze(2).transpose(1, 2)
 
-            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-            
+            x = attention_register.call(q, k, v, is_causal=False, key="sdpa").transpose(
+                1, 2
+            )
+
         else:
             q = q.squeeze(2)
             k = k.squeeze(2)
@@ -294,9 +297,11 @@ class Attention(nn.Module):
             q = q.transpose(1, 2)  # (B, hn, N, hd)
             k = k.transpose(1, 2)  # (B, hn, N, hd)
             v = v.transpose(1, 2)  # (B, hn, N, hd)
-        
-            x = attention_register.call(q, k, v, is_causal=False, key='sdpa').transpose(1, 2)
-            
+
+            x = attention_register.call(q, k, v, is_causal=False, key="sdpa").transpose(
+                1, 2
+            )
+
         x = x.reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -372,7 +377,6 @@ def cache_rotary_emb(
         device=device,
         dtype=dtype,
     )
-
 
 
 ###################################################
@@ -910,9 +914,6 @@ class DiagonalGaussianDistribution(object):
 
     def mode(self):
         return self.mean
-
-
-
 
 
 class ParallelHelper:

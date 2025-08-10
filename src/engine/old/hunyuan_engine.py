@@ -8,7 +8,7 @@ from PIL import Image
 import numpy as np
 from src.engine.denoise import HunyuanDenoise, HunyuanDenoiseType
 import torch.nn.functional as F
-from src.utils.pos_emb_utils import get_nd_rotary_pos_embed_new
+from src.utils.models.hunyuan import get_nd_rotary_pos_embed_new
 
 
 class ModelType(Enum):

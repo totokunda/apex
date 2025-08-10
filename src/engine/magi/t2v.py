@@ -6,6 +6,7 @@ from einops import rearrange
 from PIL import Image
 from tqdm import tqdm
 
+
 class MagiT2VEngine(MagiBaseEngine):
     """Magi Text-to-Video Engine Implementation"""
 
@@ -76,7 +77,7 @@ class MagiT2VEngine(MagiBaseEngine):
             device=self.device,
             num_videos_per_prompt=num_videos,
         )
-    
+
         prompt_embeds, prompt_embeds_mask = self._process_txt_embeddings(
             caption_embs=prompt_embeds,
             emb_masks=prompt_embeds_mask,
@@ -84,21 +85,21 @@ class MagiT2VEngine(MagiBaseEngine):
             infer_chunk_num=num_chunks,
             clean_chunk_num=0,
         )
-  
+
         null_emb_masks = torch.zeros_like(prompt_embeds_mask)
         null_embs, null_emb_masks = self.process_null_embeddings(
             null_caption_embedding=null_caption_embeds,
             null_emb_masks=null_emb_masks,
             infer_chunk_num=num_chunks,
         )
-        
+
         if prompt_embeds_mask.sum() == 0:
             prompt_embeds_mask = torch.cat([null_emb_masks, null_emb_masks], dim=0)
             prompt_embeds = torch.cat([null_embs, null_embs])
         else:
             prompt_embeds_mask = torch.cat([prompt_embeds_mask, null_emb_masks], dim=0)
             prompt_embeds = torch.cat([prompt_embeds, null_embs])
-        
+
         latent = self._get_latents(
             height=height,
             width=width,
@@ -153,7 +154,7 @@ class MagiT2VEngine(MagiBaseEngine):
             return torch.cat(latents, dim=2)
         else:
             videos = []
-            for latent in tqdm(latents, desc="Decoding latents"): 
+            for latent in tqdm(latents, desc="Decoding latents"):
                 video = self.vae_decode(latent, offload=False)
                 video = self._postprocess(video, output_type="pil")[0]
                 videos.extend(video)

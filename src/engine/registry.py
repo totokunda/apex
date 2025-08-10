@@ -4,6 +4,7 @@ import torch
 from src.ui.nodes import UINode
 from src.engine.base_engine import BaseEngine
 
+
 class EngineType(Enum):
     """Supported engine types"""
 

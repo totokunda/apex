@@ -7,17 +7,47 @@ import torch
 import numpy as np
 from typing import Union, List, Optional
 from PIL import Image
-
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+from tqdm import tqdm
+from src.utils.preprocessors import MODEL_WEIGHTS
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
 from ..dwpose import util
 from ..dwpose.wholebody import Wholebody, HWC3, resize_image
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+
+class PoseOutput(BaseOutput):
+    detected_map_body: np.ndarray | None = None
+    detected_map_face: np.ndarray | None = None
+    detected_map_bodyface: np.ndarray | None = None
+    detected_map_handbodyface: np.ndarray | None = None
+    det_result: np.ndarray | None = None
+
+
+class PoseBodyFaceOutput(BaseOutput):
+    detected_map_bodyface: np.ndarray | None = None
+
+
+class PoseBodyOutput(BaseOutput):
+    detected_map_body: np.ndarray | None = None
+
+
+class PoseVideoOutput(BaseOutput):
+    frames: List[PoseOutput]
+
+
+class PoseBodyFaceVideoOutput(BaseOutput):
+    frames: List[PoseBodyFaceOutput]
+
+
+class PoseBodyVideoOutput(BaseOutput):
+    frames: List[PoseBodyOutput]
 
 
 def draw_pose(pose, H, W, use_hand=False, use_body=False, use_face=False):
@@ -42,9 +72,9 @@ def draw_pose(pose, H, W, use_hand=False, use_body=False, use_face=False):
 class PosePreprocessor(BasePreprocessor):
     def __init__(
         self,
-        detection_model: str,
-        pose_model: str,
-        device: str = "cuda",
+        detection_model: Optional[str] = None,
+        pose_model: Optional[str] = None,
+        device: str = DEFAULT_DEVICE,
         resize_size: int = 1024,
         use_body: bool = True,
         use_face: bool = True,
@@ -52,12 +82,12 @@ class PosePreprocessor(BasePreprocessor):
         save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
         **kwargs,
     ):
+        if detection_model is None:
+            detection_model = MODEL_WEIGHTS["pose_detection"]
+        if pose_model is None:
+            pose_model = MODEL_WEIGHTS["pose"]
         super().__init__(preprocessor_type=PreprocessorType.POSE, **kwargs)
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device == "cuda"
-            else torch.device(device)
-        )
+        self.device = device
         detection_model = self._download(detection_model, save_path=save_path)
         pose_model = self._download(pose_model, save_path=save_path)
         self.pose_estimation = Wholebody(
@@ -166,7 +196,7 @@ class PosePreprocessor(BasePreprocessor):
                 det_result[..., 1::2] *= w_ratio
                 det_result = det_result.astype(np.int32)
 
-            return ret_data, det_result
+            return PoseOutput(**ret_data, det_result=det_result)
 
     def __str__(self):
         return f"PosePreprocessor(use_body={self.use_body}, use_face={self.use_face}, use_hand={self.use_hand})"
@@ -179,9 +209,9 @@ class PosePreprocessor(BasePreprocessor):
 class PoseBodyFacePreprocessor(PosePreprocessor, BasePreprocessor):
     def __init__(
         self,
-        detection_model: str,
-        pose_model: str,
-        device: str = "cuda",
+        detection_model: Optional[str] = None,
+        pose_model: Optional[str] = None,
+        device: str = DEFAULT_DEVICE,
         resize_size: int = 1024,
         **kwargs,
     ):
@@ -199,13 +229,8 @@ class PoseBodyFacePreprocessor(PosePreprocessor, BasePreprocessor):
     @torch.no_grad()
     @torch.inference_mode()
     def __call__(self, image: Union[Image.Image, np.ndarray, str]):
-        ret_data, det_result = super().process(
-            resize_image(
-                HWC3(np.array(self._load_image(image))[..., ::-1]), self.resize_size
-            ),
-            np.array(self._load_image(image)).shape[:2],
-        )
-        return ret_data["detected_map_bodyface"]
+        ret_data = super().__call__(image)
+        return PoseBodyFaceOutput(detected_map_bodyface=ret_data.detected_map_bodyface)
 
     def __str__(self):
         return "PoseBodyFacePreprocessor(use_body=True, use_face=True, use_hand=False)"
@@ -223,10 +248,10 @@ class PoseBodyFaceVideoPreprocessor(PoseBodyFacePreprocessor, BasePreprocessor):
     def __call__(self, frames: Union[List[Image.Image], List[str], str]):
         frames = self._load_video(frames)
         ret_frames = []
-        for frame in frames:
+        for frame in tqdm(frames):
             anno_frame = super().__call__(frame)
             ret_frames.append(anno_frame)
-        return ret_frames
+        return PoseBodyFaceVideoOutput(frames=ret_frames)
 
     def __str__(self):
         return "PoseBodyFaceVideoPreprocessor(use_body=True, use_face=True, use_hand=False)"
@@ -239,9 +264,9 @@ class PoseBodyFaceVideoPreprocessor(PoseBodyFacePreprocessor, BasePreprocessor):
 class PoseBodyPreprocessor(PosePreprocessor, BasePreprocessor):
     def __init__(
         self,
-        detection_model: str,
-        pose_model: str,
-        device: str = "cuda",
+        detection_model: Optional[str] = None,
+        pose_model: Optional[str] = None,
+        device: str = DEFAULT_DEVICE,
         resize_size: int = 1024,
         **kwargs,
     ):
@@ -259,13 +284,8 @@ class PoseBodyPreprocessor(PosePreprocessor, BasePreprocessor):
     @torch.no_grad()
     @torch.inference_mode()
     def __call__(self, image: Union[Image.Image, np.ndarray, str]):
-        ret_data, det_result = super().process(
-            resize_image(
-                HWC3(np.array(self._load_image(image))[..., ::-1]), self.resize_size
-            ),
-            np.array(self._load_image(image)).shape[:2],
-        )
-        return ret_data["detected_map_body"]
+        ret_data = super().__call__(image)
+        return PoseBodyOutput(detected_map_body=ret_data.detected_map_body)
 
     def __str__(self):
         return "PoseBodyPreprocessor(use_body=True, use_face=False, use_hand=False)"
@@ -283,10 +303,10 @@ class PoseBodyVideoPreprocessor(PoseBodyPreprocessor, BasePreprocessor):
     def __call__(self, frames: Union[List[Image.Image], List[str], str]):
         frames = self._load_video(frames)
         ret_frames = []
-        for frame in frames:
+        for frame in tqdm(frames):
             anno_frame = super().__call__(frame)
             ret_frames.append(anno_frame)
-        return ret_frames
+        return PoseBodyVideoOutput(frames=ret_frames)
 
     def __str__(self):
         return (

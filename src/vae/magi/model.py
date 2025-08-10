@@ -248,7 +248,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
             self._spatial_downsample_factor = ddconfig["patch_size"]
         else:
             self._spatial_downsample_factor = 8
-        
+
         self.scaling_factor = ddconfig.get("scaling_factor", 0.18215)
         self.tiling_enabled = True
 
@@ -259,7 +259,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
     @property
     def temporal_downsample_factor(self):
         return self._temporal_downsample_factor
-    
+
     def enable_tiling(self):
         self.tiling_enabled = True
 
@@ -274,15 +274,15 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
             tuple: Tuple containing the quantized tensor, embedding loss, and additional information.
         """
         N, C, T, H, W = x.shape
-        
+
         if T == 1 and self._temporal_downsample_factor > 1:
             x = x.expand(-1, -1, 4, -1, -1)
             x = self.encoder(x)
         else:
             x = self.encoder(x)
-        
+
         return x
-    
+
     def _decode(self, x):
         """
         Decode the quantized tensor.
@@ -301,7 +301,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
         else:
             x = self.decoder(x)
         return x
-    
+
     def encode(self, x, return_dict: bool = False):
         if self.tiling_enabled:
             h = self.tiled_encode_3d(x)
@@ -313,7 +313,7 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
             return AutoencoderKLOutput(latent_dist=z)
         else:
             return (z,)
-    
+
     def decode(self, x, return_dict: bool = False):
         if self.tiling_enabled:
             x = self.tiled_decode_3d(x)
@@ -323,10 +323,10 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
             return DecoderOutput(sample=x)
         else:
             return (x,)
-        
+
     def normalize_latents(self, latents):
         return latents * self.scaling_factor
-    
+
     def denormalize_latents(self, latents):
         return latents / self.scaling_factor
 
@@ -354,4 +354,3 @@ class AutoencoderKLMagi(ModelMixin, ConfigMixin, VideoTokenizerABC):
     @property
     def allow_spatial_tiling(self):
         return False
-

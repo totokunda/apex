@@ -2,7 +2,7 @@ import json
 import os
 from typing import Dict, Any, Optional
 from accelerate import init_empty_weights
-from src.utils.module_utils import find_class_recursive
+from src.utils.module import find_class_recursive
 import importlib
 import re
 from collections import Counter

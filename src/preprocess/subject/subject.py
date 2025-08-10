@@ -2,22 +2,42 @@
 # Copyright (c) Alibaba, Inc. and its affiliates.
 import cv2
 import numpy as np
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Literal
 from PIL import Image
-import warnings
-
+from src.preprocess.inpainting import InpaintingPreprocessor
+from src.preprocess.canvas.mask_aug import MaskAugAnnotator
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
+
+subject_mode = Literal[
+    "salient",
+    "mask",
+    "bbox",
+    "label",
+    "caption",
+    "plain",
+    "salientmasktrack",
+    "salientbboxtrack",
+    "masktrack",
+    "bboxtrack",
+]
+
+
+class SubjectOutput(BaseOutput):
+    image: np.ndarray
+    mask: np.ndarray
+    src_image: np.ndarray
 
 
 @preprocessor_registry("subject")
 class SubjectPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        mode: str = "salientmasktrack",
+        mode: subject_mode = "plain",
         use_aug: bool = False,
         use_crop: bool = False,
         roi_only: bool = False,
@@ -36,35 +56,21 @@ class SubjectPreprocessor(BasePreprocessor):
         # Note: Inpainting and mask augmentation dependencies are not available
         # This is a simplified implementation
         if inpainting_config is not None:
-            warnings.warn(
-                "Inpainting functionality requires additional dependencies and is not fully implemented."
-            )
+            self.inpainting_preprocessor = InpaintingPreprocessor(inpainting_config)
+        else:
+            self.inpainting_preprocessor = InpaintingPreprocessor()
 
         if self.use_aug:
-            warnings.warn(
-                "Mask augmentation functionality requires additional dependencies and is disabled."
-            )
-            self.use_aug = False
-
-        assert self.mode in [
-            "plain",
-            "salient",
-            "mask",
-            "bbox",
-            "salientmasktrack",
-            "salientbboxtrack",
-            "masktrack",
-            "bboxtrack",
-            "label",
-            "caption",
-            "all",
-        ]
+            self.mask_aug_annotator = MaskAugAnnotator()
+            self.use_aug = True
+        else:
+            self.mask_aug_annotator = None
 
     def __call__(
         self,
         image: Union[Image.Image, np.ndarray, str] = None,
-        mode: Optional[str] = None,
-        return_mask: Optional[bool] = None,
+        mode: Optional[subject_mode] = "salient",
+        return_mask: Optional[bool] = True,
         mask_cfg: Optional[dict] = None,
         mask: Optional[Union[Image.Image, np.ndarray, str]] = None,
         bbox: Optional[List[float]] = None,
@@ -78,26 +84,26 @@ class SubjectPreprocessor(BasePreprocessor):
         if mode == "plain":
             image = self._load_image(image)
             image_array = np.array(image)
-            return {"image": image_array, "mask": None} if return_mask else image_array
+            return SubjectOutput(image=image_array, mask=None)
 
-        # For other modes, we need inpainting functionality which is not available
-        # This is a simplified implementation that works with provided masks
         image = self._load_image(image)
         image_array = np.array(image)
 
-        if mask is not None:
-            if isinstance(mask, (str, Image.Image)):
-                mask = self._load_image(mask)
-            mask = np.array(mask)
-            # Convert to grayscale if needed
-            if len(mask.shape) == 3:
-                mask = mask.mean(axis=2).astype(np.uint8)
-        else:
-            # Create a dummy mask if none provided
-            mask = (
-                np.ones((image_array.shape[0], image_array.shape[1]), dtype=np.uint8)
-                * 255
-            )
+        inp_res = self.inpainting_preprocessor(
+            image,
+            mask=mask,
+            bbox=bbox,
+            label=label,
+            caption=caption,
+            mode=mode,
+            return_mask=True,
+            return_source=True,
+        )
+        image_array = inp_res.src_image
+        mask = inp_res.mask
+
+        if self.use_aug:
+            mask = self.mask_aug_annotator(mask, mask_cfg)
 
         # Process the mask
         _, binary_mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
@@ -121,9 +127,9 @@ class SubjectPreprocessor(BasePreprocessor):
             ret_mask = ret_mask[y : y + h, x : x + w]
 
         if return_mask:
-            return {"image": ret_image, "mask": ret_mask}
+            return SubjectOutput(image=ret_image, mask=ret_mask)
         else:
-            return ret_image
+            return SubjectOutput(image=ret_image)
 
     def __str__(self):
         return f"SubjectPreprocessor(mode={self.mode}, use_crop={self.use_crop}, roi_only={self.roi_only})"

@@ -1,7 +1,7 @@
 import torch
 import math
-from src.utils.type_utils import EnumType
-from src.utils.cache_utils import empty_cache
+from src.utils.type import EnumType
+from src.utils.cache import empty_cache
 
 
 class DenoiseType(EnumType):

@@ -1,5 +1,5 @@
 import torch
-from src.utils.support_utils import supports_double
+from src.utils.dtype import supports_double
 from typing import Optional
 
 import numpy as np

@@ -92,11 +92,13 @@ def sdpa_varlen(
     n_heads_q, head_dim_q = q.shape[1:]
     n_heads_k, head_dim_k = k.shape[1:]
     n_heads_v, head_dim_v = v.shape[1:]
-    
+
     # Validate shapes
     if head_dim_q != head_dim_k or head_dim_q != head_dim_v:
-        raise ValueError(f"Head dimensions must match: q={head_dim_q}, k={head_dim_k}, v={head_dim_v}")
-    
+        raise ValueError(
+            f"Head dimensions must match: q={head_dim_q}, k={head_dim_k}, v={head_dim_v}"
+        )
+
     head_dim = head_dim_q
 
     # 1. recover individual sequence lengths
@@ -121,14 +123,16 @@ def sdpa_varlen(
     # 3. Handle multi-query/grouped-query attention by expanding k,v if needed
     if n_heads_k != n_heads_q:
         if n_heads_q % n_heads_k != 0:
-            raise ValueError(f"Number of query heads ({n_heads_q}) must be divisible by key heads ({n_heads_k})")
+            raise ValueError(
+                f"Number of query heads ({n_heads_q}) must be divisible by key heads ({n_heads_k})"
+            )
         expand_ratio = n_heads_q // n_heads_k
         k_pad = k_pad.repeat_interleave(expand_ratio, dim=1)
         v_pad = v_pad.repeat_interleave(expand_ratio, dim=1)
 
     # 4. SDPA call with per-batch processing to avoid large mask materialization
     out_pad = torch.zeros_like(q_pad)
-    
+
     for b in range(B):
         # Create minimal mask only for this batch item
         if seq_lens_q[b] < max_seqlen_q or seq_lens_k[b] < max_seqlen_kv:
@@ -140,9 +144,9 @@ def sdpa_varlen(
                 dtype=q.dtype,
             )
             batch_out = F.scaled_dot_product_attention(
-                q_pad[b:b+1, :, :seq_lens_q[b]],
-                k_pad[b:b+1, :, :seq_lens_k[b]], 
-                v_pad[b:b+1, :, :seq_lens_k[b]],
+                q_pad[b : b + 1, :, : seq_lens_q[b]],
+                k_pad[b : b + 1, :, : seq_lens_k[b]],
+                v_pad[b : b + 1, :, : seq_lens_k[b]],
                 attn_mask=batch_mask,
                 dropout_p=0.0,
                 is_causal=is_causal,
@@ -150,18 +154,19 @@ def sdpa_varlen(
         else:
             # No padding, no mask needed
             batch_out = F.scaled_dot_product_attention(
-                q_pad[b:b+1, :, :seq_lens_q[b]],
-                k_pad[b:b+1, :, :seq_lens_k[b]],
-                v_pad[b:b+1, :, :seq_lens_k[b]],
+                q_pad[b : b + 1, :, : seq_lens_q[b]],
+                k_pad[b : b + 1, :, : seq_lens_k[b]],
+                v_pad[b : b + 1, :, : seq_lens_k[b]],
                 attn_mask=None,
                 dropout_p=0.0,
                 is_causal=is_causal,
             )
-        out_pad[b, :, :seq_lens_q[b]] = batch_out[0]
+        out_pad[b, :, : seq_lens_q[b]] = batch_out[0]
 
     # 6. strip padding and repack to (∑Lq, H, D) with original query head count
     packed_out = [
-        out_pad[b, :n_heads_q, : seq_lens_q[b]].transpose(0, 1) for b in range(B)  # (Lq, H, D)
+        out_pad[b, :n_heads_q, : seq_lens_q[b]].transpose(0, 1)
+        for b in range(B)  # (Lq, H, D)
     ]
     return torch.cat(packed_out, dim=0)
 

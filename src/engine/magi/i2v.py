@@ -6,6 +6,7 @@ from einops import rearrange
 from tqdm import tqdm
 from .base import MagiBaseEngine
 
+
 class MagiI2VEngine(MagiBaseEngine):
     """Magi Image-to-Video Engine Implementation"""
 
@@ -53,15 +54,18 @@ class MagiI2VEngine(MagiBaseEngine):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
-        
+
         loaded_image = self._load_image(image)
-        
-        loaded_image, height, width = self._aspect_ratio_resize(loaded_image, max_area=height * width)
-            
+
+        loaded_image, height, width = self._aspect_ratio_resize(
+            loaded_image, max_area=height * width
+        )
+
         transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
-        preprocessed_image = self.video_processor.preprocess(loaded_image, height=height, width=width).unsqueeze(2)
-        
+        preprocessed_image = self.video_processor.preprocess(
+            loaded_image, height=height, width=width
+        ).unsqueeze(2)
 
         prefix_video = self.vae_encode(
             preprocessed_image,
@@ -125,7 +129,6 @@ class MagiI2VEngine(MagiBaseEngine):
             generator=generator,
             seed=seed,
         )
-        
 
         latent = torch.cat([latent, latent], dim=0)
 
@@ -169,7 +172,7 @@ class MagiI2VEngine(MagiBaseEngine):
             return torch.cat(latents, dim=2)
         else:
             videos = []
-            for latent in tqdm(latents, desc="Decoding latents"): 
+            for latent in tqdm(latents, desc="Decoding latents"):
                 video = self.vae_decode(latent, offload=False)
                 video = self._postprocess(video, output_type="pil")[0]
                 videos.extend(video)

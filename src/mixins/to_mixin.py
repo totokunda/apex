@@ -1,7 +1,7 @@
 import re
 import torch
 from typing import List
-from src.utils.cache_utils import empty_cache
+from src.utils.cache import empty_cache
 from diffusers import ModelMixin
 
 

@@ -1,10 +1,12 @@
 import torch
-from src.utils.type_utils import EnumType
-from typing import  List, Dict, Any, Tuple
+from src.utils.type import EnumType
+from typing import List, Dict, Any, Tuple
 from collections import Counter
+
 
 class MagiDenoiseType(EnumType):
     BASE = "base"
+
 
 class UnconditionGuard:
     def __init__(self, kwargs):
@@ -28,6 +30,7 @@ class UnconditionGuard:
         self.kwargs["slice_point"] = self.prev_state["slice_point"]
         self.kwargs["fwd_extra_1st_chunk"] = self.prev_state["fwd_extra_1st_chunk"]
 
+
 def check_forward(module, inputs, outputs):
     for i in inputs:
         if isinstance(i, torch.Tensor):
@@ -40,7 +43,9 @@ def check_forward(module, inputs, outputs):
         for o in outputs:
             if isinstance(o, torch.Tensor):
                 if not torch.isfinite(o).all():
-                    raise RuntimeError(f"NaN/Inf in forward of {module.__class__.__name__}")
+                    raise RuntimeError(
+                        f"NaN/Inf in forward of {module.__class__.__name__}"
+                    )
 
 
 class MagiDenoise:
@@ -72,7 +77,7 @@ class MagiDenoise:
         noise2clean_kvrange = kwargs.get("noise2clean_kvrange", [5, 4, 3, 2])
         clean_chunk_kvrange = kwargs.get("clean_chunk_kvrange", 1)
         kv_offload = kwargs.get("kv_offload", True)
-        
+
         distill_nearly_clean_chunk_threshold = kwargs.get(
             "distill_nearly_clean_chunk_threshold", 0.3
         )
@@ -88,7 +93,7 @@ class MagiDenoise:
         total_steps = self.total_steps(
             denoise_step_per_stage, num_chunks, chunk_width, window_size, prefix_video
         )
-        
+
         post_patch_height = latents.size(3) // self.transformer.config.patch_size
         post_patch_width = latents.size(4) // self.transformer.config.patch_size
         chunk_token_nums = chunk_width * post_patch_height * post_patch_width
@@ -106,10 +111,10 @@ class MagiDenoise:
 
         self.scheduler.set_scheduler_params(chunk_width, denoise_step_per_stage)
         self.transformer.set_distill(distill)
-        
+
         for name, module in self.transformer.named_modules():
             module.register_forward_hook(check_forward)
-        
+
         default_model_kwargs = {
             "chunk_width": chunk_width,
             "num_steps": num_inference_steps,
@@ -117,7 +122,7 @@ class MagiDenoise:
             "transformer_dtype": transformer_dtype,
             "kv_offload": kv_offload,
         }
-        
+
         chunk_denoise_count = Counter()
         clean_latents = []
 
@@ -141,7 +146,7 @@ class MagiDenoise:
                 )
 
                 model_kwargs = default_model_kwargs.copy()
-                
+
                 if chunk_offset > 0 and denoise_step == 0:
                     self.cache_prefix_video(
                         prefix_video,
@@ -162,10 +167,9 @@ class MagiDenoise:
                 latents_chunk = latents[
                     :, :, chunk_start * chunk_width : chunk_end * chunk_width
                 ].clone()
-                
+
                 prompt_embeds_chunk = prompt_embeds[:, chunk_start:chunk_end]
                 prompt_embeds_mask_chunk = prompt_embeds_mask[:, chunk_start:chunk_end]
-                
 
                 model_kwargs.update(
                     {
@@ -174,10 +178,8 @@ class MagiDenoise:
                         "denoising_range_num": chunk_end - chunk_start,
                     }
                 )
-                
-                
-                fwd_extra_1st_chunk = chunk_start > chunk_offset and denoise_idx == 0
 
+                fwd_extra_1st_chunk = chunk_start > chunk_offset and denoise_idx == 0
 
                 if fwd_extra_1st_chunk:
                     clean_x = latents[
@@ -264,7 +266,7 @@ class MagiDenoise:
                     nearly_clean_chunk_t > distill_nearly_clean_chunk_threshold
                 )
                 model_kwargs["distill_interval"] = time_interval[denoise_idx]
-                
+
                 flow_pred = self.forward(
                     hidden_states=latents_chunk,
                     timestep=timestep,
@@ -279,7 +281,6 @@ class MagiDenoise:
                     **model_kwargs,
                 )
 
-                
                 if fwd_extra_1st_chunk:
                     latents_chunk = latents_chunk[:, :, chunk_width:]
                     flow_pred = flow_pred[:, :, chunk_width:]
@@ -292,17 +293,17 @@ class MagiDenoise:
                     denoise_idx,
                     return_dict=False,
                 )[0]
-                
+
                 for chunk_index in range(chunk_start, chunk_end):
                     chunk_denoise_count[chunk_index] += 1
-                    
+
                 if render_on_step_callback is not None:
                     self._render_step(latents_chunk, render_on_step_callback)
 
                 latents[:, :, chunk_start * chunk_width : chunk_end * chunk_width] = (
                     latents_chunk
                 )
-                
+
                 if chunk_denoise_count[chunk_start] == num_inference_steps:
                     if prefix_video is not None:
                         prefix_video_length = prefix_video.size(2)
@@ -320,9 +321,11 @@ class MagiDenoise:
                         ].chunk(2, dim=0)
                     else:
                         clean_latents_chunk, _ = latents[
-                            :, :, chunk_start * chunk_width : (chunk_start + 1) * chunk_width
+                            :,
+                            :,
+                            chunk_start * chunk_width : (chunk_start + 1) * chunk_width,
                         ].chunk(2, dim=0)
-                        
+
                     clean_latents.append(clean_latents_chunk)
 
                 pbar.update(1)
@@ -481,7 +484,7 @@ class MagiDenoise:
                     **kwargs,
                     return_dict=False,
                 )[0]
-                
+
                 near_clean_out_cond_pre_and_text = cat_out[
                     :,
                     :,
@@ -557,7 +560,7 @@ class MagiDenoise:
         )
 
         kv_cache_params["update_kv_cache"] = False
-        
+
         out_cond_pre_and_text = self.transformer(
             hidden_states[0:1],
             timestep[0:1],
@@ -571,7 +574,7 @@ class MagiDenoise:
         )[0]
 
         kv_cache_params["update_kv_cache"] = True
-        
+
         out_cond_pre = self.transformer(
             hidden_states[1:2],
             timestep[1:2],
@@ -923,17 +926,21 @@ class MagiDenoise:
         hidden_states_chunk = torch.cat(
             [hidden_states_chunk, hidden_states_chunk], dim=0
         )
-        
+
         null_prompt_embeds = prompt_embeds[1:2, :chunk_offset]
         null_prompt_embeds = torch.cat([null_prompt_embeds, null_prompt_embeds], dim=0)
         null_prompt_embeds_mask = prompt_embeds_mask[1:2, :chunk_offset]
         null_prompt_embeds_mask = torch.cat(
             [null_prompt_embeds_mask, null_prompt_embeds_mask], dim=0
         )
-        
-        null_prompt_embeds = null_prompt_embeds.flatten(start_dim=0, end_dim=1).unsqueeze(1)
-        null_prompt_embeds_mask = null_prompt_embeds_mask.flatten(start_dim=0, end_dim=1).unsqueeze(1)
-        
+
+        null_prompt_embeds = null_prompt_embeds.flatten(
+            start_dim=0, end_dim=1
+        ).unsqueeze(1)
+        null_prompt_embeds_mask = null_prompt_embeds_mask.flatten(
+            start_dim=0, end_dim=1
+        ).unsqueeze(1)
+
         timestep = torch.ones(chunk_offset, device=self.device) * self.scheduler.clean_t
         timestep = timestep.unsqueeze(0).repeat(hidden_states_chunk.size(0), 1)
 
@@ -950,7 +957,7 @@ class MagiDenoise:
                 "distill_interval": self.scheduler.time_interval[0],
             }
         )
-        
+
         kv_range = self.generate_kvrange_for_prefix_video(
             prefix_video.shape[0],
             chunk_width,
@@ -958,7 +965,7 @@ class MagiDenoise:
             noise2clean_kvrange,
             chunk_offset,
         )
-        
+
         self.forward(
             hidden_states=hidden_states_chunk,
             timestep=timestep,
@@ -983,7 +990,7 @@ class MagiDenoise:
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Non-Const Method"""
         prefix_length = prefix_video.size(2)
-  
+
         if prefix_length <= prefix_video_start:
             return x_chunk, t
 

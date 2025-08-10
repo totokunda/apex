@@ -1,4 +1,4 @@
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 from src.engine.denoise.wan_denoise import DenoiseType
 import torch
 from typing import List, Union, Optional

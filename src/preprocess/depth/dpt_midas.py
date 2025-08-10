@@ -3,8 +3,9 @@
 import torch
 import torch.nn as nn
 
-from .blocks import FeatureFusionBlock_custom, Interpolate, _make_encoder
+from .midas_blocks import FeatureFusionBlock_custom, Interpolate, _make_encoder
 from .vit import forward_vit
+from src.utils.defaults import DEFAULT_DEVICE
 
 
 def _make_fusion_block(features, use_bn):
@@ -96,7 +97,7 @@ class DPTDepthModel(DPT):
         super().__init__(head, **kwargs)
 
         if path is not None:
-            self.load_state_dict(torch.load(path))
+            self.load_state_dict(torch.load(path, map_location=DEFAULT_DEVICE))
 
     def forward(self, x):
         return super().forward(x).squeeze(dim=1)

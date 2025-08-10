@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from diffusers.models.autoencoders import AutoencoderKL
 from diffusers.pipelines.ltx.modeling_latent_upsampler import LTXLatentUpsamplerModel
 from src.postprocess.base import BasePostprocessor, postprocessor_registry
-from src.utils.cache_utils import empty_cache
+from src.utils.cache import empty_cache
 
 
 @postprocessor_registry("ltx.latent_upsampler")

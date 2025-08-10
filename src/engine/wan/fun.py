@@ -73,6 +73,7 @@ class WanFunEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        **kwargs,
     ):
 
         if not self.text_encoder:
@@ -123,12 +124,9 @@ class WanFunEngine(WanBaseEngine):
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
 
-        if not self.transformer:
-            self.load_component_by_type("transformer")
+        transformer_config = self.load_config_by_type("transformer")
 
         transformer_dtype = self.component_dtypes["transformer"]
-
-        self.to_device(self.transformer)
 
         latents = self._get_latents(
             height,
@@ -183,7 +181,7 @@ class WanFunEngine(WanBaseEngine):
 
         elif video is not None:
 
-            pt, ph, pw = self.transformer.config.patch_size
+            pt, ph, pw = transformer_config.patch_size
             loaded_video = self._load_video(video)
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]
@@ -298,7 +296,7 @@ class WanFunEngine(WanBaseEngine):
             control_latents = torch.zeros_like(latents)
             control_camera_latents = None
 
-        if reference_image is not None and self.transformer.config.get(
+        if reference_image is not None and transformer_config.get(
             "add_ref_control", False
         ):
             loaded_image = self._load_image(reference_image)

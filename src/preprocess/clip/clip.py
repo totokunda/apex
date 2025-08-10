@@ -88,22 +88,3 @@ class CLIPPreprocessor(BasePreprocessor):
 
     def __repr__(self):
         return self.__str__()
-
-
-if __name__ == "__main__":
-
-    model_path = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder"
-    config_path = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_processor"
-
-    preprocessor = CLIPPreprocessor(
-        model_path=model_path,
-        preprocessor_path=config_path,
-        processor_class="CLIPImageProcessor",
-    ).to(device="cuda", dtype=torch.bfloat16)
-
-    image = [
-        "https://static.independent.co.uk/2024/08/12/18/newFile-2.jpg",
-        "https://media.istockphoto.com/id/814423752/photo/eye-of-model-with-colorful-art-make-up-close-up.jpg?s=612x612&w=0&k=20&c=l15OdMWjgCKycMMShP8UK94ELVlEGvt7GmB_esHWPYE=",
-    ]
-
-    print(preprocessor(image).shape)

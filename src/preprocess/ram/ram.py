@@ -4,28 +4,36 @@
 import torch
 import numpy as np
 from torchvision.transforms import Normalize, Compose, Resize, ToTensor
-from typing import Union, List, Optional
+from typing import Union, List
 from PIL import Image
 
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
 
+from src.utils.defaults import DEFAULT_DEVICE
+from src.utils.preprocessors import MODEL_WEIGHTS
+
+class RAMOutput(BaseOutput):
+    tags: List[str]
+    tags_c: List[str]
 
 @preprocessor_registry("ram")
 class RAMPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        tokenizer_path: str,
-        model_path: str,
+        model_path: str | None = None,
         image_size: int = 384,
         ram_type: str = "swin_l",
         return_lang: List[str] = None,
-        device: str = "cuda",
+        device: str | torch.device = DEFAULT_DEVICE,
         **kwargs,
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["ram"]
         super().__init__(
             model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs
         )
@@ -33,22 +41,21 @@ class RAMPreprocessor(BasePreprocessor):
         try:
             from ram.models import ram_plus
             from ram import inference_ram
-        except ImportError:
+        except ImportError as e:
             import warnings
-
             warnings.warn(
-                "please pip install ram package, or you can refer to models/VACE-Annotators/ram/ram-0.1.0-py3-none-any.whl"
+                "please pip install ram package"
             )
             raise ImportError("RAM package not available")
 
         self.return_lang = (
             return_lang if return_lang is not None else ["en"]
         )  # ['en', 'zh']
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device == "cuda"
-            else torch.device(device)
-        )
+
+        if isinstance(device, str):
+            self.device = torch.device(device)
+        else:
+            self.device = device
 
         delete_tag_index = []
         self.model = (
@@ -56,7 +63,6 @@ class RAMPreprocessor(BasePreprocessor):
                 pretrained=self.model_path,
                 image_size=image_size,
                 vit=ram_type,
-                text_encoder_type=tokenizer_path,
                 delete_tag_index=delete_tag_index,
             )
             .eval()
@@ -83,13 +89,13 @@ class RAMPreprocessor(BasePreprocessor):
         tags_c_list = [tag.strip() for tag in tags_c.strip().split("|")]
 
         if len(self.return_lang) == 1 and "en" in self.return_lang:
-            return tags_e_list
+            return RAMOutput(tags=tags_e_list, tags_c=tags_c_list)
         elif len(self.return_lang) == 1 and "zh" in self.return_lang:
-            return tags_c_list
+            return RAMOutput(tags=tags_c_list, tags_c=tags_c_list)
         else:
-            return {"tags_e": tags_e_list, "tags_c": tags_c_list}
+            return RAMOutput(tags=tags_e_list, tags_c=tags_c_list)
 
-    def __str__(self):
+    def __str__(self): 
         return f"RAMPreprocessor(return_lang={self.return_lang})"
 
     def __repr__(self):

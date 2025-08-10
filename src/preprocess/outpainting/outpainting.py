@@ -11,8 +11,20 @@ from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
 
+
+class OutpaintingOutput(BaseOutput):
+    image: Image.Image
+    mask: Image.Image | None = None
+    src_image: Image.Image | None = None
+    
+class OutpaintingVideoOutput(BaseOutput):
+    frames: List[Image.Image]
+    masks: List[Image.Image] | None = None
+    src_frames: List[Image.Image] | None = None
+    
 
 def get_mask_box(mask: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     """Get bounding box of non-zero regions in mask."""
@@ -33,7 +45,7 @@ class OutpaintingPreprocessor(BasePreprocessor):
         self,
         mask_blur=0,
         random_cfg=None,
-        return_mask=False,
+        return_mask=True,
         return_source=True,
         keep_padding_ratio=8,
         mask_color=0,
@@ -134,6 +146,7 @@ class OutpaintingPreprocessor(BasePreprocessor):
                 mask = mask.mean(axis=2).astype(np.uint8)
 
             bbox = get_mask_box(mask)
+
             if bbox is None:
                 img = image
                 mask_img = Image.fromarray(mask, mode="L")
@@ -151,19 +164,14 @@ class OutpaintingPreprocessor(BasePreprocessor):
 
         if return_mask:
             if return_source:
-                ret_data = {
-                    "src_image": np.array(init_image),
-                    "image": np.array(img),
-                    "mask": np.array(mask_img),
-                }
+                return OutpaintingOutput(src_image=init_image, image=img, mask=mask_img)
             else:
-                ret_data = {"image": np.array(img), "mask": np.array(mask_img)}
+                return OutpaintingOutput(image=img, mask=mask_img)
         else:
             if return_source:
-                ret_data = {"src_image": np.array(init_image), "image": np.array(img)}
+                return OutpaintingOutput(src_image=init_image, image=img)
             else:
-                ret_data = np.array(img)
-        return ret_data
+                return OutpaintingOutput(image=img)
 
     def __str__(self):
         return f"OutpaintingPreprocessor(return_mask={self.return_mask}, return_source={self.return_source})"
@@ -178,7 +186,7 @@ class OutpaintingInnerPreprocessor(BasePreprocessor):
         self,
         mask_blur=0,
         random_cfg=None,
-        return_mask=False,
+        return_mask=True,
         return_source=True,
         keep_padding_ratio=8,
         mask_color=0,
@@ -257,18 +265,14 @@ class OutpaintingInnerPreprocessor(BasePreprocessor):
 
         if return_mask:
             if return_source:
-                ret_data = {
-                    "src_image": np.array(init_image),
-                    "image": np.array(img),
-                    "mask": np.array(mask_img),
-                }
+                ret_data = OutpaintingOutput(src_image=init_image, image=img, mask=mask_img)
             else:
-                ret_data = {"image": np.array(img), "mask": np.array(mask_img)}
+                ret_data = OutpaintingOutput(image=img, mask=mask_img)
         else:
             if return_source:
-                ret_data = {"src_image": np.array(init_image), "image": np.array(img)}
+                ret_data = OutpaintingOutput(src_image=init_image, image=img)
             else:
-                ret_data = np.array(img)
+                ret_data = OutpaintingOutput(image=img)
         return ret_data
 
     def __str__(self):
@@ -291,13 +295,13 @@ class OutpaintingVideoPreprocessor(OutpaintingPreprocessor, BasePreprocessor):
         expand_ratio: float = 0.3,
         mask: Optional[Union[Image.Image, np.ndarray, str]] = None,
         direction: List[str] = None,
-        return_mask: Optional[bool] = None,
-        return_source: Optional[bool] = None,
+        return_mask: Optional[bool] = True,
+        return_source: Optional[bool] = True,
         mask_color: Optional[int] = None,
     ):
 
         frames = self._load_video(frames)
-        ret_frames = None
+        ret_frames = {"src_images": [], "frames": [], "masks": []}
 
         for frame in frames:
             anno_frame = super().__call__(
@@ -309,18 +313,14 @@ class OutpaintingVideoPreprocessor(OutpaintingPreprocessor, BasePreprocessor):
                 return_source=return_source,
                 mask_color=mask_color,
             )
-            if isinstance(anno_frame, dict):
-                ret_frames = {} if ret_frames is None else ret_frames
-                for key, val in anno_frame.items():
-                    new_key = self.key_map[key]
-                    if new_key in ret_frames:
-                        ret_frames[new_key].append(val)
-                    else:
-                        ret_frames[new_key] = [val]
-            else:
-                ret_frames = [] if ret_frames is None else ret_frames
-                ret_frames.append(anno_frame)
-        return ret_frames
+            if anno_frame.image is not None:
+                ret_frames["frames"].append(anno_frame.image)
+            if anno_frame.mask is not None:
+                ret_frames["masks"].append(anno_frame.mask)
+            if anno_frame.src_image is not None:
+                ret_frames["src_images"].append(anno_frame.src_image)
+        
+        return OutpaintingVideoOutput(frames=ret_frames["frames"], masks=ret_frames["masks"] if return_mask else None, src_frames=ret_frames["src_images"] if return_source else None)
 
     def __str__(self):
         return f"OutpaintingVideoPreprocessor(return_mask={self.return_mask}, return_source={self.return_source})"
@@ -341,13 +341,13 @@ class OutpaintingInnerVideoPreprocessor(OutpaintingInnerPreprocessor, BasePrepro
         frames: Union[List[Image.Image], List[str], str],
         expand_ratio: float = 0.3,
         direction: List[str] = None,
-        return_mask: Optional[bool] = None,
-        return_source: Optional[bool] = None,
+        return_mask: Optional[bool] = True,
+        return_source: Optional[bool] = True,
         mask_color: Optional[int] = None,
     ):
 
         frames = self._load_video(frames)
-        ret_frames = None
+        ret_frames = {"src_images": [], "frames": [], "masks": []}
 
         for frame in frames:
             anno_frame = super().__call__(
@@ -358,18 +358,13 @@ class OutpaintingInnerVideoPreprocessor(OutpaintingInnerPreprocessor, BasePrepro
                 return_source=return_source,
                 mask_color=mask_color,
             )
-            if isinstance(anno_frame, dict):
-                ret_frames = {} if ret_frames is None else ret_frames
-                for key, val in anno_frame.items():
-                    new_key = self.key_map[key]
-                    if new_key in ret_frames:
-                        ret_frames[new_key].append(val)
-                    else:
-                        ret_frames[new_key] = [val]
-            else:
-                ret_frames = [] if ret_frames is None else ret_frames
-                ret_frames.append(anno_frame)
-        return ret_frames
+            if anno_frame.src_image is not None:
+                ret_frames["src_images"].append(anno_frame.src_image)
+            if anno_frame.image is not None:
+                ret_frames["frames"].append(anno_frame.image)
+            if anno_frame.mask is not None:
+                ret_frames["masks"].append(anno_frame.mask)
+        return OutpaintingVideoOutput(frames=ret_frames["frames"], masks=ret_frames["masks"] if return_mask else None)
 
     def __str__(self):
         return f"OutpaintingInnerVideoPreprocessor(return_mask={self.return_mask}, return_source={self.return_source})"
