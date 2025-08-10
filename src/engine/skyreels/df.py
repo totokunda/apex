@@ -371,7 +371,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
                         if component.get("type") == "scheduler"
                     ][0]
                     schedulers = [
-                        self._load_component(scheduler_component)
+                        self._load_scheduler(scheduler_component)
                         for _ in range(latent_base_num_frames_iter)
                     ]
                     for scheduler in schedulers:

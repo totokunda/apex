@@ -394,6 +394,7 @@ fi
 # Install requirements from requirements.txt
 print_status "Installing requirements from requirements.txt..."
 $CONDA_RUN pip install -r requirements.txt
+$CONDA_RUN pip install -r preprocess.requirements.txt
 
 # Create thirdparty directory if it doesn't exist
 mkdir -p thirdparty

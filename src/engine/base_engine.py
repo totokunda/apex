@@ -32,7 +32,7 @@ from src.utils.defaults import (
 )
 import tempfile
 
-from src.mixins import DownloadMixin, LoaderMixin, ToMixin, OffloadMixin
+from src.mixins import LoaderMixin, ToMixin, OffloadMixin
 from glob import glob
 from safetensors import safe_open
 from src.converters import (
@@ -51,7 +51,7 @@ from src.postprocess import postprocessor_registry
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
-class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
+class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     config: Dict[str, Any]
     scheduler: SchedulerInterface | None = None
     vae: AutoencoderKL | None = None
@@ -227,12 +227,14 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         self.attention_type = attention_type
 
     @torch.inference_mode()
-    def run(
-        self,
-        input_nodes: List[UINode] | None = None,
-        **kwargs,
-    ):
-        raise NotImplementedError("Subclasses must implement this method")
+    def run(self, *args, input_nodes: List[UINode] = None, **kwargs):
+        default_kwargs = self._get_default_kwargs("run")
+        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
+        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
+        if hasattr(self, "implementation_engine"):
+            return self.implementation_engine.run(*args, **final_kwargs)
+        else:
+            raise NotImplementedError("Subclasses must implement this method")
 
     def load_component(
         self,
@@ -260,7 +262,7 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         return component_module
 
     def load_scheduler(self, component: Dict[str, Any]):
-        scheduler = self._load_component(component)
+        scheduler = self._load_scheduler(component)
 
         # Add all SchedulerInterface methods to self.scheduler if not already present
         if not isinstance(scheduler, SchedulerInterface):
@@ -404,9 +406,11 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
             raise ValueError(f"Component type {component_type} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
-        if self._is_url(component.get("config_path")):
-            config_path = self._check_config_for_url(component.get("config_path"))
-            component["config_path"] = config_path
+        if component.get("config_path"):
+            config_path = self._download(component.get("config_path"), self.config_save_path)
+        else:
+            config_path = None
+        component["config_path"] = config_path
         text_encoder = TextEncoder(component, no_weights)
         if self.component_dtypes and "text_encoder" in self.component_dtypes:
             self.to_dtype(

@@ -27,8 +27,8 @@ from diffusers.utils import (
     scale_lora_layers,
     unscale_lora_layers,
 )
-from diffusers.models.attention import FeedForward, AttentionModuleMixin
-from diffusers.models.attention_processor import Attention
+from diffusers.models.attention import FeedForward
+from diffusers.models.attention import  AttentionModuleMixin
 from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import (
     PixArtAlphaTextProjection,

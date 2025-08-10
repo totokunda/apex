@@ -35,3 +35,4 @@ matplotlib
 onnxruntime
 librosa
 pyloudnorm
+ffmpeg-python
