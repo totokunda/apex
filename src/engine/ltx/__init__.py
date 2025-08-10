@@ -87,9 +87,3 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
 
-    def run(self, *args, input_nodes: List[UINode] = None, **kwargs):
-        default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-
-        return self.implementation_engine.run(**final_kwargs)

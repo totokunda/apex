@@ -101,9 +101,9 @@ class SkyReelsBaseEngine:
         """Denoise function"""
         return self.main_engine.denoise(*args, **kwargs)
 
-    def _load_component(self, *args, **kwargs):
-        """Load component"""
-        return self.main_engine._load_component(*args, **kwargs)
+    def _load_scheduler(self, *args, **kwargs):
+        """Load scheduler"""
+        return self.main_engine._load_scheduler(*args, **kwargs)
 
     def generate_timestep_matrix(
         self,

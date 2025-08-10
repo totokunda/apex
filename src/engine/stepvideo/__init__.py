@@ -59,18 +59,6 @@ class StepVideoEngine(BaseEngine, StepVideoDenoise):
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
-    @torch.inference_mode()
-    def run(
-        self,
-        input_nodes: List[UINode] = None,
-        **kwargs,
-    ):
-        default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-
-        return self.implementation_engine.run(**final_kwargs)
-
     def __str__(self):
         return f"StepVideoEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 

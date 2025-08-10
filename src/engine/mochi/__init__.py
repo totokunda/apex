@@ -32,17 +32,6 @@ class MochiEngine(BaseEngine, MochiDenoise):
         # Initialize the T2V implementation engine
         self.implementation_engine = MochiT2VEngine(self)
 
-    def run(
-        self,
-        input_nodes: List[UINode] = None,
-        **kwargs,
-    ):
-        default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-
-        return self.implementation_engine.run(**final_kwargs)
-
     def __str__(self):
         return f"MochiEngine(config={self.config}, device={self.device})"
 

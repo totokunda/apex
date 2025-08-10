@@ -16,6 +16,7 @@ class EngineType(Enum):
     STEPVIDEO = "stepvideo"
     MOCHI = "mochi"
     SKYREELS = "skyreels"
+    COSMOS2 = "cosmos2"
 
 
 class EngineRegistry:
@@ -92,6 +93,14 @@ class EngineRegistry:
         except ImportError as e:
             print(f"Warning: Could not import SkyReels engine: {e}")
 
+        # Register Cosmos engine
+
+        try:
+            from src.engine.cosmos2 import Cosmos2Engine
+            self._engines[EngineType.COSMOS2.value] = Cosmos2Engine
+        except ImportError as e:
+            print(f"Warning: Could not import Cosmos engine: {e}")
+
     def get_engine_class(self, engine_type: str) -> Optional[Type]:
         """Get engine class by type"""
         return self._engines.get(engine_type)
@@ -146,6 +155,10 @@ class EngineRegistry:
             return ModelType(model_type)
         elif engine_type == EngineType.SKYREELS.value:
             from src.engine.skyreels import ModelType
+
+            return ModelType(model_type)
+        elif engine_type == EngineType.COSMOS2.value:
+            from src.engine.cosmos2 import ModelType
 
             return ModelType(model_type)
         else:
@@ -214,7 +227,7 @@ def get_engine_registry() -> EngineRegistry:
 
 def create_engine(
     engine_type: Literal[
-        "wan", "hunyuan", "ltx", "cogvideo", "magi", "stepvideo", "mochi", "skyreels"
+        "wan", "hunyuan", "ltx", "cogvideo", "magi", "stepvideo", "mochi", "skyreels", "cosmos2"
     ],
     yaml_path: str,
     model_type: str | None = None,

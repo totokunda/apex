@@ -146,8 +146,7 @@ class LlamaPreprocessor(BasePreprocessor):
         else:
             self.image_processor = None
 
-        if self._is_url(config_path):
-            config_path = self._check_config_for_url(config_path)
+        config_path = self._download(config_path, self.config_save_path)
 
         self.tokenizer = fetch_and_save_tokenizer_from_config(
             self.model_path,

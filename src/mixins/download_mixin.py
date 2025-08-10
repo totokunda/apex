@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import requests
 from tqdm import tqdm
 from tenacity import retry, stop_after_attempt, wait_exponential
-from src.utils.defaults import DEFAULT_HEADERS
+from src.utils.defaults import DEFAULT_HEADERS, DEFAULT_CONFIG_SAVE_PATH
 from logging import Logger
 from huggingface_hub import repo_exists
 from google.cloud import storage
@@ -14,7 +14,11 @@ from botocore.exceptions import NoCredentialsError
 import huggingface_hub
 from google.cloud.storage import Blob
 from loguru import logger
-
+import hashlib
+import shutil
+import json
+import yaml
+from typing import Dict, Any
 
 class DownloadMixin:
     logger: Logger = logger
@@ -25,6 +29,22 @@ class DownloadMixin:
             return all([result.scheme, result.netloc])
         except ValueError:
             return False
+        
+    def fetch_config(self, config_path: str, config_save_path: str = DEFAULT_CONFIG_SAVE_PATH):
+        path = self._download(config_path, config_save_path)
+        return self._load_config_file(path)
+    
+    def _save_config(self, config: Dict[str, Any], save_path: str):
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        if save_path.endswith(".json"):
+            with open(save_path, "w") as f:
+                json.dump(config, f)
+        elif save_path.endswith(".yaml"):
+            with open(save_path, "w") as f:
+                yaml.dump(config, f)
+        else:
+            raise ValueError(f"Unsupported config file type: {save_path}")
+        return save_path
 
     def _download(self, model_path: str, save_path: str):
         if model_path.startswith("gs://"):
@@ -203,22 +223,93 @@ class DownloadMixin:
             )
         finally:
             return dest_dir
+        
+    
+    def _has_file_ending(self, path: str):
+        try:
+            if not path:
+                return False
 
+            # Normalize path component (strip query/fragment for URLs)
+            parsed = urlparse(path)
+            # For URLs, use parsed.path; for local/cloud-style URIs without netloc, fallback to original
+            normalized_path = parsed.path if parsed.scheme else path
+
+            candidate = normalized_path.rstrip("/")
+            if not candidate:
+                return False
+
+            filename = os.path.basename(candidate)
+            if "." not in filename:
+                return False
+
+            lower_name = filename.lower()
+
+            # Multi-part and specific endings first
+            multipart_suffixes = (
+                ".tar.gz",
+                ".tar.bz2",
+                ".tar.xz",
+            )
+            if any(lower_name.endswith(sfx) for sfx in multipart_suffixes):
+                return True
+
+            # Typical config and model weight endings (single-segment)
+            allowed_extensions = {
+                # Configs
+                "json", "yaml", "yml", "toml", "ini", "cfg", "conf",
+                # Model weights / artifacts
+                "bin", "pt", "pth", "ckpt", "safetensors", "onnx", "tflite",
+                "h5", "hdf5", "npz", "pb", "params", "mar",
+                # Tokenizer/vocab related (often shipped with models)
+                "model", "spm", "vocab", "merges",
+                # Archives / compressed
+                "zip", "tgz", "gz", "bz2", "xz",
+            }
+
+            ext = lower_name.rsplit(".", 1)[-1]
+            return ext in allowed_extensions
+        except Exception:
+            return False
+    
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)
     )
     def _download_from_huggingface(self, repo_id: str, save_path: str):
         """Downloads a repository from the Hugging Face Hub."""
         try:
-            dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
+            
             if hasattr(self, "logger"):
                 self.logger.info(f"Downloading from Hugging Face Hub: {repo_id}")
+            
             split_path = repo_id.split("/")
+            
+            if self._has_file_ending(repo_id):
+                # fetch the specific file
+                
+                self.logger.info(f"Downloading specific file from Hugging Face Hub: {repo_id}")
+                file_name = os.path.basename(repo_id)
+                file_path = f"{hashlib.sha256(repo_id.encode()).hexdigest()}_{file_name}"
+                # hash the des
+                file_path = os.path.join(save_path, file_path)
+                if os.path.exists(file_path):
+                    self.logger.info(f"File {file_path} already exists, skipping download.")
+                    return file_path
+                repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:2])
+                subfolder = f"{'/'.join(split_path[2:-1])}" if len(split_path) > 2 else None
+                curr_save_path = huggingface_hub.hf_hub_download(repo_id, file_name, local_dir=save_path, subfolder=subfolder)
+                # move the file to the correct path
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                shutil.move(curr_save_path, file_path)
+                self.logger.info(f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}")
+                return file_path
+            
             subfolder = (
                 [f"{'/'.join(split_path[2:])}/*"] if len(split_path) > 2 else None
             )
             repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:2])
-
+            
+            dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
             dest_path = huggingface_hub.snapshot_download(
                 repo_id,
                 local_dir=dest_path,
@@ -231,13 +322,12 @@ class DownloadMixin:
                 self.logger.info(
                     f"Successfully downloaded from Hugging Face Hub: {repo_id}"
                 )
+            return dest_path
         except Exception as e:
             if hasattr(self, "logger"):
                 self.logger.error(
                     f"Failed to download from Hugging Face Hub: {repo_id}. Error: {e}"
                 )
-        finally:
-            return dest_path
 
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)

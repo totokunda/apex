@@ -28,8 +28,8 @@ import cv2
 import tempfile
 from glob import glob
 import safetensors
-from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from transformers.modeling_utils import PreTrainedModel
+from src.mixins.download_mixin import DownloadMixin
 
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
@@ -83,62 +83,9 @@ def load_safetensors(
     return result
 
 
-class LoaderMixin:
+class LoaderMixin(DownloadMixin):
     logger: Logger = logger
 
-    def _is_url(self, url: str):
-        try:
-            result = urlparse(url)
-            return all([result.scheme, result.netloc])
-        except ValueError:
-            return False
-
-    def _fetch_url_config(self, url: str):
-        response = requests.get(url, timeout=10, headers=DEFAULT_HEADERS)
-        response.raise_for_status()
-        if url.endswith((".yaml", ".json")):
-            return response.json()
-        return response.content
-
-    def fetch_config(self, config_path: str):
-        if self._is_url(config_path):
-            config_path = self._check_config_for_url(config_path)
-            if config_path:
-                return self._load_config_file(config_path)
-        else:
-            path = Path(config_path)
-            if not path.exists():
-                raise FileNotFoundError(f"Config file not found at {config_path}")
-            return self._load_config_file(path)
-
-    def _save_config(self, config: Dict[str, Any], save_path: str):
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        if save_path.endswith(".json"):
-            with open(save_path, "w") as f:
-                json.dump(config, f)
-        elif save_path.endswith(".yaml"):
-            with open(save_path, "w") as f:
-                yaml.dump(config, f)
-        else:
-            raise ValueError(f"Unsupported config file type: {save_path}")
-        return save_path
-
-    def _check_config_for_url(self, url: str):
-        if hasattr(self, "config_save_path"):
-            config_save_path = self.config_save_path
-        else:
-            config_save_path = DEFAULT_CONFIG_SAVE_PATH
-
-        if self._is_url(url) and config_save_path:
-            url_hash = hashlib.sha256(url.encode()).hexdigest()
-            suffix = url.split(".")[-1]
-            config_path = os.path.join(config_save_path, f"{url_hash}.{suffix}")
-            if os.path.exists(config_path):
-                return config_path
-            config = self._fetch_url_config(url)
-            self._save_config(config, config_path)
-            return config_path
-        return None
 
     def _load_model(
         self,
@@ -300,7 +247,7 @@ class LoaderMixin:
         # --- PASS 2: real load with !include expansion ---
         return yaml.load(text, Loader=LoaderWithInclude)
 
-    def _load_component(self, component: Dict[str, Any]) -> Any:
+    def _load_scheduler(self, component: Dict[str, Any]) -> Any:
         component_base = component.get("base")
         if not component_base:
             raise ValueError("Component base not specified.")
@@ -337,7 +284,38 @@ class LoaderMixin:
         else:
             config = component.get("config", {})
 
-        component = component_class(**config)
+        # Determine which config entries can be passed to the component constructor
+        try:
+            init_signature = inspect.signature(component_class.__init__)
+            init_params = list(init_signature.parameters.values())
+            if init_params and init_params[0].name == "self":
+                init_params = init_params[1:]
+            accepts_var_kwargs = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in init_params
+            )
+            init_param_names = {p.name for p in init_params}
+        except (TypeError, ValueError):
+            # Fallback if signature introspection fails
+            accepts_var_kwargs = True
+            init_param_names = set()
+
+        if accepts_var_kwargs:
+            init_kwargs = dict(config)
+            config_to_register = {}
+        else:
+            init_kwargs = {k: v for k, v in (config or {}).items() if k in init_param_names}
+            config_to_register = {k: v for k, v in (config or {}).items() if k not in init_param_names}
+
+        component = component_class(**init_kwargs)
+
+        # Register remaining config to the component if supported
+        if config_to_register and hasattr(component, "register_to_config") and callable(getattr(component, "register_to_config")):
+            try:
+                component.register_to_config(**config_to_register)
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to register extra config for {component_class}: {e}"
+                )
 
         return component
 

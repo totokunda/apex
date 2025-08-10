@@ -110,7 +110,7 @@ class PreprocessorType(Enum):
     POSE = "pose"
 
 
-class BasePreprocessor(DownloadMixin, LoaderMixin, ToMixin, nn.Module):
+class BasePreprocessor(LoaderMixin, ToMixin, nn.Module):
     def __init__(
         self,
         model_path: str = None,

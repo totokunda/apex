@@ -2,6 +2,7 @@ import json
 import os
 from typing import Dict, Any, Optional
 from accelerate import init_empty_weights
+from pydash import includes
 from src.utils.module import find_class_recursive
 import importlib
 import re
@@ -19,7 +20,10 @@ VAE_CONFIG_DIR = os.path.join(
 
 def get_transformer_config(model_tag: str, config_path: str | None = None):
     if config_path is None:
-        model_base = model_tag.split("_")[0]
+        if "/" in model_tag:
+            model_base, model_tag = model_tag.split("/")
+        else:
+            model_base = model_tag.split("_")[0]
         config_path = os.path.join(
             TRANSFORMER_CONFIG_DIR, model_base, f"{model_tag}.json"
         )
