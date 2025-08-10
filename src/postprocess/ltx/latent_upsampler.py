@@ -1,6 +1,5 @@
 import torch
-from typing import Dict, Any, Optional, Literal
-from diffusers.models.autoencoders import AutoencoderKL
+from typing import Literal
 from diffusers.pipelines.ltx.modeling_latent_upsampler import LTXLatentUpsamplerModel
 from src.postprocess.base import BasePostprocessor, postprocessor_registry
 from src.utils.cache import empty_cache

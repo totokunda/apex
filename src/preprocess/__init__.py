@@ -9,6 +9,7 @@ from .layout import (
     LayoutTrackPreprocessor,
 )
 from .mask import MaskDrawPreprocessor
+
 from .outpainting import (
     OutpaintingPreprocessor,
     OutpaintingInnerPreprocessor,
@@ -22,10 +23,11 @@ from .pose import (
     PoseBodyPreprocessor,
     PoseBodyVideoPreprocessor,
 )
+from .canny import CannyPreprocessor
 from .ram import RAMPreprocessor
 from .salient import SalientPreprocessor, SalientVideoPreprocessor
 from .sam import SAMPreprocessor
-from .sam2 import SAM2Preprocessor, SAM2VideoPreprocessor
+from .sam2 import SAM2Preprocessor, SAM2VideoPreprocessor, SAM2GDINOVideoPreprocessor, SAM2SalientVideoPreprocessor
 from .scribble import ScribblePreprocessor, ScribbleVideoPreprocessor
 from .subject import SubjectPreprocessor
 from .inpainting import InpaintingPreprocessor, InpaintingVideoPreprocessor
@@ -41,6 +43,7 @@ from .wan import MultiTalkPreprocessor
 from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
 from .stepvideo import Step1TextEncoderPreprocessor
 from .base import BasePreprocessor, preprocessor_registry
+from .prompt_extend import PromptExtendPreprocessor
 
 
 __all__ = [
@@ -64,6 +67,7 @@ __all__ = [
     "PoseBodyFaceVideoPreprocessor",
     "PoseBodyPreprocessor",
     "PoseBodyVideoPreprocessor",
+    "CannyPreprocessor",
     "RAMPreprocessor",
     "SalientPreprocessor",
     "SalientVideoPreprocessor",
@@ -87,4 +91,7 @@ __all__ = [
     "AvatarPreprocessor",
     "LlamaPreprocessor",
     "Step1TextEncoderPreprocessor",
+    "PromptExtendPreprocessor",
+    "SAM2GDINOVideoPreprocessor",
+    "SAM2SalientVideoPreprocessor",
 ]
