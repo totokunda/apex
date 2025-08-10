@@ -1,11 +1,11 @@
 import torch
-import torch.nn.functional as F
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from diffusers.models.autoencoders import AutoencoderKL
 from diffusers.pipelines.ltx.modeling_latent_upsampler import LTXLatentUpsamplerModel
 from src.postprocess.base import BasePostprocessor, postprocessor_registry
 from src.utils.cache import empty_cache
-
+import numpy as np
+from PIL import Image
 
 @postprocessor_registry("ltx.latent_upsampler")
 class LatentUpsamplerPostprocessor(BasePostprocessor):
@@ -19,9 +19,9 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         self.component_load_dtypes = getattr(engine, "component_load_dtypes", {})
 
         # Default dtype for latent upsampler
-        self.dtype = self.component_dtypes.get("latent_upsampler", torch.float16)
+        self.dtype = self.component_dtypes.get("latent_upsampler", torch.bfloat16)
         self.load_dtype = self.component_load_dtypes.get(
-            "latent_upsampler", torch.float16
+            "latent_upsampler", torch.bfloat16
         )
 
         # Initialize the latent upsampler model
@@ -77,106 +77,48 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
             self.engine.logger.error(f"Failed to load latent upsampler: {e}")
             raise
 
-    def _prepare_latents(
-        self,
-        latents: torch.Tensor,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-    ) -> torch.Tensor:
-        """Prepare latents for upsampling"""
-        # Ensure latents are on correct device and dtype
-        latents = latents.to(device=self.device, dtype=self.dtype)
-
-        # Get dimensions
-        batch_size, channels, frames, latent_height, latent_width = latents.shape
-
-        # Calculate target dimensions if not provided
-        if height is None:
-            height = latent_height * 2  # Default 2x upsampling
-        if width is None:
-            width = latent_width * 2  # Default 2x upsampling
-
-        return latents, height, width
 
     def _upsample_latents(
         self,
-        latents: torch.Tensor,
-        height: int,
-        width: int,
-        num_inference_steps: int = 4,
-        guidance_scale: float = 3.0,
-        generator: Optional[torch.Generator] = None,
+        latents: torch.Tensor
     ) -> torch.Tensor:
-        """Perform latent upsampling using the loaded model"""
+        """Perform latent upsampling using the loaded model.
 
-        batch_size, channels, frames, latent_height, latent_width = latents.shape
+        Note: The LTX latent upsampler expects denormalized latents and returns upsampled latents directly.
+        """
 
-        # Calculate scale factors
-        height_scale_factor = height // latent_height
-        width_scale_factor = width // latent_width
+        # Match the upsampler's parameter dtype
+        try:
+            upsampler_dtype = next(self.latent_upsampler.parameters()).dtype
+        except Exception:
+            upsampler_dtype = self.dtype
 
-        # Create noise for upsampling process
-        if generator is None:
-            generator = torch.Generator(device=self.device)
+        latents = latents.to(device=self.device, dtype=upsampler_dtype)
 
-        # Initialize upsampled latents with interpolation
-        upsampled_shape = (batch_size, channels, frames, height, width)
-        upsampled_latents = F.interpolate(
-            latents.flatten(0, 2),  # Flatten batch and frame dimensions
-            size=(height, width),
-            mode="bilinear",
-            align_corners=False,
-        ).view(upsampled_shape)
-
-        # Add noise for the upsampling process
-        noise = torch.randn(
-            upsampled_shape, generator=generator, device=self.device, dtype=self.dtype
-        )
-
-        # Perform denoising steps using the latent upsampler
         with torch.no_grad():
-            for step in range(num_inference_steps):
-                # Calculate timestep
-                timestep = torch.tensor(
-                    [1000 - (step * 1000 // num_inference_steps)], device=self.device
-                )
-
-                # Prepare model input
-                model_input = upsampled_latents
-
-                # Get noise prediction from the upsampler model
-                noise_pred = self.latent_upsampler(
-                    model_input,
-                    timestep,
-                    encoder_hidden_states=latents,  # Use original latents as conditioning
-                    return_dict=False,
-                )[0]
-
-                # Apply guidance if scale > 1
-                if guidance_scale > 1.0:
-                    # For simplicity, we'll use the noise prediction as-is
-                    # In a full implementation, you might want to split conditional/unconditional
-                    pass
-
-                # Update latents (simplified scheduler step)
-                alpha = 1.0 - (step + 1) / num_inference_steps
-                upsampled_latents = alpha * upsampled_latents + (1 - alpha) * (
-                    upsampled_latents - noise_pred
-                )
+            upsampled_latents = self.latent_upsampler(latents)
 
         return upsampled_latents
+
+    def _adain_filter_latent(
+        self, latents: torch.Tensor, reference_latents: torch.Tensor, factor: float = 1.0
+    ) -> torch.Tensor:
+        result = latents.clone()
+        for i in range(latents.size(0)):
+            for c in range(latents.size(1)):
+                r_sd, r_mean = torch.std_mean(reference_latents[i, c], dim=None)
+                i_sd, i_mean = torch.std_mean(result[i, c], dim=None)
+                result[i, c] = ((result[i, c] - i_mean) / i_sd) * r_sd + r_mean
+        result = torch.lerp(latents, result, factor)
+        return result
 
     @torch.no_grad()
     def __call__(
         self,
-        latents: torch.Tensor,
-        vae: Optional[AutoencoderKL] = None,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        num_inference_steps: int = 4,
-        guidance_scale: float = 3.0,
-        generator: Optional[torch.Generator] = None,
+        latents: torch.Tensor | None = None,
+        video: str | list[str] | list[Image.Image] | list[np.ndarray] | None = None,
         return_latents: bool = True,
+        output_type: Literal["pil", "np"] = "pil",
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -184,12 +126,8 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
 
         Args:
             latents: Input latents to upsample
-            vae: VAE model (optional, can use engine's VAE)
-            height: Target height for upsampling
-            width: Target width for upsampling
-            num_inference_steps: Number of denoising steps
-            guidance_scale: Guidance scale for upsampling
-            generator: Random generator for reproducibility
+            video: Video to upsample
+            output_type: Type of output to return
             return_latents: Whether to return latents or decoded images
             **kwargs: Additional arguments
 
@@ -201,74 +139,70 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         if self.latent_upsampler is None:
             self._load_latent_upsampler()
 
-        # Move latent upsampler to device if needed
-        if self.latent_upsampler.device != self.device:
-            self.latent_upsampler = self.latent_upsampler.to(self.device)
+        # Optionally denormalize latents using VAE stats if available
+        self.engine.load_component_by_type("vae")
+        self.engine.to_device(self.engine.vae)
+        
+        if latents is not None and video is not None:
+            raise ValueError("Either latents or video must be provided, not both")
+        
+        if latents is None and video is None:
+            raise ValueError("Either latents or video must be provided")
+        
+        if latents is None:
+            video = self.engine._load_video(video)
+            video = self.engine.video_processor.preprocess_video(video)
+            latents = self.engine.vae.encode(video, sample_mode="mode")
+        
+        prepared_latents = self.engine.vae.denormalize_latents(latents)
 
-        # Prepare latents
-        prepared_latents, target_height, target_width = self._prepare_latents(
-            latents, height, width
-        )
-
-        self.engine.logger.info(
-            f"Upsampling latents from {prepared_latents.shape} to "
-            f"[{prepared_latents.shape[0]}, {prepared_latents.shape[1]}, "
-            f"{prepared_latents.shape[2]}, {target_height}, {target_width}]"
-        )
-
-        # Perform upsampling
+        # Perform upsampling via the upsampler model
         upsampled_latents = self._upsample_latents(
-            prepared_latents,
-            target_height,
-            target_width,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            generator=generator,
+            prepared_latents
         )
-
+        
         if return_latents:
+            upsampled_latents = self.engine.vae.normalize_latents(upsampled_latents)
             return upsampled_latents
 
-        # Decode to images if requested
-        if vae is None:
-            # Use engine's VAE if available
-            vae = getattr(self.engine, "vae", None)
-            if vae is None:
-                self.engine.logger.warning(
-                    "No VAE available for decoding, returning latents"
-                )
-                return upsampled_latents
+
+        # Optionally apply AdaIN in latent space prior to decoding
+        adain_factor = kwargs.get("adain_factor", 0.0)
+        if adain_factor and adain_factor > 0.0:
+            # Use the denormalized input latents as the reference
+            upsampled_latents = self._adain_filter_latent(
+                upsampled_latents, prepared_latents, float(adain_factor)
+            )
 
         # Decode latents to images
         self.engine.logger.info("Decoding upsampled latents to images")
 
-        # Ensure VAE is on correct device
-        if hasattr(vae, "to"):
-            vae = vae.to(self.device)
+        # If VAE supports timestep conditioning, add decoding noise and pass timestep
+        timestep = None
+        vae = self.engine.vae
+        
+        if getattr(getattr(vae, "config", object()), "timestep_conditioning", False):
+            batch_size = upsampled_latents.shape[0]
+            decode_timestep = kwargs.get("decode_timestep", 0.0)
+            decode_noise_scale = kwargs.get("decode_noise_scale", None)
+            if not isinstance(decode_timestep, list):
+                decode_timestep = [float(decode_timestep)] * batch_size
+            if decode_noise_scale is None:
+                decode_noise_scale = decode_timestep
+            elif not isinstance(decode_noise_scale, list):
+                decode_noise_scale = [float(decode_noise_scale)] * batch_size
+            timestep = torch.tensor(decode_timestep, device=self.device, dtype=upsampled_latents.dtype)
+            scale = torch.tensor(decode_noise_scale, device=self.device, dtype=upsampled_latents.dtype)[
+                :, None, None, None, None
+            ]
+            noise = torch.randn_like(upsampled_latents)
+            upsampled_latents = (1 - scale) * upsampled_latents + scale * noise
 
         # Decode in chunks to avoid memory issues
-        batch_size, channels, frames, height, width = upsampled_latents.shape
-        decoded_frames = []
-
-        for i in range(frames):
-            frame_latents = upsampled_latents[
-                :, :, i : i + 1, :, :
-            ]  # Keep frame dimension
-            with torch.no_grad():
-                decoded_frame = vae.decode(frame_latents, return_dict=False)[0]
-                decoded_frames.append(decoded_frame)
-
-        # Concatenate decoded frames
-        decoded_video = torch.cat(decoded_frames, dim=2)
+        decoded_video = self.engine.vae.decode(upsampled_latents, timestep=timestep, return_dict=False)[0]
+        decoded_video = self.engine._postprocess(decoded_video)
 
         return decoded_video
-
-    def to(self, device: torch.device):
-        """Move the postprocessor to a device"""
-        self.device = device
-        if self.latent_upsampler is not None:
-            self.latent_upsampler = self.latent_upsampler.to(device)
-        return self
 
     def __str__(self):
         return f"LatentUpsamplerPostprocessor(device={self.device}, dtype={self.dtype})"

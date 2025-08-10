@@ -817,6 +817,9 @@ class BaseEngine(DownloadMixin, LoaderMixin, ToMixin, OffloadMixin):
         postprocessor_class = postprocessor_registry.get(postprocessor_type)
         if postprocessor_class is None:
             raise ValueError(f"Postprocessor type {postprocessor_type} not supported")
+        # check if engine is part of signature of postprocessor_class
+        if "engine" in inspect.signature(postprocessor_class).parameters:
+            config["engine"] = self
         return postprocessor_class(**config)
 
     def load_postprocessors(
