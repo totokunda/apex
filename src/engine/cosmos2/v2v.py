@@ -3,6 +3,12 @@ from typing import Dict, Any, Callable, List, Union, Optional
 import torch
 import numpy as np
 from PIL import Image
+from loguru import logger
+try:
+    from cosmos_guardrail import CosmosSafetyChecker
+except ImportError:
+    logger.warning("cosmos_guardrail is not installed. This may violate the NVIDIA Open Model License Agreement. Please install it to use the safety checker for Cosmos: `pip install cosmos_guardrail`.")
+    CosmosSafetyChecker = None
 
 # Referencing from diffusers.pipelines.cosmos.pipeline_cosmos2_video2world.Cosmos2VideoToWorldPipeline.prepare_latents
 class Cosmos2V2VEngine(Cosmos2BaseEngine):
@@ -27,10 +33,10 @@ class Cosmos2V2VEngine(Cosmos2BaseEngine):
         render_on_step_callback: Callable = None,
         render_on_step: bool = False,
         offload: bool = True,
+        disable_guardrail: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
-        
         transformer_dtype = self.component_dtypes["transformer"]
         
         if self.text_encoder is None:
@@ -158,9 +164,25 @@ class Cosmos2V2VEngine(Cosmos2BaseEngine):
         if offload:
             self._offload(self.transformer)
 
+        if offload:
+            self._offload(self.transformer)
+
         if return_latents:
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
-            return postprocessed_video
+            if "cosmos.guardrail" not in self.postprocessors and not disable_guardrail:
+                self.load_postprocessor_by_type("cosmos.guardrail")
+                
+            guardrail = self.postprocessors.get("cosmos.guardrail")
+            
+            if guardrail is not None and not disable_guardrail:
+                self.to_device(guardrail)
+                video = guardrail(video)
+            else:
+                self.logger.warning("Using cosmos without the guardrail postprocessor may violates the NVIDIA Open Model License Agreement.")
+                
+            if guardrail is not None and offload:
+                self._offload(guardrail)
+            
+            return self._postprocess(video)

@@ -37,6 +37,10 @@ class Cosmos2BaseEngine:
     @property
     def preprocessors(self):
         return self.main_engine.preprocessors
+    
+    @property
+    def postprocessors(self):
+        return self.main_engine.postprocessors
 
     @property
     def component_dtypes(self):
@@ -53,6 +57,10 @@ class Cosmos2BaseEngine:
     def load_preprocessor_by_type(self, preprocessor_type: str):
         """Load a preprocessor by type"""
         return self.main_engine.load_preprocessor_by_type(preprocessor_type)
+    
+    def load_postprocessor_by_type(self, postprocessor_type: str):
+        """Load a postprocessor by type"""
+        return self.main_engine.load_postprocessor_by_type(postprocessor_type)
 
     def to_device(self, component):
         """Move component to device"""

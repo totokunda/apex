@@ -13,6 +13,10 @@ DEFAULT_PREPROCESSOR_SAVE_PATH = os.getenv(
     "PREPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "preprocessors")
 )
 
+DEFAULT_POSTPROCESSOR_SAVE_PATH = os.getenv(
+    "POSTPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "postprocessors")
+)
+
 os.environ["HF_HOME"] = os.getenv(
     "HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")
 )
