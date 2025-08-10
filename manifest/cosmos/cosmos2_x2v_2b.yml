@@ -19,6 +19,10 @@ components:
     model_path: nvidia/Cosmos-Predict2-2B-Video2World/transformer
     tag: "cosmos/cosmos2_x2v_2b"
 
+postprocessors:
+  - type: cosmos.guardrail
+    model_path: nvidia/Cosmos-1.0-Guardrail
+
 preprocessors: null 
 
 defaults:

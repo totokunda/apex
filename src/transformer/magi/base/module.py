@@ -39,9 +39,7 @@ except ImportError:
     tl = None
     TRITON_AVAILABLE = False
 from einops import rearrange
-from flash_attn import flash_attn_varlen_func
-from flash_attn.flash_attn_interface import flash_attn_func
-from flash_attn.layers.rotary import apply_rotary_emb as flash_apply_rotary_emb
+
 from torch import Tensor
 from torch.nn import Parameter
 
