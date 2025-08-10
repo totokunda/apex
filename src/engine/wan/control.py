@@ -54,6 +54,8 @@ class WanControlEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        boundary_ratio: float | None = None,
+        **kwargs,
     ):
 
         if not self.text_encoder:
@@ -247,6 +249,13 @@ class WanControlEngine(WanBaseEngine):
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
 
+        if boundary_ratio is not None:
+            boundary_timestep = boundary_ratio * getattr(
+                self.scheduler.config, "num_train_timesteps", 1000
+            )
+        else:
+            boundary_timestep = None
+
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -266,6 +275,7 @@ class WanControlEngine(WanBaseEngine):
             control_latents = start_image_latents_in
 
         latents = self.denoise(
+            boundary_timestep=boundary_timestep,
             timesteps=timesteps,
             latents=latents,
             latent_condition=control_latents,

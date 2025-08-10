@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from transformers import AutoProcessor
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_CONFIG_SAVE_PATH
-from src.utils.module_utils import find_class_recursive
+from src.utils.module import find_class_recursive
 import importlib
 from typing import Dict, Any
 from transformers.image_processing_utils import ImageProcessingMixin

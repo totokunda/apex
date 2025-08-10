@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 from typing import Any, Dict
 import json
 import transformers
-from src.utils.module_utils import find_class_recursive
+from src.utils.module import find_class_recursive
 
 
 def fetch_and_save_tokenizer_from_config(

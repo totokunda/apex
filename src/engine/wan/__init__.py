@@ -16,7 +16,7 @@ from .inp import WanInpEngine
 from .phantom import WanPhantomEngine
 from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 
 
 class ModelType(EnumType):

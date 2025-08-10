@@ -5,11 +5,17 @@ from pathlib import Path
 HOME_DIR = Path.home()
 
 
-DEFAULT_CONFIG_SAVE_PATH = str(HOME_DIR / "apex-diffusion" / "configs")
-DEFAULT_SAVE_PATH = str(HOME_DIR / "apex-diffusion")
-DEFAULT_PREPROCESSOR_SAVE_PATH = str(HOME_DIR / "apex-diffusion" / "preprocessors")
+DEFAULT_CONFIG_SAVE_PATH = os.getenv(
+    "CONFIG_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "configs")
+)
+DEFAULT_SAVE_PATH = os.getenv("SAVE_PATH", str(HOME_DIR / "apex-diffusion"))
+DEFAULT_PREPROCESSOR_SAVE_PATH = os.getenv(
+    "PREPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "preprocessors")
+)
 
-# check what system we are on for posix or windows
+os.environ["HF_HOME"] = os.getenv(
+    "HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")
+)
 
 
 DEFAULT_DEVICE = (

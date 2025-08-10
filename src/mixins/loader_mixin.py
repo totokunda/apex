@@ -7,18 +7,18 @@ import os
 import json
 import yaml
 import hashlib
-from src.utils.cache_utils import empty_cache
+from src.utils.cache import empty_cache
 from diffusers import ModelMixin
-from src.utils.load_utils import load_safetensors
+from safetensors.torch import safe_open
 from accelerate import init_empty_weights
 import torch
 from typing import Callable
 from logging import Logger
-from src.utils.module_utils import find_class_recursive
+from src.utils.module import find_class_recursive
 import importlib
 import inspect
 from loguru import logger
-from src.utils.yaml_utils import LoaderWithInclude
+from src.utils.yaml import LoaderWithInclude
 from PIL import Image
 from io import BytesIO
 import numpy as np
@@ -45,6 +45,42 @@ def is_safetensors_file(file_path: str):
         return True
     except Exception:
         return False
+
+
+def load_safetensors(
+    filename: Union[str, os.PathLike],
+    device: Union[str, int] = "cpu",
+    dtype: torch.dtype = None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Loads a safetensors file into torch format.
+
+    Args:
+        filename (`str`, or `os.PathLike`):
+            The name of the file which contains the tensors
+        device (`Union[str, int]`, *optional*, defaults to `cpu`):
+            The device where the tensors need to be located after load.
+            available options are all regular torch device locations.
+
+    Returns:
+        `Dict[str, torch.Tensor]`: dictionary that contains name as key, value as `torch.Tensor`
+
+    Example:
+
+    ```python
+    from safetensors.torch import load_file
+
+    file_path = "./my_folder/bert.safetensors"
+    loaded = load_file(file_path)
+    ```
+    """
+    result = {}
+    with safe_open(filename, framework="pt", device=device) as f:
+        for k in f.keys():
+            result[k] = f.get_tensor(k)
+            if dtype:
+                result[k] = result[k].to(dtype)
+    return result
 
 
 class LoaderMixin:
@@ -136,9 +172,10 @@ class LoaderMixin:
 
         model_path = component.get("model_path")
 
-        
-        if os.path.isdir(model_path) and os.path.exists(os.path.join(model_path, "config.json")):
-            if config: 
+        if os.path.isdir(model_path) and os.path.exists(
+            os.path.join(model_path, "config.json")
+        ):
+            if config:
                 # replace the config.json with the config
                 config_path = os.path.join(model_path, "config.json")
                 self._save_config(config, config_path)
@@ -357,20 +394,24 @@ class LoaderMixin:
     def _load_video(
         self,
         video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
-        fps: int = None,
+        fps: int | None = None,
         return_fps: bool = False,
+        convert_method: Callable[[Image.Image], Image.Image] | None = None,
     ) -> List[Image.Image]:
 
         if isinstance(video_input, List):
-            if (
-                not video_input
-                or isinstance(video_input[0], Image.Image)
-                or isinstance(video_input[0], str)
-                or isinstance(video_input[0], np.ndarray)
-                or isinstance(video_input[0], torch.Tensor)
-            ):
-                return video_input
-            return [self._load_image(v) for v in video_input]
+            if not video_input:
+                if return_fps:
+                    return video_input, fps
+                else:
+                    return video_input
+            out_frames = []
+            for v in video_input:
+                out_frames.append(self._load_image(v, convert_method=convert_method))
+            if return_fps:
+                return out_frames, fps
+            else:   
+                return out_frames
 
         if isinstance(video_input, str):
             video_path = video_input
@@ -394,7 +435,6 @@ class LoaderMixin:
                     if tmp_file_path and os.path.exists(tmp_file_path):
                         os.unlink(tmp_file_path)
                     raise IOError(f"Failed to download video from {video_input}") from e
-
             try:
                 cap = cv2.VideoCapture(video_path)
                 if not cap.isOpened():
@@ -410,8 +450,20 @@ class LoaderMixin:
                     if not ret:
                         break
                     if frame_count % frame_skip == 0:
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        frames.append(Image.fromarray(frame_rgb))
+                        # Check if frame is grayscale or color
+                        if len(frame.shape) == 2 or (
+                            len(frame.shape) == 3 and frame.shape[2] == 1
+                        ):
+                            # Grayscale frame, no color conversion needed
+                            frame_rgb = frame
+                        else:
+                            # Color frame, convert from BGR to RGB
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        frames.append(
+                            convert_method(Image.fromarray(frame_rgb))
+                            if convert_method
+                            else Image.fromarray(frame_rgb)
+                        )
                     frame_count += 1
                 if return_fps:
                     return frames, original_fps
@@ -424,7 +476,14 @@ class LoaderMixin:
                     os.unlink(tmp_file_path)
 
         if isinstance(video_input, np.ndarray):
-            return [Image.fromarray(frame).convert("RGB") for frame in video_input]
+            return [
+                (
+                    convert_method(Image.fromarray(frame))
+                    if convert_method
+                    else Image.fromarray(frame).convert("RGB")
+                )
+                for frame in video_input
+            ]
 
         if isinstance(video_input, torch.Tensor):
             tensor = video_input.cpu()
@@ -447,9 +506,17 @@ class LoaderMixin:
                         frame = (frame * 255).clip(0, 255).astype(np.uint8)
                     # check if frame is grayscale if so then don't convert to RGB
                     if frame.shape[2] == 1:
-                        frames.append(Image.fromarray(frame.squeeze(2)))
+                        frames.append(
+                            convert_method(Image.fromarray(frame.squeeze(2)))
+                            if convert_method
+                            else Image.fromarray(frame.squeeze(2))
+                        )
                     else:
-                        frames.append(Image.fromarray(frame).convert("RGB"))
+                        frames.append(
+                            convert_method(Image.fromarray(frame))
+                            if convert_method
+                            else Image.fromarray(frame).convert("RGB")
+                        )
                 if return_fps:
                     return frames, fps
                 else:
@@ -466,9 +533,17 @@ class LoaderMixin:
 
             frames = [
                 (
-                    Image.fromarray(frame).convert("RGB")
-                    if frame.shape[2] == 3
-                    else Image.fromarray(frame)
+                    convert_method(Image.fromarray(frame))
+                    if convert_method
+                    else (
+                        Image.fromarray(frame).convert("RGB")
+                        if frame.shape[2] == 3
+                        else (
+                            convert_method(Image.fromarray(frame))
+                            if convert_method
+                            else Image.fromarray(frame)
+                        )
+                    )
                 )
                 for frame in numpy_array
             ]

@@ -1,3 +1,3 @@
-from .mask import MaskDrawPreprocessor
+from .mask import MaskDrawPreprocessor, MaskOutput
 
-__all__ = ["MaskDrawPreprocessor"]
+__all__ = ["MaskDrawPreprocessor", "MaskOutput"]

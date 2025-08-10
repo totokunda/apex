@@ -9,12 +9,25 @@ import torch.nn.functional as F
 from torchvision import transforms
 from typing import Union, List, Optional
 from PIL import Image
+from src.utils.defaults import DEFAULT_DEVICE
+from src.utils.preprocessors import MODEL_WEIGHTS
+from src.preprocess.base import BaseOutput
 
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
 )
+
+
+from tqdm import tqdm
+
+class SalientOutput(BaseOutput):
+    mask: np.ndarray
+    image: np.ndarray
+    
+class SalientVideoOutput(BaseOutput):
+    frames: List[SalientOutput]
 
 
 class REBNCONV(nn.Module):
@@ -314,24 +327,19 @@ class U2NET(nn.Module):
 class SalientPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        model_path: str,
-        return_image: bool = False,
+        model_path: str | None = None,
         use_crop: bool = False,
         norm_size: List[int] = None,
-        device: str = "cuda",
         **kwargs,
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["salient"]
+
         super().__init__(
             model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs
         )
-
-        self.return_image = return_image
         self.use_crop = use_crop
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device == "cuda"
-            else torch.device(device)
-        )
+        self.device = DEFAULT_DEVICE
         self.norm_mean = [0.485, 0.456, 0.406]
         self.norm_std = [0.229, 0.224, 0.225]
         self.norm_size = norm_size if norm_size is not None else [320, 320]
@@ -351,11 +359,8 @@ class SalientPreprocessor(BasePreprocessor):
         )
 
     def __call__(
-        self,
-        image: Union[Image.Image, np.ndarray, str],
-        return_image: Optional[bool] = None,
+        self, image: Union[Image.Image, np.ndarray, str]
     ):
-        return_image = return_image if return_image is not None else self.return_image
         image = self._load_image(image)
         img_w, img_h = image.size
 
@@ -369,26 +374,22 @@ class SalientPreprocessor(BasePreprocessor):
         data_norm_np = (data_norm.cpu().numpy() * 255).astype("uint8")
         data_norm_rst = cv2.resize(data_norm_np, (img_w, img_h))
 
-        if return_image:
-            image_np = np.array(image)
-            _, binary_mask = cv2.threshold(data_norm_rst, 1, 255, cv2.THRESH_BINARY)
-            white_bg = np.ones_like(image_np) * 255
-            ret_image = np.where(
-                binary_mask[:, :, np.newaxis] == 255, image_np, white_bg
-            ).astype(np.uint8)
-            ret_mask = np.where(binary_mask, 255, 0).astype(np.uint8)
+        image_np = np.array(image)
+        _, binary_mask = cv2.threshold(data_norm_rst, 1, 255, cv2.THRESH_BINARY)
+        white_bg = np.ones_like(image_np) * 255
+        ret_image = np.where(
+            binary_mask[:, :, np.newaxis] == 255, image_np, white_bg
+        ).astype(np.uint8)
+        ret_mask = np.where(binary_mask, 255, 0).astype(np.uint8)
+        if self.use_crop:
+            x, y, w, h = cv2.boundingRect(binary_mask)
+            ret_image = ret_image[y : y + h, x : x + w]
+            ret_mask = ret_mask[y : y + h, x : x + w]
+        return SalientOutput(image=ret_image, mask=ret_mask)
 
-            if self.use_crop:
-                x, y, w, h = cv2.boundingRect(binary_mask)
-                ret_image = ret_image[y : y + h, x : x + w]
-                ret_mask = ret_mask[y : y + h, x : x + w]
-
-            return {"image": ret_image, "mask": ret_mask}
-        else:
-            return data_norm_rst
 
     def __str__(self):
-        return f"SalientPreprocessor(return_image={self.return_image}, use_crop={self.use_crop})"
+        return f"SalientPreprocessor(use_crop={self.use_crop})"
 
     def __repr__(self):
         return self.__str__()
@@ -403,17 +404,16 @@ class SalientVideoPreprocessor(SalientPreprocessor, BasePreprocessor):
     def __call__(
         self,
         frames: Union[List[Image.Image], List[str], str],
-        return_image: Optional[bool] = None,
     ):
         frames = self._load_video(frames)
         ret_frames = []
-        for frame in frames:
-            anno_frame = super().__call__(frame, return_image)
+        for frame in tqdm(frames, desc="Processing frames"):
+            anno_frame = super().__call__(frame)
             ret_frames.append(anno_frame)
-        return ret_frames
+        return SalientVideoOutput(frames=ret_frames)
 
     def __str__(self):
-        return f"SalientVideoPreprocessor(return_image={self.return_image}, use_crop={self.use_crop})"
+        return f"SalientVideoPreprocessor(use_crop={self.use_crop})"
 
     def __repr__(self):
         return self.__str__()

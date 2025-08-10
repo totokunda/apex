@@ -1,6 +1,6 @@
 from diffusers.video_processor import VideoProcessor
 from typing import List
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 from src.engine.base_engine import BaseEngine
 from src.mixins import OffloadMixin
 from src.engine.denoise.ltx_denoise import LTXDenoise, DenoiseType

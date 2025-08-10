@@ -2,7 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from src.utils.pos_emb_utils import get_rotary_pos_embed
+from src.utils.models.hunyuan import get_rotary_pos_embed
 import torch.nn.functional as F
 from .base import HunyuanBaseEngine
 

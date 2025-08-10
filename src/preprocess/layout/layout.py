@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 from src.preprocess.base import (
+    BaseOutput,
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
@@ -10,6 +11,18 @@ from src.preprocess.base import (
 from typing import Union, List, Optional, Tuple
 from PIL import Image
 import warnings
+from src.utils.preprocessors import RAM_TAG_COLOR_PATH
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+from src.preprocess.inpainting import InpaintingVideoPreprocessor
+
+class LayoutBboxOutput(BaseOutput):
+    frames: List[np.ndarray]
+
+class LayoutMaskOutput(BaseOutput):
+    frames: List[np.ndarray]
+
+class LayoutTrackOutput(BaseOutput):
+    frames: List[np.ndarray]
 
 
 @preprocessor_registry("layout.bbox")
@@ -23,20 +36,24 @@ class LayoutBboxPreprocessor(BasePreprocessor):
         ram_tag_color_path=None,
         **kwargs,
     ):
-        super().__init__(preprocessor_type=PreprocessorType.VIDEO, **kwargs)
+        if ram_tag_color_path is None:
+            ram_tag_color_path = RAM_TAG_COLOR_PATH
+
+        self.ram_tag_color_path = self._download(
+            ram_tag_color_path, DEFAULT_PREPROCESSOR_SAVE_PATH
+        )
+        super().__init__(preprocessor_type=PreprocessorType.IMAGE, **kwargs)
         self.bg_color = bg_color if bg_color is not None else [255, 255, 255]
         self.box_color = box_color if box_color is not None else [0, 0, 0]
-        self.frame_size = (
-            frame_size if frame_size is not None else [720, 1280]
-        )  # [H, W]
+        self.frame_size = frame_size if frame_size is not None else [720, 1280]
         self.num_frames = num_frames
         self.color_dict = {"default": tuple(self.box_color)}
 
-        if ram_tag_color_path is not None:
+        if self.ram_tag_color_path is not None:
             try:
                 lines = [
                     id_name_color.strip().split("#;#")
-                    for id_name_color in open(ram_tag_color_path).readlines()
+                    for id_name_color in open(self.ram_tag_color_path).readlines()
                 ]
                 self.color_dict.update(
                     {
@@ -48,6 +65,17 @@ class LayoutBboxPreprocessor(BasePreprocessor):
                 warnings.warn(
                     f"Could not load color mappings from {ram_tag_color_path}: {e}"
                 )
+
+    def _convert_bbox(self, bbox: List[float], shape) -> List[float]:
+        if bbox[0] < 1:
+            bbox[0] = bbox[0] * shape[1]
+        if bbox[1] < 1:
+            bbox[1] = bbox[1] * shape[0]
+        if bbox[2] > 1:
+            bbox[2] = bbox[2] * shape[1]
+        if bbox[3] > 1:
+            bbox[3] = bbox[3] * shape[0]
+        return bbox
 
     def __call__(
         self,
@@ -63,8 +91,6 @@ class LayoutBboxPreprocessor(BasePreprocessor):
             len(bbox) == 2
         ), "bbox should be a list of two elements (start_bbox & end_bbox)"
 
-        # frame_size = [H, W]
-        # bbox = [x1, y1, x2, y2]
         label = label[0] if label is not None and isinstance(label, list) else label
         if label is not None and label in self.color_dict:
             box_color = self.color_dict[label]
@@ -73,7 +99,10 @@ class LayoutBboxPreprocessor(BasePreprocessor):
         else:
             box_color = self.color_dict["default"]
 
-        start_bbox, end_bbox = bbox
+        start_bbox, end_bbox = [
+            self._convert_bbox(bbox[0], frame_size),
+            self._convert_bbox(bbox[1], frame_size),
+        ]
         start_bbox = [
             start_bbox[0],
             start_bbox[1],
@@ -87,6 +116,7 @@ class LayoutBboxPreprocessor(BasePreprocessor):
             end_bbox[2] - end_bbox[0],
             end_bbox[3] - end_bbox[1],
         ]
+
         end_bbox = np.array(end_bbox, dtype=np.float32)
         bbox_increment = (end_bbox - start_bbox) / num_frames
 
@@ -99,7 +129,7 @@ class LayoutBboxPreprocessor(BasePreprocessor):
             x, y, w, h = current_bbox
             cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
             ret_frames.append(frame[..., ::-1])  # Convert BGR to RGB
-        return ret_frames
+        return LayoutBboxOutput(frames=ret_frames)
 
     def __str__(self):
         return f"LayoutBboxPreprocessor(frame_size={self.frame_size}, num_frames={self.num_frames})"
@@ -118,17 +148,23 @@ class LayoutMaskPreprocessor(BasePreprocessor):
         ram_tag_color_path=None,
         **kwargs,
     ):
+        if ram_tag_color_path is None:
+            ram_tag_color_path = RAM_TAG_COLOR_PATH
+
+        self.ram_tag_color_path = self._download(
+            ram_tag_color_path, DEFAULT_PREPROCESSOR_SAVE_PATH
+        )
         super().__init__(preprocessor_type=PreprocessorType.IMAGE, **kwargs)
         self.use_aug = use_aug
         self.bg_color = bg_color if bg_color is not None else [255, 255, 255]
         self.box_color = box_color if box_color is not None else [0, 0, 0]
         self.color_dict = {"default": tuple(self.box_color)}
 
-        if ram_tag_color_path is not None:
+        if self.ram_tag_color_path is not None:
             try:
                 lines = [
                     id_name_color.strip().split("#;#")
-                    for id_name_color in open(ram_tag_color_path).readlines()
+                    for id_name_color in open(self.ram_tag_color_path).readlines()
                 ]
                 self.color_dict.update(
                     {
@@ -138,7 +174,7 @@ class LayoutMaskPreprocessor(BasePreprocessor):
                 )
             except Exception as e:
                 warnings.warn(
-                    f"Could not load color mappings from {ram_tag_color_path}: {e}"
+                    f"Could not load color mappings from {self.ram_tag_color_path}: {e}"
                 )
 
         if self.use_aug:
@@ -166,11 +202,8 @@ class LayoutMaskPreprocessor(BasePreprocessor):
         mask_cfg: Optional[dict] = None,
     ):
         if not isinstance(mask, list):
-            is_batch = False
             mask = [mask]
-        else:
-            is_batch = True
-
+        
         if label is not None and label in self.color_dict:
             color = self.color_dict[label]
         elif color is not None:
@@ -196,10 +229,7 @@ class LayoutMaskPreprocessor(BasePreprocessor):
             frame = self.draw_contours(canvas, contour, color)
             ret_data.append(frame)
 
-        if is_batch:
-            return ret_data
-        else:
-            return ret_data[0]
+        return LayoutMaskOutput(frames=ret_data)
 
     def __str__(self):
         return f"LayoutMaskPreprocessor(use_aug={self.use_aug})"
@@ -219,17 +249,23 @@ class LayoutTrackPreprocessor(BasePreprocessor):
         inpainting_config=None,
         **kwargs,
     ):
+        if ram_tag_color_path is None:
+            ram_tag_color_path = RAM_TAG_COLOR_PATH
+
+        self.ram_tag_color_path = self._download(
+            ram_tag_color_path, DEFAULT_PREPROCESSOR_SAVE_PATH
+        )
         super().__init__(preprocessor_type=PreprocessorType.VIDEO, **kwargs)
         self.use_aug = use_aug
         self.bg_color = bg_color if bg_color is not None else [255, 255, 255]
         self.box_color = box_color if box_color is not None else [0, 0, 0]
         self.color_dict = {"default": tuple(self.box_color)}
 
-        if ram_tag_color_path is not None:
+        if self.ram_tag_color_path is not None:
             try:
                 lines = [
                     id_name_color.strip().split("#;#")
-                    for id_name_color in open(ram_tag_color_path).readlines()
+                    for id_name_color in open(self.ram_tag_color_path).readlines()
                 ]
                 self.color_dict.update(
                     {
@@ -239,7 +275,7 @@ class LayoutTrackPreprocessor(BasePreprocessor):
                 )
             except Exception as e:
                 warnings.warn(
-                    f"Could not load color mappings from {ram_tag_color_path}: {e}"
+                    f"Could not load color mappings from {self.ram_tag_color_path}: {e}"
                 )
 
         if self.use_aug:
@@ -248,9 +284,8 @@ class LayoutTrackPreprocessor(BasePreprocessor):
             )
             self.use_aug = False
 
-        # Note: InpaintingVideoAnnotator is not available, so we'll provide a simplified implementation
-        warnings.warn(
-            "InpaintingVideoAnnotator is not available. Using simplified tracking."
+        self.inpainting_ins = InpaintingVideoPreprocessor(
+            **(inpainting_config if inpainting_config is not None else {})
         )
 
     def find_contours(self, mask):
@@ -267,47 +302,28 @@ class LayoutTrackPreprocessor(BasePreprocessor):
     def __call__(
         self,
         frames: Union[List[Image.Image], List[str], str] = None,
-        video: Optional[str] = None,
         mask: Optional[Union[Image.Image, np.ndarray, List]] = None,
         bbox: Optional[List] = None,
         label: Optional[str] = None,
         caption: Optional[str] = None,
-        mode: Optional[str] = None,
+        mode: str = 'salient',
         color: Optional[Tuple[int, int, int]] = None,
         mask_cfg: Optional[dict] = None,
     ):
 
-        # Load frames
         if frames is not None:
             frames = self._load_video(frames)
-        elif video is not None:
-            frames = self._load_video(video)
-        else:
-            raise ValueError("Either frames or video must be provided")
 
-        # Simplified tracking: if mask is provided, use it for all frames
-        # In a full implementation, this would use the inpainting annotator
-        if mask is not None:
-            if isinstance(mask, (str, Image.Image)):
-                mask = self._load_image(mask)
-                mask = np.array(mask)
-            elif not isinstance(mask, np.ndarray):
-                mask = np.array(mask)
+        inp_data = self.inpainting_ins(
+            frames=frames,
+            mode=mode,
+            mask=mask,
+            bbox=bbox,
+            label=label,
+            caption=caption,
+        )
 
-            # Convert to grayscale if needed
-            if len(mask.shape) == 3:
-                mask = cv2.cvtColor(mask, cv2.COLOR_RGB2GRAY)
-
-            # Resize mask to match frame size
-            frame_height, frame_width = np.array(frames[0]).shape[:2]
-            mask = cv2.resize(mask, (frame_width, frame_height))
-
-            inp_masks = [mask] * len(frames)
-        else:
-            # If no mask provided, create a dummy mask
-            frame_height, frame_width = np.array(frames[0]).shape[:2]
-            dummy_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
-            inp_masks = [dummy_mask] * len(frames)
+        inp_masks = inp_data.masks
 
         label = label[0] if label is not None and isinstance(label, list) else label
         if label is not None and label in self.color_dict:
@@ -326,7 +342,7 @@ class LayoutTrackPreprocessor(BasePreprocessor):
             frame = self.draw_contours(canvas, contour, color)
             ret_data.append(frame)
 
-        return ret_data
+        return LayoutTrackOutput(frames=ret_data)
 
     def __str__(self):
         return f"LayoutTrackPreprocessor(use_aug={self.use_aug})"

@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from diffusers.models.attention import Attention
-from src.utils.support_utils import supports_double
+from src.utils.dtype import supports_double
 from src.attention.functions import attention_register
 
 

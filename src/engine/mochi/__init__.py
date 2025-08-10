@@ -1,5 +1,5 @@
 from typing import List
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise.mochi_denoise import MochiDenoise
 from src.ui.nodes import UINode

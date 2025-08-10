@@ -7,10 +7,16 @@ from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
 from typing import Union, List
 from PIL import Image
 
+class GrayOutput(BaseOutput):
+    frame: Image.Image
+
+class GrayVideoOutput(BaseOutput):
+    frames: List[Image.Image]
 
 @preprocessor_registry("gray.image")
 class GrayPreprocessor(BasePreprocessor):
@@ -21,7 +27,7 @@ class GrayPreprocessor(BasePreprocessor):
         image = self._load_image(image)
         image_array = np.array(image)
         gray_map = cv2.cvtColor(image_array, cv2.COLOR_RGB2GRAY)
-        return gray_map[..., None].repeat(3, axis=2)
+        return GrayOutput(frame=Image.fromarray(gray_map[..., None].repeat(3, axis=2)))
 
     def __str__(self):
         return "GrayPreprocessor()"
@@ -43,9 +49,8 @@ class GrayVideoPreprocessor(BasePreprocessor):
         for frame in frames:
             frame_array = np.array(frame)
             gray_map = cv2.cvtColor(frame_array, cv2.COLOR_RGB2GRAY)
-            anno_frame = gray_map[..., None].repeat(3, axis=2)
-            ret_frames.append(anno_frame)
-        return ret_frames
+            ret_frames.append(Image.fromarray(gray_map[..., None].repeat(3, axis=2)))
+        return GrayVideoOutput(frames=ret_frames)
 
     def __str__(self):
         return "GrayVideoPreprocessor()"

@@ -872,9 +872,7 @@ class MagiTransformerBlock(torch.nn.Module):
         # hidden_states: [s/cp/sp, b, h]
         residual = hidden_states
         original_dtype = hidden_states.dtype
-        
 
-        
         norm_hidden_states = self.norm1(hidden_states)
 
         device = hidden_states.device
@@ -893,13 +891,10 @@ class MagiTransformerBlock(torch.nn.Module):
             encoder_hidden_states=encoder_hidden_states,
             **cross_attn_params,
         )
-        
-        
+
         attn_out = torch.concat([attn_out, cross_attn_out], dim=2)
         # NOTE: hn=8 is hardcoded to align with TP8 traning and TP1 inference
         attn_out = rearrange(attn_out, "sq b (n hn hd) -> sq b (hn n hd)", n=2, hn=8)
-        
-        
 
         with torch.autocast(device_type=device.type, dtype=torch.float32):
             attn_out = self.proj(attn_out)

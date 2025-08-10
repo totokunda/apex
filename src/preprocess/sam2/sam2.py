@@ -8,18 +8,26 @@ from scipy import ndimage
 from typing import Union, List, Optional, Dict, Any
 from PIL import Image
 import warnings
+from src.utils.preprocessors import MODEL_WEIGHTS, MODEL_CONFIGS
+from src.utils.defaults import DEFAULT_DEVICE
+from diffusers.utils import export_to_video
+import tempfile
 
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
+from src.preprocess.salient import SalientPreprocessor
+from src.preprocess.gdino import GDINOPreprocessor
+import pycocotools.mask as mask_utils
 
 
 def single_mask_to_rle(mask):
-    """Convert single mask to RLE format - placeholder function"""
-    # This would typically use the proper RLE encoding from SAM2
-    return {"size": mask.shape, "counts": "placeholder"}
+    rle = mask_utils.encode(np.array(mask[:, :, None], order="F", dtype="uint8"))[0]
+    rle["counts"] = rle["counts"].decode("utf-8")
+    return rle
 
 
 def single_mask_to_xyxy(mask):
@@ -33,40 +41,69 @@ def single_mask_to_xyxy(mask):
     return [cmin, rmin, cmax + 1, rmax + 1]
 
 
+class SAM2Output(BaseOutput):
+    masks: Optional[np.ndarray] = None
+    scores: Optional[np.ndarray] = None
+    logits: Optional[np.ndarray] = None
+
+
+class SAM2VideoOutput(BaseOutput):
+    annotations: Optional[Dict] = None
+
+
 @preprocessor_registry("sam2")
 class SAM2Preprocessor(BasePreprocessor):
     def __init__(
         self,
-        config_path: str,
-        model_path: str,
+        config_path: Optional[str] = None,
+        model_path: Optional[str] = None,
         task_type: str = "input_box",
         return_mask: bool = False,
-        device: str = "cuda",
+        device: str = DEFAULT_DEVICE,
         **kwargs,
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["sam2"]
+        if config_path is None:
+            config_path = MODEL_CONFIGS["sam2"]
         super().__init__(
-            model_path=model_path, preprocessor_type=PreprocessorType.IMAGE, **kwargs
+            model_path=model_path,
+            config_path=config_path,
+            preprocessor_type=PreprocessorType.IMAGE,
+            **kwargs,
         )
 
         self.task_type = task_type
         self.return_mask = return_mask
+        self.device = device
 
         try:
             from sam2.build_sam import build_sam2
             from sam2.sam2_image_predictor import SAM2ImagePredictor
         except ImportError:
-            warnings.warn(
-                "please pip install sam2 package, or you can refer to models/VACE-Annotators/sam2/SAM_2-1.0-cp310-cp310-linux_x86_64.whl"
-            )
+            warnings.warn("please pip install sam2 package")
             raise ImportError("SAM2 package not available")
 
-        # Handle config path
-        local_config_path = os.path.join(*config_path.rsplit("/")[-3:])
-        if not os.path.exists(local_config_path):
-            os.makedirs(os.path.dirname(local_config_path), exist_ok=True)
-            shutil.copy(config_path, local_config_path)
+        # The SAM2 package expects a Hydra config name like "configs/sam2.1/sam2.1_hiera_l.yaml",
+        # not a filesystem path. Convert any local/URL path to the expected relative config name.
+        def _to_sam2_config_name(path_like: str) -> str:
+            if path_like is None:
+                return None
+            normalized = str(path_like).replace("\\", "/")
+            # If it's a URL, extract the path portion
+            if normalized.startswith("http://") or normalized.startswith("https://"):
+                from urllib.parse import urlparse
 
-        sam2_model = build_sam2(local_config_path, self.model_path)
+                normalized = urlparse(normalized).path.lstrip("/")
+            # Try to find the packaged config root
+            marker = "configs/"
+            idx = normalized.find(marker)
+            return normalized[idx:] if idx != -1 else normalized
+
+        config_name = _to_sam2_config_name(self.config_path)
+        sam2_model = build_sam2(
+            config_name, ckpt_path=self.model_path, device=self.device
+        )
         self.predictor = SAM2ImagePredictor(sam2_model)
         self.predictor.fill_hole_area = 0
 
@@ -86,12 +123,11 @@ class SAM2Preprocessor(BasePreprocessor):
         image_array = np.array(image)
 
         if mask is not None:
-            if isinstance(mask, (str, Image.Image)):
-                mask = self._load_image(mask)
+            mask = self._load_image(mask)
+            mask = mask.convert("L")
+            if task_type == "mask":
+                mask = mask.resize((256, 256))
             mask = np.array(mask)
-            # Convert to grayscale if needed
-            if len(mask.shape) == 3:
-                mask = mask.mean(axis=2).astype(np.uint8)
 
         if task_type == "mask_point":
             if mask is None:
@@ -100,7 +136,7 @@ class SAM2Preprocessor(BasePreprocessor):
                 scribble = mask.transpose(2, 1, 0)[0]
             else:
                 scribble = mask.transpose(1, 0)  # (H, W) -> (W, H)
-            labeled_array, num_features = ndimage.label(scribble >= 255)
+            labeled_array, num_features = ndimage.label(scribble > 0)
             centers = ndimage.center_of_mass(
                 scribble, labeled_array, range(1, num_features + 1)
             )
@@ -114,7 +150,8 @@ class SAM2Preprocessor(BasePreprocessor):
                 scribble = mask.transpose(2, 1, 0)[0]
             else:
                 scribble = mask.transpose(1, 0)  # (H, W) -> (W, H)
-            labeled_array, num_features = ndimage.label(scribble >= 255)
+
+            labeled_array, num_features = ndimage.label(scribble > 0)
             centers = ndimage.center_of_mass(
                 scribble, labeled_array, range(1, num_features + 1)
             )
@@ -130,6 +167,7 @@ class SAM2Preprocessor(BasePreprocessor):
             if input_box is None:
                 raise ValueError("input_box is required for 'input_box' task type")
             if isinstance(input_box, list):
+                input_box = self.preprocess_bbox(input_box, np.array(image).shape)
                 input_box = np.array(input_box)
             sample = {"box": input_box}
         elif task_type == "mask":
@@ -147,10 +185,9 @@ class SAM2Preprocessor(BasePreprocessor):
         logits = logits[sorted_ind]
 
         if return_mask:
-            return masks[0]
+            return SAM2Output(masks=masks[0])
         else:
-            ret_data = {"masks": masks, "scores": scores, "logits": logits}
-            return ret_data
+            return SAM2Output(masks=masks, scores=scores, logits=logits)
 
     def __str__(self):
         return f"SAM2Preprocessor(task_type={self.task_type}, return_mask={self.return_mask})"
@@ -163,46 +200,70 @@ class SAM2Preprocessor(BasePreprocessor):
 class SAM2VideoPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        config_path: str,
-        model_path: str,
+        config_path: Optional[str] = None,
+        model_path: Optional[str] = None,
         task_type: str = "input_box",
-        device: str = "cuda",
+        device: str | torch.device = DEFAULT_DEVICE,
         **kwargs,
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["sam2"]
+        if config_path is None:
+            config_path = MODEL_CONFIGS["sam2"]
+
         super().__init__(
-            model_path=model_path, preprocessor_type=PreprocessorType.VIDEO, **kwargs
+            model_path=model_path,
+            config_path=config_path,
+            preprocessor_type=PreprocessorType.VIDEO,
+            **kwargs,
         )
 
         self.task_type = task_type
-
+        self.device = device
         try:
             from sam2.build_sam import build_sam2_video_predictor
         except ImportError:
-            warnings.warn(
-                "please pip install sam2 package, or you can refer to models/VACE-Annotators/sam2/SAM_2-1.0-cp310-cp310-linux_x86_64.whl"
-            )
+            warnings.warn("please pip install sam2 package")
             raise ImportError("SAM2 package not available")
 
-        # Handle config path
-        local_config_path = os.path.join(*config_path.rsplit("/")[-3:])
-        if not os.path.exists(local_config_path):
-            os.makedirs(os.path.dirname(local_config_path), exist_ok=True)
-            shutil.copy(config_path, local_config_path)
+        def _to_sam2_config_name(path_like: str) -> str:
+            if path_like is None:
+                return None
+            normalized = str(path_like).replace("\\", "/")
+            if normalized.startswith("http://") or normalized.startswith("https://"):
+                from urllib.parse import urlparse
 
+                normalized = urlparse(normalized).path.lstrip("/")
+            marker = "configs/"
+            idx = normalized.find(marker)
+            return normalized[idx:] if idx != -1 else normalized
+
+        config_name = _to_sam2_config_name(self.config_path)
         self.video_predictor = build_sam2_video_predictor(
-            local_config_path, self.model_path
+            config_name, ckpt_path=self.model_path, device=self.device
         )
         self.video_predictor.fill_hole_area = 0
 
     def __call__(
         self,
-        video: str,
+        video: str | List[Image.Image] | List[np.ndarray],
+        fps: int = 24,
         input_box: Optional[Union[List[float], np.ndarray]] = None,
         mask: Optional[Union[Image.Image, np.ndarray, str]] = None,
         task_type: Optional[str] = None,
     ):
 
         task_type = task_type if task_type is not None else self.task_type
+        
+        video_path = None
+        if isinstance(video, str):
+            video_path = video
+        elif isinstance(video, list):
+            tmp_video = tempfile.NamedTemporaryFile(suffix=".mp4")
+            export_to_video(video, tmp_video.name, fps=fps)
+            video_path = tmp_video.name
+        else:
+            raise ValueError(f"Unsupported video type: {type(video)}")
 
         if mask is not None:
             if isinstance(mask, (str, Image.Image)):
@@ -249,6 +310,7 @@ class SAM2VideoPreprocessor(BasePreprocessor):
             if input_box is None:
                 raise ValueError("input_box is required for 'input_box' task type")
             if isinstance(input_box, list):
+                input_box = self.preprocess_bbox(input_box, np.array(self._load_video(video_path)[0]).shape)
                 input_box = np.array(input_box)
             sample = {"box": input_box}
         elif task_type == "mask":
@@ -260,9 +322,13 @@ class SAM2VideoPreprocessor(BasePreprocessor):
 
         ann_frame_idx = 0
         object_id = 0
-
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            inference_state = self.video_predictor.init_state(video_path=video)
+        tmp_video = None
+        
+        with torch.inference_mode(), torch.autocast(
+            self.device.type if isinstance(self.device, torch.device) else self.device,
+            dtype=torch.bfloat16 if self.device.type == "cuda" else torch.float32,
+        ):
+            inference_state = self.video_predictor.init_state(video_path=video_path)
 
             if task_type in ["mask_point", "mask_box", "input_box"]:
                 _, out_obj_ids, out_mask_logits = (
@@ -300,9 +366,9 @@ class SAM2VideoPreprocessor(BasePreprocessor):
                         "mask_box": single_mask_to_xyxy(mask),
                     }
                 video_segments[out_frame_idx] = frame_segments
-
-        ret_data = {"annotations": video_segments}
-        return ret_data
+        if tmp_video is not None:
+            tmp_video.close()
+        return SAM2VideoOutput(annotations=video_segments)
 
     def __str__(self):
         return f"SAM2VideoPreprocessor(task_type={self.task_type})"
@@ -311,8 +377,51 @@ class SAM2VideoPreprocessor(BasePreprocessor):
         return self.__str__()
 
 
-# Placeholder for combined preprocessors that would depend on other preprocessors
-# These would need to be implemented when the dependencies are available
-warnings.warn(
-    "SAM2SalientVideoPreprocessor and SAM2GDINOVideoPreprocessor require additional dependencies and are not implemented yet."
-)
+class SAM2SalientVideoPreprocessor(BasePreprocessor):
+    def __init__(self, sam2_config: Dict = None, salient_config: Dict = None, **kwargs):
+        super().__init__(**kwargs)
+
+        self.sam2_preprocessor = SAM2VideoPreprocessor(** (sam2_config if sam2_config is not None else {}))
+        self.salient_preprocessor = SalientPreprocessor(** (salient_config if salient_config is not None else {}))
+
+    def __call__(self, video: str | Image.Image | np.ndarray, **kwargs):
+        loaded_video = self._load_video(video)
+        image = loaded_video[0]
+
+        salient_output = self.salient_preprocessor(image, **kwargs)
+        sam_2_output = self.sam2_preprocessor(
+            video, mask=salient_output.mask, task_type="mask"
+        )
+
+        return sam_2_output
+
+
+class SAM2GDINOVideoPreprocessor(BasePreprocessor):
+    def __init__(self, sam2_config: Dict = None, gdino_config: Dict = None, **kwargs):
+        super().__init__(**kwargs)
+
+        self.sam2_preprocessor = SAM2VideoPreprocessor(** (sam2_config if sam2_config is not None else {}))
+        self.gdino_preprocessor = GDINOPreprocessor(** (gdino_config if gdino_config is not None else {}))
+
+    def __call__(
+        self,
+        video: str | Image.Image | np.ndarray,
+        classes: List[str] = None,
+        caption: str = None,
+        **kwargs,
+    ):
+        loaded_video = self._load_video(video)
+        image = loaded_video[0]
+
+        if classes is not None:
+            gdino_output = self.gdino_preprocessor(image, classes=classes, **kwargs)
+        else:
+            gdino_output = self.gdino_preprocessor(image, caption=caption, **kwargs)
+        if gdino_output.boxes is not None and len(gdino_output.boxes) > 0:
+            bboxes = gdino_output.boxes[0]
+        else:
+            raise ValueError("Unable to find the corresponding boxes")
+        sam2_output = self.sam2_preprocessor(
+            video=video, input_box=bboxes, task_type="input_box"
+        )
+        return sam2_output

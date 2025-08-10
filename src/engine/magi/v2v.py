@@ -6,11 +6,12 @@ from einops import rearrange
 from tqdm import tqdm
 from .base import MagiBaseEngine
 
+
 class MagiV2VEngine(MagiBaseEngine):
     """Magi Video-to-Video Engine Implementation"""
 
     def run(
-        self,   
+        self,
         video: Union[str, torch.Tensor, List[Image.Image]],
         prompt: Union[List[str], str],
         height: int = 512,
@@ -55,14 +56,18 @@ class MagiV2VEngine(MagiBaseEngine):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
-        
+
         loaded_video, fps = self._load_video(video, fps=fps, return_fps=True)
         for i, frame in enumerate(loaded_video):
-            loaded_video[i] = self._aspect_ratio_resize(frame, max_area=height * width)[0]
-        
-        video_tensor = self.video_processor.preprocess_video(loaded_video, height=height, width=width)
+            loaded_video[i] = self._aspect_ratio_resize(frame, max_area=height * width)[
+                0
+            ]
+
+        video_tensor = self.video_processor.preprocess_video(
+            loaded_video, height=height, width=width
+        )
         fps = int(fps)
-        
+
         if prefix_frames is not None:
             prefix_video = video_tensor[:, :, prefix_frames:]
         else:
@@ -71,10 +76,12 @@ class MagiV2VEngine(MagiBaseEngine):
                 clip_length = 1
             else:
                 PREFIX_VIDEO_MAX_FRAMES = prefix_video_max_chunk * fps
-                clip_length = min(num_frames_to_read // fps * fps, PREFIX_VIDEO_MAX_FRAMES)
-            
+                clip_length = min(
+                    num_frames_to_read // fps * fps, PREFIX_VIDEO_MAX_FRAMES
+                )
+
             prefix_video = video_tensor[:, :, -clip_length:]
-        
+
         transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         prefix_video = self.vae_encode(
@@ -185,7 +192,7 @@ class MagiV2VEngine(MagiBaseEngine):
             return torch.cat(latents, dim=2)
         else:
             videos = []
-            for latent in tqdm(latents, desc="Decoding latents"): 
+            for latent in tqdm(latents, desc="Decoding latents"):
                 video = self.vae_decode(latent, offload=False)
                 video = self._postprocess(video, output_type="pil")[0]
                 videos.extend(video)

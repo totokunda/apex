@@ -1,3 +1,3 @@
-from .subject import SubjectPreprocessor
+from .subject import SubjectPreprocessor, subject_mode
 
-__all__ = ["SubjectPreprocessor"]
+__all__ = ["SubjectPreprocessor", "subject_mode"]

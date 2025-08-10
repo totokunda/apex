@@ -2,7 +2,7 @@ import torch
 import math
 from diffusers.schedulers import CogVideoXDPMScheduler
 from contextlib import nullcontext
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 
 
 class CogVideoDenoiseType(EnumType):

@@ -5,7 +5,7 @@ from .base import WanBaseEngine
 from torch.nn import functional as F
 from torchvision import transforms as T
 from diffusers.utils.torch_utils import randn_tensor
-from src.utils.color_utils import match_and_blend_colors
+from src.utils.models.wan import match_and_blend_colors
 
 
 class WanMultitalkEngine(WanBaseEngine):

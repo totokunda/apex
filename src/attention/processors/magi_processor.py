@@ -142,7 +142,7 @@ class MagiSelfAttentionProcessor:
         query = attn.to_q(hidden_states)  # S, B, H
         key = attn.to_k(hidden_states)  # S, B, H
         value = attn.to_v(hidden_states)  # S, B, H
-        
+
         query = query.reshape(
             query.size(0), query.size(1), -1, attn_head_dim
         )  # S, B, H/heads, heads
@@ -154,7 +154,7 @@ class MagiSelfAttentionProcessor:
 
         query = query.to(dtype=torch.float32)
         key = key.to(dtype=torch.float32)
-        
+
         if attn.norm_q is not None:
             query = attn.norm_q(query)  # S, B, H
         if attn.norm_k is not None:
@@ -172,7 +172,7 @@ class MagiSelfAttentionProcessor:
             key = apply_rotary_emb(key, (cos_emb, sin_emb))
 
         query = rearrange(query, "b sq hn hd -> (sq b) hn hd").contiguous()
-        
+
         key = rearrange(key, "b sq hn hd -> (sq b) hn hd").contiguous()
         value = rearrange(
             value, "sq b (hn hd) -> (sq b) hn hd", hd=attn_head_dim
@@ -181,7 +181,6 @@ class MagiSelfAttentionProcessor:
         query = query.to(dtype=query_dtype)
         key = key.to(dtype=query_dtype)
         value = value.to(dtype=query_dtype)
-        
 
         if kv_cache_params is not None:
             extract_prefix_video_feature = kv_cache_params.get(
@@ -200,7 +199,7 @@ class MagiSelfAttentionProcessor:
             update_kv_cache = kv_cache_params.get("update_kv_cache", False)
             kv_offload = kv_cache_params.get("kv_offload", False)
             key_value = torch.cat([key, value], dim=-1)
-        
+
             if extract_prefix_video_feature or fwd_extra_1st_chunk or slice_point > 0:
                 key_value = self._full_adjust_key_and_value(
                     max_sequence_length,
@@ -238,14 +237,13 @@ class MagiSelfAttentionProcessor:
             .transpose(0, 1)
             .contiguous()
         )
-        
+
         if not torch.isfinite(query).all():
             raise RuntimeError(f"NaN/Inf in forward of {self.__class__.__name__}")
         if not torch.isfinite(key).all():
             raise RuntimeError(f"NaN/Inf in forward of {self.__class__.__name__}")
         if not torch.isfinite(value).all():
             raise RuntimeError(f"NaN/Inf in forward of {self.__class__.__name__}")
-        
 
         core_attn_outs = []
         for i in range(denoising_range_num):
@@ -300,7 +298,7 @@ class MagiSelfAttentionProcessor:
         # =================================================
         inf_max_seq_length = max_sequence_length
         inf_max_batch_size = max_batch_size
-        
+
         if layer_number not in key_value_memory_dict:
             inference_key_and_value_memory = self._allocate_key_and_value_memory(
                 inf_max_seq_length,
@@ -318,7 +316,7 @@ class MagiSelfAttentionProcessor:
             inference_key_and_value_memory = key_value_memory_dict[layer_number]
 
         sequence_start = slice_point * clip_token_nums * inf_max_batch_size
-        
+
         get_key_and_value = inference_key_and_value_memory[:sequence_start, ...].to(
             key_and_value.device
         )
@@ -356,7 +354,7 @@ class MagiSelfAttentionProcessor:
         kv_offload: bool = False,
     ):
         """Allocate memory to store kv cache during inference."""
-        
+
         if kv_offload:
             key_and_value_memory = torch.empty(
                 sequence_length * batch_size,
@@ -364,7 +362,7 @@ class MagiSelfAttentionProcessor:
                 attn_head_dim * 2,
                 dtype=dtype,
                 pin_memory=True,
-                device='cpu',
+                device="cpu",
             )
         else:
             key_and_value_memory = torch.empty(
@@ -404,11 +402,10 @@ class MagiCrossAttentionProcessor:
         )
 
         query_dtype = query.dtype
-        
 
         if attn.cross_q_norm is not None:
             query = attn.cross_q_norm(query)
-        elif attn.norm_q is not None:   
+        elif attn.norm_q is not None:
             query = attn.norm_q(query)
 
         mixed_key_value = torch.concat(
@@ -418,7 +415,7 @@ class MagiCrossAttentionProcessor:
             ],
             axis=1,
         )
-        
+
         # [y_total_token, 2*hn*hd] --> [y_total_token, hn, 2*hd]
         mixed_key_value = mixed_key_value.view(
             encoder_hidden_states.shape[0], -1, 2 * attn_head_dim
@@ -433,7 +430,7 @@ class MagiCrossAttentionProcessor:
         query = query.to(dtype=query_dtype)
         key = key.to(dtype=query_dtype)
         value = value.to(dtype=query_dtype)
-         
+
         if attention_register.is_available("flash"):
             attn_out = (
                 attention_register.call(  # call directly due to implementation details

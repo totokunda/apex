@@ -3,16 +3,23 @@
 import torch
 import numpy as np
 import argparse
+from typing import List
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
-    PreprocessorType,
+    BaseOutput,
 )
+from tqdm import tqdm
 from raft import RAFT
 from raft.utils.utils import InputPadder
 from raft.utils import flow_viz
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+from src.utils.preprocessors import MODEL_WEIGHTS
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
+from PIL import Image
 
+class FlowOutput(BaseOutput):
+    flow: List[np.ndarray]
+    flow_vis: List[Image.Image]
 
 @preprocessor_registry("flow")
 class FlowPreprocessor(BasePreprocessor):
@@ -20,17 +27,16 @@ class FlowPreprocessor(BasePreprocessor):
         self,
         model_path: str = None,
         save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
-        device: str = "cuda",
+        device: str | torch.device = DEFAULT_DEVICE,
         **kwargs
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["flow"]
         super().__init__(model_path, save_path)
         params = {"small": False, "mixed_precision": False, "alternate_corr": False}
         params = argparse.Namespace(**params)
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device is None
-            else device
-        )
+        self.device = device
+        
         self.model = RAFT(params)
         self.model.load_state_dict(
             {
@@ -48,16 +54,16 @@ class FlowPreprocessor(BasePreprocessor):
         # frames / RGB
         frames = self._load_video(frames)
         frames = [
-            np.array(frame)
+            torch.from_numpy(np.array(frame)
             .astype(np.uint8)
-            .transpose(2, 0, 1)
+            .transpose(2, 0, 1))
             .float()[None]
             .to(self.device)
             for frame in frames
         ]
         flow_up_list, flow_up_vis_list = [], []
         with torch.no_grad():
-            for i, (image1, image2) in enumerate(zip(frames[:-1], frames[1:])):
+            for i, (image1, image2) in tqdm(enumerate(zip(frames[:-1], frames[1:])), total=len(frames)-1):
                 padder = self.InputPadder(image1.shape)
                 image1, image2 = padder.pad(image1, image2)
                 flow_low, flow_up = self.model(image1, image2, iters=20, test_mode=True)
@@ -65,4 +71,8 @@ class FlowPreprocessor(BasePreprocessor):
                 flow_up_vis = self.flow_viz.flow_to_image(flow_up)
                 flow_up_list.append(flow_up)
                 flow_up_vis_list.append(flow_up_vis)
-        return flow_up_list, flow_up_vis_list  # RGB
+            
+        return FlowOutput(
+            flow=flow_up_list,
+            flow_vis=[Image.fromarray(flow_up_vis) for flow_up_vis in flow_up_vis_list]
+        )

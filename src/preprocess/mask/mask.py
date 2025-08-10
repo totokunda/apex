@@ -9,29 +9,31 @@ from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Tuple
 from PIL import Image
+
+class MaskOutput(BaseOutput):
+    mask: Image.Image
+    image: Optional[Image.Image] = None  
 
 
 @preprocessor_registry("mask.draw")
 class MaskDrawPreprocessor(BasePreprocessor):
-    def __init__(self, mode="maskpoint", return_dict=True, **kwargs):
+    def __init__(self, mode="maskpoint", **kwargs):
         super().__init__(preprocessor_type=PreprocessorType.IMAGE, **kwargs)
         self.mode = mode
-        self.return_dict = return_dict
         assert self.mode in ["maskpoint", "maskbbox", "mask", "bbox"]
-
+        
     def __call__(
         self,
         mask: Optional[Union[Image.Image, np.ndarray, str]] = None,
         image: Optional[Union[Image.Image, np.ndarray, str]] = None,
         bbox: Optional[Union[List[float], np.ndarray]] = None,
         mode: Optional[str] = None,
-        return_dict: Optional[bool] = None,
     ):
         mode = mode if mode is not None else self.mode
-        return_dict = return_dict if return_dict is not None else self.return_dict
 
         # Load and convert inputs to numpy arrays
         if mask is not None:
@@ -65,7 +67,7 @@ class MaskDrawPreprocessor(BasePreprocessor):
             if mask is None:
                 raise ValueError("Mask is required for 'maskpoint' mode")
             scribble = mask.transpose(1, 0)
-            labeled_array, num_features = ndimage.label(scribble >= 255)
+            labeled_array, num_features = ndimage.label(scribble > 0)
             centers = ndimage.center_of_mass(
                 scribble, labeled_array, range(1, num_features + 1)
             )
@@ -87,10 +89,11 @@ class MaskDrawPreprocessor(BasePreprocessor):
             if mask is None:
                 raise ValueError("Mask is required for 'maskbbox' mode")
             scribble = mask.transpose(1, 0)
-            labeled_array, num_features = ndimage.label(scribble >= 255)
+            labeled_array, num_features = ndimage.label(scribble > 0)
             centers = ndimage.center_of_mass(
                 scribble, labeled_array, range(1, num_features + 1)
             )
+
             centers = np.array(centers)
             if len(centers) > 0:
                 # (x1, y1, x2, y2)
@@ -112,7 +115,7 @@ class MaskDrawPreprocessor(BasePreprocessor):
                 raise ValueError("Bbox is required for 'bbox' mode")
             if isinstance(bbox, list):
                 bbox = np.array(bbox)
-            x_min, y_min, x_max, y_max = bbox
+            x_min, y_min, x_max, y_max = self.preprocess_bbox(bbox, mask_shape)
             out_mask = np.zeros(mask_shape, dtype=np.uint8)
             out_mask[int(y_min) : int(y_max) + 1, int(x_min) : int(x_max) + 1] = 255
             if image is not None:
@@ -128,19 +131,14 @@ class MaskDrawPreprocessor(BasePreprocessor):
         else:
             raise NotImplementedError(f"Mode '{mode}' is not implemented")
 
-        if return_dict:
-            result = {"mask": out_mask}
-            if out_image is not None:
-                result["image"] = out_image
-            return result
-        else:
-            if out_image is not None:
-                return out_image, out_mask
-            else:
-                return out_mask
+        if isinstance(out_mask, np.ndarray):
+            out_mask = Image.fromarray(out_mask)
+        if isinstance(out_image, np.ndarray):
+            out_image = Image.fromarray(out_image)
+        return MaskOutput(mask=out_mask, image=out_image)
 
     def __str__(self):
-        return f"MaskDrawPreprocessor(mode={self.mode}, return_dict={self.return_dict})"
+        return f"MaskDrawPreprocessor(mode={self.mode})"
 
     def __repr__(self):
         return self.__str__()

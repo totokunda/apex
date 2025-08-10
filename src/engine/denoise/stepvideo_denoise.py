@@ -1,5 +1,5 @@
 import torch
-from src.utils.type_utils import EnumType
+from src.utils.type import EnumType
 
 
 class DenoiseType(EnumType):

@@ -110,11 +110,11 @@ class MagiBaseEngine:
     def _get_timesteps(self, *args, **kwargs):
         """Get timesteps"""
         return self.main_engine._get_timesteps(*args, **kwargs)
-    
+
     def _load_video(self, *args, **kwargs):
         """Load video"""
         return self.main_engine._load_video(*args, **kwargs)
-    
+
     def _load_image(self, *args, **kwargs):
         """Load image"""
         return self.main_engine._load_image(*args, **kwargs)
@@ -185,7 +185,9 @@ class MagiBaseEngine:
         )
         return special_token_keys
 
-    def get_negative_special_token_keys(self, is_negative_prompt: bool = False) -> List[str]:
+    def get_negative_special_token_keys(
+        self, is_negative_prompt: bool = False
+    ) -> List[str]:
         if is_negative_prompt:
             return ["CAPTION_TOKEN", "LOGO_TOKEN", "TRANS_TOKEN", "BORDERNESS_TOKEN"]
         return None
@@ -266,11 +268,11 @@ class MagiBaseEngine:
         emb_masks = emb_masks.unsqueeze(1).repeat(
             1, infer_chunk_num - clean_chunk_num, 1
         )
-        
+
         caption_embs, emb_masks = self.pad_special_token(
             special_token_keys, caption_embs, emb_masks
         )
-        
+
         # clean chunk with null_emb
         caption_embs = torch.cat(
             [null_emb.repeat(1, clean_chunk_num, 1, 1), caption_embs], dim=1
@@ -288,7 +290,7 @@ class MagiBaseEngine:
             ],
             dim=1,
         )
-        
+
         return caption_embs, emb_masks
 
     def process_null_embeddings(

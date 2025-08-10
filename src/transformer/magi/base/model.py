@@ -179,8 +179,8 @@ class MagiTransformer3DModel(
         return self.caption_embedding.null_caption_embedding.to(device).repeat(
             num_videos_per_prompt, 1
         )
-    
-    def set_distill(self, distill:bool):
+
+    def set_distill(self, distill: bool):
         self.distill = distill
 
     def generate_kv_range_for_uncondition(self, uncond_x) -> torch.Tensor:
@@ -293,7 +293,6 @@ class MagiTransformer3DModel(
         ), f"Invalid t shape, got {timestep.shape[1]} != {denoising_range_num}"  # nolint
         t_flat = timestep.flatten()  # (N * denoising_range_num,)
         timestep_embed = self.timestep_embedding(t_flat)  # (N, D)
-        
 
         if self.distill:
             distill_dt_scalar = 2
@@ -304,11 +303,11 @@ class MagiTransformer3DModel(
                 )
             else:
                 distill_dt_factor = num_steps / 4 * distill_dt_scalar
-            
+
             distill_dt = torch.ones_like(t_flat) * distill_dt_factor
             distill_dt_embed = self.timestep_embedding(distill_dt)
             timestep_embed = timestep_embed + distill_dt_embed
-            
+
         timestep_embed = timestep_embed.reshape(
             batch_size, denoising_range_num, -1
         )  # (N, range_num, D)
@@ -403,7 +402,7 @@ class MagiTransformer3DModel(
             max_seqlen_k=max_seqlen_k,
             denoising_range_num=denoising_range_num,
         )
-        
+
         kv_cache_params = dict(
             clip_token_nums=clip_token_nums,
             slice_point=slice_point,
@@ -503,7 +502,7 @@ class MagiTransformer3DModel(
             )
 
         kv_cache_params.update(kv_cache_params_meta)
-        
+
         hidden_states = rearrange(
             hidden_states, "N C T H W -> (T H W) N C"
         ).contiguous()  # (thw, N, D)
@@ -529,7 +528,7 @@ class MagiTransformer3DModel(
         norm_hidden_states = self.norm_out(hidden_states)
 
         with torch.autocast(device_type=hidden_states.device.type, dtype=torch.float32):
-            hidden_states = self.proj_out(norm_hidden_states)  
+            hidden_states = self.proj_out(norm_hidden_states)
         # N C T H W
         hidden_states = self.unpatchify(hidden_states, H, W)
 

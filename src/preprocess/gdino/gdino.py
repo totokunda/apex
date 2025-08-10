@@ -1,12 +1,23 @@
 import torch
 import torchvision
 import numpy as np
+from typing import Optional, List
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
     PreprocessorType,
+    BaseOutput,
 )
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
+from src.utils.preprocessors import MODEL_WEIGHTS, MODEL_CONFIGS
+
+
+class GDINOOutput(BaseOutput):
+    boxes: Optional[np.ndarray] = None
+    confidences: Optional[np.ndarray] = None
+    class_ids: Optional[np.ndarray] = None
+    class_names: Optional[List[str]] = None
+
 
 try:
     from groundingdino.util.inference import Model
@@ -17,40 +28,29 @@ except ImportError:
         "please pip install groundingdino package, or you can refer to models/VACE-Annotators/gdino/groundingdino-0.1.0-cp310-cp310-linux_x86_64.whl"
     )
 
-    # Define a dummy Model class to avoid further import errors if groundingdino is not installed.
-    class Model:
-        def __init__(self, *args, **kwargs):
-            raise ImportError(
-                "GroundingDINO model could not be initialized because the package is not installed."
-            )
-
-        def predict_with_classes(self, *args, **kwargs):
-            raise ImportError(
-                "GroundingDINO model could not be used because the package is not installed."
-            )
-
-        def predict_with_caption(self, *args, **kwargs):
-            raise ImportError(
-                "GroundingDINO model could not be used because the package is not installed."
-            )
-
 
 @preprocessor_registry("gdino")
 class GDINOPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        config_path,
-        model_path,
-        save_path=DEFAULT_PREPROCESSOR_SAVE_PATH,
-        device="cuda",
+        config_path: Optional[str] = None,
+        model_path: Optional[str] = None,
+        save_path: Optional[str] = DEFAULT_PREPROCESSOR_SAVE_PATH,
+        device: Optional[str | torch.device] = DEFAULT_DEVICE,
         box_threshold=0.25,
         text_threshold=0.2,
         iou_threshold=0.5,
         use_nms=True,
         **kwargs,
     ):
+        if model_path is None:
+            model_path = MODEL_WEIGHTS["gdino"]
+        if config_path is None:
+            config_path = MODEL_CONFIGS["gdino"]
+
         super().__init__(
             model_path=model_path,
+            config_path=config_path,
             save_path=save_path,
             preprocessor_type=PreprocessorType.IMAGE,
             **kwargs,
@@ -60,19 +60,21 @@ class GDINOPreprocessor(BasePreprocessor):
         self.text_threshold = text_threshold
         self.iou_threshold = iou_threshold
         self.use_nms = use_nms
-        self.device = (
-            torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            if device is None
-            else device
-        )
+        self.device = device
 
         self.model = Model(
-            model_config_path=config_path,
+            model_config_path=self.config_path,
             model_checkpoint_path=self.model_path,
             device=self.device,
         )
 
-    def __call__(self, image, classes=None, caption=None, **kwargs):
+    def __call__(
+        self,
+        image,
+        classes: Optional[List[str]] = None,
+        caption: Optional[str] = None,
+        **kwargs,
+    ):
         pil_image = self._load_image(image)
         image_bgr = np.array(pil_image)[:, :, ::-1]
 
@@ -123,13 +125,12 @@ class GDINOPreprocessor(BasePreprocessor):
         confidences = detections.confidence
         class_ids = detections.class_id
 
-        ret_data = {
-            "boxes": boxes.tolist() if boxes is not None else None,
-            "confidences": confidences.tolist() if confidences is not None else None,
-            "class_ids": class_ids.tolist() if class_ids is not None else None,
-            "class_names": class_names,
-        }
-        return ret_data
+        return GDINOOutput(
+            boxes=boxes,
+            confidences=confidences,
+            class_ids=class_ids,
+            class_names=class_names,
+        )
 
     def __str__(self):
         return f"GDINOPreprocessor(model_path={self.model_path})"

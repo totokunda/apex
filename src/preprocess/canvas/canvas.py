@@ -34,7 +34,7 @@ class RegionCanvasPreprocessor(BasePreprocessor):
 
     def __call__(self, image, mask):
         image = np.array(self._load_image(image))
-        mask = np.array(self._load_image(mask))
+        mask = np.array(self._load_image(mask, convert_method=lambda x: x.convert("L")))
         image_h, image_w = image.shape[:2]
 
         if self.use_aug:
@@ -44,23 +44,22 @@ class RegionCanvasPreprocessor(BasePreprocessor):
         image[np.array(mask) == 0] = self.canvas_value
         x, y, w, h = cv2.boundingRect(mask)
         region_crop = image[y : y + h, x : x + w]
+        scale_min, scale_max = self.scale_range
+        scale_factor = random.uniform(scale_min, scale_max)
+        new_w, new_h = int(image_w * scale_factor), int(image_h * scale_factor)
+        obj_scale_factor = min(new_w / w, new_h / h)
+        new_w = int(w * obj_scale_factor)
+        new_h = int(h * obj_scale_factor)
 
         if self.use_resize:
             # resize region
-            scale_min, scale_max = self.scale_range
-            scale_factor = random.uniform(scale_min, scale_max)
-            new_w, new_h = int(image_w * scale_factor), int(image_h * scale_factor)
-            obj_scale_factor = min(new_w / w, new_h / h)
-
-            new_w = int(w * obj_scale_factor)
-            new_h = int(h * obj_scale_factor)
             region_crop_resized = cv2.resize(
                 region_crop, (new_w, new_h), interpolation=cv2.INTER_AREA
             )
         else:
             region_crop_resized = region_crop
 
-        if self.use_canvas:
+        if self.use_canvas and self.use_resize:
             # plot region into canvas
             new_canvas = np.ones_like(image) * self.canvas_value
             max_x = max(0, image_w - new_w)
