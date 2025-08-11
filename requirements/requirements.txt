@@ -9,7 +9,7 @@ loguru==0.7.3
 numpy==1.26.4
 opencv-python==4.11.0.86
 opencv-python-headless==4.11.0.86
-peft==0.15.0
+peft==0.17.0
 pillow==11.2.1
 protobuf==6.31.1
 pydash==8.0.5
