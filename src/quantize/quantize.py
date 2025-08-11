@@ -1,0 +1,3 @@
+from diffusers.quantizers.gguf import GGUFQuantizer
+from diffusers.quantizers.quantization_config import GGUFQuantizationConfig
+
