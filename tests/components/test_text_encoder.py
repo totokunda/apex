@@ -1,7 +1,7 @@
 from src.text_encoder.text_encoder import TextEncoder
 
 model_path = 'umt5.Q4_K.gguf'
-config_path = '/Users/tosinkuye/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json'
+config_path = 'apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json'
 
 text_encoder = TextEncoder(config={
     "config_path": config_path,
