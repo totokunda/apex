@@ -27,7 +27,7 @@ from src.preprocess.base import (
 from src.mixins.cache_mixin import CacheMixin
 import warnings
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
-from src.quantize.ggml_layer import patch_module
+from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 
 
@@ -717,7 +717,7 @@ class Step1TextEncoderPreprocessor(BasePreprocessor, CacheMixin):
             cfg.is_gguf = True
             with init_empty_weights():
                 text_encoder = Step1Model(cfg)
-            patch_module(text_encoder)
+            patch_model(text_encoder)
             text_encoder.load_state_dict(model_weights, assign=True)
         else:
             text_encoder = Step1Model.from_pretrained(model_path)

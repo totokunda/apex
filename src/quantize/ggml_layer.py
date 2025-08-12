@@ -3,7 +3,7 @@ import gguf
 from src.quantize.dequant import is_quantized, dequantize_tensor
 import torch.nn.functional as F
 from src.quantize.ggml_tensor import GGMLTensor
-
+import torch.nn as nn
 
 def cast_to(tensor, dtype, device, copy=False, non_blocking=False):
     if tensor is None:
@@ -184,87 +184,28 @@ class GGMLGroupNorm(GGMLLayer, torch.nn.GroupNorm):
         return F.group_norm(input, self.num_groups, weight, bias, self.eps)
 
 
-def patch_module(module: torch.nn.Module):
-    # Iterate over a static list to avoid mutating while iterating
-    for name, child in list(module.named_children()):
-        # Replace leaf layers we care about, otherwise recurse
-        if isinstance(child, torch.nn.Linear):
-            new_mod = GGMLLinear(
-                child.in_features, child.out_features, bias=(child.bias is not None)
-            )
-            # Preserve parameters and training mode
-            new_mod.weight = child.weight
-            if child.bias is not None:
-                new_mod.bias = child.bias
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        elif isinstance(child, torch.nn.Conv2d):
-            new_mod = GGMLConv2d(
-                child.in_channels,
-                child.out_channels,
-                child.kernel_size,
-                child.stride,
-                child.padding,
-                child.dilation,
-                child.groups,
-                bias=(child.bias is not None),
-            )
-            new_mod.weight = child.weight
-            if child.bias is not None:
-                new_mod.bias = child.bias
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        elif isinstance(child, torch.nn.Conv1d):
-            new_mod = GGMLConv1d(
-                child.in_channels,
-                child.out_channels,
-                child.kernel_size,
-                child.stride,
-                child.padding,
-                child.dilation,
-                child.groups,
-                bias=(child.bias is not None),
-            )
-            new_mod.weight = child.weight
-            if child.bias is not None:
-                new_mod.bias = child.bias
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        elif isinstance(child, torch.nn.Embedding):
-            new_mod = GGMLEmbedding(
-                child.num_embeddings,
-                child.embedding_dim,
-                child.padding_idx,
-                child.max_norm,
-                child.norm_type,
-                child.scale_grad_by_freq,
-                child.sparse,
-            )
-            new_mod.weight = child.weight
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        elif isinstance(child, torch.nn.LayerNorm):
-            new_mod = GGMLLayerNorm(
-                child.normalized_shape, child.eps, child.elementwise_affine
-            )
-            if child.weight is not None:
-                new_mod.weight = child.weight
-            if child.bias is not None:
-                new_mod.bias = child.bias
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        elif isinstance(child, torch.nn.GroupNorm):
-            new_mod = GGMLGroupNorm(
-                child.num_groups,
-                child.num_channels,
-                child.eps,
-                child.affine,
-            )
-            if child.weight is not None:
-                new_mod.weight = child.weight
-            if child.bias is not None:
-                new_mod.bias = child.bias
-            new_mod.training = child.training
-            module.add_module(name, new_mod)
-        else:
-            patch_module(child)
+_TYPE_MAP = {
+    nn.Linear: GGMLLinear,
+    nn.Conv2d: GGMLConv2d,
+    nn.Conv1d: GGMLConv1d,
+    nn.Embedding: GGMLEmbedding,
+    nn.LayerNorm: GGMLLayerNorm,
+    nn.GroupNorm: GGMLGroupNorm,
+}
+
+def patch_model(model, name_filter=None):
+    """
+    In-place class swap. If name_filter is provided, only patch
+    qualified names for which name_filter(qname) is True.
+    """
+    stack = [("", model)]
+    while stack:
+        prefix, mod = stack.pop()
+        for name, child in mod._modules.items():
+            qname = f"{prefix}{name}"
+            t = type(child)
+            if t in _TYPE_MAP and (name_filter is None or name_filter(qname)):
+                # Critical: class swap (no new object allocation)
+                child.__class__ = _TYPE_MAP[t]
+            if child._modules:
+                stack.append((qname + ".", child))
