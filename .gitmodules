@@ -1,3 +1,6 @@
 [submodule "thirdparty/diffusers"]
 	path = thirdparty/diffusers
 	url = https://github.com/huggingface/diffusers.git
+[submodule "/Users/tosinkuye/apex/thirdparty/llama.cpp"]
+	path = /Users/tosinkuye/apex/thirdparty/llama.cpp
+	url = https://github.com/ggerganov/llama.cpp.git
