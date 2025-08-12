@@ -86,4 +86,3 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
             self.implementation_engine = LTXControlEngine(self)
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
-

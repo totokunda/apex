@@ -13,7 +13,9 @@ class BasePostprocessor(torch.nn.Module, LoaderMixin):
 
     @abstractmethod
     def __call__(self, *args, **kwargs):
-        raise NotImplementedError("BasePostprocessor::__call__ method must be implemented by child classes")
+        raise NotImplementedError(
+            "BasePostprocessor::__call__ method must be implemented by child classes"
+        )
 
 
 postprocessor_registry = ClassRegister()

@@ -12,7 +12,8 @@ from insightface.app import FaceAnalysis, DEFAULT_MP_NAME
 from typing import List
 import torch
 from PIL import Image
-from src.utils.defaults import  DEFAULT_PREPROCESSOR_SAVE_PATH
+from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+
 
 class FaceOutput(BaseOutput):
     bbox: List[float]
@@ -24,6 +25,7 @@ class FaceOutput(BaseOutput):
     gender: List[int]
     images: List[Image.Image] | None = None
     masks: List[Image.Image] | None = None
+
 
 @preprocessor_registry("face")
 class FacePreprocessor(BasePreprocessor):
@@ -48,7 +50,6 @@ class FacePreprocessor(BasePreprocessor):
         self.return_mask = return_mask
         self.return_dict = return_dict
         self.multi_face = multi_face
-        
 
     def __call__(
         self,
@@ -61,7 +62,7 @@ class FacePreprocessor(BasePreprocessor):
         return_mask = return_mask if return_mask is not None else self.return_mask
         # [dict_keys(['bbox', 'kps', 'det_score', 'landmark_3d_68', 'pose', 'landmark_2d_106', 'gender', 'age', 'embedding'])]
         faces = self.model.get(image)
-        
+
         crop_face_list, mask_list = [], []
         if len(faces) > 0:
             if not self.multi_face:
@@ -77,7 +78,11 @@ class FacePreprocessor(BasePreprocessor):
                 mask_list.append(mask)
             return FaceOutput(
                 images=[Image.fromarray(crop_face) for crop_face in crop_face_list],
-                masks=[Image.fromarray(mask) for mask in mask_list] if return_mask else None,
+                masks=(
+                    [Image.fromarray(mask) for mask in mask_list]
+                    if return_mask
+                    else None
+                ),
                 bbox=[face["bbox"].tolist() for face in faces],
                 kps=[face["kps"].tolist() for face in faces],
                 det_score=[face["det_score"] for face in faces],

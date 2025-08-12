@@ -9,7 +9,7 @@ MODEL_WEIGHTS = {
     "depth.anything_v2": "https://huggingface.co/ali-vilab/VACE-Annotators/resolve/main/depth/depth_anything_v2_vitl.pth",
     "flow": "https://huggingface.co/ali-vilab/VACE-Annotators/resolve/main/flow/raft-things.pth",
     "ram": "https://huggingface.co/ali-vilab/VACE-Annotators/resolve/main/ram/ram_plus_swin_large_14m.pth",
-    "scribble": "https://huggingface.co/ali-vilab/VACE-Annotators/resolve/main/scribble/anime_style/netG_A_latest.pth"
+    "scribble": "https://huggingface.co/ali-vilab/VACE-Annotators/resolve/main/scribble/anime_style/netG_A_latest.pth",
 }
 
 

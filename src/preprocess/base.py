@@ -165,7 +165,7 @@ class BasePreprocessor(LoaderMixin, ToMixin, nn.Module):
 
     def __call__(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement this method")
-    
+
     def preprocess_bbox(self, bbox: List[float], shape: Tuple[int, int, int]):
         """Preprocess a bounding box"""
         x1, y1, x2, y2 = bbox

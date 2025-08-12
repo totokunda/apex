@@ -42,7 +42,6 @@ class SkyReelsEngine(WanEngine):
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
-
     def __str__(self):
         return f"SkyReelsEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 

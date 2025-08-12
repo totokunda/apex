@@ -97,6 +97,7 @@ class EngineRegistry:
 
         try:
             from src.engine.cosmos2 import Cosmos2Engine
+
             self._engines[EngineType.COSMOS2.value] = Cosmos2Engine
         except ImportError as e:
             print(f"Warning: Could not import Cosmos engine: {e}")
@@ -191,20 +192,6 @@ class UniversalEngine:
         """Run the engine with given parameters"""
         return self.engine.run(input_nodes=input_nodes, **kwargs)
 
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.engine.load_component_by_type(component_type)
-
-    def set_attention_type(self, attention_type: str):
-        """Set attention type if supported"""
-        if hasattr(self.engine, "set_attention_type"):
-            return self.engine.set_attention_type(attention_type)
-
-    def to_device(self, device: torch.device):
-        """Move engine to device if supported"""
-        if hasattr(self.engine, "to"):
-            return self.engine.to(device)
-
     def __getattr__(self, name):
         """Delegate any missing attributes to the underlying engine"""
         return getattr(self.engine, name)
@@ -227,7 +214,15 @@ def get_engine_registry() -> EngineRegistry:
 
 def create_engine(
     engine_type: Literal[
-        "wan", "hunyuan", "ltx", "cogvideo", "magi", "stepvideo", "mochi", "skyreels", "cosmos2"
+        "wan",
+        "hunyuan",
+        "ltx",
+        "cogvideo",
+        "magi",
+        "stepvideo",
+        "mochi",
+        "skyreels",
+        "cosmos2",
     ],
     yaml_path: str,
     model_type: str | None = None,

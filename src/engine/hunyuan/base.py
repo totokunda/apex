@@ -102,9 +102,19 @@ class HunyuanBaseEngine:
         """Denoise function"""
         return self.main_engine.denoise(*args, **kwargs)
 
-    def _calculate_shift(self, *args, **kwargs):
+    def _calculate_shift(
+        self,
+        image_seq_len,
+        base_seq_len=256,
+        max_seq_len=4096,
+        base_shift=0.5,
+        max_shift=1.15,
+    ):
         """Calculate shift parameter for timestep scheduling"""
-        return self.main_engine._calculate_shift(*args, **kwargs)
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        mu = image_seq_len * m + b
+        return mu
 
     def _soft_append(
         self, history: torch.Tensor, current: torch.Tensor, overlap: int = 0

@@ -118,3 +118,97 @@ def supports_double(device):
         return True
     except RuntimeError:
         return False
+
+
+def convert_str_dtype(dtype: str | torch.dtype) -> torch.dtype:
+    """
+    Convert a string (with common aliases) to a ``torch.dtype``.
+
+    Accepted inputs:
+    - ``torch.dtype``: returned unchanged.
+    - ``str``: case-insensitive, optional ``"torch."`` prefix, and tolerant of
+      underscores, hyphens, and spaces. Supports many aliases:
+
+      Floating point
+      - "fp16", "f16", "half", "float16" → ``torch.float16``
+      - "bf16", "bfloat16" → ``torch.bfloat16``
+      - "fp32", "f32", "float32", "float", "single" → ``torch.float32``
+      - "fp64", "f64", "float64", "double" → ``torch.float64``
+
+      Integers
+      - "i8", "int8", "char" → ``torch.int8``
+      - "u8", "uint8", "byte" → ``torch.uint8``
+      - "i16", "int16", "short" → ``torch.int16``
+      - "i32", "int32", "int" → ``torch.int32``
+      - "i64", "int64", "long" → ``torch.int64``
+
+      Boolean
+      - "bool", "boolean" → ``torch.bool``
+
+    Raises ``TypeError`` if the input is not ``str`` or ``torch.dtype``.
+    Raises ``ValueError`` for unknown dtype strings with a helpful message.
+    """
+
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    if not isinstance(dtype, str):
+        raise TypeError(
+            f"Expected dtype as str or torch.dtype, got {type(dtype).__name__}"
+        )
+
+    normalized = dtype.strip().lower()
+    if normalized.startswith("torch."):
+        normalized = normalized[len("torch.") :]
+    # Remove common separators to be forgiving: "float_16", "float-16", etc.
+    normalized = normalized.replace(" ", "").replace("_", "").replace("-", "")
+
+    alias_map: dict[str, torch.dtype] = {
+        # Floating point
+        "fp16": torch.float16,
+        "f16": torch.float16,
+        "half": torch.float16,
+        "float16": torch.float16,
+        "bf16": torch.bfloat16,
+        "bfloat16": torch.bfloat16,
+        "fp32": torch.float32,
+        "f32": torch.float32,
+        "float32": torch.float32,
+        "float": torch.float32,
+        "single": torch.float32,
+        "fp64": torch.float64,
+        "f64": torch.float64,
+        "float64": torch.float64,
+        "double": torch.float64,
+        # Integers (signed)
+        "i8": torch.int8,
+        "int8": torch.int8,
+        "char": torch.int8,
+        "i16": torch.int16,
+        "int16": torch.int16,
+        "short": torch.int16,
+        "i32": torch.int32,
+        "int32": torch.int32,
+        "int": torch.int32,
+        "i64": torch.int64,
+        "int64": torch.int64,
+        "long": torch.int64,
+        # Unsigned and boolean
+        "u8": torch.uint8,
+        "uint8": torch.uint8,
+        "byte": torch.uint8,
+        "bool": torch.bool,
+        "boolean": torch.bool,
+    }
+
+    if normalized in alias_map:
+        return alias_map[normalized]
+
+    # As a last resort, try torch attribute names directly (e.g., "float16").
+    maybe = getattr(torch, normalized, None)
+    if isinstance(maybe, torch.dtype):
+        return maybe
+
+    known_keys = ", ".join(sorted(alias_map.keys()))
+    raise ValueError(
+        f"Unknown dtype string '{dtype}'. Try one of: {known_keys}, or a valid torch dtype name like 'float16'."
+    )

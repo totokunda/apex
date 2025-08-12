@@ -79,9 +79,8 @@ class SAMPreprocessor(BasePreprocessor):
 
         image = self._load_image(image)
         image_array = np.array(image)
-        
+
         self.predictor.set_image(image_array)
-        
 
         if mask is not None:
             mask = self._load_image(mask)
@@ -89,7 +88,7 @@ class SAMPreprocessor(BasePreprocessor):
             if task_type == "mask":
                 mask = mask.resize((256, 256))
             mask = np.array(mask)
-        
+
         if task_type == "mask_point":
             if mask is None:
                 raise ValueError("Mask is required for 'mask_point' task type")
@@ -104,7 +103,7 @@ class SAMPreprocessor(BasePreprocessor):
             point_coords = np.array(centers)
             point_labels = np.array([1] * len(centers))
             sample = {"point_coords": point_coords, "point_labels": point_labels}
-        
+
         elif task_type == "mask_box":
             if mask is None:
                 raise ValueError("Mask is required for 'mask_box' task type")
@@ -124,7 +123,7 @@ class SAMPreprocessor(BasePreprocessor):
             y_max = centers[:, 1].max()
             bbox = np.array([x_min, y_min, x_max, y_max])
             sample = {"box": bbox}
-        
+
         elif task_type == "input_box":
             if input_box is None:
                 raise ValueError("input_box is required for 'input_box' task type")
@@ -132,14 +131,14 @@ class SAMPreprocessor(BasePreprocessor):
                 input_box = self.preprocess_bbox(input_box, np.array(image).shape)
                 input_box = np.array(input_box)
             sample = {"box": input_box}
-        
+
         elif task_type == "mask":
             if mask is None:
                 raise ValueError("Mask is required for 'mask' task type")
             sample = {"mask_input": mask[None, :, :]}
         else:
             raise NotImplementedError(f"Task type '{task_type}' is not implemented")
-      
+
         masks, scores, logits = self.predictor.predict(multimask_output=False, **sample)
         sorted_ind = np.argsort(scores)[::-1]
         masks = masks[sorted_ind]
