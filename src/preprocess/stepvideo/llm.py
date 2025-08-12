@@ -24,11 +24,12 @@ from src.preprocess.base import (
     preprocessor_registry,
     PreprocessorType,
 )
-from src.attention import attention_register
+from src.mixins.cache_mixin import CacheMixin
 import warnings
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 from src.quantize.ggml_layer import patch_module
 from src.quantize.load import load_gguf
+
 
 def safediv(n, d):
     q, r = divmod(n, d)
@@ -382,16 +383,43 @@ class MultiQueryAttention(nn.Module):
         self.n_local_heads = cfg.num_attention_heads
         self.n_local_groups = self.n_groups
 
-        self.wqkv = nn.Linear(
-            cfg.hidden_size,
-            cfg.hidden_size + self.head_dim * 2 * self.n_groups,
-            bias=False,
-        )
-        self.wo = nn.Linear(
-            cfg.hidden_size,
-            cfg.hidden_size,
-            bias=False,
-        )
+        # GGUF unfused path flag
+        self.is_gguf = getattr(cfg, "is_gguf", False)
+
+        if self.is_gguf:
+            # Unfused projections to match loader mapping
+            self.wq = nn.Linear(
+                cfg.hidden_size,
+                cfg.hidden_size,
+                bias=False,
+            )
+            self.wk = nn.Linear(
+                cfg.hidden_size,
+                self.head_dim * self.n_local_groups,
+                bias=False,
+            )
+            self.wv = nn.Linear(
+                cfg.hidden_size,
+                self.head_dim * self.n_local_groups,
+                bias=False,
+            )
+            self.wo = nn.Linear(
+                cfg.hidden_size,
+                cfg.hidden_size,
+                bias=False,
+            )
+        else:
+            # Fused wqkv path
+            self.wqkv = nn.Linear(
+                cfg.hidden_size,
+                cfg.hidden_size + self.head_dim * 2 * self.n_groups,
+                bias=False,
+            )
+            self.wo = nn.Linear(
+                cfg.hidden_size,
+                cfg.hidden_size,
+                bias=False,
+            )
 
         assert self.use_flash_attention, "non-Flash attention not supported yet."
         self.core_attention = FlashSelfAttention(
@@ -408,18 +436,31 @@ class MultiQueryAttention(nn.Module):
         max_seq_len: Optional[torch.Tensor],
     ):
         seqlen, bsz, dim = x.shape
-        xqkv = self.wqkv(x)
 
-        xq, xkv = torch.split(
-            xqkv,
-            (dim // self.tp_size, self.head_dim * 2 * self.n_groups // self.tp_size),
-            dim=-1,
-        )
+        if self.is_gguf:
+            xq = self.wq(x)  # [s, b, h*d]
+            xk = self.wk(x)  # [s, b, g*d]
+            xv = self.wv(x)  # [s, b, g*d]
 
-        # gather on 1st dimension
-        xq = xq.view(seqlen, bsz, self.n_local_heads, self.head_dim)
-        xkv = xkv.view(seqlen, bsz, self.n_local_groups, 2 * self.head_dim)
-        xk, xv = xkv.chunk(2, -1)
+            xq = xq.view(seqlen, bsz, self.n_local_heads, self.head_dim)
+            xk = xk.view(seqlen, bsz, self.n_local_groups, self.head_dim)
+            xv = xv.view(seqlen, bsz, self.n_local_groups, self.head_dim)
+        else:
+            xqkv = self.wqkv(x)
+
+            xq, xkv = torch.split(
+                xqkv,
+                (
+                    dim // self.tp_size,
+                    self.head_dim * 2 * self.n_groups // self.tp_size,
+                ),
+                dim=-1,
+            )
+
+            # gather on 1st dimension
+            xq = xq.view(seqlen, bsz, self.n_local_heads, self.head_dim)
+            xkv = xkv.view(seqlen, bsz, self.n_local_groups, 2 * self.head_dim)
+            xk, xv = xkv.chunk(2, -1)
 
         # rotary embedding + flash attn
         xq = rearrange(xq, "s b h d -> b s h d")
@@ -486,21 +527,49 @@ class FeedForward(nn.Module):
 
         self.swiglu = swiglu
 
-        self.w1 = nn.Linear(
-            dim,
-            2 * hidden_dim,
-            bias=False,
-        )
-        self.w2 = nn.Linear(
-            hidden_dim,
-            dim,
-            bias=False,
-        )
+        # GGUF unfused path flag
+        self.is_gguf = getattr(cfg, "is_gguf", False)
+
+        if self.is_gguf:
+            # Unfused SWIGLU: gate and up are separate
+            self.ffn_gate = nn.Linear(
+                dim,
+                hidden_dim,
+                bias=False,
+            )
+            self.ffn_up = nn.Linear(
+                dim,
+                hidden_dim,
+                bias=False,
+            )
+            self.ffn_down = nn.Linear(
+                hidden_dim,
+                dim,
+                bias=False,
+            )
+        else:
+            self.w1 = nn.Linear(
+                dim,
+                2 * hidden_dim,
+                bias=False,
+            )
+            self.w2 = nn.Linear(
+                hidden_dim,
+                dim,
+                bias=False,
+            )
 
     def forward(self, x):
-        x = self.swiglu(self.w1(x))
-        output = self.w2(x)
-        return output
+        if self.is_gguf:
+            gate = self.ffn_gate(x)
+            up = self.ffn_up(x)
+            x = F.silu(gate) * up
+            output = self.ffn_down(x)
+            return output
+        else:
+            x = self.swiglu(self.w1(x))
+            output = self.w2(x)
+            return output
 
 
 class TransformerBlock(nn.Module):
@@ -598,7 +667,10 @@ class Step1Model(PreTrainedModel):
         config,
     ):
         super().__init__(config)
-        with init_empty_weights():
+        if getattr(config, "is_gguf", False):
+            self.tok_embeddings = LLaMaEmbedding(config)
+            self.transformer = Transformer(config)
+        else:
             self.tok_embeddings = LLaMaEmbedding(config)
             self.transformer = Transformer(config)
 
@@ -618,7 +690,7 @@ class Step1Model(PreTrainedModel):
 
 
 @preprocessor_registry("stepvideo.llm")
-class Step1TextEncoderPreprocessor(BasePreprocessor):
+class Step1TextEncoderPreprocessor(BasePreprocessor, CacheMixin):
     def __init__(
         self,
         model_path,
@@ -626,25 +698,27 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         save_path=DEFAULT_PREPROCESSOR_SAVE_PATH,
         dtype=torch.bfloat16,
         max_length=320,
-        gguf_kwargs={},
         gguf_path=None,
         **kwargs,
     ):
         super(Step1TextEncoderPreprocessor, self).__init__(
             model_path, save_path, preprocessor_type=PreprocessorType.TEXT
         )
-        
+
         self.max_length = max_length
         self.save_path = save_path
         self.dtype = dtype
         tokenizer_path = self._download(tokenizer_path, save_path)
         self.text_tokenizer = Wrapped_StepChatTokenizer(tokenizer_path)
         if gguf_path is not None:
-            model_weights = load_gguf(gguf_path, **gguf_kwargs)
+            model_weights, _ = load_gguf(gguf_path, type="text_encoder", key_map="step")
+            # Ensure model is constructed with GGUF unfused path
+            cfg = PretrainedConfig.from_pretrained(model_path)
+            cfg.is_gguf = True
             with init_empty_weights():
-                text_encoder = Step1Model.from_pretrained(model_path)
+                text_encoder = Step1Model(cfg)
             patch_module(text_encoder)
-            text_encoder.load_state_dict(model_weights)
+            text_encoder.load_state_dict(model_weights, assign=True)
         else:
             text_encoder = Step1Model.from_pretrained(model_path)
         self.text_encoder = text_encoder.eval().to(dtype)
@@ -655,6 +729,16 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         self.device = next(self.text_encoder.parameters()).device
         if type(prompts) is str:
             prompts = [prompts]
+
+        prompt_hash = self.hash_prompt(prompts)
+
+        if self.enable_cache:
+            cached = self.load_cached_prompt(prompt_hash)
+            if cached is not None:
+                cached_embeds, cached_mask = cached
+                cached_embeds = cached_embeds.to(device=self.device)
+                cached_mask = cached_mask.to(device=self.device)
+                return cached_embeds, cached_mask
 
         txt_tokens = self.text_tokenizer(
             prompts,
@@ -672,4 +756,7 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         )
 
         y_mask = txt_tokens.attention_mask
-        return y.transpose(0, 1), y_mask
+        y_out = y.transpose(0, 1)
+        if self.enable_cache:
+            self.cache_prompt(prompt_hash, y_out, y_mask)
+        return y_out, y_mask

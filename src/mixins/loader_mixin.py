@@ -6,7 +6,6 @@ from typing import Dict, Any, Union
 import os
 import json
 import yaml
-from src.utils.cache import empty_cache
 from diffusers import ModelMixin
 from accelerate import init_empty_weights
 import torch
@@ -121,7 +120,7 @@ class LoaderMixin(DownloadMixin):
         if model_path.endswith(".gguf"):
             self.logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
-            state_dict, qtype_dict = load_gguf(
+            state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
             patch_module(model)

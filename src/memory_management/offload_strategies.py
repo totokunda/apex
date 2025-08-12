@@ -1,16 +1,13 @@
 """Offloading strategies for moving data between GPU, CPU, and disk."""
 
-import os
 import pickle
 import tempfile
 import threading
 import time
-import weakref
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict
 import torch
-import torch.nn as nn
 from .config import MemoryConfig
 
 
