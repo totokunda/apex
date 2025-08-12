@@ -254,7 +254,7 @@ class SAM2VideoPreprocessor(BasePreprocessor):
     ):
 
         task_type = task_type if task_type is not None else self.task_type
-        
+
         video_path = None
         if isinstance(video, str):
             video_path = video
@@ -310,7 +310,9 @@ class SAM2VideoPreprocessor(BasePreprocessor):
             if input_box is None:
                 raise ValueError("input_box is required for 'input_box' task type")
             if isinstance(input_box, list):
-                input_box = self.preprocess_bbox(input_box, np.array(self._load_video(video_path)[0]).shape)
+                input_box = self.preprocess_bbox(
+                    input_box, np.array(self._load_video(video_path)[0]).shape
+                )
                 input_box = np.array(input_box)
             sample = {"box": input_box}
         elif task_type == "mask":
@@ -323,7 +325,7 @@ class SAM2VideoPreprocessor(BasePreprocessor):
         ann_frame_idx = 0
         object_id = 0
         tmp_video = None
-        
+
         with torch.inference_mode(), torch.autocast(
             self.device.type if isinstance(self.device, torch.device) else self.device,
             dtype=torch.bfloat16 if self.device.type == "cuda" else torch.float32,
@@ -381,8 +383,12 @@ class SAM2SalientVideoPreprocessor(BasePreprocessor):
     def __init__(self, sam2_config: Dict = None, salient_config: Dict = None, **kwargs):
         super().__init__(**kwargs)
 
-        self.sam2_preprocessor = SAM2VideoPreprocessor(** (sam2_config if sam2_config is not None else {}))
-        self.salient_preprocessor = SalientPreprocessor(** (salient_config if salient_config is not None else {}))
+        self.sam2_preprocessor = SAM2VideoPreprocessor(
+            **(sam2_config if sam2_config is not None else {})
+        )
+        self.salient_preprocessor = SalientPreprocessor(
+            **(salient_config if salient_config is not None else {})
+        )
 
     def __call__(self, video: str | Image.Image | np.ndarray, **kwargs):
         loaded_video = self._load_video(video)
@@ -400,8 +406,12 @@ class SAM2GDINOVideoPreprocessor(BasePreprocessor):
     def __init__(self, sam2_config: Dict = None, gdino_config: Dict = None, **kwargs):
         super().__init__(**kwargs)
 
-        self.sam2_preprocessor = SAM2VideoPreprocessor(** (sam2_config if sam2_config is not None else {}))
-        self.gdino_preprocessor = GDINOPreprocessor(** (gdino_config if gdino_config is not None else {}))
+        self.sam2_preprocessor = SAM2VideoPreprocessor(
+            **(sam2_config if sam2_config is not None else {})
+        )
+        self.gdino_preprocessor = GDINOPreprocessor(
+            **(gdino_config if gdino_config is not None else {})
+        )
 
     def __call__(
         self,

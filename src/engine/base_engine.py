@@ -29,20 +29,25 @@ from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
     DEFAULT_SAVE_PATH,
+    DEFAULT_COMPONENTS_PATH,
+    DEFAULT_PREPROCESSOR_SAVE_PATH,
+    DEFAULT_POSTPROCESSOR_SAVE_PATH,
 )
-import tempfile
 
+import tempfile
 from src.mixins import LoaderMixin, ToMixin, OffloadMixin
 from glob import glob
 from safetensors import safe_open
+
 from src.converters import (
     get_transformer_keys,
     convert_transformer,
     get_vae_keys,
     convert_vae,
 )
+
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 from torchvision import transforms as TF
 import inspect
 from src.preprocess import preprocessor_registry
@@ -407,7 +412,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
         if component.get("config_path"):
-            config_path = self._download(component.get("config_path"), self.config_save_path)
+            config_path = self._download(
+                component.get("config_path"), self.config_save_path
+            )
         else:
             config_path = None
         component["config_path"] = config_path
@@ -734,9 +741,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         else None
                     ),
                 )
-                setattr(
-                    self, component.get("name", component.get("type")), component_module
-                )
+                # Set for both type and name
+                setattr(self, component.get("type"), component_module)
+                if component.get("name"):
+                    setattr(self, component.get("name"), component_module)
 
     def load_component_by_type(self, component_type: str):
         for component in self.config.get("components", []):
@@ -862,11 +870,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if save_path is None:
             save_path = DEFAULT_SAVE_PATH
         if components_path is None:
-            components_path = os.path.join(save_path, "components")
+            components_path = DEFAULT_COMPONENTS_PATH       
         if preprocessors_path is None:
-            preprocessors_path = os.path.join(save_path, "preprocessors")
+            preprocessors_path = DEFAULT_PREPROCESSOR_SAVE_PATH
         if postprocessors_path is None:
-            postprocessors_path = os.path.join(save_path, "postprocessors")
+            postprocessors_path = DEFAULT_POSTPROCESSOR_SAVE_PATH
 
         os.makedirs(save_path, exist_ok=True)
         for component in self.config.get("components", []):
@@ -1091,20 +1099,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
         duration = max(duration, 1)
         return duration
-
-    def _calculate_shift(
-        self,
-        image_seq_len,
-        base_seq_len=256,
-        max_seq_len=4096,
-        base_shift=0.5,
-        max_shift=1.15,
-    ):
-        """Calculate shift parameter for timestep scheduling"""
-        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
-        b = base_shift - m * base_seq_len
-        mu = image_seq_len * m + b
-        return mu
 
     def __str__(self):
         return f"BaseEngine(config={self.config}, device={self.device})"

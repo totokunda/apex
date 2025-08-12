@@ -23,6 +23,7 @@ from src.utils.defaults import DEFAULT_POSTPROCESSOR_SAVE_PATH
 
 from retinaface.utils.nms.py_cpu_nms import py_cpu_nms
 
+
 def read_keyword_list_from_dir(folder_path: str) -> list[str]:
     """Read keyword list from all files in a folder."""
     output_list = []
@@ -68,7 +69,9 @@ def pixelate_face(face_img: np.ndarray, blocks: int = 5) -> np.ndarray:
 
 
 # Adapted from https://github.com/biubug6/Pytorch_Retinaface/blob/master/detect.py
-def filter_detected_boxes(boxes, scores, confidence_threshold, nms_threshold, top_k, keep_top_k):
+def filter_detected_boxes(
+    boxes, scores, confidence_threshold, nms_threshold, top_k, keep_top_k
+):
     """Filter boxes based on confidence score and remove overlapping boxes using NMS."""
     # Keep detections with confidence above threshold
     inds = np.where(scores > confidence_threshold)[0]
@@ -370,14 +373,19 @@ NMS_THRESHOLD = 0.4
 CENSOR = "*"
 COSMOS_GUARDRAIL_CHECKPOINT = "nvidia/Cosmos-1.0-Guardrail"
 
+
 class ContentSafetyGuardrail:
     def is_safe(self, **kwargs) -> Tuple[bool, str]:
-        raise NotImplementedError("ContentSafetyGuardrail::is_safe method must be implemented by child classes")
+        raise NotImplementedError(
+            "ContentSafetyGuardrail::is_safe method must be implemented by child classes"
+        )
 
 
 class PostprocessingGuardrail:
     def postprocess(self, frames: np.ndarray) -> np.ndarray:
-        raise NotImplementedError("PostprocessingGuardrail::postprocess method must be implemented by child classes")
+        raise NotImplementedError(
+            "PostprocessingGuardrail::postprocess method must be implemented by child classes"
+        )
 
 
 class GuardrailRunner(torch.nn.Module):
@@ -391,7 +399,9 @@ class GuardrailRunner(torch.nn.Module):
         super().__init__()
         self.safety_models = safety_models
         self.generic_block_msg = generic_block_msg
-        self.generic_safe_msg = generic_safe_msg if generic_safe_msg else "Prompt is safe"
+        self.generic_safe_msg = (
+            generic_safe_msg if generic_safe_msg else "Prompt is safe"
+        )
         self.postprocessors = postprocessors
 
     def run_safety_check(self, input: Any) -> Tuple[bool, str]:
@@ -405,7 +415,11 @@ class GuardrailRunner(torch.nn.Module):
             logger.debug(f"Running guardrail: {guardrail_name}")
             safe, message = guardrail.is_safe(input)
             if not safe:
-                reasoning = self.generic_block_msg if self.generic_block_msg else f"{guardrail_name}: {message}"
+                reasoning = (
+                    self.generic_block_msg
+                    if self.generic_block_msg
+                    else f"{guardrail_name}: {message}"
+                )
                 return False, reasoning
 
         return True, self.generic_safe_msg
@@ -455,7 +469,9 @@ class VideoSafetyModel(torch.nn.Module):
         super().__init__()
         self.config = config
         self.num_classes = config.num_classes
-        self.network = SafetyClassifier(input_size=config.input_size, num_classes=self.num_classes)
+        self.network = SafetyClassifier(
+            input_size=config.input_size, num_classes=self.num_classes
+        )
 
     @torch.inference_mode()
     def forward(self, data_batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -473,11 +489,17 @@ class SigLIPEncoder(torch.nn.Module):
         super().__init__()
 
         checkpoint_dir = snapshot_download(checkpoint_id, local_dir=save_path)
-        checkpoint_dir = (pathlib.Path(checkpoint_dir) / "video_content_safety_filter").as_posix()
+        checkpoint_dir = (
+            pathlib.Path(checkpoint_dir) / "video_content_safety_filter"
+        ).as_posix()
 
         self.checkpoint_dir = checkpoint_dir
-        self.model = SiglipModel.from_pretrained(model_name, cache_dir=self.checkpoint_dir)
-        self.processor = SiglipProcessor.from_pretrained(model_name, cache_dir=self.checkpoint_dir)
+        self.model = SiglipModel.from_pretrained(
+            model_name, cache_dir=self.checkpoint_dir
+        )
+        self.processor = SiglipProcessor.from_pretrained(
+            model_name, cache_dir=self.checkpoint_dir
+        )
 
     @torch.inference_mode()
     def encode_image(self, input_img: PIL.Image.Image) -> torch.Tensor:
@@ -485,7 +507,9 @@ class SigLIPEncoder(torch.nn.Module):
         with torch.no_grad():
             device = next(self.model.parameters()).device
             dtype = next(self.model.parameters()).dtype
-            inputs = self.processor(images=input_img, return_tensors="pt").to(device, dtype=dtype)
+            inputs = self.processor(images=input_img, return_tensors="pt").to(
+                device, dtype=dtype
+            )
             image_features = self.model.get_image_features(**inputs)
             image_features /= image_features.norm(dim=-1, keepdim=True)
         return image_features
@@ -500,7 +524,9 @@ class VideoContentSafetyFilter(torch.nn.Module, ContentSafetyGuardrail):
         super().__init__()
 
         checkpoint_dir = snapshot_download(checkpoint_id, local_dir=save_path)
-        checkpoint_dir = (pathlib.Path(checkpoint_dir) / "video_content_safety_filter").as_posix()
+        checkpoint_dir = (
+            pathlib.Path(checkpoint_dir) / "video_content_safety_filter"
+        ).as_posix()
 
         self.encoder = SigLIPEncoder(checkpoint_id=checkpoint_id)
 
@@ -558,7 +584,9 @@ class VideoContentSafetyFilter(torch.nn.Module, ContentSafetyGuardrail):
     def is_safe(self, input: Union[str, Iterable]) -> Tuple[bool, str]:
         if isinstance(input, Iterable):
             is_safe = self.is_safe_frames(input)
-            return is_safe, "safe frames detected" if is_safe else "unsafe frames detected"
+            return is_safe, (
+                "safe frames detected" if is_safe else "unsafe frames detected"
+            )
         else:
             raise ValueError(f"Input type {type(input)} not supported.")
 
@@ -574,7 +602,9 @@ class RetinaFaceFilter(torch.nn.Module, PostprocessingGuardrail):
         super().__init__()
 
         checkpoint_dir = snapshot_download(checkpoint_id, local_dir=save_path)
-        checkpoint = pathlib.Path(checkpoint_dir) / "face_blur_filter/Resnet50_Final.pth"
+        checkpoint = (
+            pathlib.Path(checkpoint_dir) / "face_blur_filter/Resnet50_Final.pth"
+        )
 
         self.cfg = cfg_re50
         self.batch_size = batch_size
@@ -602,11 +632,19 @@ class RetinaFaceFilter(torch.nn.Module, PostprocessingGuardrail):
         dtype = next(self.net.parameters()).dtype
 
         with torch.no_grad():
-            frames_tensor = torch.from_numpy(frames).to(device=device, dtype=dtype)  # Shape: [T, H, W, C]
+            frames_tensor = torch.from_numpy(frames).to(
+                device=device, dtype=dtype
+            )  # Shape: [T, H, W, C]
             frames_tensor = frames_tensor.permute(0, 3, 1, 2)  # Shape: [T, C, H, W]
-            frames_tensor = frames_tensor[:, [2, 1, 0], :, :]  # RGB to BGR to match RetinaFace model input
-            means = torch.tensor([104.0, 117.0, 123.0], device=device, dtype=dtype).view(1, 3, 1, 1)
-            frames_tensor = frames_tensor - means  # Subtract mean BGR values for each channel
+            frames_tensor = frames_tensor[
+                :, [2, 1, 0], :, :
+            ]  # RGB to BGR to match RetinaFace model input
+            means = torch.tensor(
+                [104.0, 117.0, 123.0], device=device, dtype=dtype
+            ).view(1, 3, 1, 1)
+            frames_tensor = (
+                frames_tensor - means
+            )  # Subtract mean BGR values for each channel
             return frames_tensor
 
     def blur_detected_faces(
@@ -656,9 +694,13 @@ class RetinaFaceFilter(torch.nn.Module, PostprocessingGuardrail):
                 if x2 - x1 < min_size[0] or y2 - y1 < min_size[1]:
                     continue
                 max_h, max_w = frame.shape[:2]
-                face_roi = frame[max(y1, 0) : min(y2, max_h), max(x1, 0) : min(x2, max_w)]
+                face_roi = frame[
+                    max(y1, 0) : min(y2, max_h), max(x1, 0) : min(x2, max_w)
+                ]
                 blurred_face = pixelate_face(face_roi)
-                frame[max(y1, 0) : min(y2, max_h), max(x1, 0) : min(x2, max_w)] = blurred_face
+                frame[max(y1, 0) : min(y2, max_h), max(x1, 0) : min(x2, max_w)] = (
+                    blurred_face
+                )
             blurred_frames.append(frame)
 
         return blurred_frames
@@ -704,15 +746,24 @@ class RetinaFaceFilter(torch.nn.Module, PostprocessingGuardrail):
             start_idx = i * self.batch_size
             end_idx = min(start_idx + self.batch_size, len(frames))
             processed_batches.append(
-                self.blur_detected_faces(frames[start_idx:end_idx], batch_loc, batch_conf, prior_data, scale)
+                self.blur_detected_faces(
+                    frames[start_idx:end_idx], batch_loc, batch_conf, prior_data, scale
+                )
             )
 
         processed_frames = [frame for batch in processed_batches for frame in batch]
         return np.array(processed_frames)
-    
+
+
 @postprocessor_registry("cosmos.guardrail")
 class CosmosGuardrailPostprocessor(BasePostprocessor):
-    def __init__(self, engine, model_path: str = "nvidia/Cosmos-1.0-Guardrail", save_path: str = DEFAULT_POSTPROCESSOR_SAVE_PATH, **kwargs):
+    def __init__(
+        self,
+        engine,
+        model_path: str = "nvidia/Cosmos-1.0-Guardrail",
+        save_path: str = DEFAULT_POSTPROCESSOR_SAVE_PATH,
+        **kwargs,
+    ):
         super().__init__(engine, **kwargs)
         self.model_path = model_path
         self.save_path = save_path

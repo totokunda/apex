@@ -13,6 +13,7 @@ from src.mixins.loader_mixin import LoaderMixin
 from .i2v import Cosmos2I2VEngine
 from .v2v import Cosmos2V2VEngine
 
+
 class ModelType(EnumType):
     I2V = "i2v"  # image to video
     V2V = "v2v"  # video to video
@@ -63,5 +64,3 @@ class Cosmos2Engine(BaseEngine, LoaderMixin, OffloadMixin, Cosmos2Denoise):
             self.implementation_engine = Cosmos2V2VEngine(self)
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
-
-    

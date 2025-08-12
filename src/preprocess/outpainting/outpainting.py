@@ -19,12 +19,13 @@ class OutpaintingOutput(BaseOutput):
     image: Image.Image
     mask: Image.Image | None = None
     src_image: Image.Image | None = None
-    
+
+
 class OutpaintingVideoOutput(BaseOutput):
     frames: List[Image.Image]
     masks: List[Image.Image] | None = None
     src_frames: List[Image.Image] | None = None
-    
+
 
 def get_mask_box(mask: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     """Get bounding box of non-zero regions in mask."""
@@ -265,7 +266,9 @@ class OutpaintingInnerPreprocessor(BasePreprocessor):
 
         if return_mask:
             if return_source:
-                ret_data = OutpaintingOutput(src_image=init_image, image=img, mask=mask_img)
+                ret_data = OutpaintingOutput(
+                    src_image=init_image, image=img, mask=mask_img
+                )
             else:
                 ret_data = OutpaintingOutput(image=img, mask=mask_img)
         else:
@@ -319,8 +322,12 @@ class OutpaintingVideoPreprocessor(OutpaintingPreprocessor, BasePreprocessor):
                 ret_frames["masks"].append(anno_frame.mask)
             if anno_frame.src_image is not None:
                 ret_frames["src_images"].append(anno_frame.src_image)
-        
-        return OutpaintingVideoOutput(frames=ret_frames["frames"], masks=ret_frames["masks"] if return_mask else None, src_frames=ret_frames["src_images"] if return_source else None)
+
+        return OutpaintingVideoOutput(
+            frames=ret_frames["frames"],
+            masks=ret_frames["masks"] if return_mask else None,
+            src_frames=ret_frames["src_images"] if return_source else None,
+        )
 
     def __str__(self):
         return f"OutpaintingVideoPreprocessor(return_mask={self.return_mask}, return_source={self.return_source})"
@@ -364,7 +371,10 @@ class OutpaintingInnerVideoPreprocessor(OutpaintingInnerPreprocessor, BasePrepro
                 ret_frames["frames"].append(anno_frame.image)
             if anno_frame.mask is not None:
                 ret_frames["masks"].append(anno_frame.mask)
-        return OutpaintingVideoOutput(frames=ret_frames["frames"], masks=ret_frames["masks"] if return_mask else None)
+        return OutpaintingVideoOutput(
+            frames=ret_frames["frames"],
+            masks=ret_frames["masks"] if return_mask else None,
+        )
 
     def __str__(self):
         return f"OutpaintingInnerVideoPreprocessor(return_mask={self.return_mask}, return_source={self.return_source})"

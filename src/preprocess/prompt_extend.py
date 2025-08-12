@@ -4,7 +4,11 @@ from typing import Any, Dict, Optional, List
 
 import torch
 from transformers import AutoTokenizer
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_CONFIG_SAVE_PATH, DEFAULT_DEVICE
+from src.utils.defaults import (
+    DEFAULT_PREPROCESSOR_SAVE_PATH,
+    DEFAULT_CONFIG_SAVE_PATH,
+    DEFAULT_DEVICE,
+)
 from src.preprocess.base import (
     BasePreprocessor,
     preprocessor_registry,
@@ -30,6 +34,7 @@ If the user mentions multiple beats, merge them into one continuous shot unless 
 ONLY output the extended prompt—no preface, no headings, no quotes, no JSON. Keep it concise by default (≈60–120 words) unless the user asks for longer.
 
 Do not include commentary or instructions—return ONLY the final extended prompt."""
+
 
 @preprocessor_registry("prompt_extend")
 class PromptExtendPreprocessor(BasePreprocessor):
@@ -92,19 +97,25 @@ class PromptExtendPreprocessor(BasePreprocessor):
         self.original_model_path = model_path
         try:
             if tokenizer_name is not None:
-                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, **tokenizer_kwargs)
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    tokenizer_name, **tokenizer_kwargs
+                )
                 tokenizer_loaded = True
         except Exception:
             pass
         if not tokenizer_loaded:
             try:
-                self.tokenizer = AutoTokenizer.from_pretrained(model_path, **tokenizer_kwargs)
+                self.tokenizer = AutoTokenizer.from_pretrained(
+                    model_path, **tokenizer_kwargs
+                )
                 tokenizer_loaded = True
             except Exception:
                 pass
         if not tokenizer_loaded:
             # Fallback to the locally downloaded snapshot path
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_path, **tokenizer_kwargs)
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path, **tokenizer_kwargs
+            )
 
         # Ensure pad/eos tokens are set for generation
         if self.tokenizer.pad_token_id is None:
@@ -160,18 +171,17 @@ class PromptExtendPreprocessor(BasePreprocessor):
         if hasattr(self.tokenizer, "apply_chat_template"):
             messages = [
                 {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": f"Here is the prompt to extend: {prompt}\n\n"},
+                {
+                    "role": "user",
+                    "content": f"Here is the prompt to extend: {prompt}\n\n",
+                },
             ]
             input_text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
         else:
             # Generic fallback format
-            input_text = (
-                f"System: {sys_prompt}\n\n"
-                f"User: {prompt}\n\n"
-                f"Assistant:"   
-            )
+            input_text = f"System: {sys_prompt}\n\n" f"User: {prompt}\n\n" f"Assistant:"
 
         inputs = self.tokenizer(
             input_text,
@@ -220,5 +230,3 @@ class PromptExtendPreprocessor(BasePreprocessor):
 
     def __repr__(self) -> str:
         return self.__str__()
-
-

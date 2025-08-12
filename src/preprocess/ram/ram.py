@@ -17,9 +17,11 @@ from src.preprocess.base import (
 from src.utils.defaults import DEFAULT_DEVICE
 from src.utils.preprocessors import MODEL_WEIGHTS
 
+
 class RAMOutput(BaseOutput):
     tags: List[str]
     tags_c: List[str]
+
 
 @preprocessor_registry("ram")
 class RAMPreprocessor(BasePreprocessor):
@@ -43,9 +45,8 @@ class RAMPreprocessor(BasePreprocessor):
             from ram import inference_ram
         except ImportError as e:
             import warnings
-            warnings.warn(
-                "please pip install ram package"
-            )
+
+            warnings.warn("please pip install ram package")
             raise ImportError("RAM package not available")
 
         self.return_lang = (
@@ -95,7 +96,7 @@ class RAMPreprocessor(BasePreprocessor):
         else:
             return RAMOutput(tags=tags_e_list, tags_c=tags_c_list)
 
-    def __str__(self): 
+    def __str__(self):
         return f"RAMPreprocessor(return_lang={self.return_lang})"
 
     def __repr__(self):

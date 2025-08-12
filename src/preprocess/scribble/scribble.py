@@ -19,9 +19,11 @@ from src.preprocess.base import (
 
 norm_layer = nn.InstanceNorm2d
 
+
 class ScribbleOutput(BaseOutput):
     image: Image.Image
-    
+
+
 class ScribbleVideoOutput(BaseOutput):
     frames: List[Image.Image]
 
@@ -205,7 +207,7 @@ class ScribbleVideoPreprocessor(ScribblePreprocessor, BasePreprocessor):
         for frame in tqdm(frames):
             anno_frame = super().__call__(frame)
             ret_frames.append(anno_frame.image)
-        return ScribbleVideoOutput(frames=ret_frames)   
+        return ScribbleVideoOutput(frames=ret_frames)
 
     def __str__(self):
         return "ScribbleVideoPreprocessor()"

@@ -6,10 +6,8 @@ from typing import Dict, Any, Union
 import os
 import json
 import yaml
-import hashlib
 from src.utils.cache import empty_cache
 from diffusers import ModelMixin
-from safetensors.torch import safe_open
 from accelerate import init_empty_weights
 import torch
 from typing import Callable
@@ -27,65 +25,20 @@ from typing import List
 import cv2
 import tempfile
 from glob import glob
-import safetensors
 from transformers.modeling_utils import PreTrainedModel
+from src.quantize.ggml_layer import patch_module
+from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
-
+from src.utils.torch import is_safetensors_file, load_safetensors
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 
 
-def is_safetensors_file(file_path: str):
-    try:
-        with safetensors.safe_open(file_path, framework="pt", device="cpu") as f:
-            f.keys()
-        return True
-    except Exception:
-        return False
-
-
-def load_safetensors(
-    filename: Union[str, os.PathLike],
-    device: Union[str, int] = "cpu",
-    dtype: torch.dtype = None,
-) -> Dict[str, torch.Tensor]:
-    """
-    Loads a safetensors file into torch format.
-
-    Args:
-        filename (`str`, or `os.PathLike`):
-            The name of the file which contains the tensors
-        device (`Union[str, int]`, *optional*, defaults to `cpu`):
-            The device where the tensors need to be located after load.
-            available options are all regular torch device locations.
-
-    Returns:
-        `Dict[str, torch.Tensor]`: dictionary that contains name as key, value as `torch.Tensor`
-
-    Example:
-
-    ```python
-    from safetensors.torch import load_file
-
-    file_path = "./my_folder/bert.safetensors"
-    loaded = load_file(file_path)
-    ```
-    """
-    result = {}
-    with safe_open(filename, framework="pt", device=device) as f:
-        for k in f.keys():
-            result[k] = f.get_tensor(k)
-            if dtype:
-                result[k] = result[k].to(dtype)
-    return result
-
-
 class LoaderMixin(DownloadMixin):
     logger: Logger = logger
-
 
     def _load_model(
         self,
@@ -102,6 +55,7 @@ class LoaderMixin(DownloadMixin):
             extra_kwargs = {}
 
         model_base = component.get("base")
+        model_path = component.get("model_path")
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -116,8 +70,6 @@ class LoaderMixin(DownloadMixin):
             config = self.fetch_config(config_path)
         else:
             config = component.get("config", {}) or {}
-
-        model_path = component.get("model_path")
 
         if os.path.isdir(model_path) and os.path.exists(
             os.path.join(model_path, "config.json")
@@ -166,50 +118,74 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
 
-        if os.path.isdir(model_path):
-            self.logger.info(f"Loading model from {model_path}")
-            file_pattern = component.get("file_pattern", "**/*.safetensors")
-            bin_pattern = component.get("bin_pattern", "**/*.bin")
-            pt_pattern = component.get("pt_pattern", "**/*.pt")
-            files_to_load = glob(os.path.join(model_path, file_pattern), recursive=True)
-            files_to_load += glob(os.path.join(model_path, bin_pattern), recursive=True)
-            files_to_load += glob(os.path.join(model_path, pt_pattern), recursive=True)
-            if not files_to_load:
-                self.logger.warning(f"No model files found in {model_path}")
+        if model_path.endswith(".gguf"):
+            self.logger.info(f"Loading GGUF model from {model_path}")
+            gguf_kwargs = component.get("gguf_kwargs", {})
+            state_dict, qtype_dict = load_gguf(
+                model_path, type=component.get("type"), **gguf_kwargs
+            )
+            patch_module(model)
+            model.load_state_dict(state_dict, assign=True)
+
         else:
-            if not os.path.exists(model_path):
-                raise FileNotFoundError(f"Model file not found at {model_path}")
-            files_to_load = [model_path]
-        for file_path in files_to_load:
-            self.logger.info(f"Loading weights from {file_path}")
-            if is_safetensors_file(file_path):
-                state_dict = load_safetensors(file_path, dtype=load_dtype)
-            else:
-                state_dict = torch.load(
-                    file_path, map_location="cpu", weights_only=True, mmap=True
+            if os.path.isdir(model_path):
+                self.logger.info(f"Loading model from {model_path}")
+                file_pattern = component.get("file_pattern", "**/*.safetensors")
+                bin_pattern = component.get("bin_pattern", "**/*.bin")
+                pt_pattern = component.get("pt_pattern", "**/*.pt")
+                files_to_load = glob(
+                    os.path.join(model_path, file_pattern), recursive=True
                 )
-                if load_dtype:
-                    for k, v in state_dict.items():
-                        state_dict[k] = v.to(load_dtype)
-            # remap keys if key_map is provided replace part of existing key with new key
-            if key_map:
-                new_state_dict = {}
-                for k, v in key_map.items():
-                    for k2, v2 in state_dict.items():
-                        if k in k2:
-                            new_state_dict[k2.replace(k, v)] = v2
-                        else:
-                            new_state_dict[k2] = v2
+                files_to_load += glob(
+                    os.path.join(model_path, bin_pattern), recursive=True
+                )
+                files_to_load += glob(
+                    os.path.join(model_path, pt_pattern), recursive=True
+                )
+                if not files_to_load:
+                    self.logger.warning(f"No model files found in {model_path}")
+            else:
+                if not os.path.exists(model_path):
+                    raise FileNotFoundError(f"Model file not found at {model_path}")
+                files_to_load = [model_path]
+            for file_path in files_to_load:
+                self.logger.info(f"Loading weights from {file_path}")
+                if is_safetensors_file(file_path):
+                    state_dict = load_safetensors(file_path, dtype=load_dtype)
+                else:
+                    state_dict = torch.load(
+                        file_path, map_location="cpu", weights_only=True, mmap=True
+                    )
+                    if load_dtype:
+                        for k, v in state_dict.items():
+                            state_dict[k] = v.to(load_dtype)
+                # remap keys if key_map is provided replace part of existing key with new key
+                if key_map:
+                    new_state_dict = {}
+                    for k, v in key_map.items():
+                        for k2, v2 in state_dict.items():
+                            if k in k2:
+                                new_state_dict[k2.replace(k, v)] = v2
+                            else:
+                                new_state_dict[k2] = v2
 
-                state_dict = new_state_dict
+                    state_dict = new_state_dict
 
-            model.load_state_dict(
-                state_dict, strict=False, assign=True
-            )  # must be false as we are iteratively loading the state dict
-        # Assert no parameters are on meta device
+                model.load_state_dict(
+                    state_dict, strict=False, assign=True
+                )  # must be false as we are iteratively loading the state dict
+            # Assert no parameters are on meta device
+
+        has_meta_params = False
         for name, param in model.named_parameters():
             if param.device.type == "meta":
-                raise ValueError(f"Parameter {name} is on meta device")
+                self.logger.error(f"Parameter {name} is on meta device")
+                has_meta_params = True
+
+        if has_meta_params:
+            raise ValueError(
+                "Model has parameters on meta device, this is not supported"
+            )
 
         return model
 
@@ -303,13 +279,21 @@ class LoaderMixin(DownloadMixin):
             init_kwargs = dict(config)
             config_to_register = {}
         else:
-            init_kwargs = {k: v for k, v in (config or {}).items() if k in init_param_names}
-            config_to_register = {k: v for k, v in (config or {}).items() if k not in init_param_names}
+            init_kwargs = {
+                k: v for k, v in (config or {}).items() if k in init_param_names
+            }
+            config_to_register = {
+                k: v for k, v in (config or {}).items() if k not in init_param_names
+            }
 
         component = component_class(**init_kwargs)
 
         # Register remaining config to the component if supported
-        if config_to_register and hasattr(component, "register_to_config") and callable(getattr(component, "register_to_config")):
+        if (
+            config_to_register
+            and hasattr(component, "register_to_config")
+            and callable(getattr(component, "register_to_config"))
+        ):
             try:
                 component.register_to_config(**config_to_register)
             except Exception as e:
@@ -388,7 +372,7 @@ class LoaderMixin(DownloadMixin):
                 out_frames.append(self._load_image(v, convert_method=convert_method))
             if return_fps:
                 return out_frames, fps
-            else:   
+            else:
                 return out_frames
 
         if isinstance(video_input, str):

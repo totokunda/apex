@@ -6,6 +6,7 @@ from src.utils.cache import empty_cache
 import numpy as np
 from PIL import Image
 
+
 @postprocessor_registry("ltx.latent_upsampler")
 class LatentUpsamplerPostprocessor(BasePostprocessor):
     def __init__(self, engine, **kwargs):
@@ -76,11 +77,7 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
             self.engine.logger.error(f"Failed to load latent upsampler: {e}")
             raise
 
-
-    def _upsample_latents(
-        self,
-        latents: torch.Tensor
-    ) -> torch.Tensor:
+    def _upsample_latents(self, latents: torch.Tensor) -> torch.Tensor:
         """Perform latent upsampling using the loaded model.
 
         Note: The LTX latent upsampler expects denormalized latents and returns upsampled latents directly.
@@ -100,7 +97,10 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         return upsampled_latents
 
     def _adain_filter_latent(
-        self, latents: torch.Tensor, reference_latents: torch.Tensor, factor: float = 1.0
+        self,
+        latents: torch.Tensor,
+        reference_latents: torch.Tensor,
+        factor: float = 1.0,
     ) -> torch.Tensor:
         result = latents.clone()
         for i in range(latents.size(0)):
@@ -141,29 +141,26 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         # Optionally denormalize latents using VAE stats if available
         self.engine.load_component_by_type("vae")
         self.engine.to_device(self.engine.vae)
-        
+
         if latents is not None and video is not None:
             raise ValueError("Either latents or video must be provided, not both")
-        
+
         if latents is None and video is None:
             raise ValueError("Either latents or video must be provided")
-        
+
         if latents is None:
             video = self.engine._load_video(video)
             video = self.engine.video_processor.preprocess_video(video)
             latents = self.engine.vae.encode(video, sample_mode="mode")
-        
+
         prepared_latents = self.engine.vae.denormalize_latents(latents)
 
         # Perform upsampling via the upsampler model
-        upsampled_latents = self._upsample_latents(
-            prepared_latents
-        )
-        
+        upsampled_latents = self._upsample_latents(prepared_latents)
+
         if return_latents:
             upsampled_latents = self.engine.vae.normalize_latents(upsampled_latents)
             return upsampled_latents
-
 
         # Optionally apply AdaIN in latent space prior to decoding
         adain_factor = kwargs.get("adain_factor", 0.0)
@@ -179,7 +176,7 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         # If VAE supports timestep conditioning, add decoding noise and pass timestep
         timestep = None
         vae = self.engine.vae
-        
+
         if getattr(getattr(vae, "config", object()), "timestep_conditioning", False):
             batch_size = upsampled_latents.shape[0]
             decode_timestep = kwargs.get("decode_timestep", 0.0)
@@ -190,15 +187,19 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
                 decode_noise_scale = decode_timestep
             elif not isinstance(decode_noise_scale, list):
                 decode_noise_scale = [float(decode_noise_scale)] * batch_size
-            timestep = torch.tensor(decode_timestep, device=self.device, dtype=upsampled_latents.dtype)
-            scale = torch.tensor(decode_noise_scale, device=self.device, dtype=upsampled_latents.dtype)[
-                :, None, None, None, None
-            ]
+            timestep = torch.tensor(
+                decode_timestep, device=self.device, dtype=upsampled_latents.dtype
+            )
+            scale = torch.tensor(
+                decode_noise_scale, device=self.device, dtype=upsampled_latents.dtype
+            )[:, None, None, None, None]
             noise = torch.randn_like(upsampled_latents)
             upsampled_latents = (1 - scale) * upsampled_latents + scale * noise
 
         # Decode in chunks to avoid memory issues
-        decoded_video = self.engine.vae.decode(upsampled_latents, timestep=timestep, return_dict=False)[0]
+        decoded_video = self.engine.vae.decode(
+            upsampled_latents, timestep=timestep, return_dict=False
+        )[0]
         decoded_video = self.engine._postprocess(decoded_video)
 
         return decoded_video

@@ -15,11 +15,14 @@ from src.utils.preprocessors import RAM_TAG_COLOR_PATH
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 from src.preprocess.inpainting import InpaintingVideoPreprocessor
 
+
 class LayoutBboxOutput(BaseOutput):
     frames: List[np.ndarray]
 
+
 class LayoutMaskOutput(BaseOutput):
     frames: List[np.ndarray]
+
 
 class LayoutTrackOutput(BaseOutput):
     frames: List[np.ndarray]
@@ -203,7 +206,7 @@ class LayoutMaskPreprocessor(BasePreprocessor):
     ):
         if not isinstance(mask, list):
             mask = [mask]
-        
+
         if label is not None and label in self.color_dict:
             color = self.color_dict[label]
         elif color is not None:
@@ -306,7 +309,7 @@ class LayoutTrackPreprocessor(BasePreprocessor):
         bbox: Optional[List] = None,
         label: Optional[str] = None,
         caption: Optional[str] = None,
-        mode: str = 'salient',
+        mode: str = "salient",
         color: Optional[Tuple[int, int, int]] = None,
         mask_cfg: Optional[dict] = None,
     ):

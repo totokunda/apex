@@ -4,7 +4,7 @@ engine: skyreels
 type: t2v
 
 shared: 
-  - shared_wan.yml # path to shared_wan.yml
+  - ../wan/shared_wan.yml # path to shared_wan.yml
   - shared_skyreels.yml
 
 components:

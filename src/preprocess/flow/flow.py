@@ -17,9 +17,11 @@ from src.utils.preprocessors import MODEL_WEIGHTS
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
 from PIL import Image
 
+
 class FlowOutput(BaseOutput):
     flow: List[np.ndarray]
     flow_vis: List[Image.Image]
+
 
 @preprocessor_registry("flow")
 class FlowPreprocessor(BasePreprocessor):
@@ -36,7 +38,7 @@ class FlowPreprocessor(BasePreprocessor):
         params = {"small": False, "mixed_precision": False, "alternate_corr": False}
         params = argparse.Namespace(**params)
         self.device = device
-        
+
         self.model = RAFT(params)
         self.model.load_state_dict(
             {
@@ -54,16 +56,16 @@ class FlowPreprocessor(BasePreprocessor):
         # frames / RGB
         frames = self._load_video(frames)
         frames = [
-            torch.from_numpy(np.array(frame)
-            .astype(np.uint8)
-            .transpose(2, 0, 1))
+            torch.from_numpy(np.array(frame).astype(np.uint8).transpose(2, 0, 1))
             .float()[None]
             .to(self.device)
             for frame in frames
         ]
         flow_up_list, flow_up_vis_list = [], []
         with torch.no_grad():
-            for i, (image1, image2) in tqdm(enumerate(zip(frames[:-1], frames[1:])), total=len(frames)-1):
+            for i, (image1, image2) in tqdm(
+                enumerate(zip(frames[:-1], frames[1:])), total=len(frames) - 1
+            ):
                 padder = self.InputPadder(image1.shape)
                 image1, image2 = padder.pad(image1, image2)
                 flow_low, flow_up = self.model(image1, image2, iters=20, test_mode=True)
@@ -71,8 +73,8 @@ class FlowPreprocessor(BasePreprocessor):
                 flow_up_vis = self.flow_viz.flow_to_image(flow_up)
                 flow_up_list.append(flow_up)
                 flow_up_vis_list.append(flow_up_vis)
-            
+
         return FlowOutput(
             flow=flow_up_list,
-            flow_vis=[Image.fromarray(flow_up_vis) for flow_up_vis in flow_up_vis_list]
+            flow_vis=[Image.fromarray(flow_up_vis) for flow_up_vis in flow_up_vis_list],
         )

@@ -14,9 +14,10 @@ from src.preprocess.base import (
 from typing import Union, Optional, List, Tuple
 from PIL import Image
 
+
 class MaskOutput(BaseOutput):
     mask: Image.Image
-    image: Optional[Image.Image] = None  
+    image: Optional[Image.Image] = None
 
 
 @preprocessor_registry("mask.draw")
@@ -25,7 +26,7 @@ class MaskDrawPreprocessor(BasePreprocessor):
         super().__init__(preprocessor_type=PreprocessorType.IMAGE, **kwargs)
         self.mode = mode
         assert self.mode in ["maskpoint", "maskbbox", "mask", "bbox"]
-        
+
     def __call__(
         self,
         mask: Optional[Union[Image.Image, np.ndarray, str]] = None,

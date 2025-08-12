@@ -22,10 +22,12 @@ from src.preprocess.base import (
 
 from tqdm import tqdm
 
+
 class SalientOutput(BaseOutput):
     mask: np.ndarray
     image: np.ndarray
-    
+
+
 class SalientVideoOutput(BaseOutput):
     frames: List[SalientOutput]
 
@@ -358,9 +360,7 @@ class SalientPreprocessor(BasePreprocessor):
             ]
         )
 
-    def __call__(
-        self, image: Union[Image.Image, np.ndarray, str]
-    ):
+    def __call__(self, image: Union[Image.Image, np.ndarray, str]):
         image = self._load_image(image)
         img_w, img_h = image.size
 
@@ -386,7 +386,6 @@ class SalientPreprocessor(BasePreprocessor):
             ret_image = ret_image[y : y + h, x : x + w]
             ret_mask = ret_mask[y : y + h, x : x + w]
         return SalientOutput(image=ret_image, mask=ret_mask)
-
 
     def __str__(self):
         return f"SalientPreprocessor(use_crop={self.use_crop})"

@@ -186,9 +186,6 @@ class InpaintingPreprocessor(BasePreprocessor):
         out_image = image.copy()
         out_image[bool_mask] = mask_color
         return out_image, out_mask
-    
-
-    
 
     def __call__(
         self,

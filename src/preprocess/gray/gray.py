@@ -12,11 +12,14 @@ from src.preprocess.base import (
 from typing import Union, List
 from PIL import Image
 
+
 class GrayOutput(BaseOutput):
     frame: Image.Image
 
+
 class GrayVideoOutput(BaseOutput):
     frames: List[Image.Image]
+
 
 @preprocessor_registry("gray.image")
 class GrayPreprocessor(BasePreprocessor):

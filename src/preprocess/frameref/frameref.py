@@ -8,10 +8,10 @@ from typing import List, Literal, Union
 import torch
 from PIL import Image
 
+
 class FrameOutput(BaseOutput):
     frames: List[np.ndarray]
     masks: List[np.ndarray]
-
 
 
 def align_frames(first_frame, last_frame):
@@ -36,7 +36,7 @@ class FrameRefExtractPreprocessor(BasePreprocessor):
         self,
         ref_cfg=None,
         ref_num=1,
-        ref_color:int=128,
+        ref_color: int = 128,
         return_mask=True,
         **kwargs,
     ):
@@ -56,7 +56,13 @@ class FrameRefExtractPreprocessor(BasePreprocessor):
         self.ref_color = ref_color
         self.return_mask = return_mask
 
-    def __call__(self, frames: Union[List[str], List[Image.Image], str, Image.Image], ref_cfg=None, ref_num=None, return_mask=True):
+    def __call__(
+        self,
+        frames: Union[List[str], List[Image.Image], str, Image.Image],
+        ref_cfg=None,
+        ref_num=None,
+        return_mask=True,
+    ):
         frames = self._load_video(frames)
         frames = [np.array(frame) for frame in frames]
 
@@ -69,7 +75,7 @@ class FrameRefExtractPreprocessor(BasePreprocessor):
         sel_ref_cfg = random.choices(ref_cfg, weights=probas, k=1)[0]
         mode = sel_ref_cfg["mode"] if "mode" in sel_ref_cfg else "first"
         ref_num = int(ref_num) if ref_num is not None else self.ref_num
-        
+
         frame_num = len(frames)
         frame_num_range = list(range(frame_num))
         if mode == "first":
@@ -102,13 +108,23 @@ class FrameRefExtractPreprocessor(BasePreprocessor):
     def __repr__(self):
         return self.__str__()
 
-expand_mode = Literal["firstframe", "lastframe", "firstlastframe", "firstclip", "lastclip", "firstlastclip", "all"]
+
+expand_mode = Literal[
+    "firstframe",
+    "lastframe",
+    "firstlastframe",
+    "firstclip",
+    "lastclip",
+    "firstlastclip",
+    "all",
+]
+
 
 @preprocessor_registry("frameref.expand")
 class FrameRefExpandPreprocessor(BasePreprocessor):
     def __init__(
         self,
-        ref_color:int=128,
+        ref_color: int = 128,
         return_mask=True,
         mode: expand_mode = "firstframe",
         **kwargs,
@@ -133,7 +149,7 @@ class FrameRefExpandPreprocessor(BasePreprocessor):
         image: str | List[str] | np.ndarray | torch.Tensor | Image.Image = None,
         image_2: str | List[str] | np.ndarray | torch.Tensor | Image.Image = None,
         frames: List[str] | np.ndarray | torch.Tensor | List[Image.Image] = None,
-        frames_2:  List[str] | np.ndarray | torch.Tensor | List[Image.Image] = None,
+        frames_2: List[str] | np.ndarray | torch.Tensor | List[Image.Image] = None,
         mode: expand_mode = "firstframe",
         expand_num: int = 24,
         return_mask: bool = True,
@@ -158,15 +174,22 @@ class FrameRefExpandPreprocessor(BasePreprocessor):
         frames = [np.array(frame) for frame in frames]
         frames_2 = self._load_video(frames_2) if frames_2 is not None else []
         frames_2 = [np.array(frame) for frame in frames_2]
-        
+
         expand_frames = [np.ones_like(frames[0]) * self.ref_color] * expand_num
         expand_masks = [np.ones_like(frames[0][:, :, 0]) * 255] * expand_num
         source_frames = frames
         source_masks = [np.zeros_like(frames[0][:, :, 0])] * len(frames)
-        
+
         if resize and frames_2:
             # resize frames_2 to frames[0]
-            frames_2 = [cv2.resize(f2, (frames[0].shape[1], frames[0].shape[0]), interpolation=cv2.INTER_AREA) for f2 in frames_2]
+            frames_2 = [
+                cv2.resize(
+                    f2,
+                    (frames[0].shape[1], frames[0].shape[0]),
+                    interpolation=cv2.INTER_AREA,
+                )
+                for f2 in frames_2
+            ]
 
         if mode in ["firstframe", "firstclip"]:
             out_frames = source_frames + expand_frames
