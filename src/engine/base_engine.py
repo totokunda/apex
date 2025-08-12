@@ -870,7 +870,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if save_path is None:
             save_path = DEFAULT_SAVE_PATH
         if components_path is None:
-            components_path = DEFAULT_COMPONENTS_PATH       
+            components_path = DEFAULT_COMPONENTS_PATH
         if preprocessors_path is None:
             preprocessors_path = DEFAULT_PREPROCESSOR_SAVE_PATH
         if postprocessors_path is None:

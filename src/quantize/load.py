@@ -41,15 +41,35 @@ LLAMA_SD_MAP = {
     "output.weight": "lm_head.weight",
 }
 
+STEP_SD_MAP = {
+    # layers
+    "blk.": "transformer.layers.",
+    # attention norms
+    "attn_norm": "attention_norm",
+    # attention projections (unfused path for GGUF)
+    "attn_q": "attention.wq",
+    "attn_k": "attention.wk",
+    "attn_v": "attention.wv",
+    "attn_output": "attention.wo",
+    # ffn norms
+    "ffn_norm": "ffn_norm",
+    # feed-forward weights (unfused path for GGUF)
+    "ffn_gate": "feed_forward.ffn_gate",
+    "ffn_up": "feed_forward.ffn_up",
+    "ffn_down": "feed_forward.ffn_down",
+    # embeddings
+    "token_embd": "tok_embeddings.word_embeddings",
+}
 
-def remap_key(key: str, key_map: Literal["t5", "llama"] = "t5"):
+def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
     if key_map == "t5":
         key_map = T5_SD_MAP
     elif key_map == "llama":
         key_map = LLAMA_SD_MAP
+    elif key_map == "step":
+        key_map = STEP_SD_MAP
     else:
         raise ValueError(f"Invalid key map: {key_map}")
-
     for k, v in key_map.items():
         key = key.replace(k, v)
     return key
@@ -57,7 +77,7 @@ def remap_key(key: str, key_map: Literal["t5", "llama"] = "t5"):
 
 def load_text_encoder_gguf(
     path: str,
-    key_map: Literal["t5", "llama"] = "t5",
+    key_map: Literal["t5", "llama", "step"] = "t5",
     dequant_dtype: torch.dtype | str = torch.float16,
     **kwargs,
 ):
@@ -65,30 +85,7 @@ def load_text_encoder_gguf(
         dequant_dtype = convert_str_dtype(dequant_dtype)
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
-    qtype_dict: Dict[
-        str,
-        Literal[
-            "f16",
-            "f32",
-            "f64",
-            "q4_0",
-            "q4_1",
-            "q4_2",
-            "q4_3",
-            "q4_4",
-            "q4_5",
-            "q4_6",
-            "q4_7",
-            "q4_8",
-            "q4_9",
-            "q4_10",
-            "q4_11",
-            "q4_12",
-            "q4_13",
-            "q4_14",
-            "q4_15",
-        ],
-    ] = {}
+    qtype_dict: Dict[str, int] = {}
     for tensor in tqdm(reader.tensors):
         name = remap_key(tensor.name, key_map)
         shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
@@ -132,16 +129,55 @@ def load_text_encoder_gguf(
 
     return state_dict, qtype_dict
 
+def load_transformer_gguf(
+    path: str,
+    dequant_dtype: torch.dtype | str = torch.float16,
+):
+    if isinstance(dequant_dtype, str):
+        dequant_dtype = convert_str_dtype(dequant_dtype)
+    reader = gguf.GGUFReader(path)
+    state_dict: Dict[str, GGMLTensor] = {}
+    qtype_dict: Dict[str, int] = {}
+    for tensor in tqdm(reader.tensors):
+        name = tensor.name
+        shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message="The given NumPy array is not writable"
+            )
+            # Map quantized GGUF buffers to int8 to avoid downstream frameworks casting activations to uint8
+            base = torch.from_numpy(tensor.data)
+
+            torch_tensor = GGMLTensor(
+                base,
+                tensor_type=tensor.tensor_type,
+                tensor_shape=shape,
+                dequant_dtype=dequant_dtype,
+            )  # mmap
+            if is_quantized(torch_tensor):
+                # Preserve byte pattern while exposing dtype as int8 (zero-copy reinterpret)
+                torch_tensor = GGMLTensor(
+                    base.view(torch.int8),
+                    tensor_type=tensor.tensor_type,
+                    tensor_shape=shape,
+                    dequant_dtype=dequant_dtype,
+                )
+
+        state_dict[name] = torch_tensor
+        tensor_type_str = getattr(tensor.tensor_type, "name", repr(tensor.tensor_type))
+        qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
+
+    return state_dict, qtype_dict
 
 def load_gguf(
     path: str,
     type: Literal["text_encoder", "transformer"],
-    key_map: Literal["t5", "llama"] = "t5",
+    key_map: Literal["t5", "llama", "step"] | None = None,
     **kwargs,
 ):
     if type == "text_encoder":
         return load_text_encoder_gguf(path, key_map, **kwargs)
     elif type == "transformer":
-        raise NotImplementedError("Transformer loading not implemented yet")
+        return load_transformer_gguf(path, **kwargs)
     else:
         raise ValueError(f"Invalid type: {type}")

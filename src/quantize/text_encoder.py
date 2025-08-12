@@ -9,7 +9,6 @@ import argparse
 import contextlib
 import json
 import os
-import re
 import sys
 from enum import IntEnum
 from pathlib import Path
@@ -221,7 +220,7 @@ class ModelBase:
                 "model.safetensors" if self.is_safetensors else "pytorch_model.bin"
             )
             index_name += ".index.json"
-            
+
             index_file = self.dir_model / index_name
 
             if index_file.is_file():
@@ -413,7 +412,7 @@ class ModelBase:
                             gguf.MODEL_TENSOR.POS_EMBD,
                             gguf.MODEL_TENSOR.TOKEN_TYPES,
                             gguf.MODEL_TENSOR.SSM_CONV1D,
-                            gguf.MODEL_TENSOR.SHORTCONV_CONV, 
+                            gguf.MODEL_TENSOR.SHORTCONV_CONV,
                             gguf.MODEL_TENSOR.TIME_MIX_FIRST,
                             gguf.MODEL_TENSOR.TIME_MIX_W1,
                             gguf.MODEL_TENSOR.TIME_MIX_W2,
@@ -805,7 +804,9 @@ class TextModel(ModelBase):
 
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer)
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer
+        )
         vocab_size = self.hparams.get("vocab_size", len(tokenizer.vocab))
         assert max(tokenizer.vocab.values()) < vocab_size
 
@@ -1308,7 +1309,9 @@ class TextModel(ModelBase):
         return tokens, scores, toktypes
 
     def _set_vocab_llama_hf(self):
-        vocab = gguf.LlamaHfVocab(self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer)
+        vocab = gguf.LlamaHfVocab(
+            self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer
+        )
         tokens = []
         scores = []
         toktypes = []
@@ -1326,11 +1329,18 @@ class TextModel(ModelBase):
         self.gguf_writer.add_token_scores(scores)
         self.gguf_writer.add_token_types(toktypes)
 
-        special_vocab = gguf.SpecialVocab(self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer, n_vocab=len(tokens))
+        special_vocab = gguf.SpecialVocab(
+            self.dir_model if self.dir_tokenizer is None else self.dir_tokenizer,
+            n_vocab=len(tokens),
+        )
         special_vocab.add_to_gguf(self.gguf_writer)
 
     def _set_vocab_rwkv_world(self):
-        file_path = self.dir_model / "rwkv_vocab_v20230424.txt" if self.dir_tokenizer is None else self.dir_tokenizer / "rwkv_vocab_v20230424.txt"
+        file_path = (
+            self.dir_model / "rwkv_vocab_v20230424.txt"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "rwkv_vocab_v20230424.txt"
+        )
         assert file_path.is_file()
         vocab_size = self.hparams.get("vocab_size", 65536)
 
@@ -1482,7 +1492,7 @@ class MmprojModel(ModelBase):
 
     n_block_keys = ["n_layers", "num_hidden_layers", "n_layer", "num_layers", "depth"]
 
-    has_vision_encoder: bool = True # by default
+    has_vision_encoder: bool = True  # by default
     has_audio_encoder: bool = False
 
     # for models having multiple encoders, we need to separate their hparams
@@ -1493,7 +1503,9 @@ class MmprojModel(ModelBase):
         super().__init__(*args, **kwargs)
 
         if self.model_arch != gguf.MODEL_ARCH.MMPROJ:
-            raise TypeError("MmprojModel must be subclassed with model_arch = gguf.MODEL_ARCH.MMPROJ")
+            raise TypeError(
+                "MmprojModel must be subclassed with model_arch = gguf.MODEL_ARCH.MMPROJ"
+            )
 
         # get n_embd of the text model
         if not self.is_mistral_format:
@@ -1502,10 +1514,14 @@ class MmprojModel(ModelBase):
             if "audio_config" not in self.hparams:
                 self.hparams["audio_config"] = {}
             text_config = {**self.hparams, **self.hparams["text_config"]}
-            self.n_embd_text = text_config.get("hidden_size", text_config.get("n_embd", 0))
+            self.n_embd_text = text_config.get(
+                "hidden_size", text_config.get("n_embd", 0)
+            )
         else:
             text_config = {
-                k: v for k, v in self.hparams.items() if k not in ["vision_encoder", "audio_encoder"]
+                k: v
+                for k, v in self.hparams.items()
+                if k not in ["vision_encoder", "audio_encoder"]
             }
             self.n_embd_text = text_config.get("hidden_dim", 0)
 
@@ -1513,6 +1529,7 @@ class MmprojModel(ModelBase):
 
         # move vision config to the top level, while preserving the original hparams in global_config
         import copy
+
         self.global_config = copy.deepcopy(self.hparams)
         self.hparams_vision = self.get_vision_config()
         self.hparams_audio = self.get_audio_config()
@@ -1525,16 +1542,24 @@ class MmprojModel(ModelBase):
 
         # TODO @ngxson : this is a hack to support both vision and audio encoders
         have_multiple_encoders = self.has_audio_encoder and self.has_vision_encoder
-        self.block_count = 128 if have_multiple_encoders else self.find_hparam(self.n_block_keys, True)
-        self.tensor_map = gguf.get_tensor_name_map(gguf.MODEL_ARCH.MMPROJ, self.block_count)
+        self.block_count = (
+            128 if have_multiple_encoders else self.find_hparam(self.n_block_keys, True)
+        )
+        self.tensor_map = gguf.get_tensor_name_map(
+            gguf.MODEL_ARCH.MMPROJ, self.block_count
+        )
 
         # load preprocessor config
         if not self.is_mistral_format:
-            with open(self.dir_model / "preprocessor_config.json", "r", encoding="utf-8") as f:
+            with open(
+                self.dir_model / "preprocessor_config.json", "r", encoding="utf-8"
+            ) as f:
                 self.preprocessor_config = json.load(f)
 
     def get_vision_config(self) -> dict[str, Any] | None:
-        config_name = "vision_config" if not self.is_mistral_format else "vision_encoder"
+        config_name = (
+            "vision_config" if not self.is_mistral_format else "vision_encoder"
+        )
         return self.global_config.get(config_name)
 
     def get_audio_config(self) -> dict[str, Any] | None:
@@ -1553,10 +1578,16 @@ class MmprojModel(ModelBase):
             # vision config
             self.gguf_writer.add_vision_image_size(self.find_vparam(["image_size"]))
             self.gguf_writer.add_vision_patch_size(self.find_vparam(["patch_size"]))
-            self.gguf_writer.add_vision_embedding_length(self.find_vparam(["hidden_size"]))
-            self.gguf_writer.add_vision_feed_forward_length(self.find_vparam(["intermediate_size"]))
+            self.gguf_writer.add_vision_embedding_length(
+                self.find_vparam(["hidden_size"])
+            )
+            self.gguf_writer.add_vision_feed_forward_length(
+                self.find_vparam(["intermediate_size"])
+            )
             self.gguf_writer.add_vision_block_count(self.find_vparam(self.n_block_keys))
-            self.gguf_writer.add_vision_head_count(self.find_vparam(["num_attention_heads"]))
+            self.gguf_writer.add_vision_head_count(
+                self.find_vparam(["num_attention_heads"])
+            )
 
             # preprocessor config
             image_mean = self.preprocessor_config["image_mean"]
@@ -1570,10 +1601,16 @@ class MmprojModel(ModelBase):
             self.gguf_writer.add_audio_projection_dim(self.n_embd_text)
 
             # audio config
-            self.gguf_writer.add_audio_embedding_length(self.find_aparam(["hidden_size"]))
-            self.gguf_writer.add_audio_feed_forward_length(self.find_aparam(["intermediate_size"]))
+            self.gguf_writer.add_audio_embedding_length(
+                self.find_aparam(["hidden_size"])
+            )
+            self.gguf_writer.add_audio_feed_forward_length(
+                self.find_aparam(["intermediate_size"])
+            )
             self.gguf_writer.add_audio_block_count(self.find_aparam(self.n_block_keys))
-            self.gguf_writer.add_audio_head_count(self.find_aparam(["num_attention_heads"]))
+            self.gguf_writer.add_audio_head_count(
+                self.find_aparam(["num_attention_heads"])
+            )
 
         if not self.has_vision_encoder and not self.has_audio_encoder:
             raise ValueError("MmprojModel must have either vision or audio encoder")
@@ -1589,7 +1626,9 @@ class MmprojModel(ModelBase):
         assert self.hparams_audio is not None
         return self._find_param(self.hparams_audio, keys, optional)
 
-    def _find_param(self, obj: dict[str, Any], keys: Iterable[str], optional: bool = False) -> Any:
+    def _find_param(
+        self, obj: dict[str, Any], keys: Iterable[str], optional: bool = False
+    ) -> Any:
         key = next((k for k in keys if k in obj), None)
         if key is not None:
             return obj[key]
@@ -1643,7 +1682,11 @@ class LlamaModel(TextModel):
             special_vocab._set_special_token("eot", 32010)
             special_vocab.add_to_gguf(self.gguf_writer)
 
-        tokenizer_config_file = self.dir_model / "tokenizer_config.json" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer_config.json"
+        tokenizer_config_file = (
+            self.dir_model / "tokenizer_config.json"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "tokenizer_config.json"
+        )
         if tokenizer_config_file.is_file():
             with open(tokenizer_config_file, "r", encoding="utf-8") as f:
                 tokenizer_config_json = json.load(f)
@@ -1814,7 +1857,6 @@ class LlamaModel(TextModel):
                 raise ValueError(f"Unprocessed experts: {experts}")
 
 
-
 @ModelBase.register("Step1Model")
 class Step1Model(TextModel):
     """
@@ -1838,10 +1880,14 @@ class Step1Model(TextModel):
     def set_vocab(self):
         # Prefer Step1 custom SPM if available, then generic SPM, then HF/GPT2 fallback
         from pathlib import Path as _Path
-        spm_dir = self.dir_tokenizer if self.dir_tokenizer is not None else self.dir_model
+
+        spm_dir = (
+            self.dir_tokenizer if self.dir_tokenizer is not None else self.dir_model
+        )
         custom_spm = _Path(spm_dir) / "step1_chat_tokenizer.model"
         if custom_spm.is_file():
             from sentencepiece import SentencePieceProcessor
+
             tokenizer = SentencePieceProcessor()
             tokenizer.LoadFromFile(str(custom_spm))
 
@@ -1852,7 +1898,9 @@ class Step1Model(TextModel):
                 or tokenizer.vocab_size()
             )
 
-            tokens: list[bytes] = [f"[PAD{i}]".encode("utf-8") for i in range(vocab_size)]
+            tokens: list[bytes] = [
+                f"[PAD{i}]".encode("utf-8") for i in range(vocab_size)
+            ]
             scores: list[float] = [-10000.0] * vocab_size
             toktypes: list[int] = [SentencePieceTokenTypes.UNUSED] * vocab_size
 
@@ -1922,7 +1970,9 @@ class Step1Model(TextModel):
         rope_dim = self.hparams.get("head_dim")
         if rope_dim is None:
             # hidden_size // num_attention_heads
-            rope_dim = self.hparams["hidden_size"] // self.hparams["num_attention_heads"]
+            rope_dim = (
+                self.hparams["hidden_size"] // self.hparams["num_attention_heads"]
+            )
         self.gguf_writer.add_rope_dimension_count(rope_dim)
 
         # KV heads: Step1 uses groups for GQA
@@ -1989,7 +2039,9 @@ class Step1Model(TextModel):
                 or self.hparams.get("num_attention_groups")
             )
             if kv_channels is None or n_groups is None:
-                raise ValueError("Missing kv_channels or num_attention_groups in config for Step1Model")
+                raise ValueError(
+                    "Missing kv_channels or num_attention_groups in config for Step1Model"
+                )
 
             kv_dim = int(kv_channels) * int(n_groups)
 
@@ -2043,7 +2095,11 @@ class LlavaVisionModel(MmprojModel):
         logger.info(f"Image break token id: {self.img_break_tok_id}")
 
     def get_token_id(self, token: str) -> int:
-        tokenizer_config_file = self.dir_model / "tokenizer_config.json" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer_config.json"
+        tokenizer_config_file = (
+            self.dir_model / "tokenizer_config.json"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "tokenizer_config.json"
+        )
         with open(tokenizer_config_file, "r", encoding="utf-8") as f:
             added_tokens_decoder = json.load(f)["added_tokens_decoder"]
             for id_, token_data in added_tokens_decoder.items():
@@ -2232,13 +2288,25 @@ class BertModel(TextModel):
         from sentencepiece import SentencePieceProcessor
         from sentencepiece import sentencepiece_model_pb2 as model
 
-        tokenizer_path = self.dir_model / "sentencepiece.bpe.model" if self.dir_tokenizer is None else self.dir_tokenizer / "sentencepiece.bpe.model"
+        tokenizer_path = (
+            self.dir_model / "sentencepiece.bpe.model"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "sentencepiece.bpe.model"
+        )
 
         tokenizer_json = {}
         tokenizer_config_json = {}
         if not tokenizer_path.is_file():
-            tokenizer_path = self.dir_model / "tokenizer.json" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer.json"
-            tokenizer_config_path = self.dir_model / "tokenizer_config.json" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer_config.json"
+            tokenizer_path = (
+                self.dir_model / "tokenizer.json"
+                if self.dir_tokenizer is None
+                else self.dir_tokenizer / "tokenizer.json"
+            )
+            tokenizer_config_path = (
+                self.dir_model / "tokenizer_config.json"
+                if self.dir_tokenizer is None
+                else self.dir_tokenizer / "tokenizer_config.json"
+            )
 
             if not tokenizer_path.is_file():
                 raise FileNotFoundError(f"File not found: {tokenizer_path}")
@@ -2406,7 +2474,11 @@ class RobertaModel(BertModel):
 
     def set_vocab(self):
         """Support BPE tokenizers for roberta models"""
-        bpe_tok_path = self.dir_model / "tokenizer.json" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer.json"
+        bpe_tok_path = (
+            self.dir_model / "tokenizer.json"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "tokenizer.json"
+        )
         if bpe_tok_path.exists():
             self._set_vocab_gpt2()
 
@@ -2454,11 +2526,19 @@ class T5Model(TextModel):
         from sentencepiece import SentencePieceProcessor
         from sentencepiece import sentencepiece_model_pb2 as model
 
-        tokenizer_path = self.dir_model / "tokenizer.model" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer.model"
+        tokenizer_path = (
+            self.dir_model / "tokenizer.model"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "tokenizer.model"
+        )
 
         # many older models use spiece.model tokenizer model filename
         if not tokenizer_path.is_file():
-            tokenizer_path = self.dir_model / "spiece.model" if self.dir_tokenizer is None else self.dir_tokenizer / "spiece.model"
+            tokenizer_path = (
+                self.dir_model / "spiece.model"
+                if self.dir_tokenizer is None
+                else self.dir_tokenizer / "spiece.model"
+            )
 
         if not tokenizer_path.is_file():
             raise FileNotFoundError(f"File not found: {tokenizer_path}")
@@ -2510,7 +2590,11 @@ class T5Model(TextModel):
             scores[token_id] = score
             toktypes[token_id] = toktype
 
-        added_tokens_file = self.dir_model / "added_tokens.json" if self.dir_tokenizer is None else self.dir_tokenizer / "added_tokens.json"
+        added_tokens_file = (
+            self.dir_model / "added_tokens.json"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "added_tokens.json"
+        )
         if added_tokens_file.is_file():
             with open(added_tokens_file, "r", encoding="utf-8") as f:
                 added_tokens_json = json.load(f)
@@ -2614,14 +2698,26 @@ class T5EncoderModel(TextModel):
         from sentencepiece import SentencePieceProcessor
         from sentencepiece import sentencepiece_model_pb2 as model
 
-        tokenizer_path = self.dir_model / "tokenizer.model" if self.dir_tokenizer is None else self.dir_tokenizer / "tokenizer.model"
+        tokenizer_path = (
+            self.dir_model / "tokenizer.model"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "tokenizer.model"
+        )
 
         # many older models use spiece.model tokenizer model filename
         if not tokenizer_path.is_file():
-            tokenizer_path = self.dir_model / "spiece.model" if self.dir_tokenizer is None else self.dir_tokenizer / "spiece.model"
+            tokenizer_path = (
+                self.dir_model / "spiece.model"
+                if self.dir_tokenizer is None
+                else self.dir_tokenizer / "spiece.model"
+            )
 
         if not tokenizer_path.is_file():
-            tokenizer_path = self.dir_model / ".." / "spiece.model" if self.dir_tokenizer is None else self.dir_tokenizer / ".." / "spiece.model"
+            tokenizer_path = (
+                self.dir_model / ".." / "spiece.model"
+                if self.dir_tokenizer is None
+                else self.dir_tokenizer / ".." / "spiece.model"
+            )
             if not tokenizer_path.is_file():
                 raise FileNotFoundError(f"File not found: {tokenizer_path}")
 
@@ -2672,7 +2768,11 @@ class T5EncoderModel(TextModel):
             scores[token_id] = score
             toktypes[token_id] = toktype
 
-        added_tokens_file = self.dir_model / "added_tokens.json" if self.dir_tokenizer is None else self.dir_tokenizer / "added_tokens.json"
+        added_tokens_file = (
+            self.dir_model / "added_tokens.json"
+            if self.dir_tokenizer is None
+            else self.dir_tokenizer / "added_tokens.json"
+        )
         if added_tokens_file.is_file():
             with open(added_tokens_file, "r", encoding="utf-8") as f:
                 added_tokens_json = json.load(f)
@@ -3073,7 +3173,6 @@ def main() -> None:
             except NotImplementedError:
                 logger.error(f"Model {model_architecture} is not supported")
                 sys.exit(1)
-        
 
         model_instance = model_class(
             dir_model,

@@ -1,3 +1,3 @@
-from .quantize import TextEncoderQuantizer  
+from .quantize import TextEncoderQuantizer, TransformerQuantizer
 
-__all__ = ["TextEncoderQuantizer"]
+__all__ = ["TextEncoderQuantizer", "TransformerQuantizer"]

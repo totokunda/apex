@@ -10,7 +10,9 @@ DEFAULT_CONFIG_SAVE_PATH = os.getenv(
 )
 DEFAULT_SAVE_PATH = os.getenv("SAVE_PATH", str(HOME_DIR / "apex-diffusion"))
 
-DEFAULT_COMPONENTS_PATH = os.getenv("COMPONENTS_PATH", str(HOME_DIR / "apex-diffusion" / "components"))
+DEFAULT_COMPONENTS_PATH = os.getenv(
+    "COMPONENTS_PATH", str(HOME_DIR / "apex-diffusion" / "components")
+)
 
 DEFAULT_PREPROCESSOR_SAVE_PATH = os.getenv(
     "PREPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "preprocessors")
@@ -22,7 +24,7 @@ DEFAULT_POSTPROCESSOR_SAVE_PATH = os.getenv(
 
 DEFAULT_CACHE_PATH = os.getenv("CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache"))
 
-# make sure all paths exist 
+# make sure all paths exist
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_COMPONENTS_PATH, exist_ok=True)
