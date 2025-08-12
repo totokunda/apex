@@ -25,7 +25,7 @@ import cv2
 import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
-from src.quantize.ggml_layer import patch_module
+from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 
@@ -110,9 +110,9 @@ class LoaderMixin(DownloadMixin):
                 # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
                 config_class = getattr(model_class, "config_class", PretrainedConfig)
                 conf = config_class(**config)
-                model = model_class(conf, **extra_kwargs)
+                model = model_class.from_config(conf, **extra_kwargs)
             else:
-                model = model_class(**config, **extra_kwargs)
+                model = model_class.from_config(config, **extra_kwargs)
 
         if no_weights:
             return model
@@ -123,7 +123,7 @@ class LoaderMixin(DownloadMixin):
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
-            patch_module(model)
+            patch_model(model)
             model.load_state_dict(state_dict, assign=True)
 
         else:
