@@ -1559,8 +1559,8 @@ class MmprojModel(ModelBase):
             self.gguf_writer.add_vision_head_count(self.find_vparam(["num_attention_heads"]))
 
             # preprocessor config
-            image_mean = DATASET_MEAN if self.is_mistral_format else self.preprocessor_config["image_mean"]
-            image_std = DATASET_STD if self.is_mistral_format else self.preprocessor_config["image_std"]
+            image_mean = self.preprocessor_config["image_mean"]
+            image_std = self.preprocessor_config["image_std"]
 
             self.gguf_writer.add_vision_image_mean(image_mean)
             self.gguf_writer.add_vision_image_std(image_std)
@@ -1813,6 +1813,209 @@ class LlamaModel(TextModel):
             if len(experts) > 0:
                 raise ValueError(f"Unprocessed experts: {experts}")
 
+
+
+@ModelBase.register("Step1Model")
+class Step1Model(TextModel):
+    """
+    Step1Model quantization mapping.
+
+    This model follows a LLaMA-like architecture with GQA and a fused WQKV projection
+    as implemented in `src/preprocess/stepvideo/llm.py`:
+
+      - Token embeddings at `tok_embeddings.word_embeddings.weight`
+      - Transformer stacked as `transformer.layers.{i}....`
+      - Attention uses fused `wqkv` and output `wo`
+      - FFN uses `feed_forward.w1` and `feed_forward.w2`
+      - Norms are `attention_norm` and `ffn_norm`
+
+    We map this to the LLAMA GGUF arch and only customize tensor name remapping
+    and GGUF param extraction (notably vocab size keys in config).
+    """
+
+    model_arch = gguf.MODEL_ARCH.LLAMA
+
+    def set_vocab(self):
+        # Prefer Step1 custom SPM if available, then generic SPM, then HF/GPT2 fallback
+        from pathlib import Path as _Path
+        spm_dir = self.dir_tokenizer if self.dir_tokenizer is not None else self.dir_model
+        custom_spm = _Path(spm_dir) / "step1_chat_tokenizer.model"
+        if custom_spm.is_file():
+            from sentencepiece import SentencePieceProcessor
+            tokenizer = SentencePieceProcessor()
+            tokenizer.LoadFromFile(str(custom_spm))
+
+            vocab_size = (
+                self.hparams.get("padded_vocab_size")
+                or self.hparams.get("orig_vocab_size")
+                or self.hparams.get("vocab_size")
+                or tokenizer.vocab_size()
+            )
+
+            tokens: list[bytes] = [f"[PAD{i}]".encode("utf-8") for i in range(vocab_size)]
+            scores: list[float] = [-10000.0] * vocab_size
+            toktypes: list[int] = [SentencePieceTokenTypes.UNUSED] * vocab_size
+
+            for token_id in range(tokenizer.vocab_size()):
+                if token_id >= vocab_size:
+                    break
+                piece = tokenizer.IdToPiece(token_id)
+                text = piece.encode("utf-8")
+                score = tokenizer.GetScore(token_id)
+
+                toktype = SentencePieceTokenTypes.NORMAL
+                if tokenizer.IsUnknown(token_id):
+                    toktype = SentencePieceTokenTypes.UNKNOWN
+                elif tokenizer.IsControl(token_id):
+                    toktype = SentencePieceTokenTypes.CONTROL
+                elif tokenizer.IsUnused(token_id):
+                    toktype = SentencePieceTokenTypes.UNUSED
+                elif tokenizer.IsByte(token_id):
+                    toktype = SentencePieceTokenTypes.BYTE
+
+                tokens[token_id] = text
+                scores[token_id] = score
+                toktypes[token_id] = toktype
+
+            self.gguf_writer.add_tokenizer_model("llama")
+            self.gguf_writer.add_tokenizer_pre("default")
+            self.gguf_writer.add_token_list(tokens)
+            self.gguf_writer.add_token_scores(scores)
+            self.gguf_writer.add_token_types(toktypes)
+
+            special_vocab = gguf.SpecialVocab(self.dir_model, n_vocab=len(tokens))
+            special_vocab.add_to_gguf(self.gguf_writer)
+            return
+
+        # Generic SentencePiece
+        try:
+            self._set_vocab_sentencepiece()
+            return
+        except FileNotFoundError:
+            pass
+
+        # HF llama json
+        try:
+            self._set_vocab_llama_hf()
+            return
+        except (FileNotFoundError, TypeError):
+            pass
+
+        # GPT-2 BPE as last resort
+        self._set_vocab_gpt2()
+
+    def set_gguf_parameters(self):
+        # Base params (context length, embedding length, ff length, heads, etc.)
+        super().set_gguf_parameters()
+
+        # Step1 config uses padded/original vocab size keys
+        vocab_size = (
+            self.hparams.get("padded_vocab_size")
+            or self.hparams.get("orig_vocab_size")
+            or self.hparams.get("vocab_size")
+        )
+        if vocab_size is not None:
+            self.gguf_writer.add_vocab_size(vocab_size)
+            logger.info(f"gguf: vocab size = {vocab_size}")
+
+        # RoPE dims (match LLaMA default behavior)
+        rope_dim = self.hparams.get("head_dim")
+        if rope_dim is None:
+            # hidden_size // num_attention_heads
+            rope_dim = self.hparams["hidden_size"] // self.hparams["num_attention_heads"]
+        self.gguf_writer.add_rope_dimension_count(rope_dim)
+
+        # KV heads: Step1 uses groups for GQA
+        n_head_kv = (
+            self.hparams.get("num_key_value_heads")
+            or self.hparams.get("n_kv_heads")
+            or self.hparams.get("num_attention_groups")
+        )
+        if n_head_kv is not None:
+            self.gguf_writer.add_head_count_kv(int(n_head_kv))
+
+        # Add RMSNorm epsilon expected by llama.cpp
+        eps = (
+            self.hparams.get("layernorm_epsilon")
+            or self.hparams.get("layer_norm_eps")
+            or self.hparams.get("rms_norm_eps")
+            or 1e-5
+        )
+        self.gguf_writer.add_layer_norm_rms_eps(float(eps))
+
+    def modify_tensors(
+        self, data_torch: Tensor, name: str, bid: int | None
+    ) -> Iterable[tuple[str, Tensor]]:
+        # Unwrap Step1-specific prefixes and align to LLAMA map keys
+        # 1) Token embeddings: tok_embeddings.word_embeddings.weight -> tok_embeddings.weight
+        if name == "tok_embeddings.word_embeddings.weight":
+            name = "tok_embeddings.weight"
+
+        # 2) Transformer layers prefix: transformer.layers.X.* -> layers.X.*
+        if name.startswith("transformer.layers."):
+            name = name.replace("transformer.", "", 1)
+
+        # Split fused SWiGLU gate/up projection into w1 and w3 if needed
+        if name.endswith("feed_forward.w1.weight"):
+            # data_torch shape is [out_features, in_features]; out_features == 2 * hidden_dim
+            out_features = data_torch.shape[0]
+            half = out_features // 2
+            gate = data_torch[:half, ...]
+            up = data_torch[half:, ...]
+
+            # Construct raw names for mapper
+            # Note: bid is provided by the loader based on the original name
+            if bid is None:
+                # Best-effort fallback: try to parse from the updated name
+                try:
+                    bid = int(name.split(".")[1])
+                except Exception:
+                    bid = 0
+
+            raw_w1 = f"layers.{bid}.feed_forward.w1.weight"
+            raw_w3 = f"layers.{bid}.feed_forward.w3.weight"
+            return [
+                (self.map_tensor_name(raw_w1), gate),
+                (self.map_tensor_name(raw_w3), up),
+            ]
+
+        # Split fused attention wqkv into separate q, k, v (LLAMA mapping expects them)
+        if name.endswith(".attention.wqkv.weight"):
+            hidden_size = self.hparams["hidden_size"]
+            kv_channels = self.hparams.get("kv_channels")
+            n_groups = (
+                self.hparams.get("num_key_value_heads")
+                or self.hparams.get("n_kv_heads")
+                or self.hparams.get("num_attention_groups")
+            )
+            if kv_channels is None or n_groups is None:
+                raise ValueError("Missing kv_channels or num_attention_groups in config for Step1Model")
+
+            kv_dim = int(kv_channels) * int(n_groups)
+
+            # data_torch shape: [out_features, in_features]
+            q_w = data_torch[:hidden_size, :]
+            k_w = data_torch[hidden_size : hidden_size + kv_dim, :]
+            v_w = data_torch[hidden_size + kv_dim : hidden_size + 2 * kv_dim, :]
+
+            if bid is None:
+                try:
+                    bid = int(name.split(".")[1])
+                except Exception:
+                    bid = 0
+
+            raw_wq = f"layers.{bid}.attention.wq.weight"
+            raw_wk = f"layers.{bid}.attention.wk.weight"
+            raw_wv = f"layers.{bid}.attention.wv.weight"
+
+            return [
+                (self.map_tensor_name(raw_wq), q_w),
+                (self.map_tensor_name(raw_wk), k_w),
+                (self.map_tensor_name(raw_wv), v_w),
+            ]
+
+        # Default: map as-is using the tensor map
+        return [(self.map_tensor_name(name), data_torch)]
 
 
 @ModelBase.register(

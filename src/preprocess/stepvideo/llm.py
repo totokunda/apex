@@ -27,7 +27,8 @@ from src.preprocess.base import (
 from src.attention import attention_register
 import warnings
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
-
+from src.quantize.ggml_layer import patch_module
+from src.quantize.load import load_gguf
 
 def safediv(n, d):
     q, r = divmod(n, d)
@@ -625,17 +626,27 @@ class Step1TextEncoderPreprocessor(BasePreprocessor):
         save_path=DEFAULT_PREPROCESSOR_SAVE_PATH,
         dtype=torch.bfloat16,
         max_length=320,
+        gguf_kwargs={},
+        gguf_path=None,
         **kwargs,
     ):
         super(Step1TextEncoderPreprocessor, self).__init__(
             model_path, save_path, preprocessor_type=PreprocessorType.TEXT
         )
+        
         self.max_length = max_length
         self.save_path = save_path
         self.dtype = dtype
         tokenizer_path = self._download(tokenizer_path, save_path)
         self.text_tokenizer = Wrapped_StepChatTokenizer(tokenizer_path)
-        text_encoder = Step1Model.from_pretrained(model_path)
+        if gguf_path is not None:
+            model_weights = load_gguf(gguf_path, **gguf_kwargs)
+            with init_empty_weights():
+                text_encoder = Step1Model.from_pretrained(model_path)
+            patch_module(text_encoder)
+            text_encoder.load_state_dict(model_weights)
+        else:
+            text_encoder = Step1Model.from_pretrained(model_path)
         self.text_encoder = text_encoder.eval().to(dtype)
         self.dtype = dtype
 

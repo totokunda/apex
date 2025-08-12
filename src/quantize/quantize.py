@@ -191,8 +191,9 @@ class TextEncoderQuantizer(BaseQuantizer):
             
         requires_llama_cpp_quant = self._requires_llama_cpp_quant(quantization)
             
-        hparams = ModelBase.load_hparams(self.model_path, False)
+        hparams = ModelBase.load_hparams(Path(self.model_path), False)
         model_architecture = get_model_architecture(hparams, self.model_type)
+        
         model_class = ModelBase.from_model_architecture(
             model_architecture, model_type=self.model_type
         )
