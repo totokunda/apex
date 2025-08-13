@@ -24,6 +24,11 @@ DEFAULT_POSTPROCESSOR_SAVE_PATH = os.getenv(
 
 DEFAULT_CACHE_PATH = os.getenv("CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache"))
 
+# New default path to store LoRA adapters and related artifacts
+DEFAULT_LORA_SAVE_PATH = os.getenv(
+    "LORA_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "loras")
+)
+
 # make sure all paths exist
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)
@@ -31,6 +36,7 @@ os.makedirs(DEFAULT_COMPONENTS_PATH, exist_ok=True)
 os.makedirs(DEFAULT_PREPROCESSOR_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_POSTPROCESSOR_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_CACHE_PATH, exist_ok=True)
+os.makedirs(DEFAULT_LORA_SAVE_PATH, exist_ok=True)
 
 os.environ["HF_HOME"] = os.getenv(
     "HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")

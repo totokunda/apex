@@ -32,6 +32,7 @@ from src.utils.defaults import (
     DEFAULT_COMPONENTS_PATH,
     DEFAULT_PREPROCESSOR_SAVE_PATH,
     DEFAULT_POSTPROCESSOR_SAVE_PATH,
+    DEFAULT_LORA_SAVE_PATH,
 )
 
 import tempfile
@@ -52,6 +53,7 @@ from torchvision import transforms as TF
 import inspect
 from src.preprocess import preprocessor_registry
 from src.postprocess import postprocessor_registry
+from src.lora import LoraManager, LoraItem
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -85,6 +87,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     denoise_type: str | None = None
     vae_tiling: bool = False
     vae_slicing: bool = False
+    lora_manager: LoraManager | None = None
+    loaded_loras: Dict[str, LoraItem] = {}
 
     def __init__(
         self,
@@ -127,6 +131,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
+        self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
+        self._auto_apply_loras()
 
     def _init_logger(self):
         self.logger = logger
@@ -850,7 +856,79 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 )
 
     def apply_lora(self, lora_path: str):
-        pass
+        # Backward-compat shim: allow direct single-path call
+        if self.transformer is None:
+            self.load_component_by_type("transformer")
+        self.apply_loras([lora_path])
+
+    def _init_lora_manager(self, save_dir: str):
+        try:
+            self.lora_manager = LoraManager(save_dir)
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize LoraManager: {e}")
+            self.lora_manager = None
+
+    def apply_loras(
+        self,
+        loras: List[Union[str, LoraItem, tuple]],
+        adapter_names: List[str] | None = None,
+        scales: List[float] | None = None,
+    ):
+        """
+        Apply one or multiple LoRAs to the current transformer using PEFT backend.
+        Each entry in `loras` may be a source string, a LoraItem, or (source|LoraItem, scale).
+        """
+        if self.transformer is None:
+            self.load_component_by_type("transformer")
+
+        if self.lora_manager is None:
+            self._init_lora_manager(DEFAULT_LORA_SAVE_PATH)
+        if self.lora_manager is None:
+            raise RuntimeError("LoraManager is not available")
+
+        resolved = self.lora_manager.load_into(
+            self.transformer, loras, adapter_names=adapter_names, scales=scales
+        )
+        # Track by adapter name
+        for i, item in enumerate(resolved):
+            name = (
+                adapter_names[i]
+                if adapter_names and i < len(adapter_names)
+                else item.name or f"lora_{i}"
+            )
+            self.loaded_loras[name] = item
+        self.logger.info(f"Applied {len(resolved)} LoRA(s) to transformer")
+
+    def _auto_apply_loras(self):
+        """If the YAML config includes a top-level `loras` list, apply them on init.
+        Supported formats:
+        - ["source1", "source2"]
+        - [{"source": "...", "scale": 0.8, "name": "style"}, ...]
+        """
+        loras_cfg = self.config.get("loras", None)
+        if not loras_cfg:
+            return
+        formatted: List[Union[str, LoraItem, tuple]] = []
+        adapter_names: List[str] = []
+        for entry in loras_cfg:
+            if isinstance(entry, str):
+                formatted.append(entry)
+                adapter_names.append(None)
+            elif isinstance(entry, dict):
+                src = entry.get("source") or entry.get("path") or entry.get("url")
+                scale = float(entry.get("scale", 1.0))
+                name = entry.get("name")
+                if name is not None:
+                    adapter_names.append(name)
+                else:
+                    adapter_names.append(None)
+                formatted.append((src, scale))
+        # remove None names at end so we can pass None overall if all None
+        final_names = adapter_names if any(n is not None for n in adapter_names) else None
+        try:
+            self.apply_loras(formatted, adapter_names=final_names)
+        except Exception as e:
+            self.logger.warning(f"Auto-apply LoRAs failed: {e}")
 
     def _parse_input_nodes(self, input_nodes: List[UINode]):
         kwargs = {}
