@@ -67,6 +67,32 @@ def get_transformer_converter(model_type: str):
         raise ValueError(f"Model type {model_type} not supported")
 
 
+def get_transformer_converter_by_model_name(model_name: str):
+    if "WanVace" in model_name:
+        return WanVaceTransformerConverter()
+    elif "WanMultiTalk" in model_name:
+        return WanMultiTalkTransformerConverter()
+    elif "Wan" in model_name:
+        return WanTransformerConverter()
+    elif "CogVideoX" in model_name:
+        return CogVideoXTransformerConverter()
+    elif "HunyuanAvatar" in model_name:
+        return HunyuanAvatarTransformerConverter()
+    elif "Hunyuan" in model_name:
+        return HunyuanTransformerConverter()
+    elif "Mochi" in model_name:
+        return MochiTransformerConverter()
+    elif "LTX" in model_name:
+        return LTXTransformerConverter()
+    elif "StepVideo" in model_name:
+        return StepVideoTransformerConverter()
+    elif "SkyReels" in model_name:
+        return SkyReelsTransformerConverter()
+    elif "Magi" in model_name:
+        return MagiTransformerConverter()
+    return None
+
+
 def get_vae_converter(vae_type: str, **additional_kwargs):
     if vae_type == "ltx":
         return LTXVAEConverter(**additional_kwargs)

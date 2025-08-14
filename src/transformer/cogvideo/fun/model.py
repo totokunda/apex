@@ -18,7 +18,6 @@ import json
 import os
 from typing import Any, Dict, Optional, Tuple, Union
 
-from diffusers.loaders.single_file_model import FromOriginalModelMixin
 import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -361,7 +360,7 @@ class CogVideoXBlock(nn.Module):
 
 
 @TRANSFORMERS_REGISTRY("cogvideo.fun")
-class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
+class CogVideoXTransformer3DModel(ModelMixin, ConfigMixin):
     """
     A Transformer model for video-like data in [CogVideoX](https://github.com/THUDM/CogVideo).
 

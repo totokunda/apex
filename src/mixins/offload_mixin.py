@@ -1,5 +1,7 @@
 import torch
 import gc
+import mlx.core as mx
+from mlx.nn import Module as MlxModule
 
 
 class OffloadMixin:
@@ -67,3 +69,11 @@ class OffloadMixin:
             and torch.backends.mps.is_available()
         ):
             torch.mps.empty_cache()
+
+    @staticmethod
+    def _mlx_offload(module: MlxModule | None) -> None:
+        if not module:
+            return
+        del module
+        gc.collect()
+        mx.clear_cache()

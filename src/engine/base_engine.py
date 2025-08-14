@@ -7,13 +7,13 @@ import urllib3
 from diffusers.models.modeling_utils import ModelMixin
 from contextlib import contextmanager
 from tqdm import tqdm
-import math
 import shutil
 import accelerate
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from src.transformer.base import TRANSFORMERS_REGISTRY
+from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
+from src.mlx.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_MLX
 from src.text_encoder.text_encoder import TextEncoder
 from src.vae import get_vae
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -25,6 +25,7 @@ from src.utils.cache import empty_cache
 from logging import Logger
 from src.scheduler import SchedulerInterface
 from typing import Callable
+from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
 from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
@@ -39,7 +40,8 @@ import tempfile
 from src.mixins import LoaderMixin, ToMixin, OffloadMixin
 from glob import glob
 from safetensors import safe_open
-
+import mlx.core as mx
+import mlx.nn as mx_nn
 from src.converters import (
     get_transformer_keys,
     convert_transformer,
@@ -436,7 +438,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     def load_transformer(
         self,
         component: Dict[str, Any],
-        load_dtype: torch.dtype | None,
+        load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
         component["model_path"], is_converted = self._check_convert_model_path(
@@ -482,18 +484,29 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info(f"Converted transformer weights to diffusers format")
                 empty_cache()
         else:
+            base = component.get("base")
+            if base.startswith("mlx."):
+                registry = TRANSFORMERS_REGISTRY_MLX
+                dtype_converter = convert_dtype_to_mlx
+                component["base"] = base.lstrip("mlx.")
+            else:
+                registry = TRANSFORMERS_REGISTRY_TORCH
+                dtype_converter = convert_dtype_to_torch
             transformer = self._load_model(
                 component,
-                TRANSFORMERS_REGISTRY.get,
+                registry.get,
                 "Transformer",
-                load_dtype,
+                dtype_converter(load_dtype) if load_dtype else None,
                 no_weights,
                 key_map=component.get("key_map", {}),
                 extra_kwargs=component.get("extra_kwargs", {}),
             )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
-            self.to_dtype(transformer, self.component_dtypes["transformer"])
+            if isinstance(transformer, torch.nn.Module):
+                self.to_dtype(transformer, self.component_dtypes["transformer"])
+            elif isinstance(transformer, mx_nn.Module):
+                self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
         return transformer
 
@@ -924,7 +937,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     adapter_names.append(None)
                 formatted.append((src, scale))
         # remove None names at end so we can pass None overall if all None
-        final_names = adapter_names if any(n is not None for n in adapter_names) else None
+        final_names = (
+            adapter_names if any(n is not None for n in adapter_names) else None
+        )
         try:
             self.apply_loras(formatted, adapter_names=final_names)
         except Exception as e:

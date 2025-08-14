@@ -3,6 +3,10 @@ import torch
 from typing import List
 from src.utils.cache import empty_cache
 from diffusers import ModelMixin
+from mlx import nn as mx_nn
+import mlx.core as mx
+from src.utils.mlx import convert_dtype_to_mlx
+from src.mlx.mixins.from_model_mixin import _flatten_leaf_arrays, _set_by_path
 
 
 class ToMixin:
@@ -128,9 +132,58 @@ class ToMixin:
 
         return module
 
+    def to_mlx_dtype(
+        self,
+        module: mx_nn.Module,
+        dtype: str | torch.dtype | mx.Dtype,
+    ) -> mx_nn.Module:
+        """
+        Cast all floating-point mlx arrays inside an `mlx.nn.Module` to the
+        requested MLX dtype, preserving structure and honoring model-specific
+        FP32 keep-lists when available.
+
+        Parameters
+        ----------
+        module:
+            The MLX module whose arrays should be cast.
+        dtype:
+            Target dtype. May be a string (e.g. "float16", "bfloat16"),
+            a torch.dtype, or an MLX dtype; will be converted to an MLX dtype.
+
+        Returns
+        -------
+        module: mx_nn.Module
+            The same module instance, with floating-point arrays cast in-place.
+        """
+        target_dtype: mx.Dtype = convert_dtype_to_mlx(dtype)
+
+        keep_fp32_patterns = tuple(getattr(module, "_keep_in_fp32_modules", []) or [])
+
+        def _matches(patterns: tuple[str, ...], name: str) -> bool:
+            return any(re.search(p, name) for p in patterns)
+
+        def _is_float_dtype(d: mx.Dtype) -> bool:
+            return d in (mx.float16, mx.bfloat16, mx.float32, mx.float64)
+
+        leaves = _flatten_leaf_arrays(module)
+
+        for name, arr in leaves.items():
+            # Only cast floating types; skip integer/bool arrays
+            if not _is_float_dtype(arr.dtype):
+                continue
+
+            wanted_dtype = (
+                mx.float32 if _matches(keep_fp32_patterns, name) else target_dtype
+            )
+
+            if arr.dtype != wanted_dtype:
+                _set_by_path(module, name, arr.astype(wanted_dtype))
+
+        return module
+
     def to_device(
         self,
-        *components: torch.nn.Module,
+        *components: torch.nn.Module | mx_nn.Module,
         device: torch.device | str | None = None,
     ) -> None:
         """

@@ -310,6 +310,7 @@ class WanRotaryPosEmbed(nn.Module):
         ppf, pph, ppw = num_frames // p_t, height // p_h, width // p_w
 
         freqs = self.freqs.to(hidden_states.device)
+
         freqs = freqs.split_with_sizes(
             [
                 self.attention_head_dim // 2 - 2 * (self.attention_head_dim // 6),
@@ -318,9 +319,9 @@ class WanRotaryPosEmbed(nn.Module):
             ],
             dim=1,
         )
-
         freqs_f = freqs[0][:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
         freqs_h = freqs[1][:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
+
         freqs_w = freqs[2][:ppw].view(1, 1, ppw, -1).expand(ppf, pph, ppw, -1)
         freqs = torch.cat([freqs_f, freqs_h, freqs_w], dim=-1).reshape(
             1, 1, ppf * pph * ppw, -1
