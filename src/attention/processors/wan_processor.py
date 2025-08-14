@@ -36,6 +36,8 @@ class WanAttnProcessor2_0:
         query = attn.to_q(hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
+        
+        
 
         if attn.norm_q is not None:
             query = attn.norm_q(query)
@@ -45,6 +47,9 @@ class WanAttnProcessor2_0:
         query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
         key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
         value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        
+        
+        
 
         if rotary_emb is not None:
 
@@ -62,6 +67,7 @@ class WanAttnProcessor2_0:
 
             query = apply_rotary_emb(query, rotary_emb)
             key = apply_rotary_emb(key, rotary_emb)
+            
 
         # I2V task
         hidden_states_img = None
@@ -84,10 +90,12 @@ class WanAttnProcessor2_0:
 
             hidden_states_img = hidden_states_img.flatten(2, 3)
             hidden_states_img = hidden_states_img.type_as(query)
-
+        
+        
         hidden_states = attention_register.call(
             query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
         ).transpose(1, 2)
+        
         hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
 

@@ -31,8 +31,9 @@ from src.mixins.download_mixin import DownloadMixin
 
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
-from src.utils.torch import is_safetensors_file, load_safetensors
+from src.utils.safetensors import is_safetensors_file, load_safetensors
 import mlx.core as mx
+from src.utils.mlx import check_mlx_convolutional_weights
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 
@@ -78,8 +79,13 @@ class LoaderMixin(DownloadMixin):
                 # replace the config.json with the config
                 config_path = os.path.join(model_path, "config.json")
                 self._save_config(config, config_path)
+            
+            if hasattr(self, "engine_type") and self.engine_type == "mlx" and component.get("type") == "transformer":
+                extra_kwargs["dtype"] = load_dtype
+            else:
+                extra_kwargs["torch_dtype"] = load_dtype
             model = model_class.from_pretrained(
-                model_path, torch_dtype=load_dtype, **extra_kwargs
+                model_path,  **extra_kwargs
             )
             return model
 
@@ -118,7 +124,7 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
 
-        if model_path.endswith(".gguf"):
+        if model_path.endswith(".gguf") and hasattr(self, "engine_type") and self.engine_type == "torch":
             self.logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
             state_dict, _ = load_gguf(
@@ -126,7 +132,12 @@ class LoaderMixin(DownloadMixin):
             )
             patch_model(model)
             model.load_state_dict(state_dict, assign=True)
-
+        elif model_path.endswith(".gguf") and hasattr(self, "engine_type") and self.engine_type == "mlx":
+            self.logger.info(f"Loading GGUF model from {model_path}")
+            # Can load gguf directly into mlx model no need to convert
+            gguf_weights = mx.load(model_path)
+            check_mlx_convolutional_weights(gguf_weights, model)
+            model.load_weights(gguf_weights)
         else:
             if os.path.isdir(model_path):
                 self.logger.info(f"Loading model from {model_path}")
@@ -151,7 +162,7 @@ class LoaderMixin(DownloadMixin):
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")
                 if is_safetensors_file(file_path):
-                    state_dict = load_safetensors(file_path, dtype=load_dtype)
+                    state_dict = load_safetensors(file_path, dtype=load_dtype, framework="np" if self.engine_type == "mlx" else "pt")
                 else:
                     state_dict = torch.load(
                         file_path, map_location="cpu", weights_only=True, mmap=True
@@ -170,6 +181,10 @@ class LoaderMixin(DownloadMixin):
                                 new_state_dict[k2] = v2
 
                     state_dict = new_state_dict
+                
+                if hasattr(self, "engine_type") and self.engine_type == "mlx":
+                    check_mlx_convolutional_weights(state_dict, model)
+                    
                 if hasattr(model, "load_state_dict"):
                     model.load_state_dict(
                         state_dict, strict=False, assign=True
@@ -180,18 +195,18 @@ class LoaderMixin(DownloadMixin):
                     raise ValueError(
                         f"Model {model} does not have a load_state_dict or load_weights method"
                     )
-            # Assert no parameters are on meta device
+                
+        if hasattr(self, "engine_type") and self.engine_type == "torch":
+            has_meta_params = False
+            for name, param in model.named_parameters():
+                if param.device.type == "meta":
+                    self.logger.error(f"Parameter {name} is on meta device")
+                    has_meta_params = True
 
-        has_meta_params = False
-        for name, param in model.named_parameters():
-            if param.device.type == "meta":
-                self.logger.error(f"Parameter {name} is on meta device")
-                has_meta_params = True
-
-        if has_meta_params:
-            raise ValueError(
-                "Model has parameters on meta device, this is not supported"
-            )
+            if has_meta_params:
+                raise ValueError(
+                    "Model has parameters on meta device, this is not supported"
+                )
 
         return model
 
@@ -236,18 +251,19 @@ class LoaderMixin(DownloadMixin):
 
         component_split = component_base.split(".")
         if len(component_split) > 1:
-            module_name = component_split[0]
+            module_name = ".".join(component_split[:-1])
             class_name = component_split[-1]
         else:
             module_name = "diffusers"
             class_name = component_base
-
+        
         try:
             base_module = importlib.import_module(module_name)
         except ImportError:
             raise ImportError(
                 f"Could not import the base module '{module_name}' from component '{component_base}'"
             )
+
 
         component_class = find_class_recursive(base_module, class_name)
 

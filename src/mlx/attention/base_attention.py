@@ -13,6 +13,8 @@ class Attention(nn.Module):
         dropout: float = 0.0,
         added_kv_proj_dim: Optional[int] = None,
         cross_attention_dim_head: Optional[int] = None,
+        bias: bool = True,
+        out_bias: bool = True,
         processor=None,
     ):
         super().__init__()
@@ -27,18 +29,18 @@ class Attention(nn.Module):
             else cross_attention_dim_head * heads
         )
 
-        self.to_q = nn.Linear(dim, self.inner_dim, bias=True)
-        self.to_k = nn.Linear(dim, self.kv_inner_dim, bias=True)
-        self.to_v = nn.Linear(dim, self.kv_inner_dim, bias=True)
-        self.to_out = [nn.Linear(self.inner_dim, dim, bias=True), nn.Dropout(dropout)]
+        self.to_q = nn.Linear(dim, self.inner_dim, bias=bias)
+        self.to_k = nn.Linear(dim, self.kv_inner_dim, bias=bias)
+        self.to_v = nn.Linear(dim, self.kv_inner_dim, bias=bias)
+        self.to_out = [nn.Linear(self.inner_dim, dim, bias=out_bias), nn.Dropout(dropout)]
 
         self.norm_q = nn.RMSNorm(dim_head * heads, eps=eps)
         self.norm_k = nn.RMSNorm(dim_head * heads, eps=eps)
 
         self.add_k_proj = self.add_v_proj = None
         if added_kv_proj_dim is not None:
-            self.add_k_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
-            self.add_v_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=True)
+            self.add_k_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=bias)
+            self.add_v_proj = nn.Linear(added_kv_proj_dim, self.inner_dim, bias=bias)
             self.norm_added_k = nn.RMSNorm(dim_head * heads, eps=eps)
 
         self.set_processor(processor)

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import shutil
 import accelerate
+from src.converters.convert_torch_mlx import convert_weights_to_mlx
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -26,6 +27,7 @@ from logging import Logger
 from src.scheduler import SchedulerInterface
 from typing import Callable
 from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
+
 from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
@@ -59,8 +61,8 @@ from src.lora import LoraManager, LoraItem
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-
 class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
+    engine_type: Literal["torch", "mlx"] = "torch"
     config: Dict[str, Any]
     scheduler: SchedulerInterface | None = None
     vae: AutoencoderKL | None = None
@@ -176,6 +178,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.logger.info(f"Loading model {config['name']}")
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
+        self.engine_type = config.get("engine_type", "torch")
         if config.get("denoise_type", None):
             self.denoise_type = config.get("denoise_type")
 
@@ -278,7 +281,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         scheduler = self._load_scheduler(component)
 
         # Add all SchedulerInterface methods to self.scheduler if not already present
-        if not isinstance(scheduler, SchedulerInterface):
+        if not isinstance(scheduler, SchedulerInterface) and self.engine_type == "torch":
             # Create a new class that inherits from both the scheduler's class and SchedulerInterface
             class SchedulerWrapper(scheduler.__class__, SchedulerInterface):
                 pass
@@ -434,17 +437,18 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 cast_buffers=False,
             )
         return text_encoder
-
+    
     def load_transformer(
         self,
         component: Dict[str, Any],
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
+        
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
-
+        
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             transformer = self.convert_transformer_weights(component)
@@ -464,6 +468,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         "transformer",
                         **self.config.get("save_kwargs", {}),
                     )
+                
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
                         # add subdirectory called transformer
@@ -510,9 +515,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         return transformer
 
-    def _get_safetensors_keys(self, model_path: str, model_key: str | None = None):
+    def _get_safetensors_keys(self, model_path: str, model_key: str | None = None, framework: str = "pt"):
         keys = set()
-        with safe_open(model_path, framework="pt", device="cpu") as f:
+        with safe_open(model_path, framework=framework, device="cpu") as f:
             if model_key is not None:
                 keys.update(f[model_key].keys())
             else:
@@ -589,12 +594,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
             for file in files:
                 if file.endswith(".safetensors"):
-                    keys.update(self._get_safetensors_keys(file, model_key))
+                    keys.update(self._get_safetensors_keys(file, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
                 elif file.endswith(pt_extensions):
                     keys.update(self._get_pt_keys(file, model_key))
         else:
             if model_path.endswith(".safetensors"):
-                keys.update(self._get_safetensors_keys(model_path, model_key))
+                keys.update(self._get_safetensors_keys(model_path, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
             elif model_path.endswith(pt_extensions):
                 keys.update(self._get_pt_keys(model_path, model_key))
 
@@ -612,12 +617,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     )
                     for file in files:
                         if file.endswith(".safetensors"):
-                            keys.update(self._get_safetensors_keys(file, model_key))
+                            keys.update(self._get_safetensors_keys(file, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
                         elif file.endswith(pt_extensions):
                             keys.update(self._get_pt_keys(file, model_key))
             else:
                 if extra_model_path.endswith(".safetensors"):
-                    keys.update(self._get_safetensors_keys(extra_model_path, model_key))
+                    keys.update(self._get_safetensors_keys(extra_model_path, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
                 elif extra_model_path.endswith(pt_extensions):
                     keys.update(self._get_pt_keys(extra_model_path, model_key))
 
@@ -641,13 +646,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             iterating_keys = _keys.copy()
 
         found_keys = set()
+        
         for iterating_key in iterating_keys:
             for key in keys:
                 if key == iterating_key:
                     found_keys.add(iterating_key)
                     break
-
-        return len(found_keys) == len(iterating_keys)
+    
+        missing_keys = iterating_keys - found_keys
+        return len(missing_keys) == 0
 
     def convert_transformer_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"

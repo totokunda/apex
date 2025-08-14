@@ -5,9 +5,9 @@ import safetensors
 import mlx.core as mx
 
 
-def is_safetensors_file(file_path: str):
+def is_safetensors_file(file_path: str, framework: str = "pt"):
     try:
-        with safetensors.safe_open(file_path, framework="pt", device="cpu") as f:
+        with safetensors.safe_open(file_path, framework=framework, device="cpu") as f:
             f.keys()
         return True
     except Exception:
@@ -18,6 +18,7 @@ def load_safetensors(
     filename: Union[str, os.PathLike],
     device: Union[str, int] = "cpu",
     dtype: torch.dtype | mx.Dtype = None,
+    framework: str = "pt",
 ) -> Dict[str, torch.Tensor]:
     """
     Loads a safetensors file into torch format.
@@ -42,9 +43,11 @@ def load_safetensors(
     ```
     """
     result = {}
-    with safetensors.safe_open(filename, framework="pt", device=device) as f:
+    with safetensors.safe_open(filename, framework=framework, device=device) as f:
         for k in f.keys():
             result[k] = f.get_tensor(k)
+            if framework == "np":
+                result[k] = mx.array(result[k])
             if dtype:
                 if isinstance(dtype, torch.dtype) and isinstance(
                     result[k], torch.Tensor

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 import mlx.core as mx
 from safetensors import safe_open
 from tqdm import tqdm
+from mlx.utils import tree_flatten
 
 
 def _mx_dtype_from_str(dtype: Optional[str] | Optional[mx.Dtype]) -> Optional[mx.Dtype]:
@@ -193,6 +194,7 @@ class FromModelMixin:
         seen: set[str] = set()
 
         keep_in_fp32_modules = getattr(model, "_keep_in_fp32_modules", [])
+        state_dict = tree_flatten(model.parameters(), destination={})
 
         # Load shards
         for shard_name, tensor_names in tqdm(shard_map.items(), desc="Loading shards"):
@@ -214,6 +216,21 @@ class FromModelMixin:
                         if mod in name:
                             arr = arr.astype(mx.float32)
                             break
+                    
+                    if arr.ndim == 5:
+                        # check same shape as model 
+                        if arr.shape != state_dict[name].shape:
+                            arr = arr.transpose(0, 2, 3, 4, 1)
+                            if arr.shape != state_dict[name].shape:
+                                shape = state_dict[name].shape
+                                raise ValueError(f"Weight {name} has shape {arr.shape} but expected {shape}")
+                    elif arr.ndim == 4:
+                        if arr.shape != state_dict[name].shape:
+                            arr = arr.transpose(0, 2, 3, 1)
+                            if arr.shape != state_dict[name].shape:
+                                shape = state_dict[name].shape
+                                raise ValueError(f"Weight {name} has shape {arr.shape} but expected {shape}")
+                    
                     assigned = _set_by_path(model, name, arr)
                     if assigned:
                         seen.add(name)

@@ -2,7 +2,7 @@ import torch
 import math
 from src.utils.type import EnumType
 from src.utils.cache import empty_cache
-
+from src.mlx.denoise import WanDenoise as WanDenoiseMLX, DenoiseType as DenoiseTypeMLX
 
 class DenoiseType(EnumType):
     BASE = "base"
@@ -10,8 +10,7 @@ class DenoiseType(EnumType):
     DIFFUSION_FORCING = "diffusion_forcing"
     MULTITALK = "multitalk"
 
-
-class WanDenoise:
+class WanDenoise(WanDenoiseMLX):
     def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
@@ -25,6 +24,14 @@ class WanDenoise:
             return self.diffusion_forcing_denoise(*args, **kwargs)
         elif self.denoise_type == DenoiseType.MULTITALK:
             return self.multitalk_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseTypeMLX.BASE:
+            return self.mlx_base_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseTypeMLX.MOE:
+            return self.mlx_moe_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseTypeMLX.DIFFUSION_FORCING:
+            return self.mlx_diffusion_forcing_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseTypeMLX.MULTITALK:
+            return self.mlx_multitalk_denoise(*args, **kwargs)
         else:
             raise ValueError(f"Denoise type {self.denoise_type} not supported")
 
@@ -159,7 +166,7 @@ class WanDenoise:
                     else:
                         latent_model_input = latents.to(transformer_dtype)
                 # Standard denoising
-
+                
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,

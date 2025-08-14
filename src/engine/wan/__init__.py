@@ -2,7 +2,6 @@ from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
 from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
 from src.mlx.denoise.wan_denoise import (
-    WanDenoise as WanDenoiseMLX,
     DenoiseType as DenoiseTypeMLX,
 )
 from .t2v import WanT2VEngine
@@ -33,34 +32,26 @@ class ModelType(EnumType):
     MULTITALK = "multitalk"  # multitalk audio-driven video
 
 
-class WanEngine(BaseEngine, WanDenoise, WanDenoiseMLX):
+class WanEngine(BaseEngine, WanDenoise):
     def __init__(
         self,
         yaml_path: str,
         model_type: ModelType = ModelType.T2V,
         denoise_type: DenoiseType | DenoiseTypeMLX = DenoiseType.BASE,
-        use_mlx: bool = False,
         **kwargs,
     ):
         self.model_type = model_type
-        self.denoise_type = denoise_type
-        self.use_mlx = use_mlx
-        if use_mlx:
-            # get the denoise type from the mlx denoise type
+        
+        super().__init__(yaml_path, **kwargs)
+        
+        if self.engine_type == "mlx":
             self.denoise_type = DenoiseTypeMLX(
                 f"mlx.{denoise_type.value if isinstance(denoise_type, DenoiseType) or isinstance(denoise_type, DenoiseTypeMLX) else denoise_type}"
             )
         else:
             self.denoise_type = DenoiseType(
-                (
-                    denoise_type.value
-                    if isinstance(denoise_type, DenoiseType)
-                    or isinstance(denoise_type, DenoiseTypeMLX)
-                    else denoise_type
-                ).rstrip("mlx.")
+                (denoise_type.value if isinstance(denoise_type, DenoiseType) or isinstance(denoise_type, DenoiseTypeMLX) else denoise_type).rstrip("mlx.")
             )
-
-        super().__init__(yaml_path, **kwargs)
 
         self.vae_scale_factor_temporal = (
             2 ** sum(self.vae.temperal_downsample)
