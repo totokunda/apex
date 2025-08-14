@@ -1,8 +1,7 @@
 from src.engine import create_engine
 from diffusers.utils import export_to_video
-import torch
 
-engine = create_engine("wan", "manifest/wan/wan_t2v_1.3b.yml", "t2v", attention_type="sdpa")
+engine = create_engine("wan", "manifest/wan/wan_t2v_1.3b_mlx.yml", "t2v", attention_type="sdpa")
 engine.enable_vae_tiling()
 
 space_prompt = "Deep space: a velvet-black void studded with shimmering stars. Center frame: a colossal spiral galaxy, its cerulean and rose arms rotating against cosmic darkness. In the foreground, a sleek silver spacecraft hovers silently, its hull reflecting swirling nebulae.  \
@@ -18,9 +17,9 @@ video = engine.run(
     width=832,
     duration='1s',
     num_videos=1,
-    num_inference_steps=10,
+    num_inference_steps=35,
     guidance_scale=5.0, 
     seed=42,
 )
 
-export_to_video(video[0], "test_wan_t2v_1.3b_space.mp4", fps=16, quality=8)
+export_to_video(video[0], "test_wan_t2v_1.3b_mlx_space.mp4", fps=16, quality=8)

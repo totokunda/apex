@@ -16,7 +16,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
     def __init__(
         self,
         config: Dict[str, Any],
-        no_weights: bool = False,
+        no_weights: bool = True,
         enable_cache: bool = True,
         cache_file: str = None,
         max_cache_size: int = 100,
@@ -31,7 +31,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         self.model_path = config.get("model_path")
         self.config_path = config.get("config_path", None)
         self.tokenizer_path = config.get("tokenizer_path", None)
-        self.config = config.get("config", {})
+        self.model_config = config.get("config", {})
+        self.config = config
         self.enable_cache = enable_cache
         self.cache_file = cache_file
         self.max_cache_size = max_cache_size
@@ -52,24 +53,29 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             self.tokenizer = fetch_and_save_tokenizer_from_config(
                 self.model_path,
                 self.config_path,
-                self.config,
-                tokenizer_class=config.get("tokenizer_class", None),
-                tokenizer_name=config.get("tokenizer_name", None),
-                **config.get("tokenizer_kwargs", {}),
+                self.model_config,
+                tokenizer_class=self.config.get("tokenizer_class", None),
+                tokenizer_name=self.config.get("tokenizer_name", None),
+                **self.config.get("tokenizer_kwargs", {}),
             )
-        self.model = self._load_model(
+        
+        self.model = None
+        self.model_loaded = False
+    
+    def load_model(self, no_weights: bool = False):
+        return self._load_model(
             {
-                "config": self.config,
+                "config": self.model_config,
                 "config_path": self.config_path,
                 "model_path": self.model_path,
                 "base": self.base,
                 "type": "text_encoder",
-                "gguf_kwargs": config.get("gguf_kwargs", {}),
+                "gguf_kwargs": self.config.get("gguf_kwargs", {}),
             },
             module_name="transformers",
             no_weights=no_weights,
-            key_map=config.get("key_map", {}),
-            extra_kwargs=config.get("extra_kwargs", {}),
+            key_map=self.config.get("key_map", {}),
+            extra_kwargs=self.config.get("extra_kwargs", {}),
         )
 
     def basic_clean(self, text):
@@ -132,6 +138,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
                     return cached_embeds, cached_mask
                 else:
                     return cached_embeds
+        
+        if not self.model_loaded:
+            self.model = self.load_model(no_weights=False)
+            self.model_loaded = True
 
         text_inputs = self.tokenizer(
             text,

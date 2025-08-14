@@ -1,65 +1,57 @@
-import mlx.core as mx
 import torch
-from src.mlx.transformer.wan.base.model import WanTransformer3DModel
-from src.utils.mlx import to_mlx
-import time 
-model = WanTransformer3DModel.from_pretrained("apex-diffusion/components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer/mlx", dtype='float16')
-model = model.eval()
+from src.mlx.transformer.wan.base.model import WanTransformer3DModel as WanTransformer3DModelMLX
+from src.transformer.wan.base.model import WanTransformer3DModel as WanTransformer3DModelTorch
+import torch 
+from src.utils.mlx import torch_to_mlx, mlx_to_torch
+from diffusers import UniPCMultistepScheduler
+from src.mlx.scheduler.unipc import UniPCMultistepScheduler as UniPCMultistepSchedulerMLX
+
+mlx_model = WanTransformer3DModelMLX.from_pretrained("/Users/tosinkuye/apex-diffusion/components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer/mlx", dtype='float16')
+torch_model = WanTransformer3DModelTorch.from_pretrained("/Users/tosinkuye/apex-diffusion/components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer", torch_dtype=torch.float16).to("mps")
+
+mlx_model = mlx_model.eval()
+torch_model = torch_model.eval()
 file = "denoise_input.pt"
 
-data = torch.load(file)
+tensors = torch.load(file)
+t_hidden_states = tensors["hidden_states"].to("mps")
+t_timestep = tensors["timestep"].to("mps")
+t_t = t_timestep.squeeze()
+t_encoder_hidden_states = tensors["encoder_hidden_states"].to("mps")
 
-data['hidden_states'] = data['hidden_states'].repeat(1, 1, 2, 1, 1)[:, :, :21, :, :]
-data['timestep'] = data['timestep']
-data['encoder_hidden_states'] = data['encoder_hidden_states']
+mlx_tensors = torch_to_mlx(tensors.copy())
+m_hidden_states = mlx_tensors["hidden_states"]
+m_timestep = mlx_tensors["timestep"]
+m_t = m_timestep.squeeze()
+m_encoder_hidden_states = mlx_tensors["encoder_hidden_states"]
 
-data = {k: to_mlx(v) if isinstance(v, torch.Tensor) else v for k, v in data.items()} 
-torch.mps.empty_cache()
+scheduler = UniPCMultistepScheduler.from_pretrained('/Users/tosinkuye/apex-diffusion/configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
+scheduler_mlx = UniPCMultistepSchedulerMLX.from_pretrained('/Users/tosinkuye/apex-diffusion/configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
+scheduler.set_timesteps(30)
+scheduler_mlx.set_timesteps(30)
 
-hidden_states = data["hidden_states"]
-timestep = data["timestep"]
-encoder_hidden_states = data["encoder_hidden_states"]
+def compare_tensors(t_tensor, m_tensor, label: str = ""):
+    if t_tensor is None or m_tensor is None:
+        print("One of the tensors is None", label)
+        return
+    mt_tensor = mlx_to_torch(m_tensor)
+    print(label, t_tensor.shape, mt_tensor.shape, t_tensor.dtype, mt_tensor.dtype, t_tensor.device, mt_tensor.device)
+    try:
+        torch.testing.assert_close(t_tensor, mt_tensor, atol=1e-4, rtol=1e2)
+        print("Passed", label)
+    except Exception as e:
+        print("Failed", label, e)
 
-batch_size, num_channels, num_frames, height, width = hidden_states.shape
-p_t, p_h, p_w = model.config.patch_size
-post_patch_num_frames = num_frames // p_t
-post_patch_height = height // p_h
-post_patch_width = width // p_w
-
-print(batch_size, num_channels, num_frames, height, width)
-print(p_t, p_h, p_w)
-print(post_patch_num_frames, post_patch_height, post_patch_width)
-
-print(f"Peak memory: {mx.get_peak_memory() / 1024**3:.2f} GB")
-
-start_time = time.time()
-@mx.compile
-def inference_model(hidden_states, timestep, encoder_hidden_states):
-    out = model(
-        hidden_states=hidden_states,
-        timestep=timestep,
-        encoder_hidden_states=encoder_hidden_states,
-        encoder_hidden_states_image=None,
-        return_dict=False,
-    )[0]
-    return out
-
-out = inference_model(hidden_states, timestep, encoder_hidden_states)
-mx.eval(out)
-
-out_2 = inference_model(hidden_states, timestep, encoder_hidden_states / 2)
-mx.eval(out_2)
-
-end_time = time.time()
-print(f"Time taken: {end_time - start_time:.2f} seconds")
-print(f"Active memory: {mx.get_active_memory() / 1024**3:.2f} GB")
-print(f"Peak memory: {mx.get_peak_memory() / 1024**3:.2f} GB")
-
-
-
-
-
-
-
-
-
+with torch.no_grad():
+   
+    t_noise_pred = torch_model(hidden_states=t_hidden_states, encoder_hidden_states=t_encoder_hidden_states, timestep=t_timestep, return_dict=False)[0]
+    m_noise_pred = mlx_model(hidden_states=m_hidden_states, encoder_hidden_states=m_encoder_hidden_states, timestep=m_timestep, return_dict=False)[0]
+    
+    t_latents = scheduler.step(t_noise_pred, t_t, t_hidden_states, return_dict=False)[0]
+    m_latents = scheduler_mlx.step(m_noise_pred, m_t, m_hidden_states, return_dict=False)[0]
+    
+    compare_tensors(t_noise_pred, m_noise_pred, "noise_pred")
+    compare_tensors(t_latents, m_latents, "latents")
+    
+    
+    

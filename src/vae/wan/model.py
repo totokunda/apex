@@ -1389,6 +1389,7 @@ class AutoencoderKLWan(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         tile_latent_min_width = (
             self.tile_sample_min_width // self.spatial_compression_ratio
         )
+        
 
         if self.use_tiling and (
             width > tile_latent_min_width or height > tile_latent_min_height

@@ -4,7 +4,7 @@ description: "Shared SkyReels Components"
 components:
   - type: scheduler
     name: "skyreels/scheduler"
-    base: "src.scheduler.FlowUniPCMultistepScheduler"
+    base: "src.scheduler.UniPCMultistepScheduler"
     config:
       shift: 8.0
       num_train_timesteps: 1000

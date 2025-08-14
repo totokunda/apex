@@ -4,21 +4,19 @@ from typing import Iterable, Optional
 import mlx.core as mx
 from loguru import logger
 from tqdm import tqdm
-from src.utils.mlx import to_torch, to_mlx
-import torch
 from src.utils.type import EnumType
-
+from src.utils.mlx import convert_dtype_to_mlx, torch_to_mlx, to_torch
 
 class DenoiseType(EnumType):
-    MLX_BASE = "mlx.base"
-    MLX_MOE = "mlx.moe"
-    MLX_DIFFUSION_FORCING = "mlx.diffusion_forcing"
-    MLX_MULTITALK = "mlx.multitalk"
+    BASE = "mlx.base"
+    MOE = "mlx.moe"
+    DIFFUSION_FORCING = "mlx.diffusion_forcing"
+    MULTITALK = "mlx.multitalk"
 
 
 class WanDenoise:
     def __init__(
-        self, denoise_type: DenoiseType = DenoiseType.MLX_BASE, *args, **kwargs
+        self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
@@ -30,13 +28,13 @@ class WanDenoise:
         return getattr(self, "logger", logger)
 
     def denoise(self, *args, **kwargs) -> mx.array:
-        if self.denoise_type == DenoiseType.MLX_BASE:
+        if self.denoise_type == DenoiseType.BASE:
             return self.mlx_base_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.MLX_MOE:
+        elif self.denoise_type == DenoiseType.MOE:
             return self.mlx_moe_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.MLX_DIFFUSION_FORCING:
+        elif self.denoise_type == DenoiseType.DIFFUSION_FORCING:
             return self.mlx_diffusion_forcing_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.MLX_MULTITALK:
+        elif self.denoise_type == DenoiseType.MULTITALK:
             return self.mlx_multitalk_denoise(*args, **kwargs)
         else:
             raise ValueError(f"Denoise type {self.denoise_type} not supported")
@@ -53,6 +51,7 @@ class WanDenoise:
             return array
         if array.dtype == dtype:
             return array
+
         return array.astype(dtype)
 
     def _concat_if_needed(
@@ -64,9 +63,7 @@ class WanDenoise:
 
     def mlx_moe_denoise(self, *args, **kwargs) -> mx.array:
 
-        for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                kwargs[k] = to_mlx(v)
+        kwargs = torch_to_mlx(kwargs)
 
         timesteps: Iterable[mx.array] = kwargs.get("timesteps", None)
         latents: mx.array = kwargs.get("latents", None)
@@ -78,10 +75,12 @@ class WanDenoise:
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
+        
+        transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 
         log = self._get_logger()
 
-        for i, t in enumerate(tqdm(timesteps, desc="Sampling MOE")):
+        for i, t in enumerate(tqdm(timesteps, desc="Sampling MOE (MLX)")):
             if latent_condition is not None:
                 latent_model_input = self._concat_if_needed(latents, latent_condition)
                 latent_model_input = self._maybe_to_dtype(
@@ -94,7 +93,7 @@ class WanDenoise:
 
             if boundary_timestep is None or t >= boundary_timestep:
                 if hasattr(self, "transformer_2") and self.transformer_2:
-                    self._mlx_offload(self.transformer_2)
+                    self._offload(self.transformer_2)
                     setattr(self, "transformer_2", None)
                 if not self.transformer:
                     self.load_component_by_name("transformer")
@@ -103,7 +102,7 @@ class WanDenoise:
                     guidance_scale = guidance_scale[1]
             else:
                 if self.transformer:
-                    self._mlx_offload(self.transformer)
+                    self._offload(self.transformer)
                     setattr(self, "transformer", None)
                 if not hasattr(self, "transformer_2") or not self.transformer_2:
                     self.load_component_by_name("transformer_2")
@@ -135,9 +134,9 @@ class WanDenoise:
                     noise_pred - uncond_noise_pred
                 )
             mx.eval(noise_pred)
-
+            
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
+            
             mx.eval(latents)
 
             if render_on_step and render_on_step_callback:
@@ -150,9 +149,7 @@ class WanDenoise:
         return to_torch(latents)
 
     def mlx_base_denoise(self, *args, **kwargs) -> mx.array:
-        for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                kwargs[k] = to_mlx(v)
+        kwargs = torch_to_mlx(kwargs)
 
         timesteps: Iterable[mx.array] = kwargs.get("timesteps", None)
         latents: mx.array = kwargs.get("latents", None)
@@ -165,16 +162,16 @@ class WanDenoise:
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps: bool = kwargs.get("expand_timesteps", False)
         first_frame_mask: Optional[mx.array] = kwargs.get("first_frame_mask", None)
+        
+        transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 
-        if getattr(self, "transformer", None) is None:
-            raise RuntimeError(
-                "Expected 'transformer' attribute to be set for WanDenoise.base_denoise"
-            )
+        if not hasattr(self, "transformer") or self.transformer is None:
+            self.load_component_by_type("transformer")
         transformer = self.transformer
 
         log = self._get_logger()
 
-        for i, t in enumerate(tqdm(timesteps, desc=f"Sampling WAN(MLX)")):
+        for i, t in enumerate(tqdm(timesteps, desc=f"Sampling WAN (MLX)")):
             if expand_timesteps and first_frame_mask is not None:
                 mask = mx.ones_like(latents)
             else:
@@ -222,6 +219,7 @@ class WanDenoise:
                 return_dict=False,
                 **kwargs.get("transformer_kwargs", {}),
             )[0]
+            
             mx.eval(noise_pred)
 
             if use_cfg_guidance and kwargs.get(
@@ -237,9 +235,9 @@ class WanDenoise:
                     noise_pred - uncond_noise_pred
                 )
             mx.eval(noise_pred)
-
+            
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
+            
             mx.eval(latents)
 
             if render_on_step and render_on_step_callback:
@@ -258,4 +256,5 @@ class WanDenoise:
             ) * latent_condition + first_frame_mask * latents
 
         log.info("Denoising completed.")
-        return to_torch(latents)
+        
+        return to_torch(latents)  

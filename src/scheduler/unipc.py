@@ -14,14 +14,8 @@ from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from diffusers.schedulers.scheduling_utils import SchedulerOutput
 from diffusers.utils import deprecate
 import math
-import os
-import json
-from pathlib import Path
-from torch import Tensor
-from safetensors.torch import safe_open
 
-
-class FlowUniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
+class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
     """
     `UniPCMultistepScheduler` is a training-free framework designed for the fast sampling of diffusion models.
 

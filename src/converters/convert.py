@@ -10,6 +10,8 @@ from src.transformer.base import get_transformer
 from src.vae import get_vae
 from accelerate import init_empty_weights
 from typing import List
+from mlx.utils import tree_flatten
+
 
 from src.converters.transformer_converters import (
     WanTransformerConverter,
@@ -36,35 +38,35 @@ from src.converters.utils import (
 from src.converters.vae_converters import LTXVAEConverter, MagiVAEConverter
 
 
-def get_transformer_converter(model_type: str):
+def get_transformer_converter(model_base: str):
     if (
-        model_type == "wan.base"
-        or model_type == "wan.causal"
-        or model_type == "wan.fun"
+        model_base == "wan.base"
+        or model_base == "wan.causal"
+        or model_base == "wan.fun"
     ):
         return WanTransformerConverter()
-    elif model_type == "wan.vace":
+    elif model_base == "wan.vace":
         return WanVaceTransformerConverter()
-    elif model_type == "wan.multitalk":
+    elif model_base == "wan.multitalk":
         return WanMultiTalkTransformerConverter()
-    elif model_type == "cogvideox.base":
+    elif model_base == "cogvideox.base":
         return CogVideoXTransformerConverter()
-    elif model_type == "hunyuan.base":
+    elif model_base == "hunyuan.base":
         return HunyuanTransformerConverter()
-    elif model_type == "hunyuan.avatar":
+    elif model_base == "hunyuan.avatar":
         return HunyuanAvatarTransformerConverter()
-    elif model_type == "mochi.base":
+    elif model_base == "mochi.base":
         return MochiTransformerConverter()
-    elif model_type == "ltx.base":
+    elif model_base == "ltx.base":
         return LTXTransformerConverter()
-    elif model_type == "stepvideo.base":
+    elif model_base == "stepvideo.base":
         return StepVideoTransformerConverter()
-    elif model_type == "skyreels.base":
+    elif model_base == "skyreels.base":
         return SkyReelsTransformerConverter()
-    elif model_type == "magi.base":
+    elif model_base == "magi.base":
         return MagiTransformerConverter()
     else:
-        raise ValueError(f"Model type {model_type} not supported")
+        raise ValueError(f"Model type {model_base} not supported")
 
 
 def get_transformer_converter_by_model_name(model_name: str):
@@ -207,7 +209,7 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
 
 def convert_transformer(
     model_tag: str,
-    model_type: str,
+    model_base: str,
     ckpt_path: str | List[str] = None,
     model_key: str = None,
     pattern: str | None = None,
@@ -217,10 +219,18 @@ def convert_transformer(
     config = get_transformer_config(
         model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
     )
+    
+    if "mlx" in model_base:
+        using_mlx = True
+        model_base = model_base.replace("mlx.", "")
+        model_type = "mlx.transformer"
+    else:
+        using_mlx = False
+        model_type = "transformer"
 
-    model_class = get_model_class(model_type, config, model_type="transformer")
+    model_class = get_model_class(model_base, config, model_type=model_type)
 
-    converter = get_transformer_converter(model_type)
+    converter = get_transformer_converter(model_base)
 
     if isinstance(ckpt_path, list):
         state_dict = {}
@@ -230,16 +240,16 @@ def convert_transformer(
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
 
     model = get_empty_model(model_class, config)
-
-    model_keys = model.state_dict().keys()
-    # print(model_keys)
-    # exit()
-
+    
     converter.convert(state_dict)
 
-    state_dict = strip_common_prefix(state_dict, model.state_dict())
-
-    model.load_state_dict(state_dict, strict=True, assign=True)
+    if not using_mlx:
+        state_dict = strip_common_prefix(state_dict, model.state_dict())
+        model.load_state_dict(state_dict, strict=True, assign=True)
+    else:
+        model_state_dict = tree_flatten(model.parameters(), destination={})
+        state_dict = strip_common_prefix(state_dict, model_state_dict)
+        model.load_weights(state_dict)
 
     return model
 
@@ -277,14 +287,27 @@ def convert_vae(
 
 
 def get_transformer_keys(
-    model_type: str, model_tag: str, transformer_converter_kwargs: dict
+    model_base: str, model_tag: str, transformer_converter_kwargs: dict
 ):
     config = get_transformer_config(
         model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
     )
-    model_class = get_model_class(model_type, config, model_type="transformer")
+    using_mlx = False
+    if "mlx" in model_base:
+        using_mlx = True
+        model_base = model_base.replace("mlx.", "")
+        model_type = "mlx.transformer"
+    else:
+        model_type = "transformer"
+    model_class = get_model_class(model_base, config, model_type=model_type)
     model = get_empty_model(model_class, config)
-    return model.state_dict().keys()
+    
+    if using_mlx:
+        params = model.parameters()
+        flat_params = tree_flatten(params, destination={})
+        return flat_params.keys()
+    else:
+        return model.state_dict().keys()
 
 
 def get_vae_keys(vae_type: str, vae_tag: str, vae_converter_kwargs: dict):

@@ -86,7 +86,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         if timestep.dtype != time_embedder_dtype and time_embedder_dtype != mx.int8:
             timestep = timestep.astype(time_embedder_dtype)
 
-        temb = self.time_embedder(timestep).astype(enc_dtype)
+        temb = self.time_embedder(timestep).astype(dtype=enc_dtype)
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
@@ -127,14 +127,18 @@ class WanRotaryPosEmbed(nn.Module):
                 freqs_dtype=freqs_dtype,
             )
             freqs.append(freq)
-        self.freqs = mx.concatenate(freqs, axis=1)
+        
+        self._buffers = {"freqs": mx.concatenate(freqs, axis=1)}
+    
+    def get_freqs(self):
+        return self._buffers["freqs"]
 
     def __call__(self, hidden_states: mx.array) -> mx.array:
         batch_size, num_channels, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
         ppf, pph, ppw = num_frames // p_t, height // p_h, width // p_w
 
-        freqs = self.freqs
+        freqs = self.get_freqs()
         a = self.attention_head_dim // 2 - 2 * (self.attention_head_dim // 6)  # 22
         b = self.attention_head_dim // 6  # 32
         freqs = mx.split(
@@ -241,11 +245,13 @@ class WanTransformerBlock(nn.Module):
         norm_hidden_states = (
             self.norm1(hidden_states.astype(mx.float32)) * (1 + scale_msa) + shift_msa
         ).astype(hidden_states.dtype)
+        
 
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
-
+        
+       
         hidden_states = (
             hidden_states.astype(mx.float32) + attn_output * gate_msa
         ).astype(hidden_states.dtype)
@@ -401,6 +407,7 @@ class WanTransformer3DModel(nn.Module, ConfigMixin, FromModelMixin):
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[Tuple[mx.array], Transformer2DModelOutput]:
+        
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)
@@ -473,10 +480,11 @@ class WanTransformer3DModel(nn.Module, ConfigMixin, FromModelMixin):
         # on.
         shift = shift.astype(hidden_states.dtype)
         scale = scale.astype(hidden_states.dtype)
+        hidden_states_dtype = hidden_states.dtype
 
         hidden_states = (
             self.norm_out(hidden_states.astype(mx.float32)) * (1 + scale) + shift
-        ).astype(hidden_states.dtype)
+        ).astype(hidden_states_dtype)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = mx.reshape(

@@ -406,6 +406,7 @@ class WanTransformerBlock(nn.Module):
         norm_hidden_states = (
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
         ).type_as(hidden_states)
+        
 
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
