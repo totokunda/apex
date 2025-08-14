@@ -1,17 +1,15 @@
 import os
 import re
-import json
 import hashlib
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
-
+from src.converters.convert import get_transformer_converter_by_model_name
 import torch
 from loguru import logger
-from diffusers.loaders import LoraLoaderMixin
-
+from diffusers.loaders import PeftAdapterMixin
+from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
-
 
 @dataclass
 class LoraItem:
@@ -47,7 +45,11 @@ class LoraManager(DownloadMixin):
         # Local path
         if os.path.exists(source):
             paths = self._collect_lora_files(source)
-            item = LoraItem(source=source, local_paths=paths, name=prefer_name or os.path.basename(source))
+            item = LoraItem(
+                source=source,
+                local_paths=paths,
+                name=prefer_name or os.path.basename(source),
+            )
             self._cache[source] = item
             return item
 
@@ -58,7 +60,11 @@ class LoraManager(DownloadMixin):
             else:
                 local_path = self._download_from_url(source, self.save_dir)
             paths = self._collect_lora_files(local_path)
-            item = LoraItem(source=source, local_paths=paths, name=prefer_name or self._infer_name(source, local_path))
+            item = LoraItem(
+                source=source,
+                local_paths=paths,
+                name=prefer_name or self._infer_name(source, local_path),
+            )
             self._cache[source] = item
             return item
 
@@ -66,7 +72,11 @@ class LoraManager(DownloadMixin):
         if self._is_huggingface_repo(source) or self._looks_like_hf_file(source):
             local_path = self._download(source, self.save_dir)
             paths = self._collect_lora_files(local_path)
-            item = LoraItem(source=source, local_paths=paths, name=prefer_name or self._infer_name(source, local_path))
+            item = LoraItem(
+                source=source,
+                local_paths=paths,
+                name=prefer_name or self._infer_name(source, local_path),
+            )
             self._cache[source] = item
             return item
 
@@ -74,13 +84,21 @@ class LoraManager(DownloadMixin):
         if self._is_url(source):
             local_path = self._download_from_url(source, self.save_dir)
             paths = self._collect_lora_files(local_path)
-            item = LoraItem(source=source, local_paths=paths, name=prefer_name or self._infer_name(source, local_path))
+            item = LoraItem(
+                source=source,
+                local_paths=paths,
+                name=prefer_name or self._infer_name(source, local_path),
+            )
             self._cache[source] = item
             return item
 
         # As a last resort, try to treat as local path string
         paths = self._collect_lora_files(source)
-        item = LoraItem(source=source, local_paths=paths, name=prefer_name or os.path.basename(source))
+        item = LoraItem(
+            source=source,
+            local_paths=paths,
+            name=prefer_name or os.path.basename(source),
+        )
         self._cache[source] = item
         return item
 
@@ -115,11 +133,13 @@ class LoraManager(DownloadMixin):
         lower = filename.lower()
         return lower.endswith((".safetensors", ".bin", ".pt", ".pth"))
 
-    def load_into(self,
-                  model: Union[torch.nn.Module, LoraLoaderMixin],
-                  loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
-                  adapter_names: Optional[List[str]] = None,
-                  scales: Optional[List[float]] = None) -> List[LoraItem]:
+    def load_into(
+        self,
+        model: Union[torch.nn.Module, PeftAdapterMixin],
+        loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
+        adapter_names: Optional[List[str]] = None,
+        scales: Optional[List[float]] = None,
+    ) -> List[LoraItem]:
         """
         Load multiple LoRAs into a PEFT-enabled model. Supports per-adapter scaling.
         - loras can be strings (sources), LoraItem, or tuples of (source|LoraItem, scale)
@@ -127,8 +147,12 @@ class LoraManager(DownloadMixin):
         - scales optionally overrides per-adapter scale values
         Returns resolved LoraItem objects in load order.
         """
-        if not hasattr(model, "load_lora_weights"):
-            raise ValueError("Model doesn't support PEFT/LoRA. Ensure transformer inherits PeftAdapterMixin.")
+        if not hasattr(model, "load_adapter"):
+            raise ValueError(
+                "Model doesn't support PEFT/LoRA. Ensure transformer inherits PeftAdapterMixin."
+            )
+            
+        # verify the state dict is correct or convert it to the correct format
 
         resolved: List[LoraItem] = []
         final_names: List[str] = []
@@ -160,14 +184,24 @@ class LoraManager(DownloadMixin):
             final_scales.append(item.scale)
             # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
             for local_path in item.local_paths:
-                model.load_lora_weights(local_path, adapter_name=adapter_name)
+                local_path_state_dict = self.maybe_convert_state_dict(local_path, model.config._class_name)
+                model.load_lora_adapter(local_path_state_dict, adapter_name=adapter_name)
 
         # Activate all adapters with their weights in one call
         try:
             model.set_adapters(final_names, weights=final_scales)
         except Exception as e:
-            logger.warning(f"Failed to activate adapters {final_names} with scales {final_scales}: {e}")
+            logger.warning(
+                f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
+            )
         return resolved
+
+    def maybe_convert_state_dict(self, local_path: str, model_name: str) -> str:
+        state_dict = self.load_file(local_path)
+        converter = get_transformer_converter_by_model_name(model_name)
+        if converter is not None:
+            return converter.convert(state_dict)
+        return state_dict
 
     def _download_from_civitai_spec(self, spec: str) -> str:
         """
@@ -213,5 +247,9 @@ class LoraManager(DownloadMixin):
                 if file_id is not None:
                     return download_file_id(file_id)
         raise RuntimeError(f"No downloadable files found for CivitAI model {model_id}")
-
-
+    
+    def load_file(self, local_path: str) -> str:
+        if local_path.endswith(".safetensors"):
+            return load_file(local_path)
+        else:
+            torch.load(local_path)

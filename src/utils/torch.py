@@ -2,6 +2,7 @@ from typing import Dict, Union
 import os
 import torch
 import safetensors
+import mlx.core as mx
 
 
 def is_safetensors_file(file_path: str):
@@ -16,7 +17,7 @@ def is_safetensors_file(file_path: str):
 def load_safetensors(
     filename: Union[str, os.PathLike],
     device: Union[str, int] = "cpu",
-    dtype: torch.dtype = None,
+    dtype: torch.dtype | mx.Dtype = None,
 ) -> Dict[str, torch.Tensor]:
     """
     Loads a safetensors file into torch format.
@@ -41,9 +42,14 @@ def load_safetensors(
     ```
     """
     result = {}
-    with safe_open(filename, framework="pt", device=device) as f:
+    with safetensors.safe_open(filename, framework="pt", device=device) as f:
         for k in f.keys():
             result[k] = f.get_tensor(k)
             if dtype:
-                result[k] = result[k].to(dtype)
+                if isinstance(dtype, torch.dtype) and isinstance(
+                    result[k], torch.Tensor
+                ):
+                    result[k] = result[k].to(dtype)
+                elif isinstance(dtype, mx.Dtype) and isinstance(result[k], mx.array):
+                    result[k] = result[k].astype(dtype)
     return result

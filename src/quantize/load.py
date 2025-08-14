@@ -61,6 +61,7 @@ STEP_SD_MAP = {
     "token_embd": "tok_embeddings.word_embeddings",
 }
 
+
 def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
     if key_map == "t5":
         key_map = T5_SD_MAP
@@ -129,6 +130,7 @@ def load_text_encoder_gguf(
 
     return state_dict, qtype_dict
 
+
 def load_transformer_gguf(
     path: str,
     dequant_dtype: torch.dtype | str = torch.float16,
@@ -168,6 +170,7 @@ def load_transformer_gguf(
         qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
 
     return state_dict, qtype_dict
+
 
 def load_gguf(
     path: str,

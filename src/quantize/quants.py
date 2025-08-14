@@ -9,6 +9,7 @@ import numpy as np
 from enum import Enum
 import gguf
 
+
 class QuantConfig:
     ftype: gguf.LlamaFileType
     qtype: gguf.GGMLQuantizationType
@@ -34,11 +35,11 @@ class QuantType(Enum):
     Q4_K_S = "Q4_K_S"
     Q4_1 = "Q4_1"
     Q4_0 = "Q4_0"
-    Q3_K = "Q3_K" 
+    Q3_K = "Q3_K"
     Q3_K_L = "Q3_K_L"
     Q3_K_M = "Q3_K_M"
     Q3_K_S = "Q3_K_S"
-    Q2_K = "Q2_K" 
+    Q2_K = "Q2_K"
     Q2_K_S = "Q2_K_S"
 
 
@@ -65,7 +66,6 @@ qconfig_map: dict[str, QuantConfig] = {
     ),
     "Q4_1": QuantConfig(gguf.LlamaFileType.MOSTLY_Q4_1, gguf.GGMLQuantizationType.Q4_1),
     "Q4_0": QuantConfig(gguf.LlamaFileType.MOSTLY_Q4_0, gguf.GGMLQuantizationType.Q4_0),
-    
     "Q3_K_L": QuantConfig(
         gguf.LlamaFileType.MOSTLY_Q3_K_L, gguf.GGMLQuantizationType.Q3_K
     ),
@@ -80,6 +80,7 @@ qconfig_map: dict[str, QuantConfig] = {
         gguf.LlamaFileType.MOSTLY_Q2_K_S, gguf.GGMLQuantizationType.Q2_K
     ),
 }
+
 
 # This is faster than np.vectorize and np.apply_along_axis because it works on more than one row at a time
 def _apply_over_grouped_rows(

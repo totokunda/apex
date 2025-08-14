@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from src.quantize.ggml_tensor import GGMLTensor
 import torch.nn as nn
 
+
 def cast_to(tensor, dtype, device, copy=False, non_blocking=False):
     if tensor is None:
         return None
@@ -192,6 +193,7 @@ _TYPE_MAP = {
     nn.LayerNorm: GGMLLayerNorm,
     nn.GroupNorm: GGMLGroupNorm,
 }
+
 
 def patch_model(model, name_filter=None):
     """

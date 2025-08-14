@@ -130,6 +130,7 @@ class WanDenoise:
         self.to_device(self.transformer)
 
         model_type_str = getattr(self, "model_type", "WAN")
+
         with self._progress_bar(
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
@@ -158,12 +159,14 @@ class WanDenoise:
                     else:
                         latent_model_input = latents.to(transformer_dtype)
                 # Standard denoising
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
+
                 if use_cfg_guidance and kwargs.get(
                     "unconditional_transformer_kwargs", None
                 ):

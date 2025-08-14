@@ -45,6 +45,116 @@ except ImportError:
 attention_register = FunctionRegister()
 
 
+@attention_register("sdpa_streaming")
+def sdpa_streaming(
+    q,
+    k,
+    v,
+    attn_mask=None,
+    is_causal=False,
+    q_chunk=1024,
+    kv_chunk=4096,
+    **kwargs,
+):
+    """
+    Exact attention via streaming softmax, never forms full S_q x S_k.
+    q: [B,H,S_q,D], k,v: [B,H,S_k,D]  -> out: [B,H,S_q,D]
+    """
+    assert q.dim() == k.dim() == v.dim() == 4, "q,k,v must be [B,H,S, D]"
+    Bq, Hq, S_q, Dq = q.shape
+    Bk, Hk, S_k, Dk = k.shape
+    Bv, Hv, S_v, Dv = v.shape
+    assert (Bq, Hq, Dq) == (Bk, Hk, Dk) == (Bv, Hv, Dv), "B,H,D must match across q,k,v"
+    assert S_k == S_v, "K and V must share sequence length"
+
+    BH = Bq * Hq
+    device = q.device
+    dtype = q.dtype
+    logits_dtype = torch.float32  # stable logits math
+
+    # Fold heads to batch
+    qf = q.reshape(BH, S_q, Dq)
+    kf = k.reshape(BH, S_k, Dq)
+    vf = v.reshape(BH, S_k, Dq)
+
+    # Optional: normalize mask to [BH,S_q,S_k]
+    am = None
+    if attn_mask is not None:
+        if attn_mask.ndim == 2:  # [S_q,S_k]
+            am = attn_mask.to(logits_dtype).expand(BH, S_q, S_k)
+        elif attn_mask.ndim == 4:  # [B,H,S_q,S_k]
+            Bm, Hm, Smq, Smk = attn_mask.shape
+            assert (Bm, Hm, Smq, Smk) == (Bq, Hq, S_q, S_k)
+            am = attn_mask.reshape(BH, S_q, S_k).to(logits_dtype)
+        elif attn_mask.ndim == 3 and attn_mask.shape[0] == Bq:
+            # common case: [B,1,S_q,S_k]
+            Bm, _, Smq, Smk = attn_mask.shape
+            assert (Bm, Smq, Smk) == (Bq, S_q, S_k)
+            am = (
+                attn_mask.repeat_interleave(Hq, dim=0).squeeze(1).to(logits_dtype)
+            )  # [BH,S_q,S_k]
+        else:
+            raise ValueError(f"Unsupported attn_mask shape: {attn_mask.shape}")
+
+    scale = 1.0 / math.sqrt(Dq)
+    out = torch.empty_like(qf)  # [BH,S_q,D]
+    pos_q = torch.arange(S_q, device=device)
+    pos_k = torch.arange(S_k, device=device)
+
+    for qs in range(0, S_q, q_chunk):
+        qe = min(qs + q_chunk, S_q)
+        q_block = qf[:, qs:qe, :]  # [BH,q_len,D]
+        q_len = q_block.size(1)
+
+        # Streaming state per row
+        m_i = torch.full((BH, q_len), -float("inf"), device=device, dtype=logits_dtype)
+        l_i = torch.zeros((BH, q_len), device=device, dtype=logits_dtype)
+        out_i = torch.zeros((BH, q_len, Dq), device=device, dtype=dtype)
+
+        for ks in range(0, S_k, kv_chunk):
+            ke = min(ks + kv_chunk, S_k)
+            k_blk = kf[:, ks:ke, :]  # [BH,k_len,D]
+            v_blk = vf[:, ks:ke, :]  # [BH,k_len,D]
+            k_len = k_blk.size(1)
+
+            # Scores: [BH,q_len,k_len] in fp32
+            scores = (
+                torch.matmul(
+                    q_block.to(logits_dtype), k_blk.transpose(1, 2).to(logits_dtype)
+                )
+                * scale
+            )
+
+            # Add masks
+            if is_causal:
+                qpos = pos_q[qs:qe].unsqueeze(-1)  # [q_len,1]
+                kpos = pos_k[ks:ke].unsqueeze(0)  # [1,k_len]
+                tri = (kpos > qpos).unsqueeze(0)  # [1,q_len,k_len]
+                scores = scores.masked_fill(tri, float("-inf"))
+
+            if am is not None:
+                scores = scores + am[:, qs:qe, ks:ke]
+
+            # Streaming softmax update
+            m_ij = scores.max(dim=-1).values  # [BH,q_len]
+            p = torch.exp(scores - m_ij.unsqueeze(-1))  # [BH,q_len,k_len]
+            l_ij = p.sum(dim=-1)  # [BH,q_len]
+
+            m_new = torch.maximum(m_i, m_ij)  # [BH,q_len]
+            alpha = torch.exp(m_i - m_new)  # old scale
+            beta = torch.exp(m_ij - m_new)  # new block scale
+
+            out_i = out_i * alpha.unsqueeze(-1).to(out_i.dtype) + (
+                p.to(out_i.dtype) @ v_blk
+            )
+            l_i = l_i * alpha + l_ij * beta
+            m_i = m_new
+
+        out[:, qs:qe, :] = out_i / l_i.clamp_min(1e-20).unsqueeze(-1).to(out_i.dtype)
+
+    return out.reshape(Bq, Hq, S_q, Dq)
+
+
 @attention_register("sdpa")
 def sdpa(
     q,

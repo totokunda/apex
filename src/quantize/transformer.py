@@ -17,6 +17,7 @@ QUANTIZATION_THRESHOLD = 4096
 MAX_TENSOR_NAME_LENGTH = 127
 MAX_TENSOR_DIMS = 4
 
+
 class ModelArchitecture(Enum):
     WAN = "wan"
     COSMOS = "cosmos"
@@ -47,7 +48,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm_added_k",
         "pos_embed",
     ],
-
     # Cosmos transformers
     ModelArchitecture.COSMOS: [
         "patch_embed",
@@ -60,7 +60,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm_q",
         "norm_k",
     ],
-
     # CogVideoX transformers
     ModelArchitecture.COGVIDEO: [
         "patch_embed",
@@ -73,7 +72,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm_out",
         "norm_final",
     ],
-
     # Hunyuan transformers (base, avatar, framepack)
     ModelArchitecture.HUNYUAN: [
         "context_embedder",
@@ -86,7 +84,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm1_context",
         "norm2_context",
     ],
-
     # SkyReels transformers
     ModelArchitecture.SKYREELS: [
         "time_embedder",
@@ -101,7 +98,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm_k",
         "pos_embed",
     ],
-
     # LTX-Video transformers
     ModelArchitecture.LTX: [
         "time_embed",
@@ -112,7 +108,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm_out",
         "scale_shift_table",
     ],
-
     # MAGI transformers
     ModelArchitecture.MAGI: [
         "norm1",
@@ -129,7 +124,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "rope",
         "proj_out",
     ],
-
     # Mochi transformers
     ModelArchitecture.MOCHI: [
         "patch_embed",
@@ -143,7 +137,6 @@ FP32_WEIGHTS_PRESERVE_DTYPE = {
         "norm3_context",
         "norm4_context",
     ],
-
     # StepVideo transformers
     ModelArchitecture.STEPVIDEO: [
         "pos_embed",
@@ -246,6 +239,7 @@ def check_key_in_preserve_weights_dtype(key: str, preserve_weights_dtype: list[s
         if preserve_weight_dtype in key:
             return True
     return False
+
 
 def convert_model(
     model_path: str,

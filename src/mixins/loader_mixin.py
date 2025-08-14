@@ -32,6 +32,7 @@ from src.mixins.download_mixin import DownloadMixin
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 from src.utils.torch import is_safetensors_file, load_safetensors
+import mlx.core as mx
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 
@@ -44,7 +45,7 @@ class LoaderMixin(DownloadMixin):
         component: Dict[str, Any],
         getter_fn: Callable | None = None,
         module_name: str = "diffusers",
-        load_dtype: torch.dtype | None = None,
+        load_dtype: torch.dtype | mx.Dtype | None = None,
         no_weights: bool = False,
         key_map: Dict[str, str] | None = None,
         extra_kwargs: Dict[str, Any] | None = None,
@@ -169,10 +170,16 @@ class LoaderMixin(DownloadMixin):
                                 new_state_dict[k2] = v2
 
                     state_dict = new_state_dict
-
-                model.load_state_dict(
-                    state_dict, strict=False, assign=True
-                )  # must be false as we are iteratively loading the state dict
+                if hasattr(model, "load_state_dict"):
+                    model.load_state_dict(
+                        state_dict, strict=False, assign=True
+                    )  # must be false as we are iteratively loading the state dict
+                elif hasattr(model, "load_weights"):
+                    model.load_weights(state_dict, strict=False)
+                else:
+                    raise ValueError(
+                        f"Model {model} does not have a load_state_dict or load_weights method"
+                    )
             # Assert no parameters are on meta device
 
         has_meta_params = False

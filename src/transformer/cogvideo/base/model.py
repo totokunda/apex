@@ -15,7 +15,6 @@
 
 from typing import Any, Dict, Optional, Tuple, Union
 
-from diffusers.loaders.single_file_model import FromOriginalModelMixin
 import torch
 from torch import nn
 
@@ -184,7 +183,7 @@ class CogVideoXBlock(nn.Module):
 
 @TRANSFORMERS_REGISTRY("cogvideo.base")
 class CogVideoXTransformer3DModel(
-    ModelMixin, ConfigMixin, PeftAdapterMixin, CacheMixin, FromOriginalModelMixin
+    ModelMixin, ConfigMixin, PeftAdapterMixin, CacheMixin
 ):
     """
     A Transformer model for video-like data in [CogVideoX](https://github.com/THUDM/CogVideo).
