@@ -17,6 +17,11 @@ from tqdm import tqdm
 class CompositionOutput(BaseOutput):
     video: List[Image.Image]
     mask: List[Image.Image] | None = None
+    
+
+class ReferenceAnythingOutput(BaseOutput):
+    images: List[Image.Image]
+    masks: List[Image.Image] | None = None
 
 
 class AnimateAnythingOutput(BaseOutput):
@@ -236,7 +241,7 @@ class ReferenceAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        frames: Union[List[Union[Image.Image, np.ndarray, str]], str],
+        images: Union[List[Union[Image.Image, np.ndarray, str]], str],
         mask: Optional[Union[List[Union[Image.Image, np.ndarray, str]], str]] = None,
         mode: Optional[subject_mode] = "salient",
         return_mask: Optional[bool] = None,
@@ -246,7 +251,7 @@ class ReferenceAnythingPreprocessor(BasePreprocessor):
         bbox: Optional[List[float | int] | List[List[float | int]]] = None,
     ):
 
-        images = self._load_video(frames)
+        images = self._load_video(images)
         ret_data = defaultdict(list)
         if mask is not None:
             masks = self._load_video(mask, convert_method=lambda x: x.convert("L"))
@@ -288,8 +293,8 @@ class ReferenceAnythingPreprocessor(BasePreprocessor):
             if return_mask:
                 ret_data["masks"].append(ret_one_data.mask)
 
-        return CompositionOutput(
-            video=[Image.fromarray(image) for image in ret_data["images"]],
+        return ReferenceAnythingOutput(
+            images=[Image.fromarray(image) for image in ret_data["images"]],
             mask=(
                 [Image.fromarray(mask) for mask in ret_data["masks"]]
                 if ret_data["masks"] is not None
