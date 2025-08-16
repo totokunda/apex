@@ -1,6 +1,7 @@
 from diffusers import DiffusionPipeline
 import torch
 
+
 model_name = "Qwen/Qwen-Image"
 
 # Load the pipeline
@@ -20,7 +21,7 @@ positive_magic = {
 }
 
 # Generate image
-prompt = '''Majestic mountain in the Latium countryside near ancient Rome (circa 60–70 CE), the mountain fills most of the frame with rugged pale limestone cliffs, sunlit slopes, Mediterranean pines and cypress, wildflowers and scrub, faint goat paths, warm golden-hour light with long shadows, soft haze and atmospheric perspective, rolling green hills in the mid-ground, far on the horizon a small ancient Roman city by the Tiber—low temples and forums, red-tile roofs, distant aqueduct arches—tiny and unobtrusive, no monumental amphitheater yet, serene sky with thin clouds, ultra-detailed, natural color, cinematic landscape photograph, wide-angle 28–35 mm, tripod-stable, f/8 depth and crisp textures, composition: mountain occupies ~65% of frame, Rome a subtle glimmer in the distance'''
+prompt = '''Majestic mountain in the Latium countryside near ancient Rome (circa 60–70 CE), the mountain fills most of the frame with rugged pale limestone cliffs and jagged outcrops, wind-scoured terraces, Mediterranean pines and cypress bent and battered by a cold wind, scrub and wildflowers flattened into the slopes, faint goat paths cutting like scars. Golden-hour light is waning — long, cold shadows stretch across the rocks while a bruised, low sky thickens with heavy, thin thunderheads and a creeping mist pools in the valleys. A lone vulture wheels high above; a thin column of smoke rises on the distant horizon. Rolling green hills in the mid-ground, and far on the horizon a small ancient Roman town by the Tiber — low temples and forums, red-tile roofs and distant aqueduct arches — tiny and ominously unobtrusive (no monumental amphitheatre yet). Ultra-detailed, high-contrast cinematic landscape photograph, slightly desaturated natural palette, subtle film grain, dramatic composition, foreboding atmosphere.'''
 
 negative_prompt = " " # using an empty string if you do not have specific concept to remove
 
@@ -37,13 +38,15 @@ aspect_ratios = {
 
 width, height = aspect_ratios["16:9"]
 
-image = pipe(
+images = pipe(
+    num_images_per_prompt=4,
     prompt=prompt + positive_magic["en"],
     negative_prompt=negative_prompt,
     width=width,
     height=height,
     num_inference_steps=50,
     true_cfg_scale=4.0
-).images[0]
+).images
 
-image.save("assets/mountain.png")
+for i, image in enumerate(images):
+    image.save(f"assets/ominous_mountain_{i}.png")

@@ -11,9 +11,9 @@ class WanVaceEngine(WanBaseEngine):
 
     def run(
         self,
-        video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor],
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
+        video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor] | None = None,
         reference_images: Union[
             Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
         ] = None,
@@ -46,6 +46,8 @@ class WanVaceEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+        
+        num_frames = self._parse_num_frames(duration, fps=fps)
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -89,7 +91,7 @@ class WanVaceEngine(WanBaseEngine):
             num_inference_steps=num_inference_steps,
         )
 
-        loaded_video = self._load_video(video)
+        
         if mask:
             loaded_mask = self._load_video(mask)
 
@@ -112,25 +114,29 @@ class WanVaceEngine(WanBaseEngine):
                 device=self.device, dtype=transformer_dtype
             )
 
-        video_height, video_width = self.video_processor.get_default_height_width(
-            loaded_video[0]
-        )
-        base = self.vae_scale_factor_spatial * ph
-        if video_height * video_width > height * width:
-            scale = min(width / video_width, height / video_height)
-            video_height, video_width = int(video_height * scale), int(
-                video_width * scale
+        if video is not None:
+            loaded_video = self._load_video(video)
+            video_height, video_width = self.video_processor.get_default_height_width(
+                loaded_video[0]
             )
+            base = self.vae_scale_factor_spatial * ph
+            if video_height * video_width > height * width:
+                scale = min(width / video_width, height / video_height)
+                video_height, video_width = int(video_height * scale), int(
+                    video_width * scale
+                )
 
-        if video_height % base != 0 or video_width % base != 0:
-            video_height = (video_height // base) * base
-            video_width = (video_width // base) * base
+            if video_height % base != 0 or video_width % base != 0:
+                video_height = (video_height // base) * base
+                video_width = (video_width // base) * base
 
-        assert video_height * video_width <= height * width
+            assert video_height * video_width <= height * width
 
-        preprocessed_video = self.video_processor.preprocess_video(
-            loaded_video, video_height, video_width
-        )
+            preprocessed_video = self.video_processor.preprocess_video(
+                loaded_video, video_height, video_width
+            )
+        else:
+            preprocessed_video = torch.zeros(num_videos, 3, num_frames, height, width, device=self.device, dtype=torch.float32)
 
         if not mask:
             preprocessed_mask = torch.ones_like(preprocessed_video)
@@ -167,6 +173,7 @@ class WanVaceEngine(WanBaseEngine):
                 reference_images if reference_images else None
                 for _ in range(preprocessed_video.shape[0])
             ]
+            
 
         assert reference_images is not None, "reference_images must be provided"
         assert isinstance(reference_images, list), "reference_images must be a list"
@@ -298,7 +305,7 @@ class WanVaceEngine(WanBaseEngine):
         if duration is None:
             duration = len(loaded_video)
 
-        num_frames = self._parse_num_frames(duration, fps=fps)
+        
         latents = self._get_latents(
             height,
             width,
