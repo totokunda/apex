@@ -371,7 +371,8 @@ if [[ "$CUDA_AVAILABLE" == true ]]; then
     print_status "Installing PyTorch with CUDA support..."
     # For CUDA 12.x, the 'cu121' wheel is recommended by PyTorch.
     $CONDA_RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-    
+    $CONDA_RUN pip install 'mlx[cuda]'
+
     print_status "Verifying PyTorch CUDA setup..."
     if $CONDA_RUN python -c "import torch; exit(0) if torch.cuda.is_available() else exit(1)"; then
         print_success "PyTorch CUDA is available and working."
@@ -384,10 +385,11 @@ if [[ "$CUDA_AVAILABLE" == true ]]; then
 else
     if [[ "$OS" == "mac" ]]; then
         print_status "Installing PyTorch for macOS..."
-        $CONDA_RUN pip install torch torchvision torchaudio
+        $CONDA_RUN pip install torch torchvision torchaudio mlx
     else
         print_status "Installing PyTorch with CPU support..."
         $CONDA_RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        $CONDA_RUN pip install 'mlx[cpu]'
     fi
 fi
 
@@ -452,20 +454,19 @@ export MAX_JOBS=$MAX_JOBS
 print_status "Installing Flash Attention..."
 if [[ "$CUDA_AVAILABLE" == true ]]; then
     if [[ ! -d "flash-attention" ]]; then
-        clone_and_install "https://github.com/Dao-AILab/flash-attention.git" "flash-attention" "$CONDA_RUN pip install ."
+        clone_and_install "https://github.com/Dao-AILab/flash-attention.git" "flash-attention" "$CONDA_RUN pip install . --no-build-isolation"
     else
         cd flash-attention
         print_status "Installing Flash Attention from existing directory..."
         $CONDA_RUN pip install . --verbose --no-build-isolation
-        
-        # The setup.py of modern flash-attention automatically detects and builds for the present GPU architecture.
-        if [[ "$SUPPORTS_HOPPER" == true ]]; then
-            print_status "Flash Attention is being compiled with support for Hopper GPUs."
-            cd hopper/
-            $CONDA_RUN pip install . --verbose
-        fi
-        
         cd ..
+    fi
+    # The setup.py of modern flash-attention automatically detects and builds for the present GPU architecture.
+    if [[ "$SUPPORTS_HOPPER" == true ]]; then
+        print_status "Flash Attention is being compiled with support for Hopper GPUs."
+        cd flash-attention/hopper/
+        $CONDA_RUN pip install . --verbose
+        cd ../..
     fi
 else
     print_warning "CUDA not available, skipping installation."

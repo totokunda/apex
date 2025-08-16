@@ -2,16 +2,78 @@ import torch
 import torch.nn.functional as F
 from diffusers.models.attention import Attention
 from typing import Optional
-
+from einops import rearrange
 from src.attention.functions import attention_register
 
 
+NUM_FRAMES = None
+ENHANCE_WEIGHT = None
+ENABLE_ENHANCE = False
+
+def get_num_frames() -> int:
+    return NUM_FRAMES
+
+def get_enhance_weight() -> float:
+    return ENHANCE_WEIGHT
+
+def enhance_score(query_image, key_image, head_dim, num_frames):
+    scale = head_dim**-0.5
+    query_image = query_image * scale
+    attn_temp = query_image @ key_image.transpose(-2, -1)  # translate attn to float32
+    attn_temp = attn_temp.to(torch.float32)
+    attn_temp = attn_temp.softmax(dim=-1)
+
+    # Reshape to [batch_size * num_tokens, num_frames, num_frames]
+    attn_temp = attn_temp.reshape(-1, num_frames, num_frames)
+
+    # Create a mask for diagonal elements
+    diag_mask = torch.eye(num_frames, device=attn_temp.device).bool()
+    diag_mask = diag_mask.unsqueeze(0).expand(attn_temp.shape[0], -1, -1)
+
+    # Zero out diagonal elements
+    attn_wo_diag = attn_temp.masked_fill(diag_mask, 0)
+
+    # Calculate mean for each token's attention matrix
+    # Number of off-diagonal elements per matrix is n*n - n
+    num_off_diag = num_frames * num_frames - num_frames
+    mean_scores = attn_wo_diag.sum(dim=(1, 2)) / num_off_diag
+
+    enhance_scores = mean_scores.mean() * (num_frames + get_enhance_weight())
+    enhance_scores = enhance_scores.clamp(min=1)
+    return enhance_scores
+
 class WanAttnProcessor2_0:
-    def __init__(self):
+    def __init__(self, use_enhance: bool = False):
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError(
                 "WanAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0."
             )
+        self.use_enhance = use_enhance
+    
+    @staticmethod
+    def set_num_frames(num_frames: int):
+        global NUM_FRAMES
+        NUM_FRAMES = num_frames
+    
+    @staticmethod
+    def set_enhance_weight(enhance_weight: float):
+        global ENHANCE_WEIGHT
+        ENHANCE_WEIGHT = enhance_weight
+        
+    def _get_enhance_scores(self, query, key):
+        img_q, img_k = query, key
+
+        num_frames = get_num_frames()
+        _, num_heads, ST, head_dim = img_q.shape
+        spatial_dim = ST / num_frames
+        spatial_dim = int(spatial_dim)
+
+        query_image = rearrange(
+            img_q, "B N (T S) C -> (B S) N T C", T=num_frames, S=spatial_dim, N=num_heads, C=head_dim
+        )
+        key_image = rearrange(img_k, "B N (T S) C -> (B S) N T C", T=num_frames, S=spatial_dim, N=num_heads, C=head_dim)
+
+        return enhance_score(query_image, key_image, head_dim, num_frames)
 
     def __call__(
         self,
@@ -37,7 +99,6 @@ class WanAttnProcessor2_0:
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
         
-        
 
         if attn.norm_q is not None:
             query = attn.norm_q(query)
@@ -47,8 +108,6 @@ class WanAttnProcessor2_0:
         query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
         key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
         value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
-        
-        
         
 
         if rotary_emb is not None:
@@ -68,6 +127,8 @@ class WanAttnProcessor2_0:
             query = apply_rotary_emb(query, rotary_emb)
             key = apply_rotary_emb(key, rotary_emb)
             
+        if self.use_enhance:
+            enhance_scores = self._get_enhance_scores(query, key)
 
         # I2V task
         hidden_states_img = None
@@ -104,4 +165,12 @@ class WanAttnProcessor2_0:
 
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)
+
+        if self.use_enhance:
+            hidden_states = hidden_states * enhance_scores
+
         return hidden_states
+
+
+
+
