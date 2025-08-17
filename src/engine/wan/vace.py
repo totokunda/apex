@@ -354,6 +354,7 @@ class WanVaceEngine(WanBaseEngine):
         if return_latents:
             return latents
         else:
+            latents = latents[:, :, num_reference_images:]
             video = self.vae_decode(latents, offload=offload)
             postprocessed_video = self._postprocess(video)
             return postprocessed_video
