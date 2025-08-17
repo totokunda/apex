@@ -2,31 +2,30 @@ import torch
 import os
 from pathlib import Path
 
-HOME_DIR = Path.home()
-
+HOME_DIR = Path(os.getenv("APEX_HOME_DIR", Path.home()))
 
 DEFAULT_CONFIG_SAVE_PATH = os.getenv(
-    "CONFIG_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "configs")
+    "APEX_CONFIG_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "configs")
 )
-DEFAULT_SAVE_PATH = os.getenv("SAVE_PATH", str(HOME_DIR / "apex-diffusion"))
+DEFAULT_SAVE_PATH = os.getenv("APEX_SAVE_PATH", str(HOME_DIR / "apex-diffusion"))
 
 DEFAULT_COMPONENTS_PATH = os.getenv(
-    "COMPONENTS_PATH", str(HOME_DIR / "apex-diffusion" / "components")
+    "APEX_COMPONENTS_PATH", str(HOME_DIR / "apex-diffusion" / "components")
 )
 
 DEFAULT_PREPROCESSOR_SAVE_PATH = os.getenv(
-    "PREPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "preprocessors")
+    "APEX_PREPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "preprocessors")
 )
 
 DEFAULT_POSTPROCESSOR_SAVE_PATH = os.getenv(
-    "POSTPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "postprocessors")
+    "APEX_POSTPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "postprocessors")
 )
 
-DEFAULT_CACHE_PATH = os.getenv("CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache"))
+DEFAULT_CACHE_PATH = os.getenv("APEX_CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache"))
 
 # New default path to store LoRA adapters and related artifacts
 DEFAULT_LORA_SAVE_PATH = os.getenv(
-    "LORA_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "loras")
+    "APEX_LORA_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "loras")
 )
 
 # make sure all paths exist
@@ -39,7 +38,7 @@ os.makedirs(DEFAULT_CACHE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_LORA_SAVE_PATH, exist_ok=True)
 
 os.environ["HF_HOME"] = os.getenv(
-    "HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")
+    "APEX_HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")
 )
 
 

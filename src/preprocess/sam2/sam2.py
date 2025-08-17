@@ -5,13 +5,14 @@ import shutil
 import numpy as np
 import torch
 from scipy import ndimage
-from typing import Union, List, Optional, Dict, Any
+from typing import Union, List, Optional, Dict
 from PIL import Image
 import warnings
 from src.utils.preprocessors import MODEL_WEIGHTS, MODEL_CONFIGS
 from src.utils.defaults import DEFAULT_DEVICE
 from diffusers.utils import export_to_video
 import tempfile
+from src.utils.defaults import DEFAULT_CACHE_PATH
 
 from src.preprocess.base import (
     BasePreprocessor,
@@ -256,10 +257,12 @@ class SAM2VideoPreprocessor(BasePreprocessor):
         task_type = task_type if task_type is not None else self.task_type
 
         video_path = None
+        tmp_video = None
+        
         if isinstance(video, str):
             video_path = video
         elif isinstance(video, list):
-            tmp_video = tempfile.NamedTemporaryFile(suffix=".mp4")
+            tmp_video = tempfile.NamedTemporaryFile(suffix=".mp4", dir=DEFAULT_CACHE_PATH, delete=False)
             export_to_video(video, tmp_video.name, fps=fps)
             video_path = tmp_video.name
         else:
@@ -324,7 +327,6 @@ class SAM2VideoPreprocessor(BasePreprocessor):
 
         ann_frame_idx = 0
         object_id = 0
-        tmp_video = None
 
         with torch.inference_mode(), torch.autocast(
             self.device.type if isinstance(self.device, torch.device) else self.device,
@@ -370,6 +372,7 @@ class SAM2VideoPreprocessor(BasePreprocessor):
                 video_segments[out_frame_idx] = frame_segments
         if tmp_video is not None:
             tmp_video.close()
+            os.unlink(tmp_video.name)
         return SAM2VideoOutput(annotations=video_segments)
 
     def __str__(self):

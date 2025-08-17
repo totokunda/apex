@@ -46,12 +46,12 @@ class WanEngine(BaseEngine, WanDenoise):
         
         if self.engine_type == "mlx":
             self.denoise_type = DenoiseTypeMLX(
-                f"mlx.{denoise_type.value if isinstance(denoise_type, DenoiseType) or isinstance(denoise_type, DenoiseTypeMLX) else denoise_type}"
-            )
+                f"mlx.{self.denoise_type.value if isinstance(self.denoise_type, DenoiseType) or isinstance(self.denoise_type, DenoiseTypeMLX) else self.denoise_type}"
+            ) if self.denoise_type is not None else DenoiseTypeMLX.BASE
         else:
             self.denoise_type = DenoiseType(
-                (denoise_type.value if isinstance(denoise_type, DenoiseType) or isinstance(denoise_type, DenoiseTypeMLX) else denoise_type).rstrip("mlx.")
-            )
+                (self.denoise_type.value if isinstance(self.denoise_type, DenoiseType) or isinstance(self.denoise_type, DenoiseTypeMLX) else self.denoise_type).rstrip("mlx.")
+            ) if self.denoise_type is not None else DenoiseType.BASE
 
         self.vae_scale_factor_temporal = (
             2 ** sum(self.vae.temperal_downsample)

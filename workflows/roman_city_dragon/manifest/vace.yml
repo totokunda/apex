@@ -1,0 +1,38 @@
+name: "Wan 2.1 14B Video Animation Control Editing"
+description: "Wan 2.1 14B is a 14B parameter model for image-to-video generation."
+engine: wan
+type: vace
+
+shared: []
+
+components:
+  - type: scheduler
+    base: "diffusers.UniPCMultistepScheduler"
+    config:
+      flow_shift: 3.0
+    config_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/scheduler/scheduler_config.json
+
+  - type: vae
+    base: "wan"
+    model_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/vae
+
+  - type: text_encoder
+    name: "wan/text_encoder"
+    base: "UMT5EncoderModel"
+    model_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/text_encoder
+    config_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/text_encoder/config.json
+
+  - type: transformer
+    base: "wan.vace" 
+    model_path:  /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/transformer
+    tag: "wan_vace_14b"
+
+preprocessors: []
+
+defaults:
+  run:
+    num_inference_steps: 30
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    attention_kwargs: {}
