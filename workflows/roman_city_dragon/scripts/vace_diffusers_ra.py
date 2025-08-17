@@ -34,7 +34,8 @@ output = pipe(
     width=width,
     num_frames=num_frames,
     num_inference_steps=30,
-    guidance_scale=5.0,
     generator=torch.Generator().manual_seed(42),
+    guidance_scale=5.0,
 ).frames[0]
-export_to_video(output, "output.mp4", fps=16)
+
+export_to_video(output, "vace_anything_output.mp4", fps=16)

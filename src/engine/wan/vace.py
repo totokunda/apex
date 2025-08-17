@@ -5,7 +5,6 @@ import numpy as np
 import torch.nn.functional as F
 from .base import WanBaseEngine
 
-
 class WanVaceEngine(WanBaseEngine):
     """WAN VACE (Video Acceleration) Engine Implementation"""
 
@@ -90,8 +89,6 @@ class WanVaceEngine(WanBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-
-        
         if mask:
             loaded_mask = self._load_video(mask)
 
@@ -135,6 +132,7 @@ class WanVaceEngine(WanBaseEngine):
             preprocessed_video = self.video_processor.preprocess_video(
                 loaded_video, video_height, video_width
             )
+            height, width = video_height, video_width
         else:
             preprocessed_video = torch.zeros(num_videos, 3, num_frames, height, width, device=self.device, dtype=torch.float32)
 
@@ -174,7 +172,6 @@ class WanVaceEngine(WanBaseEngine):
                 for _ in range(preprocessed_video.shape[0])
             ]
             
-
         assert reference_images is not None, "reference_images must be provided"
         assert isinstance(reference_images, list), "reference_images must be a list"
         assert (

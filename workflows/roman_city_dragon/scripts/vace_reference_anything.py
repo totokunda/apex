@@ -1,16 +1,19 @@
 import sys
-sys.path.append('/workspace/apex')
+import os
+os.environ["APEX_HOME_DIR"] = "/data/apex-diffusion"
+sys.path.append('/data/apex')
 
 import torch
+torch.set_float32_matmul_precision('high')
 from src.engine import create_engine
 from diffusers.utils import export_to_video
 from PIL import Image
 
-engine = create_engine("wan", "/workspace/apex/manifest/wan/wan_vace_14b.yml", "vace", attention_type="flash", components_to_load=['transformer'])
+engine = create_engine("wan", "/data/apex/workflows/roman_city_dragon/manifest/vace.yml", "vace", attention_type="flash", components_to_load=['transformer'])
 
 images = [
-    Image.open('assets/reference_anything/ominous_mountain_reference_anything.png'),
     Image.open('assets/reference_anything/dragon_reference_anything.png'),
+    Image.open('assets/reference_anything/mountain_reference_anything.png'),
 ]
 
 prompt = "Wide aerial over a Latium limestone range near ancient Rome (c. 60–70 CE): sunlit pale cliffs, Mediterranean pines and cypress, faint goat paths, long golden-hour shadows, soft haze; far on the horizon, a tiny city by the Tiber with low temples and aqueduct arches, unobtrusive. Camera performs a smooth dolly-in with optical zoom from ~24 mm to ~85 mm toward the jagged summit; subtle parallax over ridges; stabilized, no wobble; end angle slightly low, looking up. On the crown, the referenced dragon—black scales veined with molten cracks, horn layout and proportions exactly as ref—perches with wings partly unfurled. As the camera nears, the dragon inhales; chest and throat sacs brighten; embers leak between teeth. It bellows: a column of fire blasts forward with bright core and rolling orange bloom, sparks, heat distortion, and smoke shearing leeward, casting strobing highlights across limestone and armor-like scales. Wind whips wing membranes; flicker lighting plays across the face; shallow depth of field near the end. The dragon keeps its gaze fixed onward past the camera toward the distant horizon/city, dominant and unafraid."
@@ -26,7 +29,7 @@ video = engine.run(
     width=832,
     duration='5s',
     num_videos=1,
-    num_inference_steps=50,
+    num_inference_steps=30,
     guidance_scale=5.0
 )
 

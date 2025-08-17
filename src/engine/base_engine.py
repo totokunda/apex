@@ -179,8 +179,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
         self.engine_type = config.get("engine_type", "torch")
+
         if config.get("denoise_type", None):
             self.denoise_type = config.get("denoise_type")
+
 
         if component_dtypes:
             self.component_dtypes = {}
@@ -461,25 +463,26 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 model_path = component.get("model_path", None)
 
                 tmp_dir = tempfile.mkdtemp()
+                component_name = component.get("name", component.get("type"))
                 try:
                     self.save_component(
                         transformer,
                         tmp_dir,
-                        "transformer",
+                        component_name,
                         **self.config.get("save_kwargs", {}),
                     )
                 
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
                         # add subdirectory called transformer
-                        transformer_dir = os.path.join(model_path, "transformer")
+                        transformer_dir = os.path.join(model_path, component_name)
                         os.makedirs(transformer_dir, exist_ok=True)
                         os.rename(tmp_dir, transformer_dir)
                     else:
                         # Atomically replace file with directory
                         shutil.rmtree(model_path, ignore_errors=True)
                         model_dir = os.path.dirname(model_path)
-                        transformer_path = os.path.join(model_dir, "transformer")
+                        transformer_path = os.path.join(model_dir, component_name)
                         os.makedirs(transformer_path, exist_ok=True)
                         os.rename(tmp_dir, transformer_path)
                 finally:
@@ -547,17 +550,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             "vae",
         ], "Only transformer and vae are supported for now"
         model_path = component["model_path"]
-        component_type = component.get("type")
+        component_name = component.get("name", component.get("type"))
         if os.path.isfile(model_path):
             # check base directory
-            if os.path.isdir(os.path.join(os.path.dirname(model_path), component_type)):
+            if os.path.isdir(os.path.join(os.path.dirname(model_path), component_name)):
                 return (
-                    os.path.join(os.path.dirname(model_path), component_type),
+                    os.path.join(os.path.dirname(model_path), component_name),
                     True,
                 )
         elif os.path.isdir(model_path):
-            if os.path.isdir(os.path.join(model_path, component_type)):
-                return os.path.join(model_path, component_type), True
+            if os.path.isdir(os.path.join(model_path, component_name)):
+                return os.path.join(model_path, component_name), True
         return model_path, False
 
     def _check_weights(self, component: Dict[str, Any]):
