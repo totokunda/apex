@@ -433,6 +433,22 @@ else
     cd ..
 fi
 
+# check if GroundingDINO is installed in the conda environment and install it if not
+if [[ ! -d "$CONDA_PREFIX/lib/python3.10/site-packages/groundingdino" ]]; then
+    print_status "Installing patch for gdino..."
+    if [[ ! -d "GroundingDINO" ]]; then
+        git clone "https://github.com/IDEA-Research/GroundingDINO.git" "GroundingDINO"
+    fi
+    
+    cp ../patches/gdino-fixed.cu GroundingDINO/groundingdino/models/GroundingDINO/csrc/MsDeformAttn/ms_deform_attn_cuda.cu
+    # install gdino
+    cd GroundingDINO
+    $CONDA_RUN pip install -e .
+    cd ..
+else
+    print_status "GroundingDINO is already installed in the conda environment."
+fi
+
 # Check if we can support Hopper GPUs (Compute Capability 9.0+)
 SUPPORTS_HOPPER=false
 if [[ "$CUDA_AVAILABLE" == true ]]; then
@@ -453,20 +469,29 @@ export MAX_JOBS=$MAX_JOBS
 # Install Flash Attention
 print_status "Installing Flash Attention..."
 if [[ "$CUDA_AVAILABLE" == true ]]; then
-    if [[ ! -d "flash-attention" ]]; then
-        clone_and_install "https://github.com/Dao-AILab/flash-attention.git" "flash-attention" "$CONDA_RUN pip install . --no-build-isolation"
+    # Check if flash-attention is installed in the conda environment and install it if not
+    if [[ ! -d "$CONDA_PREFIX/lib/python3.10/site-packages/flash_attn" ]]; then
+        if [[ ! -d "flash-attention" ]]; then
+            clone_and_install "https://github.com/Dao-AILab/flash-attention.git" "flash-attention" "$CONDA_RUN pip install . --no-build-isolation"
+        else
+            cd flash-attention
+            print_status "Installing Flash Attention from existing directory..."
+            $CONDA_RUN pip install . --verbose --no-build-isolation
+            cd ..
+        fi
     else
-        cd flash-attention
-        print_status "Installing Flash Attention from existing directory..."
-        $CONDA_RUN pip install . --verbose --no-build-isolation
-        cd ..
+        print_status "Flash Attention is already installed in the conda environment."
     fi
-    # The setup.py of modern flash-attention automatically detects and builds for the present GPU architecture.
+    # check if flash-attention 3 is installed in the conda environment and install it if not
     if [[ "$SUPPORTS_HOPPER" == true ]]; then
+        if [[ ! -d "$CONDA_PREFIX/lib/python3.10/site-packages/flash_attn/flash_attn_interface.cpython-310-x86_64-linux-gnu.so" ]]; then
         print_status "Flash Attention is being compiled with support for Hopper GPUs."
-        cd flash-attention/hopper/
-        $CONDA_RUN pip install . --verbose
-        cd ../..
+            cd flash-attention/hopper/
+            $CONDA_RUN pip install . --verbose
+            cd ../..
+        else
+            print_status "Flash Attention is already compiled with support for Hopper GPUs."
+        fi
     fi
 else
     print_warning "CUDA not available, skipping installation."
@@ -478,12 +503,17 @@ if [[ "$CUDA_AVAILABLE" == true ]]; then
     $CONDA_RUN pip install --upgrade pip setuptools wheel
     export SETUPTOOLS_USE_DISTUTILS=stdlib
     unset PYTHONPATH
-    if [[ ! -d "SageAttention" ]]; then
-        clone_and_install "https://github.com/thu-ml/SageAttention.git" "SageAttention" "$CONDA_RUN pip install . --verbose --no-build-isolation"
+    # check if SageAttention is installed in the conda environment and install it if not
+    if [[ ! -d "$CONDA_PREFIX/lib/python3.10/site-packages/sageattention" ]]; then
+        if [[ ! -d "SageAttention" ]]; then
+            clone_and_install "https://github.com/thu-ml/SageAttention.git" "SageAttention" "$CONDA_RUN pip install . --verbose --no-build-isolation"
+        else
+            cd SageAttention
+            $CONDA_RUN pip install . --verbose --no-build-isolation
+            cd ..
+        fi
     else
-        cd SageAttention
-        $CONDA_RUN pip install . --verbose --no-build-isolation
-        cd ..
+        print_status "SageAttention is already installed in the conda environment."
     fi
 else
     print_warning "CUDA not available, skipping installation."

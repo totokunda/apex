@@ -4,3 +4,6 @@
 [submodule "thirdparty/llama.cpp"]
 	path = thirdparty/llama.cpp
 	url = https://github.com/ggerganov/llama.cpp.git
+[submodule "thirdparty/GroundingDINO"]
+	path = thirdparty/GroundingDINO
+	url = https://github.com/IDEA-Research/GroundingDINO.git
