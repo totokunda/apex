@@ -516,6 +516,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             elif isinstance(transformer, mx_nn.Module):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
+
         return transformer
 
     def _get_safetensors_keys(self, model_path: str, model_key: str | None = None, framework: str = "pt"):
@@ -573,6 +574,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             "vae",
         ], "Only transformer and vae are supported for now"
         file_pattern = component.get("file_pattern", None)
+        
+        if model_path.endswith(".gguf"):
+            return True # We don't need to check weights for gguf models
 
         pt_extensions = tuple(["pt", "bin", "pth"])
         model_key = component.get("model_key", None)

@@ -7,6 +7,8 @@ from mlx import nn as mx_nn
 import mlx.core as mx
 from src.utils.mlx import convert_dtype_to_mlx
 from src.mlx.mixins.from_model_mixin import _flatten_leaf_arrays, _set_by_path
+from src.quantize.dequant import is_quantized
+from src.quantize.ggml_tensor import GGMLTensor
 
 
 class ToMixin:
@@ -33,6 +35,23 @@ class ToMixin:
         if key in mapping:
             return mapping[key]
         raise ValueError(f"Unsupported dtype: {dtype}")
+
+    
+    def check_quantized(self, module: ModelMixin | GGMLTensor | torch.nn.Parameter) -> bool:
+        """
+        Check if the module is quantized.
+        """
+        if isinstance(module, GGMLTensor):
+            return is_quantized(module)
+        elif isinstance(module, torch.nn.Parameter):
+            return is_quantized(module.data)
+        elif isinstance(module, ModelMixin):
+            for name, param in module.named_parameters():
+                if is_quantized(param.data):
+                    return True
+            return False
+        else:
+            raise ValueError(f"Unsupported module type: {type(module)}")
 
     def to_dtype(
         self,
@@ -96,7 +115,8 @@ class ToMixin:
                     if _matches(keep_fp32_patterns, name)
                     else target_dtype
                 )
-                submod.to(dtype_mod)
+                if not self.check_quantized(submod):
+                    submod.to(dtype_mod)
                 frozen_prefixes.append(name)
 
         # b) cast individual parameters
@@ -107,6 +127,8 @@ class ToMixin:
             wanted_dtype = (
                 torch.float32 if _matches(keep_fp32_patterns, name) else target_dtype
             )
+            if self.check_quantized(param):
+                continue
             param.data = param.data.to(wanted_dtype)
             param.requires_grad = requires_grad
             if param.grad is not None:

@@ -1,60 +1,78 @@
 import torch
 import logging
-
+from typing import Any, Optional, Iterable
 
 class GGMLTensor(torch.Tensor):
     """
-    Main tensor-like class for storing quantized weights
+    A safe torch.Tensor subclass that carries GGUF metadata:
+
+      - tensor_type: gguf.GGMLQuantizationType (or None for F16/F32)
+      - tensor_shape: original logical shape for the tensor (torch.Size)
+      - dequant_dtype: preferred dtype when dequantizing (torch.dtype)
+      - patches: optional patch metadata list
+
+    IMPORTANT: Construct with an existing tensor `data` so storage exists.
     """
 
-    def __init__(
-        self, *args, tensor_type, tensor_shape, dequant_dtype=None, patches=[], **kwargs
-    ):
-        super().__init__()
-        self.tensor_type = tensor_type
-        self.tensor_shape = tensor_shape
-        self.patches = patches
-        self.dequant_dtype = dequant_dtype
-
+    # ---- creation ---------------------------------------------------------
+    @staticmethod
     def __new__(
-        cls, *args, tensor_type, tensor_shape, dequant_dtype=None, patches=[], **kwargs
+        cls,
+        data: torch.Tensor,
+        *,
+        tensor_type: Any,
+        tensor_shape: Optional[Iterable[int]] = None,
+        dequant_dtype: Optional[torch.dtype] = None,
+        patches: Optional[Iterable[Any]] = None,
+        requires_grad: bool = False,
     ):
-        return super().__new__(cls, *args, **kwargs)
+        if not isinstance(data, torch.Tensor):
+            data = torch.as_tensor(data)  # ensure a tensor
+        # make a real subclass that shares the same storage
+        obj = torch.Tensor._make_subclass(cls, data, require_grad=requires_grad)
+        obj.tensor_type = tensor_type
+        obj.tensor_shape = torch.Size(tuple(tensor_shape)) if tensor_shape is not None else torch.Size(data.shape)
+        obj.dequant_dtype = dequant_dtype
+        obj.patches = list(patches) if patches is not None else []
+        return obj
 
+    # ---- helpers to re-wrap outputs and preserve metadata -----------------
+    def _wrap_like(self, base: torch.Tensor) -> "GGMLTensor":
+        out = torch.Tensor._make_subclass(GGMLTensor, base, require_grad=base.requires_grad)
+        out.tensor_type = getattr(self, "tensor_type", None)
+        out.tensor_shape = torch.Size(getattr(self, "tensor_shape", base.shape))
+        out.dequant_dtype = getattr(self, "dequant_dtype", None)
+        out.patches = list(getattr(self, "patches", []))
+        return out
+
+    # ---- tensor API overrides (preserve metadata) -------------------------
     def to(self, *args, **kwargs):
-        new = super().to(*args, **kwargs)
-        new.tensor_type = getattr(self, "tensor_type", None)
-        new.tensor_shape = getattr(self, "tensor_shape", new.data.shape)
-        new.patches = getattr(self, "patches", []).copy()
-        new.dequant_dtype = getattr(self, "dequant_dtype", None)
-        return new
+        base = super().to(*args, **kwargs)
+        # Keep it as GGMLTensor to preserve metadata
+        return self._wrap_like(base)
+
+    def cpu(self):
+        return self.to("cpu")
+
+    def cuda(self, device=None, non_blocking=False, **kwargs):
+        return self.to(device if device is not None else "cuda", non_blocking=non_blocking)
 
     def clone(self, *args, **kwargs):
-        return self
+        base = super().clone(*args, **kwargs)
+        return self._wrap_like(base)
 
-    def detach(self, *args, **kwargs):
-        return self
+    def detach(self):
+        base = super().detach()
+        return self._wrap_like(base)
 
-    def copy_(self, *args, **kwargs):
-        # fixes .weight.copy_ in comfy/clip_model/CLIPTextModel
-        try:
-            return super().copy_(*args, **kwargs)
-        except Exception as e:
-            logging.warning(f"ignoring 'copy_' on tensor: {e}")
+    def requires_grad_(self, requires_grad: bool = True):
+        base = super().requires_grad_(requires_grad)
+        # _make_subclass already returned self, no need to re-wrap
+        return self
 
     def new_empty(self, size, *args, **kwargs):
-        # Intel Arc fix, ref#50
-        new_tensor = super().new_empty(size, *args, **kwargs)
-        return GGMLTensor(
-            new_tensor,
-            tensor_type=getattr(self, "tensor_type", None),
-            tensor_shape=size,
-            dequant_dtype=getattr(self, "dequant_dtype", None),
-            patches=getattr(self, "patches", []).copy(),
-        )
-
-    @property
-    def shape(self):
-        if not hasattr(self, "tensor_shape"):
-            self.tensor_shape = self.size()
-        return self.tensor_shape
+        base = super().new_empty(size, *args, **kwargs)
+        # preserve metadata on empties (Intel Arc / odd backends friendliness)
+        out = self._wrap_like(base)
+        out.tensor_shape = torch.Size(size)
+        return out

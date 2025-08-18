@@ -256,10 +256,12 @@ class WanTimeTextImageEmbedding(nn.Module):
             timestep = timestep.unflatten(0, (1, timestep_seq_len))
 
         time_embedder_dtype = next(iter(self.time_embedder.parameters())).dtype
-        if timestep.dtype != time_embedder_dtype and time_embedder_dtype != torch.int8:
+
+        if timestep.dtype != time_embedder_dtype and time_embedder_dtype != torch.int8 and time_embedder_dtype != torch.uint8:
             timestep = timestep.to(time_embedder_dtype)
 
         temb = self.time_embedder(timestep).type_as(encoder_hidden_states)
+
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)

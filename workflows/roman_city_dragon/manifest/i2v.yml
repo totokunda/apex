@@ -12,14 +12,16 @@ components:
     config_path: "https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers/resolve/main/scheduler/scheduler_config.json"
 
   - type: vae
-    base: "wan"
-    model_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/vae
+    name: "wan/vae_2.2"
+    base: "wan" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
+    config_path: https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B-Diffusers/resolve/main/vae/config.json
 
   - type: text_encoder
     name: "wan/text_encoder"
     base: "UMT5EncoderModel"
-    model_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/text_encoder
-    config_path: /data/.hf_home/hub/models--Wan-AI--Wan2.1-VACE-14B-diffusers/snapshots/db79b90c60bbb45ceec9e41b9d5a4df934538ac4/text_encoder/config.json
+    model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
 
   
   - type: transformer

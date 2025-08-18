@@ -26,8 +26,9 @@ import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model
-from src.quantize.load import load_gguf
+from src.quantize.load import load_gguf, dequantize_tensor
 from src.mixins.download_mixin import DownloadMixin
+from src.converters.convert import get_transformer_converter
 
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
@@ -130,8 +131,15 @@ class LoaderMixin(DownloadMixin):
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
+            # check if we need to convert the weights
+            if component.get("type") == "transformer":
+                converter = get_transformer_converter(model_base)
+                converter.convert(state_dict)
+            
+            # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model(model)
             model.load_state_dict(state_dict, assign=True)
+            
         elif model_path.endswith(".gguf") and hasattr(self, "engine_type") and self.engine_type == "mlx":
             self.logger.info(f"Loading GGUF model from {model_path}")
             # Can load gguf directly into mlx model no need to convert
