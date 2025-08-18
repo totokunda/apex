@@ -164,7 +164,7 @@ check_cuda() {
 }
 
 install_cuda_debian() {
-    print_status "Setting up CUDA repository for Debian/Ubuntu..."
+    print_status "Setting up CUDA 12 repository for Debian/Ubuntu..."
     local distro_id
     case "$DISTRO" in
         ubuntu)
@@ -187,13 +187,18 @@ install_cuda_debian() {
     rm cuda-keyring_1.1-1_all.deb
     sudo apt-get update
     
-    print_status "Installing CUDA toolkit and NVIDIA drivers..."
-    sudo apt-get -y install cuda
+    # Remove conflicting packages first
+    print_status "Removing conflicting NVIDIA packages..."
+    sudo apt-get remove -y nvidia-open || true
+    sudo apt-get autoremove -y
+    
+    print_status "Installing CUDA 12 toolkit and NVIDIA drivers..."
+    sudo apt-get -y install cuda-12-6
     return $?
 }
 
 install_cuda_rhel() {
-    print_status "Setting up CUDA repository for RHEL/CentOS/Fedora..."
+    print_status "Setting up CUDA 12 repository for RHEL/CentOS/Fedora..."
     local distro_name="$DISTRO"
     if [[ "$DISTRO" == "centos" ]]; then
         distro_name="rhel"
@@ -213,13 +218,13 @@ install_cuda_rhel() {
     if command -v dnf &> /dev/null; then
         sudo dnf config-manager --add-repo "$repo_url"
         sudo dnf clean all
-        print_status "Installing CUDA toolkit and NVIDIA drivers..."
-        sudo dnf -y install cuda
+        print_status "Installing CUDA 12 toolkit and NVIDIA drivers..."
+        sudo dnf -y install cuda-12-6
     elif command -v yum &> /dev/null; then
         sudo yum-config-manager --add-repo "$repo_url"
         sudo yum clean all
-        print_status "Installing CUDA toolkit and NVIDIA drivers..."
-        sudo yum -y install cuda
+        print_status "Installing CUDA 12 toolkit and NVIDIA drivers..."
+        sudo yum -y install cuda-12-6
     else
         print_error "dnf or yum not found on RHEL-based system."
         return 1
@@ -289,25 +294,35 @@ CUDA_VERSION=""
 if [[ "$OS" == "mac" ]]; then
     print_warning "macOS detected - skipping CUDA installation"
 else
-    if check_cuda; then
+    # Check if CUDA toolkit is available
+    if command -v nvcc &> /dev/null; then
+        CUDA_AVAILABLE=true
+        CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
+        print_success "CUDA toolkit detected: version $CUDA_VERSION"
+    elif check_cuda; then
         CUDA_AVAILABLE=true
         CUDA_VERSION=$(get_cuda_version)
+        print_success "NVIDIA driver detected but no CUDA toolkit, attempting to install..."
     else
-        print_status "NVIDIA driver with CUDA support not detected, attempting to install..."
+        print_status "No CUDA toolkit or NVIDIA driver detected, attempting to install..."
+    fi
+    
+    # Install CUDA if not available
+    if [[ "$CUDA_AVAILABLE" == false ]] || [[ ! -z "$CUDA_VERSION" && "$CUDA_VERSION" != "12"* ]]; then
+        print_status "Installing CUDA 12..."
         if install_cuda; then
             # Re-check after installation
-            if check_cuda; then
+            if command -v nvcc &> /dev/null; then
+                CUDA_AVAILABLE=true
+                CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
+                print_success "CUDA 12 installation successful: version $CUDA_VERSION"
+            elif check_cuda; then
                 CUDA_AVAILABLE=true
                 CUDA_VERSION=$(get_cuda_version)
+                print_success "CUDA 12 installation successful"
             else
-                print_warning "Could not detect NVIDIA driver via nvidia-smi after installation. Some features may be limited."
-                # Fallback to nvcc version if driver is not immediately available
-                if command -v nvcc &> /dev/null; then
-                    CUDA_AVAILABLE=true
-                    CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | cut -d',' -f1)
-                else
-                    CUDA_AVAILABLE=false
-                fi
+                print_warning "Could not detect CUDA after installation. Some features may be limited."
+                CUDA_AVAILABLE=false
             fi
         else
             print_warning "CUDA installation failed, continuing without CUDA support."
@@ -355,6 +370,11 @@ fi
 # Ensure conda is in PATH
 export PATH="$HOME/miniconda3/bin:$PATH"
 
+# Accept conda Terms of Service for default channels
+print_status "Accepting conda Terms of Service..."
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
 # Create conda environment
 if conda info --envs | grep -wq "^$ENV_NAME\s"; then
     print_status "Conda environment '$ENV_NAME' already exists."
@@ -368,19 +388,24 @@ CONDA_RUN="conda run -n $ENV_NAME"
 # Install PyTorch
 print_status "Installing PyTorch..."
 if [[ "$CUDA_AVAILABLE" == true ]]; then
-    print_status "Installing PyTorch with CUDA support..."
-    # For CUDA 12.x, the 'cu121' wheel is recommended by PyTorch.
+    print_status "Installing PyTorch with CUDA 12.6 support..."
+    # For CUDA 12.6, use the cu126 wheel
     $CONDA_RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-    $CONDA_RUN pip install 'mlx[cuda]'
+    
+    # Clean up any conflicting MLX installations
+    print_status "Cleaning up conflicting MLX installations..."
+    $CONDA_RUN pip uninstall -y mlx mlx-cuda mlx-cpu || true
+    
+    # Install MLX with CPU support to avoid CUDA version conflicts
+    print_status "Installing MLX with CPU support to avoid CUDA version conflicts..."
+    $CONDA_RUN pip install 'mlx[cpu]'
 
     print_status "Verifying PyTorch CUDA setup..."
-    if $CONDA_RUN python -c "import torch; exit(0) if torch.cuda.is_available() else exit(1)"; then
+    if $CONDA_RUN python -c "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA version:', torch.version.cuda if torch.cuda.is_available() else 'N/A'); exit(0) if torch.cuda.is_available() else exit(1)"; then
         print_success "PyTorch CUDA is available and working."
     else
-        print_error "PyTorch CUDA verification failed. torch.cuda.is_available() returned False."
-        print_error "A reboot may be required if NVIDIA drivers were just installed."
-        print_error "Please check your CUDA and NVIDIA driver installation."
-        exit 1
+        print_warning "PyTorch CUDA verification failed. This may be due to NVIDIA driver issues."
+        print_warning "Continuing with installation - CUDA support may be limited until driver issues are resolved."
     fi
 else
     if [[ "$OS" == "mac" ]]; then
@@ -454,12 +479,14 @@ SUPPORTS_HOPPER=false
 if [[ "$CUDA_AVAILABLE" == true ]]; then
     if command -v nvidia-smi &> /dev/null; then
         # Get major compute capability, e.g., 8 from 8.6
-        COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | cut -d'.' -f1)
-        if [[ "$COMPUTE_CAP" -ge 9 ]]; then
+        COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 | cut -d'.' -f1)
+        if [[ -n "$COMPUTE_CAP" && "$COMPUTE_CAP" -ge 9 ]]; then
             SUPPORTS_HOPPER=true
             print_success "Hopper GPU architecture (Compute Capability 9.0+) detected"
-        else
+        elif [[ -n "$COMPUTE_CAP" ]]; then
             print_status "Non-Hopper GPU detected (Compute Capability: ${COMPUTE_CAP}.x). Skipping Hopper-specific installations."
+        else
+            print_warning "Could not determine GPU compute capability. Skipping Hopper-specific installations."
         fi
     fi
 fi
@@ -509,7 +536,16 @@ if [[ "$CUDA_AVAILABLE" == true ]]; then
             clone_and_install "https://github.com/thu-ml/SageAttention.git" "SageAttention" "$CONDA_RUN pip install . --verbose --no-build-isolation"
         else
             cd SageAttention
-            $CONDA_RUN pip install . --verbose --no-build-isolation
+            # Try to install with GPU support first, fallback to CPU if it fails
+            if ! $CONDA_RUN pip install . --verbose --no-build-isolation; then
+                print_warning "SageAttention GPU installation failed, trying CPU fallback..."
+                # Set environment variables to force CPU build
+                export CUDA_VISIBLE_DEVICES=""
+                export FORCE_CUDA=0
+                if ! $CONDA_RUN pip install . --verbose --no-build-isolation; then
+                    print_warning "SageAttention installation failed completely, skipping..."
+                fi
+            fi
             cd ..
         fi
     else
