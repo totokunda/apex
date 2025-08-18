@@ -614,7 +614,7 @@ def sage_attention(q, k, v, is_causal=False, softmax_scale=None, **kwargs):
     attn_output = sageattn(
         q, k, v, tensor_layout="HND", is_causal=is_causal, sm_scale=softmax_scale
     )
-    return attn_output.transpose(1, 2)
+    return attn_output
 
 
 @attention_register("xla_flash", available=xla_flash_attention_func is not None)

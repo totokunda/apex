@@ -44,9 +44,7 @@ def dequantize(data, qtype, oshape, dtype=None):
     """
     block_size, type_size = gguf.GGML_QUANT_SIZES[qtype]
     dequantize_blocks = dequantize_functions[qtype]
-
     rows = data.reshape((-1, data.shape[-1])).view(torch.uint8)
-
     n_blocks = rows.numel() // type_size
     blocks = rows.reshape((n_blocks, type_size))
     blocks = dequantize_blocks(blocks, block_size, type_size, dtype)

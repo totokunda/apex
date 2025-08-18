@@ -6,6 +6,8 @@ from src.mlx.denoise.wan_denoise import (
 )
 from .t2v import WanT2VEngine
 from .i2v import WanI2VEngine
+from .v2v import WanV2VEngine
+from .ati import WanATIEngine
 from .vace import WanVaceEngine
 from .fflf import WanFFLFEngine
 from .causal import WanCausalEngine
@@ -30,8 +32,9 @@ class ModelType(EnumType):
     PHANTOM = "phantom"  # phantom (subject reference images)
     APEX_FRAMEPACK = "apex_framepack"  # apex framepack
     MULTITALK = "multitalk"  # multitalk audio-driven video
-
-
+    V2V = "v2v"  # video to video
+    ATI = "ati"  # trajectory to video
+    
 class WanEngine(BaseEngine, WanDenoise):
     def __init__(
         self,
@@ -100,6 +103,10 @@ class WanEngine(BaseEngine, WanDenoise):
             self.implementation_engine = WanApexFramepackEngine(self)
         elif self.model_type == ModelType.MULTITALK:
             self.implementation_engine = WanMultitalkEngine(self)
+        elif self.model_type == ModelType.ATI:
+            self.implementation_engine = WanATIEngine(self)
+        elif self.model_type == ModelType.V2V:
+            self.implementation_engine = WanV2VEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

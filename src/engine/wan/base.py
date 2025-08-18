@@ -188,3 +188,4 @@ class WanBaseEngine:
             cropped_tensor = cropped_tensor[:, :, None, :, :]
 
         return cropped_tensor
+    

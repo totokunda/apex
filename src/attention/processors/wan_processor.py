@@ -91,15 +91,17 @@ class WanAttnProcessor2_0:
             encoder_hidden_states = encoder_hidden_states[:, image_context_length:]
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
-
-        hidden_states = hidden_states.to(attn.to_q.weight.dtype)
-        encoder_hidden_states = encoder_hidden_states.to(attn.to_k.weight.dtype)
+            
+        
+        if attn.to_q.weight.dtype != hidden_states.dtype and attn.to_q.weight.dtype != torch.int8 and attn.to_q.weight.dtype != torch.uint8:
+            hidden_states = hidden_states.to(attn.to_q.weight.dtype)
+        if attn.to_k.weight.dtype != encoder_hidden_states.dtype and attn.to_k.weight.dtype != torch.int8 and attn.to_k.weight.dtype != torch.uint8:
+            encoder_hidden_states = encoder_hidden_states.to(attn.to_k.weight.dtype)
 
         query = attn.to_q(hidden_states)
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
         
-
         if attn.norm_q is not None:
             query = attn.norm_q(query)
         if attn.norm_k is not None:

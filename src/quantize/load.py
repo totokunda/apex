@@ -95,27 +95,19 @@ def load_text_encoder_gguf(
                 "ignore", message="The given NumPy array is not writable"
             )
             # Map quantized GGUF buffers to int8 to avoid downstream frameworks casting activations to uint8
-            base = torch.from_numpy(tensor.data)
+            torch_tensor = torch.from_numpy(tensor.data)
 
-            torch_tensor = GGMLTensor(
-                base,
+            ggml_tensor = GGMLTensor(
+                torch_tensor.view(torch.int8) if is_quantized(torch_tensor) else torch_tensor,
                 tensor_type=tensor.tensor_type,
                 tensor_shape=shape,
                 dequant_dtype=dequant_dtype,
-            )  # mmap
-            if is_quantized(torch_tensor):
-                # Preserve byte pattern while exposing dtype as int8 (zero-copy reinterpret)
-                torch_tensor = GGMLTensor(
-                    base.view(torch.int8),
-                    tensor_type=tensor.tensor_type,
-                    tensor_shape=shape,
-                    dequant_dtype=dequant_dtype,
-                )
+            )
 
-        state_dict[name] = torch_tensor
+        state_dict[name] = ggml_tensor
         if tensor.name == "token_embd.weight":
             state_dict[name] = dequantize_tensor(
-                torch_tensor, dequant_dtype=dequant_dtype
+                ggml_tensor, dequant_dtype=dequant_dtype
             )
             if key_map == "t5":  # We duplicate the token embedding for t5
                 state_dict["encoder.embed_tokens.weight"] = state_dict[name]
@@ -131,41 +123,53 @@ def load_text_encoder_gguf(
     return state_dict, qtype_dict
 
 
+def get_orig_shape(reader, tensor_name):
+    field_key = f"comfy.gguf.orig_shape.{tensor_name}"
+    field = reader.get_field(field_key)
+    if field is None:
+        return None
+    # Has original shape metadata, so we try to decode it.
+    if len(field.types) != 2 or field.types[0] != gguf.GGUFValueType.ARRAY or field.types[1] != gguf.GGUFValueType.INT32:
+        raise TypeError(f"Bad original shape metadata for {field_key}: Expected ARRAY of INT32, got {field.types}")
+    return torch.Size(tuple(int(field.parts[part_idx][0]) for part_idx in field.data))
+
+
 def load_transformer_gguf(
     path: str,
     dequant_dtype: torch.dtype | str = torch.float16,
 ):
     if isinstance(dequant_dtype, str):
         dequant_dtype = convert_str_dtype(dequant_dtype)
+
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
+
     for tensor in tqdm(reader.tensors):
         name = tensor.name
-        shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
+        shape = get_orig_shape(reader, name)
+        if shape is None:
+            # GGUF stores dims reversed
+            shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
+
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message="The given NumPy array is not writable"
-            )
-            # Map quantized GGUF buffers to int8 to avoid downstream frameworks casting activations to uint8
+            warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
             base = torch.from_numpy(tensor.data)
 
-            torch_tensor = GGMLTensor(
+            # For F16/F32, present the logical shape now; quantized shapes are handled by dequant
+            if tensor.tensor_type in {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16}:
+                base = base.view(*shape)
+
+            ggml_tensor = GGMLTensor(
                 base,
                 tensor_type=tensor.tensor_type,
                 tensor_shape=shape,
                 dequant_dtype=dequant_dtype,
-            )  # mmap
-            if is_quantized(torch_tensor):
-                # Preserve byte pattern while exposing dtype as int8 (zero-copy reinterpret)
-                torch_tensor = GGMLTensor(
-                    base.view(torch.int8),
-                    tensor_type=tensor.tensor_type,
-                    tensor_shape=shape,
-                    dequant_dtype=dequant_dtype,
-                )
+                patches=[],
+                requires_grad=False,
+            )
 
-        state_dict[name] = torch_tensor
+        state_dict[name] = ggml_tensor
         tensor_type_str = getattr(tensor.tensor_type, "name", repr(tensor.tensor_type))
         qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
 
