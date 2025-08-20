@@ -214,7 +214,7 @@ class WanATIEngine(WanBaseEngine):
         ],
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
-        tracks: np.ndarray = None,
+        tracks: np.ndarray | str = None,
         duration: int | str = 16,
         height: int = 480,
         width: int = 832,
@@ -241,6 +241,14 @@ class WanATIEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+        
+        if isinstance(tracks, str):
+            self.load_preprocessor_by_type("wan.ati")
+            preprocessor = self.preprocessors["wan.ati"]
+            tracks = preprocessor(tracks, width, height)
+            tracks = tracks.to(self.device)
+        else:
+            tracks = torch.from_numpy(tracks).to(self.device)
 
         prompt_embeds = self.text_encoder.encode(
             prompt,

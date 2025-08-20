@@ -11,6 +11,7 @@ class DenoiseType(EnumType):
     MOE = "moe"
     DIFFUSION_FORCING = "diffusion_forcing"
     MULTITALK = "multitalk"
+    RECAM = "recam"
 
 
 class WanDenoise(WanDenoiseMLX):
@@ -27,6 +28,8 @@ class WanDenoise(WanDenoiseMLX):
             return self.diffusion_forcing_denoise(*args, **kwargs)
         elif self.denoise_type == DenoiseType.MULTITALK:
             return self.multitalk_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseType.RECAM:
+            return self.recam_denoise(*args, **kwargs)
         elif self.denoise_type == DenoiseTypeMLX.BASE:
             return self.mlx_base_denoise(*args, **kwargs)
         elif self.denoise_type == DenoiseTypeMLX.MOE:
@@ -35,6 +38,8 @@ class WanDenoise(WanDenoiseMLX):
             return self.mlx_diffusion_forcing_denoise(*args, **kwargs)
         elif self.denoise_type == DenoiseTypeMLX.MULTITALK:
             return self.mlx_multitalk_denoise(*args, **kwargs)
+        elif self.denoise_type == DenoiseTypeMLX.RECAM:
+            return self.mlx_recam_denoise(*args, **kwargs)
         else:
             raise ValueError(f"Denoise type {self.denoise_type} not supported")
 
@@ -176,10 +181,6 @@ class WanDenoise(WanDenoiseMLX):
                     else:
                         latent_model_input = latents.to(transformer_dtype)
                 
-                # Standard denoising
-                
-                if self.transformer.config.ip_adapter:
-                    timestep = timestep.to(transformer_dtype)
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -218,6 +219,63 @@ class WanDenoise(WanDenoiseMLX):
             self.logger.info("Denoising completed.")
 
         return latents
+
+    def recam_denoise(self, *args, **kwargs) -> torch.Tensor:
+        timesteps = kwargs.get("timesteps", None)
+        latents = kwargs.get("latents", None)
+        source_latents = kwargs.get("source_latents", None)
+        transformer_dtype = kwargs.get("transformer_dtype", None)
+        use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
+        render_on_step = kwargs.get("render_on_step", False)
+        render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        scheduler = kwargs.get("scheduler", None)
+        guidance_scale = kwargs.get("guidance_scale", 5.0)
+
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+        self.to_device(self.transformer)
+
+        model_type_str = getattr(self, "model_type", "WAN")
+        target_length = latents.shape[2]
+
+        with self._progress_bar(
+            len(timesteps), desc=f"Sampling {model_type_str}"
+        ) as pbar:
+            for i, t in enumerate(timesteps):
+                
+                timestep = t.expand(latents.shape[0])
+                latent_model_input = torch.cat([latents, source_latents], dim=2).to(transformer_dtype)
+
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    return_dict=False,
+                    **kwargs.get("transformer_kwargs", {}),
+                )[0]
+
+                if use_cfg_guidance and kwargs.get(
+                    "unconditional_transformer_kwargs", None
+                ):
+                    uncond_noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        timestep=timestep,
+                        return_dict=False,
+                        **kwargs.get("unconditional_transformer_kwargs", {}),
+                    )[0]
+                    noise_pred = uncond_noise_pred + guidance_scale * (
+                        noise_pred - uncond_noise_pred
+                    )
+
+                latents = scheduler.step(noise_pred[:, :, :target_length], t, latents[:, :, :target_length], return_dict=False)[0]
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+                pbar.update(1)
+
+            self.logger.info("Denoising completed.")
+
+        return latents
+
 
     def diffusion_forcing_denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents", None)

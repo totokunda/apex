@@ -379,7 +379,7 @@ class WanVACETransformer3DModel(
             hidden_states_ip = self.patch_embedding(ip_image_hidden_states)
             hidden_states_ip = hidden_states_ip.flatten(2).transpose(1, 2)
             ip_hidden_states_len = hidden_states_ip.shape[1]
-            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states)
+            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states, time_index=0)
             rotary_emb = torch.concat([rotary_emb, rotary_emb_ip], dim=2)
         else:
             hidden_states_ip = None

@@ -72,7 +72,7 @@ class WanV2VEngine(WanBaseEngine):
             )
             loaded_video[i] = frame
 
-        preprocessed_video = self.video_processor.preprocess(
+        preprocessed_video = self.video_processor.preprocess_video(
             loaded_video, height=height, width=width
         ).to(self.device, dtype=torch.float32)
 

@@ -1,3 +1,5 @@
+import os
+os.environ["APEX_HOME_DIR"] = "/mnt/localssd"
 from src.engine import create_engine
 from diffusers.utils import export_to_video
 import torch

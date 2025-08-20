@@ -17,6 +17,7 @@ from .inp import WanInpEngine
 from .phantom import WanPhantomEngine
 from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
+from .recam import WanRecamEngine
 from src.utils.type import EnumType
 
 
@@ -34,6 +35,7 @@ class ModelType(EnumType):
     MULTITALK = "multitalk"  # multitalk audio-driven video
     V2V = "v2v"  # video to video
     ATI = "ati"  # trajectory to video
+    RECAM = "recam"  # recam (camera-driven video)
 
 
 class WanEngine(BaseEngine, WanDenoise):
@@ -64,7 +66,7 @@ class WanEngine(BaseEngine, WanDenoise):
                         if isinstance(self.denoise_type, DenoiseType)
                         or isinstance(self.denoise_type, DenoiseTypeMLX)
                         else self.denoise_type
-                    ).rstrip("mlx.")
+                    ).replace("mlx.", "")
                 )
                 if self.denoise_type is not None
                 else DenoiseType.BASE
@@ -121,6 +123,8 @@ class WanEngine(BaseEngine, WanDenoise):
             self.implementation_engine = WanATIEngine(self)
         elif self.model_type == ModelType.V2V:
             self.implementation_engine = WanV2VEngine(self)
+        elif self.model_type == ModelType.RECAM:
+            self.implementation_engine = WanRecamEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

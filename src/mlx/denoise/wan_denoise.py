@@ -45,6 +45,9 @@ class WanDenoise:
     def mlx_multitalk_denoise(self, *args, **kwargs) -> mx.array:
         raise NotImplementedError("multitalk_denoise not implemented for MLX")
 
+    def mlx_recam_denoise(self, *args, **kwargs) -> mx.array:
+        raise NotImplementedError("recam_denoise not implemented for MLX")
+
     def _maybe_to_dtype(self, array: mx.array, dtype):
         if dtype is None:
             return array
