@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torchvision import transforms as T
 from diffusers.utils.torch_utils import randn_tensor
 from src.utils.models.wan import match_and_blend_colors
-
+import numpy as np
 
 class WanMultitalkEngine(WanBaseEngine):
     """WAN MultiTalk (Audio-driven) Engine Implementation"""
@@ -14,7 +14,8 @@ class WanMultitalkEngine(WanBaseEngine):
     def run(
         self,
         prompt: List[str] | str,
-        image: Union[Image.Image, str],
+        image: Union[Image.Image, str] | None = None,
+        video: Union[List[Image.Image], str, np.ndarray, torch.Tensor, None] = None,
         audio_paths: Optional[Dict[str, str]] = None,
         audio_type: str = "para",
         negative_prompt: List[str] | str = None,
@@ -69,14 +70,37 @@ class WanMultitalkEngine(WanBaseEngine):
         """
 
         num_frames = self._parse_num_frames(duration, fps)
-        loaded_image = self._load_image(image)
-        loaded_image, height, width = self._aspect_ratio_resize(
-            loaded_image, max_area=height * width, mod_value=16
-        )
+        
+        assert image is not None or video is not None, "Either image or video must be provided"
+        
+        process_type = "image" if image is not None else "video"
+        
+        if image is not None:
+            loaded_image = self._load_image(image)
+            loaded_image, height, width = self._aspect_ratio_resize(
+                loaded_image, max_area=height * width, mod_value=16
+            )
+            
+            cond_image = self.video_processor.preprocess(
+                loaded_image, height=height, width=width
+            ).to(self.device, dtype=torch.float32)
+        
+        if video is not None:
+            input_video = self._load_video(video)
+            for idx, frame in enumerate(input_video):
+                frame, height, width = self._aspect_ratio_resize(
+                    frame, max_area=height * width, mod_value=16
+                )
+                input_video[idx] = frame
+            
+            loaded_image = input_video[0]
+            input_video = self.video_processor.preprocess_video(
+                input_video, height=height, width=width
+            ).to(self.device, dtype=torch.float32)
+            cond_image = input_video[:, :, 0, :, :]
+        else:
+            input_video = None
 
-        cond_image = self.video_processor.preprocess(
-            loaded_image, height=height, width=width
-        ).to(self.device, dtype=torch.float32)
 
         cond_image = cond_image.unsqueeze(2)
 
@@ -338,11 +362,18 @@ class WanMultitalkEngine(WanBaseEngine):
             # update next condition frames
             is_first_clip = False
             cur_motion_frames_num = motion_frames
-
+            
+            
             cond_image = (
                 videos[:, :, -cur_motion_frames_num:].to(torch.float32).to(self.device)
             )
-            loaded_image = cond_image[:, :, -1, :, :].squeeze(0).permute(1, 2, 0)
+            
+            if process_type == "image":
+                loaded_image = cond_image[:, :, -1, :, :]
+            else:
+                loaded_image = input_video[:, :, audio_start_idx, :, :]
+            
+            loaded_image = loaded_image.squeeze(0).permute(1, 2, 0)
             loaded_image = Image.fromarray(
                 ((loaded_image + 1) * 127.5).clamp(0, 255).to(torch.uint8).cpu().numpy()
             )

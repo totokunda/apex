@@ -83,6 +83,7 @@ class SkyReelsTransformerConverter(WanTransformerConverter):
                 "fps_projection": "condition_embedder.fps_projection",
             }
         )
+        
 
 
 class WanMultiTalkTransformerConverter(TransformerConverter):

@@ -1,0 +1,36 @@
+name: "Wan 2.1 1.3B Recam"
+description: "Wan 2.1 1.3B is a 1.3B parameter model for recam generation."
+engine: wan
+type: recam
+denoise_type: recam
+
+shared: 
+  - shared_wan.yml # path to shared_wan.yml
+
+components:
+  - type: scheduler
+    base: "diffusers.UniPCMultistepScheduler"
+    config_path: "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler/scheduler_config.json"
+
+  - !include shared:wan/vae
+  - !include shared:wan/text_encoder
+  
+  - type: transformer
+    base: "wan.recam" # one of cogvideo, hunyuan, ltx, mochi, stepvideo, wan 
+    model_path: /mnt/localssd/apex-diffusion/components/KwaiVGI/ReCamMaster-Wan2.1/resolve/main/step20000.ckpt
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/transformer/config.json
+    config: 
+      _class_name: WanRecamTransformer3DModel
+    tag: "wan_recam_1.3b"
+
+preprocessors: 
+  - type: wan.recam
+    cam_type: 1
+
+defaults:
+  run:
+    num_inference_steps: 50
+    guidance_scale: 5.0
+    return_latents: false
+    text_encoder_kwargs: {}
+    attention_kwargs: {}

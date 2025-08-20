@@ -44,7 +44,7 @@ from .composition import (
     ExpandAnythingPreprocessor,
     MoveAnythingPreprocessor,
 )
-from .wan import MultiTalkPreprocessor
+from .wan import MultiTalkPreprocessor, ATIPreprocessor, RecamPreprocessor
 from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
 from .stepvideo import Step1TextEncoderPreprocessor
 from .base import BasePreprocessor, preprocessor_registry
@@ -99,4 +99,6 @@ __all__ = [
     "PromptExtendPreprocessor",
     "SAM2GDINOVideoPreprocessor",
     "SAM2SalientVideoPreprocessor",
-]
+    "ATIPreprocessor",
+    "RecamPreprocessor",
+    ]

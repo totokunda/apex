@@ -498,7 +498,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if base.startswith("mlx."):
                 registry = TRANSFORMERS_REGISTRY_MLX
                 dtype_converter = convert_dtype_to_mlx
-                component["base"] = base.lstrip("mlx.")
+                component["base"] = base.replace("mlx.", "")
             else:
                 registry = TRANSFORMERS_REGISTRY_TORCH
                 dtype_converter = convert_dtype_to_torch

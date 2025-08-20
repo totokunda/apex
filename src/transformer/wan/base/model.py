@@ -828,7 +828,6 @@ class WanTransformer3DModel(
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         
         
-
         if timestep.ndim == 2:
             ts_seq_len = timestep.shape[1]
             timestep = timestep.flatten()  # batch_size * seq_len
