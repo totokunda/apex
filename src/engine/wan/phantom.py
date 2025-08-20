@@ -38,6 +38,7 @@ class WanPhantomEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        enhance_kwargs: Dict[str, Any] = {},
     ):
 
         if not self.text_encoder:
@@ -142,6 +143,7 @@ class WanPhantomEngine(WanBaseEngine):
                     else None
                 ),
                 attention_kwargs=attention_kwargs,
+                enhance_kwargs=enhance_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
@@ -152,6 +154,7 @@ class WanPhantomEngine(WanBaseEngine):
                         else None
                     ),
                     attention_kwargs=attention_kwargs,
+                    enhance_kwargs=enhance_kwargs,
                 )
                 if negative_prompt_embeds is not None
                 else None

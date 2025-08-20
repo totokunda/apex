@@ -23,18 +23,34 @@ class WanBaseEngine:
     @property
     def text_encoder(self):
         return self.main_engine.text_encoder
+    
+    @text_encoder.setter
+    def text_encoder(self, text_encoder):
+        self.main_engine.text_encoder = text_encoder
 
     @property
     def transformer(self):
         return self.main_engine.transformer
+    
+    @transformer.setter
+    def transformer(self, transformer):
+        self.main_engine.transformer = transformer
 
     @property
     def scheduler(self):
         return self.main_engine.scheduler
+    
+    @scheduler.setter
+    def scheduler(self, scheduler):
+        self.main_engine.scheduler = scheduler
 
     @property
     def vae(self):
         return self.main_engine.vae
+    
+    @vae.setter
+    def vae(self, vae):
+        self.main_engine.vae = vae
 
     @property
     def preprocessors(self):

@@ -55,6 +55,7 @@ class WanVACETransformerBlock(nn.Module):
         added_kv_proj_dim: Optional[int] = None,
         apply_input_projection: bool = False,
         apply_output_projection: bool = False,
+        use_enhance: bool = False,
     ):
         super().__init__()
 
@@ -133,6 +134,7 @@ class WanVACETransformerBlock(nn.Module):
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
+        
         control_hidden_states = (
             control_hidden_states.float() + attn_output * gate_msa
         ).type_as(control_hidden_states)
@@ -242,6 +244,7 @@ class WanVACETransformer3DModel(
         vace_layers: List[int] = [0, 5, 10, 15, 20, 25, 30, 35],
         vace_in_channels: int = 96,
         ip_adapter: bool = False,
+        use_enhance: bool = False,
     ) -> None:
         super().__init__()
 
@@ -286,6 +289,7 @@ class WanVACETransformer3DModel(
                     cross_attn_norm,
                     eps,
                     added_kv_proj_dim,
+                    use_enhance,
                 )
                 for _ in range(num_layers)
             ]
@@ -307,6 +311,7 @@ class WanVACETransformer3DModel(
                     apply_input_projection=i
                     == 0,  # Layer 0 always has input projection and is in vace_layers
                     apply_output_projection=True,
+                    use_enhance=use_enhance,
                 )
                 for i in range(len(vace_layers))
             ]
@@ -324,6 +329,11 @@ class WanVACETransformer3DModel(
     def init_ip_projections(self, train: bool = False):
         for block in self.blocks:
             block.attn1.init_ip_projections(train=train)
+            
+    def set_enhance(self, enhance_weight: float, num_frames: int):
+        for block in self.blocks:
+            block.attn1.processor.set_enhance_weight(enhance_weight)
+            block.attn1.processor.set_num_frames(num_frames)
 
     def forward(
         self,
@@ -336,7 +346,15 @@ class WanVACETransformer3DModel(
         ip_image_hidden_states: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        
+        if enhance_kwargs is not None:
+            enhance_weight = enhance_kwargs.get("enhance_weight", None)
+            num_frames = enhance_kwargs.get("num_frames", None)
+            if enhance_weight is not None and num_frames is not None:
+                self.set_enhance(enhance_weight, num_frames)
+
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)

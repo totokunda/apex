@@ -34,6 +34,7 @@ class WanT2VEngine(WanBaseEngine):
         boundary_ratio: float | None = None,
         expand_timesteps: bool = False,
         ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
+        enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
 
@@ -122,11 +123,13 @@ class WanT2VEngine(WanBaseEngine):
             transformer_kwargs=dict(
                 encoder_hidden_states=prompt_embeds,
                 attention_kwargs=attention_kwargs,
+                enhance_kwargs=enhance_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
                     encoder_hidden_states=negative_prompt_embeds,
                     attention_kwargs=attention_kwargs,
+                    enhance_kwargs=enhance_kwargs,
                 )
                 if negative_prompt_embeds is not None
                 else None

@@ -132,6 +132,7 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
         self.cond_size = None
 
         self.set_processor(processor)
+        
 
     def fuse_projections(self):
         if getattr(self, "fused_projections", False):
@@ -502,6 +503,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
+        use_enhance: bool = False,
     ):
         super().__init__()
 
@@ -513,7 +515,7 @@ class WanTransformerBlock(nn.Module):
             dim_head=dim // num_heads,
             eps=eps,
             cross_attention_dim_head=dim // num_heads,
-            processor=WanAttnProcessor2_0(),
+            processor=WanAttnProcessor2_0(use_enhance=use_enhance),
         )
 
         # 2. Cross-attention
@@ -608,7 +610,6 @@ class WanTransformerBlock(nn.Module):
             hidden_states
         )
         
-       
         # 2. Cross-attention
         norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
         attn_output = self.attn2(
@@ -619,8 +620,6 @@ class WanTransformerBlock(nn.Module):
 
         hidden_states = hidden_states + attn_output
         
-        
-
         # 3. Feed-forward
         norm_hidden_states = (
             self.norm3(hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa
@@ -631,7 +630,6 @@ class WanTransformerBlock(nn.Module):
         ).type_as(hidden_states)
         
         
-
         if hidden_states_ip is not None:
             gated_hidden_states_ip = (
                 hidden_states_ip.float() + attn_output_ip.float() * gate_msa_ip
@@ -723,6 +721,7 @@ class WanTransformer3DModel(
         rope_max_seq_len: int = 1024,
         pos_embed_seq_len: Optional[int] = None,
         ip_adapter: bool = False,
+        use_enhance: bool = False,
     ) -> None:
         super().__init__()
 
@@ -757,6 +756,7 @@ class WanTransformer3DModel(
                     cross_attn_norm,
                     eps,
                     added_kv_proj_dim,
+                    use_enhance,
                 )
                 for _ in range(num_layers)
             ]
@@ -777,6 +777,11 @@ class WanTransformer3DModel(
     def init_ip_projections(self, train: bool = False, device: torch.device = "cpu", dtype: torch.dtype = torch.float32):
         for block in self.blocks:
             block.attn1.init_ip_projections(train=train, device=device, dtype=dtype)
+            
+    def set_enhance(self, enhance_weight: float, num_frames: int):
+        for block in self.blocks:
+            block.attn1.processor.set_enhance_weight(enhance_weight)
+            block.attn1.processor.set_num_frames(num_frames)
 
     def forward(
         self,
@@ -787,12 +792,19 @@ class WanTransformer3DModel(
         ip_image_hidden_states: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)
         else:
             lora_scale = 1.0
+
+        if enhance_kwargs is not None:
+            enhance_weight = enhance_kwargs.get("enhance_weight", None)
+            num_frames = enhance_kwargs.get("num_frames", None)
+            if enhance_weight is not None and num_frames is not None:
+                self.set_enhance(enhance_weight, num_frames)
 
         if USE_PEFT_BACKEND:
             # weight the lora layers by setting `lora_scale` for each PEFT layer
