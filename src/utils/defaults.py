@@ -21,7 +21,9 @@ DEFAULT_POSTPROCESSOR_SAVE_PATH = os.getenv(
     "APEX_POSTPROCESSOR_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "postprocessors")
 )
 
-DEFAULT_CACHE_PATH = os.getenv("APEX_CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache"))
+DEFAULT_CACHE_PATH = os.getenv(
+    "APEX_CACHE_PATH", str(HOME_DIR / "apex-diffusion" / "cache")
+)
 
 # New default path to store LoRA adapters and related artifacts
 DEFAULT_LORA_SAVE_PATH = os.getenv(

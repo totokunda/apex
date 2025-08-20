@@ -5,6 +5,7 @@ from src.mlx.attention.base_attention import Attention
 from src.mlx.modules.rotary import view_as_complex, view_as_real
 import math
 
+
 @mx.compile
 def apply_rotary_emb(hidden_states: mx.array, freqs: mx.array):
     orig_dtype = hidden_states.dtype
@@ -53,11 +54,10 @@ class WanAttnProcessor2_0:
         query = mx.unflatten(query, 2, (attn.heads, -1)).transpose(0, 2, 1, 3)
         key = mx.unflatten(key, 2, (attn.heads, -1)).transpose(0, 2, 1, 3)
         value = mx.unflatten(value, 2, (attn.heads, -1)).transpose(0, 2, 1, 3)
-        
+
         if rotary_emb is not None:
             query = apply_rotary_emb(query, rotary_emb)
             key = apply_rotary_emb(key, rotary_emb)
-            
 
         head_dim = attn.inner_dim // attn.heads
         scale = 1 / math.sqrt(head_dim)
@@ -81,7 +81,7 @@ class WanAttnProcessor2_0:
             ).transpose(0, 2, 1, 3)
             hidden_states_img = mx.flatten(hidden_states_img, 2, 3)
             hidden_states_img = hidden_states_img.astype(query.dtype)
-            
+
         # Compute attention in float32 for numerical parity, then cast back
         qd = query.dtype
         hidden_states = mx.fast.scaled_dot_product_attention(
@@ -96,7 +96,7 @@ class WanAttnProcessor2_0:
 
         if hidden_states_img is not None:
             hidden_states = hidden_states + hidden_states_img
-            
+
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)
 

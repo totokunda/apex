@@ -14,7 +14,7 @@ class TransformerConverter:
             new_key = key[:]
             for replace_key, rename_key in self.rename_dict.items():
                 new_key = new_key.replace(replace_key, rename_key)
-            update_state_dict_(state_dict, key, new_key)
+                update_state_dict_(state_dict, key, new_key)
 
         for key in list(state_dict.keys()):
             for special_key, handler_fn_inplace in self.special_keys_map.items():
@@ -49,7 +49,12 @@ class WanTransformerConverter(TransformerConverter):
             "img_emb.proj.4": "condition_embedder.image_embedder.norm2",
             # for the FLF2V model
             "img_emb.emb_pos": "condition_embedder.image_embedder.pos_embed",
+            # for the IP model
+            "self_attn.q_loras": "attn1.add_q_lora",
+            "self_attn.k_loras": "attn1.add_k_lora",
+            "self_attn.v_loras": "attn1.add_v_lora",
             # Add attention component mappings
+            # original keys
             "self_attn.q": "attn1.to_q",
             "self_attn.k": "attn1.to_k",
             "self_attn.v": "attn1.to_v",

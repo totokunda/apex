@@ -34,7 +34,8 @@ class ModelType(EnumType):
     MULTITALK = "multitalk"  # multitalk audio-driven video
     V2V = "v2v"  # video to video
     ATI = "ati"  # trajectory to video
-    
+
+
 class WanEngine(BaseEngine, WanDenoise):
     def __init__(
         self,
@@ -44,17 +45,30 @@ class WanEngine(BaseEngine, WanDenoise):
         **kwargs,
     ):
         self.model_type = model_type
-        
+
         super().__init__(yaml_path, **kwargs)
-        
+
         if self.engine_type == "mlx":
-            self.denoise_type = DenoiseTypeMLX(
-                f"mlx.{self.denoise_type.value if isinstance(self.denoise_type, DenoiseType) or isinstance(self.denoise_type, DenoiseTypeMLX) else self.denoise_type}"
-            ) if self.denoise_type is not None else DenoiseTypeMLX.BASE
+            self.denoise_type = (
+                DenoiseTypeMLX(
+                    f"mlx.{self.denoise_type.value if isinstance(self.denoise_type, DenoiseType) or isinstance(self.denoise_type, DenoiseTypeMLX) else self.denoise_type}"
+                )
+                if self.denoise_type is not None
+                else DenoiseTypeMLX.BASE
+            )
         else:
-            self.denoise_type = DenoiseType(
-                (self.denoise_type.value if isinstance(self.denoise_type, DenoiseType) or isinstance(self.denoise_type, DenoiseTypeMLX) else self.denoise_type).rstrip("mlx.")
-            ) if self.denoise_type is not None else DenoiseType.BASE
+            self.denoise_type = (
+                DenoiseType(
+                    (
+                        self.denoise_type.value
+                        if isinstance(self.denoise_type, DenoiseType)
+                        or isinstance(self.denoise_type, DenoiseTypeMLX)
+                        else self.denoise_type
+                    ).rstrip("mlx.")
+                )
+                if self.denoise_type is not None
+                else DenoiseType.BASE
+            )
 
         self.vae_scale_factor_temporal = (
             2 ** sum(self.vae.temperal_downsample)

@@ -2,6 +2,7 @@ import torch
 import logging
 from typing import Any, Optional, Iterable
 
+
 class GGMLTensor(torch.Tensor):
     """
     A safe torch.Tensor subclass that carries GGUF metadata:
@@ -31,14 +32,20 @@ class GGMLTensor(torch.Tensor):
         # make a real subclass that shares the same storage
         obj = torch.Tensor._make_subclass(cls, data, require_grad=requires_grad)
         obj.tensor_type = tensor_type
-        obj.tensor_shape = torch.Size(tuple(tensor_shape)) if tensor_shape is not None else torch.Size(data.shape)
+        obj.tensor_shape = (
+            torch.Size(tuple(tensor_shape))
+            if tensor_shape is not None
+            else torch.Size(data.shape)
+        )
         obj.dequant_dtype = dequant_dtype
         obj.patches = list(patches) if patches is not None else []
         return obj
 
     # ---- helpers to re-wrap outputs and preserve metadata -----------------
     def _wrap_like(self, base: torch.Tensor) -> "GGMLTensor":
-        out = torch.Tensor._make_subclass(GGMLTensor, base, require_grad=base.requires_grad)
+        out = torch.Tensor._make_subclass(
+            GGMLTensor, base, require_grad=base.requires_grad
+        )
         out.tensor_type = getattr(self, "tensor_type", None)
         out.tensor_shape = torch.Size(getattr(self, "tensor_shape", base.shape))
         out.dequant_dtype = getattr(self, "dequant_dtype", None)
@@ -55,7 +62,9 @@ class GGMLTensor(torch.Tensor):
         return self.to("cpu")
 
     def cuda(self, device=None, non_blocking=False, **kwargs):
-        return self.to(device if device is not None else "cuda", non_blocking=non_blocking)
+        return self.to(
+            device if device is not None else "cuda", non_blocking=non_blocking
+        )
 
     def clone(self, *args, **kwargs):
         base = super().clone(*args, **kwargs)

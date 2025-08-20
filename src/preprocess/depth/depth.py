@@ -15,7 +15,8 @@ import cv2
 from src.preprocess.base import BaseOutput
 from src.utils.preprocessors import MODEL_WEIGHTS
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
-from tqdm import tqdm   
+from tqdm import tqdm
+
 
 def resize_image(input_image, resolution):
     H, W, C = input_image.shape
@@ -44,9 +45,9 @@ def resize_image_ori(h, w, image, k):
 class DepthOutput(BaseOutput):
     depth: Image.Image
 
+
 class VideoDepthOutput(BaseOutput):
     depth: List[Image.Image]
-
 
 
 @preprocessor_registry("depth.midas")
@@ -160,22 +161,31 @@ class VideoDepthAnythingV2Preprocessor(DepthAnythingV2Preprocessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def __call__(self, video: Union[str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]]):
+    def __call__(
+        self,
+        video: Union[
+            str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]
+        ],
+    ):
         frames = self._load_video(video)
         depths = []
         for frame in tqdm(frames):
             depth = super().__call__(frame)
             depths.append(depth.depth)
         return VideoDepthOutput(depth=depths)
-    
-    
+
 
 @preprocessor_registry("depth.video.midas")
 class VideoMidasDepthPreprocessor(MidasDepthPreprocessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def __call__(self, video: Union[str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]]):
+    def __call__(
+        self,
+        video: Union[
+            str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]
+        ],
+    ):
         frames = self._load_video(video)
         depths = []
         for frame in tqdm(frames):

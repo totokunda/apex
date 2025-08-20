@@ -68,26 +68,29 @@ class LoaderMixin(DownloadMixin):
             raise ValueError(f"Model class for base '{model_base}' not found")
 
         config_path = component.get("config_path")
+        config = {}
         if config_path:
-            config = self.fetch_config(config_path)
-        else:
-            config = component.get("config", {}) or {}
+            config.update(self.fetch_config(config_path))
+        if component.get("config"):
+            config.update(component.get("config"))
 
         if os.path.isdir(model_path) and os.path.exists(
             os.path.join(model_path, "config.json")
-        ):
+            ) and not component.get("extra_model_paths"):
             if config:
                 # replace the config.json with the config
                 config_path = os.path.join(model_path, "config.json")
                 self._save_config(config, config_path)
-            
-            if hasattr(self, "engine_type") and self.engine_type == "mlx" and component.get("type") == "transformer":
+
+            if (
+                hasattr(self, "engine_type")
+                and self.engine_type == "mlx"
+                and component.get("type") == "transformer"
+            ):
                 extra_kwargs["dtype"] = load_dtype
             else:
                 extra_kwargs["torch_dtype"] = load_dtype
-            model = model_class.from_pretrained(
-                model_path,  **extra_kwargs
-            )
+            model = model_class.from_pretrained(model_path, **extra_kwargs)
             return model
 
         with init_empty_weights():
@@ -125,7 +128,11 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
 
-        if model_path.endswith(".gguf") and hasattr(self, "engine_type") and self.engine_type == "torch":
+        if (
+            model_path.endswith(".gguf")
+            and hasattr(self, "engine_type")
+            and self.engine_type == "torch"
+        ):
             self.logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
             state_dict, _ = load_gguf(
@@ -135,12 +142,16 @@ class LoaderMixin(DownloadMixin):
             if component.get("type") == "transformer":
                 converter = get_transformer_converter(model_base)
                 converter.convert(state_dict)
-            
+
             # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model(model)
             model.load_state_dict(state_dict, assign=True)
-            
-        elif model_path.endswith(".gguf") and hasattr(self, "engine_type") and self.engine_type == "mlx":
+
+        elif (
+            model_path.endswith(".gguf")
+            and hasattr(self, "engine_type")
+            and self.engine_type == "mlx"
+        ):
             self.logger.info(f"Loading GGUF model from {model_path}")
             # Can load gguf directly into mlx model no need to convert
             gguf_weights = mx.load(model_path)
@@ -148,29 +159,31 @@ class LoaderMixin(DownloadMixin):
             model.load_weights(gguf_weights)
         else:
             if os.path.isdir(model_path):
+                extensions = component.get("extensions", ["safetensors", "bin", "pt", "ckpt"])
                 self.logger.info(f"Loading model from {model_path}")
-                file_pattern = component.get("file_pattern", "**/*.safetensors")
-                bin_pattern = component.get("bin_pattern", "**/*.bin")
-                pt_pattern = component.get("pt_pattern", "**/*.pt")
-                files_to_load = glob(
-                    os.path.join(model_path, file_pattern), recursive=True
-                )
-                files_to_load += glob(
-                    os.path.join(model_path, bin_pattern), recursive=True
-                )
-                files_to_load += glob(
-                    os.path.join(model_path, pt_pattern), recursive=True
-                )
+                files_to_load = []
+                for ext in extensions:
+                    files_to_load.extend(glob(os.path.join(model_path, f"*.{ext}")))
                 if not files_to_load:
                     self.logger.warning(f"No model files found in {model_path}")
             else:
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(f"Model file not found at {model_path}")
                 files_to_load = [model_path]
+            
+            extra_model_paths = component.get("extra_model_paths", [])
+            if isinstance(extra_model_paths, str):
+                extra_model_paths = [extra_model_paths]
+            files_to_load.extend(extra_model_paths)
+
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")
                 if is_safetensors_file(file_path):
-                    state_dict = load_safetensors(file_path, dtype=load_dtype, framework="np" if self.engine_type == "mlx" else "pt")
+                    state_dict = load_safetensors(
+                        file_path,
+                        dtype=load_dtype,
+                        framework="np" if self.engine_type == "mlx" else "pt",
+                    )
                 else:
                     state_dict = torch.load(
                         file_path, map_location="cpu", weights_only=True, mmap=True
@@ -189,10 +202,10 @@ class LoaderMixin(DownloadMixin):
                                 new_state_dict[k2] = v2
 
                     state_dict = new_state_dict
-                
+
                 if hasattr(self, "engine_type") and self.engine_type == "mlx":
                     check_mlx_convolutional_weights(state_dict, model)
-                    
+
                 if hasattr(model, "load_state_dict"):
                     model.load_state_dict(
                         state_dict, strict=False, assign=True
@@ -203,7 +216,7 @@ class LoaderMixin(DownloadMixin):
                     raise ValueError(
                         f"Model {model} does not have a load_state_dict or load_weights method"
                     )
-                
+
         if hasattr(self, "engine_type") and self.engine_type == "torch":
             has_meta_params = False
             for name, param in model.named_parameters():
@@ -264,14 +277,13 @@ class LoaderMixin(DownloadMixin):
         else:
             module_name = "diffusers"
             class_name = component_base
-        
+
         try:
             base_module = importlib.import_module(module_name)
         except ImportError:
             raise ImportError(
                 f"Could not import the base module '{module_name}' from component '{component_base}'"
             )
-
 
         component_class = find_class_recursive(base_module, class_name)
 

@@ -11,6 +11,7 @@ from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
 
+
 @dataclass
 class LoraItem:
     # A single LoRA entry that may consist of 1+ files (.safetensors/.bin and optional .json config)
@@ -151,7 +152,7 @@ class LoraManager(DownloadMixin):
             raise ValueError(
                 "Model doesn't support PEFT/LoRA. Ensure transformer inherits PeftAdapterMixin."
             )
-            
+
         # verify the state dict is correct or convert it to the correct format
 
         resolved: List[LoraItem] = []
@@ -184,8 +185,12 @@ class LoraManager(DownloadMixin):
             final_scales.append(item.scale)
             # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
             for local_path in item.local_paths:
-                local_path_state_dict = self.maybe_convert_state_dict(local_path, model.config._class_name)
-                model.load_lora_adapter(local_path_state_dict, adapter_name=adapter_name)
+                local_path_state_dict = self.maybe_convert_state_dict(
+                    local_path, model.config._class_name
+                )
+                model.load_lora_adapter(
+                    local_path_state_dict, adapter_name=adapter_name
+                )
 
         # Activate all adapters with their weights in one call
         try:
@@ -247,7 +252,7 @@ class LoraManager(DownloadMixin):
                 if file_id is not None:
                     return download_file_id(file_id)
         raise RuntimeError(f"No downloadable files found for CivitAI model {model_id}")
-    
+
     def load_file(self, local_path: str) -> str:
         if local_path.endswith(".safetensors"):
             return load_file(local_path)

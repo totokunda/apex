@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 from .base import WanBaseEngine
 
+
 class WanVaceEngine(WanBaseEngine):
     """WAN VACE (Video Acceleration) Engine Implementation"""
 
@@ -12,7 +13,9 @@ class WanVaceEngine(WanBaseEngine):
         self,
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
-        video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor] | None = None,
+        video: (
+            Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor] | None
+        ) = None,
         reference_images: Union[
             Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
         ] = None,
@@ -38,6 +41,7 @@ class WanVaceEngine(WanBaseEngine):
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
         **kwargs,
     ):
 
@@ -45,7 +49,7 @@ class WanVaceEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
+
         num_frames = self._parse_num_frames(duration, fps=fps)
 
         prompt_embeds = self.text_encoder.encode(
@@ -134,7 +138,15 @@ class WanVaceEngine(WanBaseEngine):
             )
             height, width = video_height, video_width
         else:
-            preprocessed_video = torch.zeros(num_videos, 3, num_frames, height, width, device=self.device, dtype=torch.float32)
+            preprocessed_video = torch.zeros(
+                num_videos,
+                3,
+                num_frames,
+                height,
+                width,
+                device=self.device,
+                dtype=torch.float32,
+            )
 
         if not mask:
             preprocessed_mask = torch.ones_like(preprocessed_video)
@@ -171,7 +183,7 @@ class WanVaceEngine(WanBaseEngine):
                 reference_images if reference_images else None
                 for _ in range(preprocessed_video.shape[0])
             ]
-            
+
         assert reference_images is not None, "reference_images must be provided"
         assert isinstance(reference_images, list), "reference_images must be a list"
         assert (
@@ -302,7 +314,6 @@ class WanVaceEngine(WanBaseEngine):
         if duration is None:
             duration = len(loaded_video)
 
-        
         latents = self._get_latents(
             height,
             width,
@@ -343,6 +354,7 @@ class WanVaceEngine(WanBaseEngine):
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
+            ip_image=ip_image,
         )
 
         if offload:

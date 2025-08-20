@@ -1,7 +1,7 @@
 import torch
 from typing import Literal
 from diffusers.pipelines.ltx.modeling_latent_upsampler import LTXLatentUpsamplerModel
-from src.postprocess.base import BasePostprocessor, postprocessor_registry
+from src.postprocess.base import BasePostprocessor, PostprocessorCategory, postprocessor_registry
 from src.utils.cache import empty_cache
 import numpy as np
 from PIL import Image
@@ -10,7 +10,7 @@ from PIL import Image
 @postprocessor_registry("ltx.latent_upsampler")
 class LatentUpsamplerPostprocessor(BasePostprocessor):
     def __init__(self, engine, **kwargs):
-        super().__init__(engine, **kwargs)
+        super().__init__(engine, PostprocessorCategory.UPSCALER, **kwargs)
 
         # Get configuration from component_conf
         self.config = self.component_conf

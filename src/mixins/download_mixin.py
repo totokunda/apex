@@ -19,7 +19,7 @@ import shutil
 import json
 import yaml
 from typing import Dict, Any
-
+from gdown import download
 
 class DownloadMixin:
     logger: Logger = logger
@@ -32,10 +32,13 @@ class DownloadMixin:
             return False
 
     def fetch_config(
-        self, config_path: str, config_save_path: str = DEFAULT_CONFIG_SAVE_PATH
+        self, config_path: str, config_save_path: str = DEFAULT_CONFIG_SAVE_PATH, return_path: bool = False
     ):
         path = self._download(config_path, config_save_path)
-        return self._load_config_file(path)
+        if return_path:
+            return path
+        else:
+            return self._load_config_file(path)
 
     def _save_config(self, config: Dict[str, Any], save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -53,6 +56,8 @@ class DownloadMixin:
         # check if model_path is a local path
         if os.path.exists(model_path):
             return model_path
+        elif "drive.google.com" in model_path:
+            return self._download_from_google_drive(model_path, save_path)
         elif model_path.startswith("gs://"):
             return self._download_from_gcs(model_path, save_path)
         elif model_path.startswith("s3://"):
@@ -371,6 +376,15 @@ class DownloadMixin:
                 self.logger.error(
                     f"Failed to download from Hugging Face Hub: {repo_id}. Error: {e}"
                 )
+                
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)
+    )
+    def _download_from_google_drive(self, url: str, save_path: str):
+        try:
+            return download(url, save_path, user_agent=DEFAULT_HEADERS['User-Agent'])
+        except Exception as e:
+            self.logger.error(f"Failed to download from Google Drive: {url}. Error: {e}")
 
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)

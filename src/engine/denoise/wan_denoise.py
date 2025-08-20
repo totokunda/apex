@@ -3,12 +3,15 @@ import math
 from src.utils.type import EnumType
 from src.utils.cache import empty_cache
 from src.mlx.denoise import WanDenoise as WanDenoiseMLX, DenoiseType as DenoiseTypeMLX
+import numpy as np
+from PIL import Image
 
 class DenoiseType(EnumType):
     BASE = "base"
     MOE = "moe"
     DIFFUSION_FORCING = "diffusion_forcing"
     MULTITALK = "multitalk"
+
 
 class WanDenoise(WanDenoiseMLX):
     def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
@@ -126,7 +129,14 @@ class WanDenoise(WanDenoiseMLX):
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps = kwargs.get("expand_timesteps", False)
         first_frame_mask = kwargs.get("first_frame_mask", None)
+        ip_image = kwargs.get("ip_image", None)
 
+        if ip_image is not None:
+            ip_image_latent = self._encode_ip_image(ip_image, dtype=transformer_dtype)
+        else:
+            ip_image_latent = None
+            
+        
         if expand_timesteps and first_frame_mask is not None:
             mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         else:
@@ -165,14 +175,21 @@ class WanDenoise(WanDenoiseMLX):
                         ).to(transformer_dtype)
                     else:
                         latent_model_input = latents.to(transformer_dtype)
+                
                 # Standard denoising
                 
+                if self.transformer.config.ip_adapter:
+                    timestep = timestep.to(transformer_dtype)
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
+                    ip_image_hidden_states=ip_image_latent,
                     timestep=timestep,
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
+
+                ip_image_latent = None
 
                 if use_cfg_guidance and kwargs.get(
                     "unconditional_transformer_kwargs", None
@@ -186,6 +203,7 @@ class WanDenoise(WanDenoiseMLX):
                     noise_pred = uncond_noise_pred + guidance_scale * (
                         noise_pred - uncond_noise_pred
                     )
+
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 if render_on_step and render_on_step_callback:
@@ -412,3 +430,16 @@ class WanDenoise(WanDenoiseMLX):
             self.logger.info("Denoising completed.")
 
         return latents
+    
+    def _encode_ip_image(self, ip_image: Image.Image | str | np.ndarray | torch.Tensor, dtype: torch.dtype = None):
+        ip_image = self._load_image(ip_image)
+        ip_image = (
+            torch.tensor(np.array(ip_image)).permute(2, 0, 1).float() / 255.0
+        )  # [3, H, W]
+        ip_image = (
+            ip_image.unsqueeze(1).unsqueeze(0).to(dtype=dtype)
+        )  # [B, 3, 1, H, W]
+        ip_image = ip_image * 2 - 1
+
+        encoded_image = self.vae_encode(ip_image, sample_mode="mode", dtype=dtype)
+        return encoded_image

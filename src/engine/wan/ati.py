@@ -33,7 +33,10 @@ def _ind_sel(target: torch.Tensor, ind: torch.Tensor, dim: int = 1):
     """
     assert (
         len(ind.shape) > dim
-    ), "Index must have the target dim, but get dim: %d, ind shape: %s" % (dim, str(ind.shape))
+    ), "Index must have the target dim, but get dim: %d, ind shape: %s" % (
+        dim,
+        str(ind.shape),
+    )
 
     target = target.expand(
         *tuple(
@@ -55,7 +58,9 @@ def _ind_sel(target: torch.Tensor, ind: torch.Tensor, dim: int = 1):
     return torch.gather(target, dim=dim, index=ind_pad)
 
 
-def _merge_final(vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: torch.Tensor):
+def _merge_final(
+    vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: torch.Tensor
+):
     """
 
     :param vert_attr: [n, d] or [b, n, d] color or feature of each vertex
@@ -68,12 +73,16 @@ def _merge_final(vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: tor
         assert vert_attr.shape[0] > vert_assign.max()
         # [n, d] ind: [b(optional), w, h, M]-> [b(optional), w, h, M, d]
         sel_attr = _ind_sel(
-            vert_attr[(None,) * target_dim], vert_assign.type(torch.long), dim=target_dim
+            vert_attr[(None,) * target_dim],
+            vert_assign.type(torch.long),
+            dim=target_dim,
         )
     else:
         assert vert_attr.shape[1] > vert_assign.max()
         sel_attr = _ind_sel(
-            vert_attr[(slice(None),) + (None,)*(target_dim-1)], vert_assign.type(torch.long), dim=target_dim
+            vert_attr[(slice(None),) + (None,) * (target_dim - 1)],
+            vert_assign.type(torch.long),
+            dim=target_dim,
         )
 
     # [b(optional), w, h, M]
@@ -96,7 +105,9 @@ def _patch_motion(
         _, tracks, visible = torch.split(
             tracks, [1, 2, 1], dim=-1
         )  # (B, T, N, 2) | (B, T, N, 1)
-        tracks_n = tracks / torch.tensor([W / min(H, W), H / min(H, W)], device=tracks.device)
+        tracks_n = tracks / torch.tensor(
+            [W / min(H, W), H / min(H, W)], device=tracks.device
+        )
         tracks_n = tracks_n.clamp(-1, 1)
         visible = visible.clamp(0, 1)
 
@@ -123,9 +134,9 @@ def _patch_motion(
         visible_pad = visible[:, 1:]
 
         visible_align = visible_pad.view(T - 1, 4, *visible_pad.shape[2:]).sum(1)
-        tracks_align = (tracks_pad * visible_pad).view(T - 1, 4, *tracks_pad.shape[2:]).sum(
-            1
-        ) / (visible_align + 1e-5)
+        tracks_align = (tracks_pad * visible_pad).view(
+            T - 1, 4, *tracks_pad.shape[2:]
+        ).sum(1) / (visible_align + 1e-5)
         dist_ = (
             (tracks_align[:, None, None] - grid[None, :, :, None]).pow(2).sum(-1)
         )  # T, H, W, N
@@ -138,26 +149,36 @@ def _patch_motion(
 
     grid_mode = "bilinear"
     point_feature = torch.nn.functional.grid_sample(
-        vid[vae_divide[0]:].permute(1, 0, 2, 3)[:1],
+        vid[vae_divide[0] :].permute(1, 0, 2, 3)[:1],
         tracks_n[:, :1].type(vid.dtype),
         mode=grid_mode,
         padding_mode="zeros",
         align_corners=None,
     )
-    point_feature = point_feature.squeeze(0).squeeze(1).permute(1, 0) # N, C=16
+    point_feature = point_feature.squeeze(0).squeeze(1).permute(1, 0)  # N, C=16
 
-    out_feature = _merge_final(point_feature, vert_weight, vert_index).permute(3, 0, 1, 2) # T - 1, H, W, C => C, T - 1, H, W
-    out_weight = vert_weight.sum(-1) # T - 1, H, W
+    out_feature = _merge_final(point_feature, vert_weight, vert_index).permute(
+        3, 0, 1, 2
+    )  # T - 1, H, W, C => C, T - 1, H, W
+    out_weight = vert_weight.sum(-1)  # T - 1, H, W
 
     # out feature -> already soft weighted
-    mix_feature = out_feature + vid[vae_divide[0]:, 1:] * (1 - out_weight.clamp(0, 1))
+    mix_feature = out_feature + vid[vae_divide[0] :, 1:] * (1 - out_weight.clamp(0, 1))
 
-    out_feature_full = torch.cat([vid[vae_divide[0]:, :1], mix_feature], dim=1) # C, T, H, W
-    out_mask_full = torch.cat([torch.ones_like(out_weight[:1]), out_weight], dim=0)  # T, H, W
-    return torch.cat([out_mask_full[None].expand(vae_divide[0], -1, -1, -1), out_feature_full], dim=0)
+    out_feature_full = torch.cat(
+        [vid[vae_divide[0] :, :1], mix_feature], dim=1
+    )  # C, T, H, W
+    out_mask_full = torch.cat(
+        [torch.ones_like(out_weight[:1]), out_weight], dim=0
+    )  # T, H, W
+    return torch.cat(
+        [out_mask_full[None].expand(vae_divide[0], -1, -1, -1), out_feature_full], dim=0
+    )
 
 
-def _process_tracks(tracks_np: np.ndarray, frame_size: Tuple[int, int], quant_multi: int = 8, **kwargs):
+def _process_tracks(
+    tracks_np: np.ndarray, frame_size: Tuple[int, int], quant_multi: int = 8, **kwargs
+):
     # tracks: shape [t, h, w, 3] => samples align with 24 fps, model trained with 16 fps.
     # frame_size: tuple (W, H)
 
@@ -172,11 +193,13 @@ def _process_tracks(tracks_np: np.ndarray, frame_size: Tuple[int, int], quant_mu
 
     visibles = visibles * 2 - 1
 
-    trange = torch.linspace(-1, 1, tracks.shape[0]).view(-1, 1, 1, 1).expand(*visibles.shape)
-    
+    trange = (
+        torch.linspace(-1, 1, tracks.shape[0]).view(-1, 1, 1, 1).expand(*visibles.shape)
+    )
+
     out_ = torch.cat([trange, tracks, visibles], dim=-1).view(121, -1, 4)
     out_0 = out_[:1]
-    out_l = out_[1:] # 121 => 120 | 1
+    out_l = out_[1:]  # 121 => 120 | 1
     out_l = torch.repeat_interleave(out_l, 2, dim=0)[1::3]  # 120 => 240 => 80
     return torch.cat([out_0, out_l], dim=0)
 
@@ -401,7 +424,7 @@ class WanATIEngine(WanBaseEngine):
             mask_lat_size = mask_lat_size.to(latents.device)
 
             latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
-        
+
         if tracks is not None:
             tracks = _process_tracks(tracks, (width, height))
             tracks = tracks.to(latent_condition)

@@ -156,7 +156,10 @@ def view_as_real(arr: mx.array) -> mx.array:
         ValueError: If ``arr`` is not a complex tensor.
     """
     # Validate complex dtype
-    valid_complex_dtypes = {getattr(mx, "complex64", None), getattr(mx, "complex128", None)}
+    valid_complex_dtypes = {
+        getattr(mx, "complex64", None),
+        getattr(mx, "complex128", None),
+    }
     valid_complex_dtypes = {dt for dt in valid_complex_dtypes if dt is not None}
 
     if arr.dtype not in valid_complex_dtypes:

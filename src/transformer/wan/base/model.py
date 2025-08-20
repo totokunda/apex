@@ -33,8 +33,7 @@ from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import (
     PixArtAlphaTextProjection,
     TimestepEmbedding,
-    Timesteps,
-    get_1d_rotary_pos_embed,
+    Timesteps
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
@@ -45,6 +44,34 @@ from src.attention.processors.wan_processor import WanAttnProcessor2_0
 from src.transformer.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+
+class LoRALinearLayerIP(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        rank: int = 128,
+        device="cuda",
+        dtype: Optional[torch.dtype] = torch.float32,
+    ):
+        super().__init__()
+        self.down = nn.Linear(in_features, rank, bias=False, device=device, dtype=dtype)
+        self.up = nn.Linear(rank, out_features, bias=False, device=device, dtype=dtype)
+        self.rank = rank
+        self.out_features = out_features
+        self.in_features = in_features
+
+        nn.init.normal_(self.down.weight, std=1 / rank)
+        nn.init.zeros_(self.up.weight)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        orig_dtype = hidden_states.dtype
+        dtype = self.down.weight.dtype
+
+        down_hidden_states = self.down(hidden_states.to(dtype))
+        up_hidden_states = self.up(down_hidden_states)
+        return up_hidden_states.to(orig_dtype)
 
 
 class WanAttention(torch.nn.Module, AttentionModuleMixin):
@@ -83,6 +110,7 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
                 torch.nn.Dropout(dropout),
             ]
         )
+        
         self.norm_q = torch.nn.RMSNorm(
             dim_head * heads, eps=eps, elementwise_affine=True
         )
@@ -99,6 +127,9 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
                 added_kv_proj_dim, self.inner_dim, bias=True
             )
             self.norm_added_k = torch.nn.RMSNorm(dim_head * heads, eps=eps)
+
+        self.kv_cache = None
+        self.cond_size = None
 
         self.set_processor(processor)
 
@@ -152,6 +183,17 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
             )
 
         self.fused_projections = True
+
+    def init_ip_projections(self, train: bool = False, device: torch.device = "cpu", dtype: torch.dtype = torch.float32):
+        dim = self.inner_dim
+        self.add_q_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
+        self.add_k_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
+        self.add_v_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
+
+        requires_grad = train
+        for lora in [self.add_q_lora, self.add_k_lora, self.add_v_lora]:
+            for param in lora.parameters():
+                param.requires_grad = requires_grad
 
     @torch.no_grad()
     def unfuse_projections(self):
@@ -248,8 +290,19 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: Optional[torch.Tensor] = None,
+        ip_image_hidden_states: Optional[torch.Tensor] = None,
         timestep_seq_len: Optional[int] = None,
     ):
+
+        timestep_proj_ip = None
+        temb_ip = None
+
+        if ip_image_hidden_states is not None:
+            timestep_ip = torch.zeros_like(timestep)
+            timestep_ip = self.timesteps_proj(timestep_ip)
+            temb_ip = self.time_embedder(timestep_ip).type_as(encoder_hidden_states)
+            timestep_proj_ip = self.time_proj(self.act_fn(temb_ip))
+
         timestep = self.timesteps_proj(timestep)
 
         if timestep_seq_len is not None:
@@ -257,7 +310,11 @@ class WanTimeTextImageEmbedding(nn.Module):
 
         time_embedder_dtype = next(iter(self.time_embedder.parameters())).dtype
 
-        if timestep.dtype != time_embedder_dtype and time_embedder_dtype != torch.int8 and time_embedder_dtype != torch.uint8:
+        if (
+            timestep.dtype != time_embedder_dtype
+            and time_embedder_dtype != torch.int8
+            and time_embedder_dtype != torch.uint8
+        ):
             timestep = timestep.to(time_embedder_dtype)
 
         temb = self.time_embedder(timestep).type_as(encoder_hidden_states)
@@ -265,70 +322,174 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        
         if encoder_hidden_states_image is not None:
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image
             )
 
-        return temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image
+        return (
+            temb,
+            timestep_proj,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            timestep_proj_ip,
+        )
 
+
+def rope_1d(dim: int,
+            length: int,
+            theta: float = 10000.0,
+            start: int = 0,
+            dtype: torch.dtype = torch.float64,
+            device: Optional[torch.device] = None) -> torch.Tensor:
+    """
+    Return complex RoPE table of shape [length, dim//2] with positions = [start, ..., start+length-1].
+    """
+    if dim % 2 != 0:
+        raise ValueError(f"RoPE dim must be even, got {dim}")
+    base = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=dtype, device=device).double() / dim))
+    pos  = torch.arange(start, start + length, dtype=dtype, device=device)
+    ang  = torch.outer(pos, base)                             # [length, dim//2]
+    return torch.polar(torch.ones_like(ang, dtype=dtype), ang)
 
 class WanRotaryPosEmbed(nn.Module):
+    """
+    3D RoPE split across (time, height, width) halves of the head-dim.
+    Complex representation; returns [1, 1, num_patches, head_dim//2] table.
+    """
     def __init__(
         self,
         attention_head_dim: int,
         patch_size: Tuple[int, int, int],
         max_seq_len: int,
         theta: float = 10000.0,
+        time_offset: int = -1,           # use -1 to include sentinel row at t=-1
     ):
         super().__init__()
-
         self.attention_head_dim = attention_head_dim
         self.patch_size = patch_size
         self.max_seq_len = max_seq_len
+        self.theta = theta
+        self.time_offset = time_offset
 
+        # partition head dim: h_dim = w_dim = 2 * (head_dim // 6); rest is time
         h_dim = w_dim = 2 * (attention_head_dim // 6)
         t_dim = attention_head_dim - h_dim - w_dim
+        if any(d % 2 for d in (t_dim, h_dim, w_dim)):
+            raise ValueError(f"t/h/w dims must be even, got t={t_dim}, h={h_dim}, w={w_dim}")
 
-        freqs = []
-        freqs_dtype = (
-            torch.float32 if torch.backends.mps.is_available() else torch.float64
-        )
-        for dim in [t_dim, h_dim, w_dim]:
-            freq = get_1d_rotary_pos_embed(
-                dim,
-                max_seq_len,
-                theta,
-                use_real=False,
-                repeat_interleave_real=False,
-                freqs_dtype=freqs_dtype,
-            )
-            freqs.append(freq)
-        self.freqs = torch.cat(freqs, dim=1)
+        # sequence lengths
+        t_len = max_seq_len + (1 if time_offset < 0 else 0)   # add sentinel if starting < 0
+        h_len = max_seq_len
+        w_len = max_seq_len
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        p_t, p_h, p_w = self.patch_size
-        ppf, pph, ppw = num_frames // p_t, height // p_h, width // p_w
+        # build separate tables (do NOT concat across dim=1; lengths differ)
+        self.freqs_t = rope_1d(t_dim, t_len, theta=theta, start=time_offset)
+        self.freqs_h = rope_1d(h_dim, h_len, theta=theta, start=0)
+        self.freqs_w = rope_1d(w_dim, w_len, theta=theta, start=0)
 
-        freqs = self.freqs.to(hidden_states.device)
+        # cache half-dims for final concat
+        self.t_half = t_dim // 2
+        self.h_half = h_dim // 2
+        self.w_half = w_dim // 2
 
-        freqs = freqs.split_with_sizes(
-            [
-                self.attention_head_dim // 2 - 2 * (self.attention_head_dim // 6),
-                self.attention_head_dim // 6,
-                self.attention_head_dim // 6,
-            ],
-            dim=1,
-        )
-        freqs_f = freqs[0][:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
-        freqs_h = freqs[1][:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        ip_image_hidden_states: Optional[torch.Tensor] = None,
+        time_index: Optional[int] = None,
+    ) -> torch.Tensor:
+        """
+        If ip_image_hidden_states is provided, uses forward_ip (needs h_start, w_start; optional time_index).
+        Otherwise uses forward_hidden_states.
+        """
+        if ip_image_hidden_states is None:
+            return self.forward_hidden_states(hidden_states)
+        else:
+            return self.forward_ip(hidden_states, ip_image_hidden_states, time_index)
 
-        freqs_w = freqs[2][:ppw].view(1, 1, ppw, -1).expand(ppf, pph, ppw, -1)
-        freqs = torch.cat([freqs_f, freqs_h, freqs_w], dim=-1).reshape(
-            1, 1, ppf * pph * ppw, -1
-        )
-        return freqs
+    def _patch_grid(self, T: int, H: int, W: int):
+        pt, ph, pw = self.patch_size
+        if (T % pt) or (H % ph) or (W % pw):
+            raise ValueError(f"Input dims must be divisible by patch_size. "
+                             f"Got (T,H,W)=({T},{H},{W}), patch={self.patch_size}")
+        return (T // pt, H // ph, W // pw)  # (ppf, pph, ppw)
+
+    def forward_hidden_states(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """
+        Build RoPE table for the current hidden_states volume (no IP crop).
+        Returns: [1, 1, ppf*pph*ppw, (t_half+h_half+w_half)]
+        """
+        b, c, T, H, W = hidden_states.shape
+        ppf, pph, ppw = self._patch_grid(T, H, W)
+
+        # time starts at t=0 for “normal” frames; if we keep sentinel, skip index 0
+        t_start = 1 if self.time_offset < 0 else 0
+        if t_start + ppf > self.freqs_t.size(0):
+            raise IndexError(f"time slice out of range: need {t_start+ppf} rows, have {self.freqs_t.size(0)}")
+
+        t = self.freqs_t[t_start : t_start + ppf]                # [ppf, t_half]
+        h = self.freqs_h[:pph]                                   # [pph, h_half]
+        w = self.freqs_w[:ppw]                                   # [ppw, w_half]
+        
+
+        # expand to 3D grid and concat along the last (feature) axis
+        t3 = t.view(ppf, 1, 1, self.t_half).expand(ppf, pph, ppw, self.t_half)
+        h3 = h.view(1, pph, 1, self.h_half).expand(ppf, pph, ppw, self.h_half)
+        w3 = w.view(1, 1, ppw, self.w_half).expand(ppf, pph, ppw, self.w_half)
+
+        freqs = torch.cat([t3, h3, w3], dim=-1)                  # [ppf, pph, ppw, sum_halfs]
+        return freqs.reshape(1, 1, ppf * pph * ppw, self.t_half + self.h_half + self.w_half).to(hidden_states.device)
+
+    def forward_ip(
+        self,
+        hidden_states: torch.Tensor,
+        ip_image_hidden_states: torch.Tensor,
+        time_index: Optional[int] = None,
+    ) -> torch.Tensor:
+        """
+        Build RoPE table for an IP crop.
+        - time_index: which time row to use for the crop.
+            If None and time_offset<0, defaults to the sentinel row (index 0).
+            If None and time_offset>=0, defaults to 0.
+        Returns: [1, 1, ppf_ip*pph_ip*ppw_ip, (t_half+h_half+w_half)]
+        """
+        
+        # main volume patch grid (not strictly needed here but kept for parity)
+        _, _, T, H, W = hidden_states.shape
+        ppf_main, pph_main, ppw_main = self._patch_grid(T, H, W)
+
+        # IP volume patch grid (what we will emit)
+        _, _, T_ip, H_ip, W_ip = ip_image_hidden_states.shape
+        ppf_ip, pph_ip, ppw_ip = self._patch_grid(T_ip, H_ip, W_ip)
+        
+        # choose time row(s)
+        if time_index is None:
+            time_index = 0 if self.time_offset < 0 else 0
+
+        if ppf_ip == 1:
+            # match your manual path: take a single time row and broadcast
+            if not (0 <= time_index < self.freqs_t.size(0)):
+                raise IndexError(f"time_index {time_index} out of range [0, {self.freqs_t.size(0)})")
+            t = self.freqs_t[time_index]                          # [t_half]
+            t3 = t.view(1, 1, 1, self.t_half).expand(ppf_ip, pph_ip, ppw_ip, self.t_half)
+        else:
+            # multi-frame crop: use a contiguous range
+            if time_index + ppf_ip > self.freqs_t.size(0):
+                raise IndexError(f"time slice out of range: need {time_index+ppf_ip} rows, have {self.freqs_t.size(0)}")
+            t = self.freqs_t[time_index : time_index + ppf_ip]    # [ppf_ip, t_half]
+            t3 = t.view(ppf_ip, 1, 1, self.t_half).expand(ppf_ip, pph_ip, ppw_ip, self.t_half)
+
+        h = self.freqs_h[pph_main : pph_main + pph_ip]
+        w = self.freqs_w[ppw_main : ppw_main + ppw_ip]   
+
+        h3 = h.view(1, pph_ip, 1, self.h_half).expand(ppf_ip, pph_ip, ppw_ip, self.h_half)
+        w3 = w.view(1, 1, ppw_ip, self.w_half).expand(ppf_ip, pph_ip, ppw_ip, self.w_half)
+
+        freqs_ip = torch.cat([t3, h3, w3], dim=-1)                # [ppf_ip, pph_ip, ppw_ip, sum_halfs]
+        return freqs_ip.reshape(1, 1, ppf_ip * pph_ip * ppw_ip, self.t_half + self.h_half + self.w_half).to(hidden_states.device)
+
 
 
 class WanTransformerBlock(nn.Module):
@@ -384,6 +545,8 @@ class WanTransformerBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         rotary_emb: torch.Tensor,
+        hidden_states_ip: torch.Tensor = None,
+        timestep_proj_ip: torch.Tensor = None,
     ) -> torch.Tensor:
 
         if temb.ndim == 4:
@@ -409,23 +572,55 @@ class WanTransformerBlock(nn.Module):
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
         ).type_as(hidden_states)
         
+        if hidden_states_ip is not None:
+            (
+                shift_msa_ip,
+                scale_msa_ip,
+                gate_msa_ip,
+                c_shift_msa_ip,
+                c_scale_msa_ip,
+                c_gate_msa_ip,
+            ) = (self.scale_shift_table + timestep_proj_ip.float()).chunk(
+                6, dim=1
+            )
 
+            self.attn1.cond_size = hidden_states_ip.shape[1]
+
+            norm_hidden_states_ip = (
+                self.norm1(hidden_states_ip.float()) * (1 + scale_msa_ip) + shift_msa_ip
+            ).type_as(hidden_states_ip)
+
+            norm_hidden_states = torch.concat(
+                [norm_hidden_states, norm_hidden_states_ip], dim=1
+            )
+            self.attn1.kv_cache = None
+        
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
 
+        if hidden_states_ip is not None:
+            attn_output, attn_output_ip = (
+                attn_output[:, : -self.attn1.cond_size],
+                attn_output[:, -self.attn1.cond_size :],
+            )
+
         hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
             hidden_states
         )
-
+        
+       
         # 2. Cross-attention
         norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
         attn_output = self.attn2(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
+            no_cache=True,
         )
 
         hidden_states = hidden_states + attn_output
+        
+        
 
         # 3. Feed-forward
         norm_hidden_states = (
@@ -435,6 +630,24 @@ class WanTransformerBlock(nn.Module):
         hidden_states = (
             hidden_states.float() + ff_output.float() * c_gate_msa
         ).type_as(hidden_states)
+        
+        
+
+        if hidden_states_ip is not None:
+            gated_hidden_states_ip = (
+                hidden_states_ip.float() + attn_output_ip.float() * gate_msa_ip
+            ).type_as(hidden_states_ip)
+            
+            norm3_hidden_states_ip = (
+                self.norm3(gated_hidden_states_ip.float()) * (1 + c_scale_msa_ip)
+                + c_shift_msa_ip
+            ).type_as(hidden_states_ip)
+            
+            ffn_output_ip = self.ffn(norm3_hidden_states_ip)
+            hidden_states_ip = (
+                gated_hidden_states_ip.float() + ffn_output_ip.float() * c_gate_msa_ip
+            ).type_as(hidden_states_ip)
+            hidden_states = torch.concat([hidden_states, hidden_states_ip], dim=1)
 
         return hidden_states
 
@@ -510,6 +723,7 @@ class WanTransformer3DModel(
         added_kv_proj_dim: Optional[int] = None,
         rope_max_seq_len: int = 1024,
         pos_embed_seq_len: Optional[int] = None,
+        ip_adapter: bool = False,
     ) -> None:
         super().__init__()
 
@@ -549,6 +763,9 @@ class WanTransformer3DModel(
             ]
         )
 
+        if ip_adapter:
+            self.init_ip_projections()
+
         # 4. Output norm & projection
         self.norm_out = FP32LayerNorm(inner_dim, eps, elementwise_affine=False)
         self.proj_out = nn.Linear(inner_dim, out_channels * math.prod(patch_size))
@@ -558,12 +775,17 @@ class WanTransformer3DModel(
 
         self.gradient_checkpointing = False
 
+    def init_ip_projections(self, train: bool = False, device: torch.device = "cpu", dtype: torch.dtype = torch.float32):
+        for block in self.blocks:
+            block.attn1.init_ip_projections(train=train, device=device, dtype=dtype)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         timestep: torch.LongTensor,
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: Optional[torch.Tensor] = None,
+        ip_image_hidden_states: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -590,11 +812,22 @@ class WanTransformer3DModel(
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
         post_patch_width = width // p_w
-
+        
         rotary_emb = self.rope(hidden_states)
+        ip_hidden_states_len = 0
+        if ip_image_hidden_states is not None:
+            hidden_states_ip = self.patch_embedding(ip_image_hidden_states)
+            hidden_states_ip = hidden_states_ip.flatten(2).transpose(1, 2)
+            ip_hidden_states_len = hidden_states_ip.shape[1]
+            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states, time_index=0)
+            rotary_emb = torch.concat([rotary_emb, rotary_emb_ip], dim=2)
+        else:
+            hidden_states_ip = None
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        
+        
 
         if timestep.ndim == 2:
             ts_seq_len = timestep.shape[1]
@@ -602,13 +835,18 @@ class WanTransformer3DModel(
         else:
             ts_seq_len = None
 
-        temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = (
-            self.condition_embedder(
-                timestep,
-                encoder_hidden_states,
-                encoder_hidden_states_image,
-                timestep_seq_len=ts_seq_len,
-            )
+        (
+            temb,
+            timestep_proj,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            timestep_proj_ip,
+        ) = self.condition_embedder(
+            timestep,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            ip_image_hidden_states,
+            timestep_seq_len=ts_seq_len,
         )
 
         if ts_seq_len is not None:
@@ -618,10 +856,14 @@ class WanTransformer3DModel(
             # batch_size, 6, inner_dim
             timestep_proj = timestep_proj.unflatten(1, (6, -1))
 
+        if timestep_proj_ip is not None:
+            timestep_proj_ip = timestep_proj_ip.unflatten(1, (6, -1))
+
         if encoder_hidden_states_image is not None:
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1
             )
+            
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -632,12 +874,29 @@ class WanTransformer3DModel(
                     encoder_hidden_states,
                     timestep_proj,
                     rotary_emb,
+                    hidden_states_ip,
+                    timestep_proj_ip,
                 )
+                if hidden_states_ip is not None:
+                    hidden_states, hidden_states_ip = (
+                        hidden_states[:, :-ip_hidden_states_len],
+                        hidden_states[:, -ip_hidden_states_len:],
+                    )
         else:
             for block in self.blocks:
                 hidden_states = block(
-                    hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
+                    hidden_states,
+                    encoder_hidden_states,
+                    timestep_proj,
+                    rotary_emb,
+                    hidden_states_ip,
+                    timestep_proj_ip,
                 )
+                if hidden_states_ip is not None:
+                    hidden_states, hidden_states_ip = (
+                        hidden_states[:, :-ip_hidden_states_len],
+                        hidden_states[:, -ip_hidden_states_len:],
+                    )
 
         if temb.ndim == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
@@ -671,7 +930,8 @@ class WanTransformer3DModel(
             p_h,
             p_w,
             -1,
-        )
+        ) 
+        
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

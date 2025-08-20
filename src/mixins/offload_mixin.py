@@ -34,7 +34,7 @@ class OffloadMixin:
         recurse  : bool, default True
             Whether to descend into sub-modules (almost always what you want).
         """
-        
+
         if isinstance(module, MlxModule):
             return OffloadMixin._mlx_offload(module)
 

@@ -36,8 +36,9 @@ class ToMixin:
             return mapping[key]
         raise ValueError(f"Unsupported dtype: {dtype}")
 
-    
-    def check_quantized(self, module: ModelMixin | GGMLTensor | torch.nn.Parameter) -> bool:
+    def check_quantized(
+        self, module: ModelMixin | GGMLTensor | torch.nn.Parameter
+    ) -> bool:
         """
         Check if the module is quantized.
         """

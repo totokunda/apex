@@ -34,6 +34,7 @@ class WanV2VEngine(WanBaseEngine):
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
         expand_timesteps: bool = False,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
     ):
 
         if not self.text_encoder:
@@ -60,10 +61,9 @@ class WanV2VEngine(WanBaseEngine):
 
         if offload:
             self._offload(self.text_encoder)
-            
-        
+
         loaded_video = self._load_video(video)
-        
+
         for i, frame in enumerate(loaded_video):
             frame, height, width = self._aspect_ratio_resize(
                 frame,
@@ -82,7 +82,7 @@ class WanV2VEngine(WanBaseEngine):
         transformer_dtype = self.component_dtypes["transformer"]
 
         self.to_device(self.transformer)
-        
+
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -104,7 +104,7 @@ class WanV2VEngine(WanBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-        
+
         latent_timestep = timesteps[:1].repeat(num_videos)
 
         vae_config = self.load_config_by_type("vae")
@@ -114,8 +114,8 @@ class WanV2VEngine(WanBaseEngine):
         vae_scale_factor_temporal = getattr(
             vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
         )
-        cond_latent = self.vae_encode(preprocessed_video, offload=offload)    
-            
+        cond_latent = self.vae_encode(preprocessed_video, offload=offload)
+
         latents = self._get_latents(
             height,
             width,
@@ -129,9 +129,9 @@ class WanV2VEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
-        
-        cond_latent = cond_latent[:, :, :latents.shape[2], :, :]
-        
+
+        cond_latent = cond_latent[:, :, : latents.shape[2], :, :]
+
         if hasattr(self.scheduler, "add_noise"):
             latents = self.scheduler.add_noise(cond_latent, latents, latent_timestep)
         else:
@@ -167,6 +167,7 @@ class WanV2VEngine(WanBaseEngine):
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             expand_timesteps=expand_timesteps,
+            ip_image=ip_image,
         )
 
         if offload:

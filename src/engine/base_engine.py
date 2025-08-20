@@ -61,6 +61,7 @@ from src.lora import LoraManager, LoraItem
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+
 class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     engine_type: Literal["torch", "mlx"] = "torch"
     config: Dict[str, Any]
@@ -183,7 +184,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if config.get("denoise_type", None):
             self.denoise_type = config.get("denoise_type")
 
-
         if component_dtypes:
             self.component_dtypes = {}
             for component_type, dtype in component_dtypes.items():
@@ -283,7 +283,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         scheduler = self._load_scheduler(component)
 
         # Add all SchedulerInterface methods to self.scheduler if not already present
-        if not isinstance(scheduler, SchedulerInterface) and self.engine_type == "torch":
+        if (
+            not isinstance(scheduler, SchedulerInterface)
+            and self.engine_type == "torch"
+        ):
             # Create a new class that inherits from both the scheduler's class and SchedulerInterface
             class SchedulerWrapper(scheduler.__class__, SchedulerInterface):
                 pass
@@ -328,6 +331,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
+        
+        if is_converted:
+            component.pop('extra_model_paths', None)
 
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
@@ -424,13 +430,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             raise ValueError(f"Component type {component_type} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
-        if component.get("config_path"):
-            config_path = self._download(
-                component.get("config_path"), self.config_save_path
-            )
-        else:
-            config_path = None
-        component["config_path"] = config_path
         text_encoder = TextEncoder(component, no_weights)
         if self.component_dtypes and "text_encoder" in self.component_dtypes:
             self.to_dtype(
@@ -439,18 +438,21 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 cast_buffers=False,
             )
         return text_encoder
-    
+
     def load_transformer(
         self,
         component: Dict[str, Any],
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
-        
+
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
         
+        if is_converted:
+            component.pop('extra_model_paths', None)
+
         if self.check_weights and not self._check_weights(component):
             self.logger.info(f"Found old model weights, converting to diffusers format")
             transformer = self.convert_transformer_weights(component)
@@ -471,7 +473,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         component_name,
                         **self.config.get("save_kwargs", {}),
                     )
-                
+
                     if os.path.isdir(model_path):
                         # Safely copy to preserve other files in the directory
                         # add subdirectory called transformer
@@ -516,10 +518,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             elif isinstance(transformer, mx_nn.Module):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
-
         return transformer
 
-    def _get_safetensors_keys(self, model_path: str, model_key: str | None = None, framework: str = "pt"):
+    def _get_safetensors_keys(
+        self, model_path: str, model_key: str | None = None, framework: str = "pt"
+    ):
         keys = set()
         with safe_open(model_path, framework=framework, device="cpu") as f:
             if model_key is not None:
@@ -574,25 +577,31 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             "vae",
         ], "Only transformer and vae are supported for now"
         file_pattern = component.get("file_pattern", None)
-        
-        if model_path.endswith(".gguf"):
-            return True # We don't need to check weights for gguf models
 
-        pt_extensions = tuple(["pt", "bin", "pth"])
+        if model_path.endswith(".gguf"):
+            return True  # We don't need to check weights for gguf models
+
+        extensions = tuple(["pt", "bin", "pth", "ckpt", "safetensors"])
         model_key = component.get("model_key", None)
         keys = set()
         extra_model_paths = component.get("extra_model_paths", [])
+        
+        config = {}
+        config_path = component.get("config_path", None)
+        if config_path:
+            config = self.fetch_config(config_path)
+        if component.get("config", None):
+            config.update(component.get("config", {}))  
+            
+
 
         if os.path.isdir(model_path):
             if file_pattern:
                 files = glob(os.path.join(model_path, file_pattern))
             else:
-                files = (
-                    glob(os.path.join(model_path, "*.safetensors"))
-                    + glob(os.path.join(model_path, "*.pt"))
-                    + glob(os.path.join(model_path, "*.bin"))
-                    + glob(os.path.join(model_path, "*.pth"))
-                )
+                files = []
+                for ext in extensions:
+                    files.extend(glob(os.path.join(model_path, f"*.{ext}")))
 
             if len(files) == 0:
                 raise ValueError(
@@ -601,13 +610,26 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
             for file in files:
                 if file.endswith(".safetensors"):
-                    keys.update(self._get_safetensors_keys(file, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
-                elif file.endswith(pt_extensions):
+                    keys.update(
+                        self._get_safetensors_keys(
+                            file,
+                            model_key,
+                            framework="np" if self.engine_type == "mlx" else "pt",
+                        )
+                    )
+
+                elif file.endswith(extensions):
                     keys.update(self._get_pt_keys(file, model_key))
         else:
             if model_path.endswith(".safetensors"):
-                keys.update(self._get_safetensors_keys(model_path, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
-            elif model_path.endswith(pt_extensions):
+                keys.update(
+                    self._get_safetensors_keys(
+                        model_path,
+                        model_key,
+                        framework="np" if self.engine_type == "mlx" else "pt",
+                    )
+                )
+            elif model_path.endswith(extensions):
                 keys.update(self._get_pt_keys(model_path, model_key))
 
         for extra_model_path in extra_model_paths:
@@ -616,21 +638,32 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if file_pattern:
                     files = glob(os.path.join(extra_model_path, file_pattern))
                 else:
-                    files = (
-                        glob(os.path.join(extra_model_path, "*.safetensors"))
-                        + glob(os.path.join(extra_model_path, "*.pt"))
-                        + glob(os.path.join(extra_model_path, "*.bin"))
-                        + glob(os.path.join(extra_model_path, "*.pth"))
-                    )
+                    files = []
+                    for ext in extensions:
+                        files.extend(glob(os.path.join(extra_model_path, f"*.{ext}")))
                     for file in files:
                         if file.endswith(".safetensors"):
-                            keys.update(self._get_safetensors_keys(file, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
-                        elif file.endswith(pt_extensions):
+                            keys.update(
+                                self._get_safetensors_keys(
+                                    file,
+                                    model_key,
+                                    framework=(
+                                        "np" if self.engine_type == "mlx" else "pt"
+                                    ),
+                                )
+                            )
+                        elif file.endswith(extensions):
                             keys.update(self._get_pt_keys(file, model_key))
             else:
                 if extra_model_path.endswith(".safetensors"):
-                    keys.update(self._get_safetensors_keys(extra_model_path, model_key, framework="np" if self.engine_type == "mlx" else "pt"))
-                elif extra_model_path.endswith(pt_extensions):
+                    keys.update(
+                        self._get_safetensors_keys(
+                            extra_model_path,
+                            model_key,
+                            framework="np" if self.engine_type == "mlx" else "pt",
+                        )
+                    )
+                elif extra_model_path.endswith(extensions):
                     keys.update(self._get_pt_keys(extra_model_path, model_key))
 
         if component_type == "transformer":
@@ -639,6 +672,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     base,
                     component.get("tag", None),
                     component.get("converter_kwargs", {}),
+                    config,
                 )
             )
             iterating_keys = _keys.copy()
@@ -648,18 +682,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     base,
                     component.get("tag", None),
                     component.get("converter_kwargs", {}),
+                    config,
                 )
             )
             iterating_keys = _keys.copy()
 
         found_keys = set()
-        
+
         for iterating_key in iterating_keys:
             for key in keys:
                 if key == iterating_key:
                     found_keys.add(iterating_key)
                     break
-    
+
         missing_keys = iterating_keys - found_keys
         return len(missing_keys) == 0
 
@@ -675,13 +710,22 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if isinstance(extra_model_paths, str):
                 extra_model_paths = [extra_model_paths]
             model_path = [model_path] + extra_model_paths
-
+            
+        # try to load config
+        config = {}
+        config_path = component.get("config_path", None)
+        if config_path:
+            config = self.fetch_config(config_path)
+        if component.get("config", None):
+            config.update(component.get("config", {}))
+            
         return convert_transformer(
             component.get("tag", None),
             component["base"],
             model_path,
             component.get("model_key", None),
             component.get("file_pattern", None),
+            config,
         )
 
     def convert_vae_weights(self, component: Dict[str, Any]):
@@ -990,13 +1034,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 downloaded_model_path = self._download(model_path, save_path)
                 if downloaded_model_path:
                     component["model_path"] = downloaded_model_path
+                if config_path := component.get("config_path"):
+                    downloaded_config_path = self.fetch_config(config_path, return_path=True)
+                    if downloaded_config_path:
+                        component["config_path"] = downloaded_config_path
             if extra_model_paths := component.get("extra_model_paths"):
-                for extra_model_path in extra_model_paths:
+                for i, extra_model_path in enumerate(extra_model_paths):
                     downloaded_extra_model_path = self._download(
                         extra_model_path, save_path
                     )
                     if downloaded_extra_model_path:
-                        component["extra_model_paths"] = downloaded_extra_model_path
+                        component["extra_model_paths"][i] = downloaded_extra_model_path
 
         preprocessors = self.config.get("preprocessors", []) or []
         if preprocessors:
@@ -1009,6 +1057,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 )
                 if downloaded_preprocessor_path:
                     preprocessor["model_path"] = downloaded_preprocessor_path
+            if config_path := preprocessor.get("config_path"):
+                downloaded_config_path = self.fetch_config(config_path, return_path=True)
+                if downloaded_config_path:
+                    preprocessor["config_path"] = downloaded_config_path
+
 
         postprocessors = self.config.get("postprocessors", []) or []
         if postprocessors:
@@ -1020,6 +1073,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 )
                 if downloaded_postprocessor_path:
                     postprocessor["model_path"] = downloaded_postprocessor_path
+            if config_path := postprocessor.get("config_path"):
+                downloaded_config_path = self.fetch_config(config_path, return_path=True)
+                if downloaded_config_path:
+                    postprocessor["config_path"] = downloaded_config_path
 
     def _get_latents(
         self,

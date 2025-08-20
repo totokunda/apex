@@ -17,6 +17,7 @@ from diffusers.utils import is_scipy_available
 if is_scipy_available():
     import scipy.stats
 
+
 # Copied from diffusers.schedulers.scheduling_ddpm.betas_for_alpha_bar
 def betas_for_alpha_bar(
     num_diffusion_timesteps,
@@ -205,23 +206,44 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         time_shift_type: str = "exponential",
     ):
         if self.config.use_beta_sigmas and not is_scipy_available():
-            raise ImportError("Make sure to install scipy if you want to use beta sigmas.")
-        if sum([self.config.use_beta_sigmas, self.config.use_exponential_sigmas, self.config.use_karras_sigmas]) > 1:
+            raise ImportError(
+                "Make sure to install scipy if you want to use beta sigmas."
+            )
+        if (
+            sum(
+                [
+                    self.config.use_beta_sigmas,
+                    self.config.use_exponential_sigmas,
+                    self.config.use_karras_sigmas,
+                ]
+            )
+            > 1
+        ):
             raise ValueError(
                 "Only one of `config.use_beta_sigmas`, `config.use_exponential_sigmas`, `config.use_karras_sigmas` can be used."
             )
         if trained_betas is not None:
             self.betas = mx.array(trained_betas, dtype=mx.float32)
         elif beta_schedule == "linear":
-            self.betas = mx.array(np.linspace(beta_start, beta_end, num_train_timesteps), dtype=mx.float32)
+            self.betas = mx.array(
+                np.linspace(beta_start, beta_end, num_train_timesteps), dtype=mx.float32
+            )
         elif beta_schedule == "scaled_linear":
             # this schedule is very specific to the latent diffusion model.
-            self.betas = mx.array(np.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps), dtype=mx.float32) ** 2
+            self.betas = (
+                mx.array(
+                    np.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps),
+                    dtype=mx.float32,
+                )
+                ** 2
+            )
         elif beta_schedule == "squaredcos_cap_v2":
             # Glide cosine schedule
             self.betas = betas_for_alpha_bar(num_train_timesteps)
         else:
-            raise NotImplementedError(f"{beta_schedule} is not implemented for {self.__class__}")
+            raise NotImplementedError(
+                f"{beta_schedule} is not implemented for {self.__class__}"
+            )
 
         if rescale_betas_zero_snr:
             self.betas = rescale_zero_terminal_snr(self.betas)
@@ -247,12 +269,16 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             if solver_type in ["midpoint", "heun", "logrho"]:
                 self.register_to_config(solver_type="bh2")
             else:
-                raise NotImplementedError(f"{solver_type} is not implemented for {self.__class__}")
+                raise NotImplementedError(
+                    f"{solver_type} is not implemented for {self.__class__}"
+                )
 
         self.predict_x0 = predict_x0
         # setable values
         self.num_inference_steps = None
-        timesteps = np.linspace(0, num_train_timesteps - 1, num_train_timesteps, dtype=np.float32)[::-1].copy()
+        timesteps = np.linspace(
+            0, num_train_timesteps - 1, num_train_timesteps, dtype=np.float32
+        )[::-1].copy()
         self.timesteps = mx.array(timesteps)
         self.model_outputs = [None] * solver_order
         self.timestep_list = [None] * solver_order
@@ -290,7 +316,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         self._begin_index = begin_index
 
     def set_timesteps(
-        self, num_inference_steps: int, device: Union[str, mx.Device] = None, mu: Optional[float] = None
+        self,
+        num_inference_steps: int,
+        device: Union[str, mx.Device] = None,
+        mu: Optional[float] = None,
     ):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
@@ -303,11 +332,16 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         """
         # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://huggingface.co/papers/2305.08891
         if mu is not None:
-            assert self.config.use_dynamic_shifting and self.config.time_shift_type == "exponential"
+            assert (
+                self.config.use_dynamic_shifting
+                and self.config.time_shift_type == "exponential"
+            )
             self.config.flow_shift = np.exp(mu)
         if self.config.timestep_spacing == "linspace":
             timesteps = (
-                np.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps + 1)
+                np.linspace(
+                    0, self.config.num_train_timesteps - 1, num_inference_steps + 1
+                )
                 .round()[::-1][:-1]
                 .copy()
                 .astype(np.int64)
@@ -316,13 +350,23 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             step_ratio = self.config.num_train_timesteps // (num_inference_steps + 1)
             # creates integer timesteps by multiplying by ratio
             # casting to int to avoid issues when num_inference_step is power of 3
-            timesteps = (np.arange(0, num_inference_steps + 1) * step_ratio).round()[::-1][:-1].copy().astype(np.int64)
+            timesteps = (
+                (np.arange(0, num_inference_steps + 1) * step_ratio)
+                .round()[::-1][:-1]
+                .copy()
+                .astype(np.int64)
+            )
             timesteps += self.config.steps_offset
         elif self.config.timestep_spacing == "trailing":
             step_ratio = self.config.num_train_timesteps / num_inference_steps
             # creates integer timesteps by multiplying by ratio
             # casting to int to avoid issues when num_inference_step is power of 3
-            timesteps = np.arange(self.config.num_train_timesteps, 0, -step_ratio).round().copy().astype(np.int64)
+            timesteps = (
+                np.arange(self.config.num_train_timesteps, 0, -step_ratio)
+                .round()
+                .copy()
+                .astype(np.int64)
+            )
             timesteps -= 1
         else:
             raise ValueError(
@@ -333,8 +377,12 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         if self.config.use_karras_sigmas:
             log_sigmas = np.log(sigmas)
             sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_karras(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
+            sigmas = self._convert_to_karras(
+                in_sigmas=sigmas, num_inference_steps=num_inference_steps
+            )
+            timesteps = np.array(
+                [self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]
+            ).round()
             if self.config.final_sigmas_type == "sigma_min":
                 sigma_last = sigmas[-1]
             elif self.config.final_sigmas_type == "zero":
@@ -347,8 +395,12 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         elif self.config.use_exponential_sigmas:
             log_sigmas = np.log(sigmas)
             sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_exponential(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
+            sigmas = self._convert_to_exponential(
+                in_sigmas=sigmas, num_inference_steps=num_inference_steps
+            )
+            timesteps = np.array(
+                [self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]
+            )
             if self.config.final_sigmas_type == "sigma_min":
                 sigma_last = sigmas[-1]
             elif self.config.final_sigmas_type == "zero":
@@ -361,8 +413,12 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         elif self.config.use_beta_sigmas:
             log_sigmas = np.log(sigmas)
             sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_beta(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
+            sigmas = self._convert_to_beta(
+                in_sigmas=sigmas, num_inference_steps=num_inference_steps
+            )
+            timesteps = np.array(
+                [self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]
+            )
             if self.config.final_sigmas_type == "sigma_min":
                 sigma_last = sigmas[-1]
             elif self.config.final_sigmas_type == "zero":
@@ -373,9 +429,15 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
                 )
             sigmas = np.concatenate([sigmas, [sigma_last]]).astype(np.float32)
         elif self.config.use_flow_sigmas:
-            alphas = np.linspace(1, 1 / self.config.num_train_timesteps, num_inference_steps + 1)
+            alphas = np.linspace(
+                1, 1 / self.config.num_train_timesteps, num_inference_steps + 1
+            )
             sigmas = 1.0 - alphas
-            sigmas = np.flip(self.config.flow_shift * sigmas / (1 + (self.config.flow_shift - 1) * sigmas))[:-1].copy()
+            sigmas = np.flip(
+                self.config.flow_shift
+                * sigmas
+                / (1 + (self.config.flow_shift - 1) * sigmas)
+            )[:-1].copy()
             timesteps = (sigmas * self.config.num_train_timesteps).copy()
             if self.config.final_sigmas_type == "sigma_min":
                 sigma_last = sigmas[-1]
@@ -389,7 +451,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         else:
             sigmas = np.interp(timesteps, np.arange(0, len(sigmas)), sigmas)
             if self.config.final_sigmas_type == "sigma_min":
-                sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]) ** 0.5
+                sigma_last = (
+                    (1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]
+                ) ** 0.5
             elif self.config.final_sigmas_type == "zero":
                 sigma_last = 0
             else:
@@ -431,7 +495,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         batch_size, channels, *remaining_dims = sample.shape
 
         if dtype not in (mx.float32, mx.float64):
-            sample = sample.astype(mx.float32)  # upcast for quantile calculation, and clamp not implemented for cpu half
+            sample = sample.astype(
+                mx.float32
+            )  # upcast for quantile calculation, and clamp not implemented for cpu half
 
         # Flatten sample for doing quantile calculation along each image
         sample = sample.reshape(batch_size, channels * np.prod(remaining_dims))
@@ -442,8 +508,12 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         s = mx.clip(
             s, min=1, max=self.config.sample_max_value
         )  # When clamped to min=1, equivalent to standard clipping to [-1, 1]
-        s = s.reshape(batch_size, 1)  # (batch_size, 1) because clamp will broadcast along dim=0
-        sample = mx.clip(sample, -s, s) / s  # "we threshold xt0 to the range [-s, s] and then divide by s"
+        s = s.reshape(
+            batch_size, 1
+        )  # (batch_size, 1) because clamp will broadcast along dim=0
+        sample = (
+            mx.clip(sample, -s, s) / s
+        )  # "we threshold xt0 to the range [-s, s] and then divide by s"
 
         sample = sample.reshape(batch_size, channels, *remaining_dims)
         sample = sample.astype(dtype)
@@ -459,7 +529,11 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         dists = log_sigma - log_sigmas[:, np.newaxis]
 
         # get sigmas range
-        low_idx = np.cumsum((dists >= 0), axis=0).argmax(axis=0).clip(max=log_sigmas.shape[0] - 2)
+        low_idx = (
+            np.cumsum((dists >= 0), axis=0)
+            .argmax(axis=0)
+            .clip(max=log_sigmas.shape[0] - 2)
+        )
         high_idx = low_idx + 1
 
         low = log_sigmas[low_idx]
@@ -512,7 +586,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         return sigmas
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
-    def _convert_to_exponential(self, in_sigmas: mx.array, num_inference_steps: int) -> mx.array:
+    def _convert_to_exponential(
+        self, in_sigmas: mx.array, num_inference_steps: int
+    ) -> mx.array:
         """Constructs an exponential noise schedule."""
 
         # Hack to make sure that other schedulers which copy this function don't break
@@ -530,12 +606,18 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
         sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
 
-        sigmas = np.exp(np.linspace(math.log(sigma_max), math.log(sigma_min), num_inference_steps))
+        sigmas = np.exp(
+            np.linspace(math.log(sigma_max), math.log(sigma_min), num_inference_steps)
+        )
         return sigmas
 
     # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
     def _convert_to_beta(
-        self, in_sigmas: mx.array, num_inference_steps: int, alpha: float = 0.6, beta: float = 0.6
+        self,
+        in_sigmas: mx.array,
+        num_inference_steps: int,
+        alpha: float = 0.6,
+        beta: float = 0.6,
     ) -> mx.array:
         """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
 
@@ -600,7 +682,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
                 "Passing `timesteps` is deprecated and has no effect as model output conversion is now handled via an internal counter `self.step_index`",
             )
 
-        sigma = self.sigmas[self.step_index].astype(self.sigmas.dtype, stream=mx.default_device())
+        sigma = self.sigmas[self.step_index].astype(
+            self.sigmas.dtype, stream=mx.default_device()
+        )
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma)
 
         if self.predict_x0:
@@ -611,7 +695,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             elif self.config.prediction_type == "v_prediction":
                 x0_pred = alpha_t * sample - sigma_t * model_output
             elif self.config.prediction_type == "flow_prediction":
-                sigma_t = self.sigmas[self.step_index].astype(self.sigmas.dtype, stream=mx.default_device())
+                sigma_t = self.sigmas[self.step_index].astype(
+                    self.sigmas.dtype, stream=mx.default_device()
+                )
                 x0_pred = sample - sigma_t * model_output
             else:
                 raise ValueError(
@@ -690,7 +776,11 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             x_t = self.solver_p.step(model_output, s0, x).prev_sample
             return x_t
 
-        sigma_t, sigma_s0 = self.sigmas[self.step_index + 1].astype(self.sigmas.dtype, stream=mx.default_device()), self.sigmas[self.step_index].astype(self.sigmas.dtype, stream=mx.default_device())
+        sigma_t, sigma_s0 = self.sigmas[self.step_index + 1].astype(
+            self.sigmas.dtype, stream=mx.default_device()
+        ), self.sigmas[self.step_index].astype(
+            self.sigmas.dtype, stream=mx.default_device()
+        )
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t)
         alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0)
 
@@ -744,7 +834,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             if order == 2:
                 rhos_p = mx.array([0.5], dtype=x.dtype)
             else:
-                rhos_p = mx.linalg.solve(R[:-1, :-1], b[:-1], stream=mx.Device(mx.cpu)).astype(x.dtype, stream=mx.default_device())
+                rhos_p = mx.linalg.solve(
+                    R[:-1, :-1], b[:-1], stream=mx.Device(mx.cpu)
+                ).astype(x.dtype, stream=mx.default_device())
         else:
             D1s = None
 
@@ -824,7 +916,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         x_t = this_sample
         model_t = this_model_output
 
-        sigma_t, sigma_s0 = self.sigmas[self.step_index], self.sigmas[self.step_index - 1]
+        sigma_t, sigma_s0 = (
+            self.sigmas[self.step_index],
+            self.sigmas[self.step_index - 1],
+        )
         alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t)
         alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0)
 
@@ -881,7 +976,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         if order == 1:
             rhos_c = mx.array([0.5], dtype=x.dtype)
         else:
-            rhos_c = mx.linalg.solve(R, b, stream=mx.Device(mx.cpu)).astype(x.dtype, stream=mx.default_device())
+            rhos_c = mx.linalg.solve(R, b, stream=mx.Device(mx.cpu)).astype(
+                x.dtype, stream=mx.default_device()
+            )
 
         if self.predict_x0:
             x_t_ = sigma_t / sigma_s0 * x - alpha_t * h_phi_1 * m0
@@ -918,8 +1015,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         elif len(index_candidates) > 1:
             step_index = index_candidates[1].item()
         else:
-            step_index = index_candidates[0].item()            
-
+            step_index = index_candidates[0].item()
 
         return step_index
 
@@ -930,7 +1026,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         """
 
         if self.begin_index is None:
-            
+
             self._step_index = self.index_for_timestep(timestep)
         else:
             self._step_index = self._begin_index
@@ -971,7 +1067,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             self._init_step_index(timestep)
 
         use_corrector = (
-            self.step_index > 0 and self.step_index - 1 not in self.disable_corrector and self.last_sample is not None
+            self.step_index > 0
+            and self.step_index - 1 not in self.disable_corrector
+            and self.last_sample is not None
         )
 
         model_output_convert = self.convert_model_output(model_output, sample=sample)
@@ -992,11 +1090,15 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         self.timestep_list[-1] = timestep
 
         if self.config.lower_order_final:
-            this_order = min(self.config.solver_order, len(self.timesteps) - self.step_index)
+            this_order = min(
+                self.config.solver_order, len(self.timesteps) - self.step_index
+            )
         else:
             this_order = self.config.solver_order
 
-        self.this_order = min(this_order, self.lower_order_nums + 1)  # warmup for multistep
+        self.this_order = min(
+            this_order, self.lower_order_nums + 1
+        )  # warmup for multistep
         assert self.this_order > 0
 
         self.last_sample = sample
@@ -1051,7 +1153,9 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
 
         # begin_index is None when the scheduler is used for training or pipeline does not implement set_begin_index
         if self.begin_index is None:
-            step_indices = [self.index_for_timestep(t, schedule_timesteps) for t in timesteps]
+            step_indices = [
+                self.index_for_timestep(t, schedule_timesteps) for t in timesteps
+            ]
         elif self.step_index is not None:
             # add_noise is called after first denoising step (for inpainting)
             step_indices = [self.step_index] * timesteps.shape[0]

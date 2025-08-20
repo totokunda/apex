@@ -4,10 +4,9 @@ from PIL import Image
 import numpy as np
 from .base import WanBaseEngine
 
-
 class WanPhantomEngine(WanBaseEngine):
     """WAN Phantom Engine Implementation for subject reference image processing"""
-
+    
     def run(
         self,
         subject_reference_images: Union[

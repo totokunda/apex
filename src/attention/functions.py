@@ -694,4 +694,5 @@ def xformers_attention(
     # Transpose back to (B, H, S, D) format
     return output.transpose(1, 2)
 
-attention_register.set_default('sdpa')
+
+attention_register.set_default("sdpa")
