@@ -7,20 +7,8 @@ import torch.nn as nn
 from src.attention.functions import attention_register
 
 
-NUM_FRAMES = None
-ENHANCE_WEIGHT = None
-ENABLE_ENHANCE = False
 
-
-def get_num_frames() -> int:
-    return NUM_FRAMES
-
-
-def get_enhance_weight() -> float:
-    return ENHANCE_WEIGHT
-
-
-def enhance_score(query_image, key_image, head_dim, num_frames):
+def enhance_score(query_image, key_image, head_dim, num_frames, enhance_weight):
     scale = head_dim**-0.5
     query_image = query_image * scale
     attn_temp = query_image @ key_image.transpose(-2, -1)  # translate attn to float32
@@ -42,7 +30,7 @@ def enhance_score(query_image, key_image, head_dim, num_frames):
     num_off_diag = num_frames * num_frames - num_frames
     mean_scores = attn_wo_diag.sum(dim=(1, 2)) / num_off_diag
 
-    enhance_scores = mean_scores.mean() * (num_frames + get_enhance_weight())
+    enhance_scores = mean_scores.mean() * (num_frames + enhance_weight)
     enhance_scores = enhance_scores.clamp(min=1)
     return enhance_scores
 
@@ -62,7 +50,6 @@ def rope_apply_ip_adapter(x, freqs, num_heads):
     return x_out.to(x.dtype)
 
 
-
 class WanAttnProcessor2_0:
     def __init__(self, use_enhance: bool = False):
         if not hasattr(F, "scaled_dot_product_attention"):
@@ -70,21 +57,22 @@ class WanAttnProcessor2_0:
                 "WanAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0."
             )
         self.use_enhance = use_enhance
+        self.num_frames = None
+        self.enhance_weight = None
 
-    @staticmethod
-    def set_num_frames(num_frames: int):
-        global NUM_FRAMES
-        NUM_FRAMES = num_frames
 
-    @staticmethod
-    def set_enhance_weight(enhance_weight: float):
-        global ENHANCE_WEIGHT
-        ENHANCE_WEIGHT = enhance_weight
+    def set_num_frames(self, num_frames: int):
+        self.num_frames = num_frames
+        self.use_enhance = True
+
+    def set_enhance_weight(self, enhance_weight: float):
+        self.enhance_weight = enhance_weight
+        self.use_enhance = True
 
     def _get_enhance_scores(self, query, key):
         img_q, img_k = query, key
 
-        num_frames = get_num_frames()
+        num_frames = self.num_frames
         _, num_heads, ST, head_dim = img_q.shape
         spatial_dim = ST / num_frames
         spatial_dim = int(spatial_dim)
@@ -97,6 +85,7 @@ class WanAttnProcessor2_0:
             N=num_heads,
             C=head_dim,
         )
+        
         key_image = rearrange(
             img_k,
             "B N (T S) C -> (B S) N T C",
@@ -106,7 +95,7 @@ class WanAttnProcessor2_0:
             C=head_dim,
         )
 
-        return enhance_score(query_image, key_image, head_dim, num_frames)
+        return enhance_score(query_image, key_image, head_dim, num_frames, self.enhance_weight)
 
     def process_with_kv_cache(
         self,
@@ -127,8 +116,6 @@ class WanAttnProcessor2_0:
             rotary_emb_split_point = rotary_emb.shape[2] - attn.cond_size
             rotary_emb_main = rotary_emb[:, :, :rotary_emb_split_point]
             rotary_emb_ip = rotary_emb[:, :, rotary_emb_split_point:]
-            
-
             
             query_main = attn.to_q(hidden_states_main)
             key_main = attn.to_k(hidden_states_main)
@@ -262,7 +249,7 @@ class WanAttnProcessor2_0:
         no_cache: bool = False,
     ) -> torch.Tensor:
         
-        if attn.cond_size is not None and not no_cache:
+        if hasattr(attn, "cond_size") and attn.cond_size is not None and not no_cache:
             return self.process_with_kv_cache(
                 attn, hidden_states, attention_mask, rotary_emb
             )

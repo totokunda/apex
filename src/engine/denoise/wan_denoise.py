@@ -135,6 +135,7 @@ class WanDenoise(WanDenoiseMLX):
         expand_timesteps = kwargs.get("expand_timesteps", False)
         first_frame_mask = kwargs.get("first_frame_mask", None)
         ip_image = kwargs.get("ip_image", None)
+        
 
         if ip_image is not None:
             ip_image_latent = self._encode_ip_image(ip_image, dtype=transformer_dtype)
@@ -396,9 +397,19 @@ class WanDenoise(WanDenoiseMLX):
         human_num = kwargs.get("human_num", None)
         negative_prompt_embeds = kwargs.get("negative_prompt_embeds", None)
         attention_kwargs = kwargs.get("attention_kwargs", {})
+        using_video_input = kwargs.get("using_video_input", False)
+        cur_motion_frames_latent_num = kwargs.get("cur_motion_frames_latent_num", None)
+        latent_motion_frames = kwargs.get("latent_motion_frames", None)
+        
+        
+        
+        
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
             for i, t in enumerate(timesteps):
+                if using_video_input:
+                    latents[:, :, :cur_motion_frames_latent_num] = latent_motion_frames.unsqueeze(0)
+                
                 latent_model_input = torch.cat([latents, latent_condition], dim=1).to(
                     transformer_dtype
                 )
@@ -414,7 +425,7 @@ class WanDenoise(WanDenoiseMLX):
                     ref_target_masks=ref_target_masks,
                     human_num=human_num,
                     return_dict=False,
-                    **attention_kwargs,
+                    **attention_kwargs
                 )[0]
 
                 if math.isclose(guidance_scale, 1.0):
@@ -480,6 +491,9 @@ class WanDenoise(WanDenoiseMLX):
                     )
                     _, T_m, _, _ = add_latent.shape
                     latents[:, :T_m] = add_latent
+                
+                if using_video_input:
+                    latents[:, :, :cur_motion_frames_latent_num] = latent_motion_frames.unsqueeze(0)
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)

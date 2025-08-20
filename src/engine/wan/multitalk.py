@@ -167,8 +167,11 @@ class WanMultitalkEngine(WanBaseEngine):
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+        
+        self.transformer = torch.compile(self.transformer)
 
         batch_size = num_videos
+        using_video_input = input_video is not None
         while True:
             audio_embs = []
             # split audio with window size
@@ -202,8 +205,11 @@ class WanMultitalkEngine(WanBaseEngine):
                 latent_width,
                 device=self.device,
             )
-
-            mask_lat_size[:, :, cur_motion_frames_num:] = 0
+            # For InfiniteTalk (video input), only the first frame is preserved; for image mode, preserve cur_motion_frames_num
+            if using_video_input:
+                mask_lat_size[:, :, 1:] = 0
+            else:
+                mask_lat_size[:, :, cur_motion_frames_num:] = 0
             first_frame_mask = mask_lat_size[:, :, 0:1]
             first_frame_mask = torch.repeat_interleave(
                 first_frame_mask, dim=2, repeats=self.vae_scale_factor_temporal
@@ -238,34 +244,26 @@ class WanMultitalkEngine(WanBaseEngine):
                 self._offload(clip_processor)
 
             # zero padding and vae encode
+            # InfiniteTalk: always condition on the current source video frame when a video is provided;
+            # MultiTalk (image-only): condition on previous generated frames after the first clip
             if is_first_clip:
-                video_condition = torch.cat(
-                    [
-                        cond_image,
-                        cond_image.new_zeros(
-                            cond_image.shape[0],
-                            cond_image.shape[1],
-                            num_frames - cond_image.shape[2],
-                            height,
-                            width,
-                        ),
-                    ],
-                    dim=2,
-                )
+                base_condition = cond_image
             else:
-                video_condition = torch.cat(
-                    [
-                        cond_frame,
-                        cond_frame.new_zeros(
-                            cond_frame.shape[0],
-                            cond_frame.shape[1],
-                            num_frames - cond_frame.shape[2],
-                            height,
-                            width,
-                        ),
-                    ],
-                    dim=2,
-                )
+                base_condition = cond_image if using_video_input else cond_frame
+
+            video_condition = torch.cat(
+                [
+                    base_condition,
+                    base_condition.new_zeros(
+                        base_condition.shape[0],
+                        base_condition.shape[1],
+                        num_frames - base_condition.shape[2],
+                        height,
+                        width,
+                    ),
+                ],
+                dim=2,
+            )
 
             latent_condition = self.vae_encode(
                 video_condition,
@@ -275,11 +273,20 @@ class WanMultitalkEngine(WanBaseEngine):
             )
 
             cur_motion_frames_latent_num = int(1 + (cur_motion_frames_num - 1) // 4)
-            latent_motion_frames = latent_condition[
-                :, :, :cur_motion_frames_latent_num
-            ][
-                0
-            ]  # C T H W
+            # For InfiniteTalk (video input), match reference behavior:
+            #   - first clip: inject latents encoded from the current source frame
+            #   - subsequent clips: inject latents encoded from last generated frames
+            if using_video_input:
+                motion_source = cond_image if is_first_clip else cond_frame
+                motion_latents = self.vae_encode(
+                    motion_source,
+                    offload=offload,
+                    dtype=torch.float32,
+                    normalize_latents_dtype=torch.float32,
+                )
+                latent_motion_frames = motion_latents[0]
+            else:
+                latent_motion_frames = latent_condition[:, :, :cur_motion_frames_latent_num][0]  # C T H W
             latent_condition = torch.concat(
                 [mask_lat_size.to(latent_condition), latent_condition], dim=1
             )  # B 4+C T H W
@@ -335,6 +342,9 @@ class WanMultitalkEngine(WanBaseEngine):
                 latents[:, :C, :T_m, :H, :W] = add_latent
 
             latents = self.denoise(
+                latent_motion_frames=latent_motion_frames,
+                using_video_input=using_video_input,
+                cur_motion_frames_latent_num=cur_motion_frames_latent_num,
                 timesteps=input_timesteps,
                 latents=latents,
                 latent_condition=latent_condition,
@@ -354,7 +364,7 @@ class WanMultitalkEngine(WanBaseEngine):
                 audio_guidance_scale=audio_guidance_scale,
             )
 
-            videos = self.vae_decode(latents, offload=offload).cpu()
+            videos = self.vae_decode(latents, offload=offload)
 
             # >>> START OF COLOR CORRECTION STEP <<<
             if color_correction_strength > 0.0 and original_color_reference is not None:
@@ -384,7 +394,9 @@ class WanMultitalkEngine(WanBaseEngine):
             if video is None:
                 loaded_image = cond_frame[:, :, -1, :, :]
             else:
-                loaded_image = input_video[:, :, audio_start_idx, :, :]
+                # Clamp index to available frames
+                next_src_idx = min(audio_start_idx, input_video.shape[2] - 1)
+                loaded_image = input_video[:, :, next_src_idx, :, :]
                 
                 
             loaded_image = loaded_image.squeeze(0).permute(1, 2, 0)
@@ -392,6 +404,10 @@ class WanMultitalkEngine(WanBaseEngine):
             loaded_image = Image.fromarray(
                 ((loaded_image + 1) * 127.5).clamp(0, 255).to(torch.uint8).cpu().numpy()
             )
+            # Update cond_image from source video for the next iteration in video mode
+            if using_video_input:
+                cond_idx = min(audio_start_idx, input_video.shape[2] - 1)
+                cond_image = input_video[:, :, cond_idx : cond_idx + 1, :, :]
             audio_start_idx += num_frames - cur_motion_frames_num
             audio_end_idx = audio_start_idx + clip_length
             miss_lengths = []
@@ -433,6 +449,10 @@ class WanMultitalkEngine(WanBaseEngine):
             ]
             if max_num_frames > num_frames and sum(miss_lengths) > 0:
                 # split video frames
-                gen_video_samples = gen_video_samples[:, :, : -1 * miss_lengths[0]]
+                if using_video_input:
+                    gen_video_samples = gen_video_samples[:, :, : full_audio_embs[0].shape[0]]
+                else:
+                    gen_video_samples = gen_video_samples[:, :, : -1 * miss_lengths[0]]
+
             postprocessed_video = self._postprocess(gen_video_samples)
             return postprocessed_video

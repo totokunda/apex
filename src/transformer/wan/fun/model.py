@@ -250,6 +250,7 @@ class WanTransformerBlock(nn.Module):
         cross_attn_norm: bool = False,
         eps: float = 1e-6,
         added_kv_proj_dim: Optional[int] = None,
+        use_enhance: bool = False,
     ):
         super().__init__()
 
@@ -265,7 +266,7 @@ class WanTransformerBlock(nn.Module):
             bias=True,
             cross_attention_dim=None,
             out_bias=True,
-            processor=WanAttnProcessor2_0(),
+            processor=WanAttnProcessor2_0(use_enhance=use_enhance),
         )
 
         # 2. Cross-attention
@@ -417,6 +418,7 @@ class WanFunTransformer3DModel(
         in_dim_control_adapter=24,
         add_ref_conv=True,
         in_dim_ref_conv=16,
+        use_enhance: bool = False,
     ) -> None:
         super().__init__()
 
@@ -473,6 +475,7 @@ class WanFunTransformer3DModel(
                     cross_attn_norm,
                     eps,
                     added_kv_proj_dim,
+                    use_enhance,
                 )
                 for _ in range(num_layers)
             ]
@@ -486,6 +489,11 @@ class WanFunTransformer3DModel(
         )
 
         self.gradient_checkpointing = False
+        
+    def set_enhance(self, enhance_weight: float, num_frames: int):
+        for block in self.blocks:
+            block.attn1.processor.set_enhance_weight(enhance_weight)
+            block.attn1.processor.set_num_frames(num_frames)
 
     def forward(
         self,
@@ -498,7 +506,15 @@ class WanFunTransformer3DModel(
         encoder_hidden_states_subject_ref: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
+        
+        if enhance_kwargs is not None:
+            enhance_weight = enhance_kwargs.get("enhance_weight", None)
+            num_frames = enhance_kwargs.get("num_frames", None)
+            if enhance_weight is not None and num_frames is not None:
+                self.set_enhance(enhance_weight, num_frames)
+
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)

@@ -192,6 +192,7 @@ class WanATIEngine(WanBaseEngine):
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
         expand_timesteps: bool = False,
+        enhance_kwargs: Dict[str, Any] = {},
     ):
 
         if not self.text_encoder:
@@ -412,12 +413,14 @@ class WanATIEngine(WanBaseEngine):
                 encoder_hidden_states=prompt_embeds,
                 encoder_hidden_states_image=image_embeds,
                 attention_kwargs=attention_kwargs,
+                enhance_kwargs=enhance_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
                     encoder_hidden_states=negative_prompt_embeds,
                     encoder_hidden_states_image=image_embeds,
                     attention_kwargs=attention_kwargs,
+                    enhance_kwargs=enhance_kwargs,
                 )
                 if negative_prompt_embeds is not None
                 else None

@@ -30,7 +30,7 @@ class WanVaceEngine(WanBaseEngine):
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
         use_cfg_guidance: bool = True,
-        seed: int | None = None,
+        seed: int | None = None,    
         num_videos: int = 1,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -42,6 +42,7 @@ class WanVaceEngine(WanBaseEngine):
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
+        enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
 
@@ -337,6 +338,7 @@ class WanVaceEngine(WanBaseEngine):
                 control_hidden_states=conditioning_latents,
                 control_hidden_states_scale=conditioning_scale,
                 attention_kwargs=attention_kwargs,
+                enhance_kwargs=enhance_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
@@ -344,6 +346,7 @@ class WanVaceEngine(WanBaseEngine):
                     control_hidden_states=conditioning_latents,
                     control_hidden_states_scale=conditioning_scale,
                     attention_kwargs=attention_kwargs,
+                    enhance_kwargs=enhance_kwargs,
                 )
                 if negative_prompt_embeds is not None
                 else None

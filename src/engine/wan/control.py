@@ -55,6 +55,7 @@ class WanControlEngine(WanBaseEngine):
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
+        enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
 
@@ -293,6 +294,7 @@ class WanControlEngine(WanBaseEngine):
                     else None
                 ),
                 attention_kwargs=attention_kwargs,
+                enhance_kwargs=enhance_kwargs,
             ),
             unconditional_transformer_kwargs=(
                 dict(
@@ -309,6 +311,7 @@ class WanControlEngine(WanBaseEngine):
                         else None
                     ),
                     attention_kwargs=attention_kwargs,
+                    enhance_kwargs=enhance_kwargs,
                 )
                 if negative_prompt_embeds is not None
                 else None
