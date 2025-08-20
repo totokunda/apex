@@ -512,7 +512,6 @@ class WanTransformerBlock(nn.Module):
             heads=num_heads,
             dim_head=dim // num_heads,
             eps=eps,
-            added_kv_proj_dim=added_kv_proj_dim,
             cross_attention_dim_head=dim // num_heads,
             processor=WanAttnProcessor2_0(),
         )

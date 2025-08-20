@@ -1,4 +1,4 @@
-from .euler import FlowMatchDiscreteScheduler, FlowMatchScheduler
+from .flow import FlowMatchDiscreteScheduler, FlowMatchScheduler
 from .rf import RectifiedFlowScheduler
 from .unipc import UniPCMultistepScheduler
 from .scheduler import SchedulerInterface
