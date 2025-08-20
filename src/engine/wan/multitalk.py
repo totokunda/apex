@@ -14,7 +14,7 @@ class WanMultitalkEngine(WanBaseEngine):
     def run(
         self,
         prompt: List[str] | str,
-        image: Union[Image.Image, str] | None = None,
+        image: Union[Image.Image, str, np.ndarray, torch.Tensor] | None = None,
         video: Union[List[Image.Image], str, np.ndarray, torch.Tensor, None] = None,
         audio_paths: Optional[Dict[str, str]] = None,
         audio_type: str = "para",
@@ -72,9 +72,7 @@ class WanMultitalkEngine(WanBaseEngine):
         num_frames = self._parse_num_frames(duration, fps)
         
         assert image is not None or video is not None, "Either image or video must be provided"
-        
-        process_type = "image" if image is not None else "video"
-        
+ 
         if image is not None:
             loaded_image = self._load_image(image)
             loaded_image, height, width = self._aspect_ratio_resize(
@@ -84,6 +82,7 @@ class WanMultitalkEngine(WanBaseEngine):
             cond_image = self.video_processor.preprocess(
                 loaded_image, height=height, width=width
             ).to(self.device, dtype=torch.float32)
+            cond_image = cond_image.unsqueeze(2)
         
         if video is not None:
             input_video = self._load_video(video)
@@ -97,12 +96,11 @@ class WanMultitalkEngine(WanBaseEngine):
             input_video = self.video_processor.preprocess_video(
                 input_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)
-            cond_image = input_video[:, :, 0, :, :]
+            cond_image = input_video[:, :, :1, :, :]
         else:
             input_video = None
-
-
-        cond_image = cond_image.unsqueeze(2)
+        
+        cond_frame = None
 
         original_color_reference = None
         if color_correction_strength > 0.0:
@@ -238,19 +236,34 @@ class WanMultitalkEngine(WanBaseEngine):
                 self._offload(clip_processor)
 
             # zero padding and vae encode
-            video_condition = torch.cat(
-                [
-                    cond_image,
-                    cond_image.new_zeros(
-                        cond_image.shape[0],
-                        cond_image.shape[1],
-                        num_frames - cond_image.shape[2],
-                        height,
-                        width,
-                    ),
-                ],
-                dim=2,
-            )
+            if is_first_clip:
+                video_condition = torch.cat(
+                    [
+                        cond_image,
+                        cond_image.new_zeros(
+                            cond_image.shape[0],
+                            cond_image.shape[1],
+                            num_frames - cond_image.shape[2],
+                            height,
+                            width,
+                        ),
+                    ],
+                    dim=2,
+                )
+            else:
+                video_condition = torch.cat(
+                    [
+                        cond_frame,
+                        cond_frame.new_zeros(
+                            cond_frame.shape[0],
+                            cond_frame.shape[1],
+                            num_frames - cond_frame.shape[2],
+                            height,
+                            width,
+                        ),
+                    ],
+                    dim=2,
+                )
 
             latent_condition = self.vae_encode(
                 video_condition,
@@ -362,18 +375,18 @@ class WanMultitalkEngine(WanBaseEngine):
             # update next condition frames
             is_first_clip = False
             cur_motion_frames_num = motion_frames
-            
-            
-            cond_image = (
-                videos[:, :, -cur_motion_frames_num:].to(torch.float32).to(self.device)
+            cond_frame = (
+                    videos[:, :, -cur_motion_frames_num:].to(torch.float32).to(self.device)
             )
             
-            if process_type == "image":
-                loaded_image = cond_image[:, :, -1, :, :]
+            if video is None:
+                loaded_image = cond_frame[:, :, -1, :, :]
             else:
                 loaded_image = input_video[:, :, audio_start_idx, :, :]
-            
+                
+                
             loaded_image = loaded_image.squeeze(0).permute(1, 2, 0)
+
             loaded_image = Image.fromarray(
                 ((loaded_image + 1) * 127.5).clamp(0, 255).to(torch.uint8).cpu().numpy()
             )

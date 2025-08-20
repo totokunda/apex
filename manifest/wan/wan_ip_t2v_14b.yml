@@ -8,7 +8,7 @@ shared:
 
 components:
   - type: scheduler
-    base: "src.scheduler.euler.FlowMatchScheduler"
+    base: "src.scheduler.flow.FlowMatchScheduler"
     config:
       shift: 5.0
       sigma_min: 0.0

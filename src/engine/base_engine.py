@@ -10,7 +10,7 @@ from tqdm import tqdm
 import shutil
 import accelerate
 from src.converters.convert_torch_mlx import convert_weights_to_mlx
-
+from src.utils.defaults import DEFAULT_CACHE_PATH
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
@@ -343,7 +343,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     f"Saving converted vae weights to {component.get('model_path', None)}"
                 )
                 model_path = component.get("model_path", None)
-                tmp_dir = tempfile.mkdtemp()
+                tmp_dir = tempfile.mkdtemp(dir=DEFAULT_CACHE_PATH)
                 try:
                     self.save_component(
                         vae, tmp_dir, "vae", **self.config.get("save_kwargs", {})
@@ -464,7 +464,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
                 model_path = component.get("model_path", None)
 
-                tmp_dir = tempfile.mkdtemp()
+                tmp_dir = tempfile.mkdtemp(dir=DEFAULT_CACHE_DIR)
                 component_name = component.get("name", component.get("type"))
                 try:
                     self.save_component(

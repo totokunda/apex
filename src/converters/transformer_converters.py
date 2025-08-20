@@ -8,8 +8,13 @@ class TransformerConverter:
     def __init__(self):
         self.rename_dict = {}
         self.special_keys_map = {}
+        
+    def _sort_rename_dict(self):
+        """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
+        self.rename_dict = dict(sorted(self.rename_dict.items(), key=lambda item: len(item[0]), reverse=True))
 
     def convert(self, state_dict: Dict[str, Any]):
+        self._sort_rename_dict()
         for key in list(state_dict.keys()):
             new_key = key[:]
             for replace_key, rename_key in self.rename_dict.items():
@@ -67,9 +72,9 @@ class WanTransformerConverter(TransformerConverter):
             "cross_attn.o": "attn2.to_out.0",
             "cross_attn.norm_q": "attn2.norm_q",
             "cross_attn.norm_k": "attn2.norm_k",
-            "attn2.to_k_img": "attn2.add_k_proj",
-            "attn2.to_v_img": "attn2.add_v_proj",
-            "attn2.norm_k_img": "attn2.norm_added_k",
+            "cross_attn.k_img": "attn2.add_k_proj",
+            "cross_attn.v_img": "attn2.add_v_proj",
+            "cross_attn.norm_k_img": "attn2.norm_added_k",
         }
         self.special_keys_map = {}
 
@@ -134,9 +139,9 @@ class WanMultiTalkTransformerConverter(TransformerConverter):
             "cross_attn.o": "attn2.to_out.0",
             "cross_attn.norm_q": "attn2.norm_q",
             "cross_attn.norm_k": "attn2.norm_k",
-            "attn2.to_k_img": "attn2.add_k_proj",
-            "attn2.to_v_img": "attn2.add_v_proj",
-            "attn2.norm_k_img": "attn2.norm_added_k",
+            "cross_attn.k_img": "attn2.add_k_proj",
+            "cross_attn.v_img": "attn2.add_v_proj",
+            "cross_attn.norm_k_img": "attn2.norm_added_k",
         }
 
         self.special_keys_map = {}
@@ -181,9 +186,9 @@ class WanVaceTransformerConverter(WanTransformerConverter):
             "cross_attn.o": "attn2.to_out.0",
             "cross_attn.norm_q": "attn2.norm_q",
             "cross_attn.norm_k": "attn2.norm_k",
-            "attn2.to_k_img": "attn2.add_k_proj",
-            "attn2.to_v_img": "attn2.add_v_proj",
-            "attn2.norm_k_img": "attn2.norm_added_k",
+            "cross_attn.k_img": "attn2.add_k_proj",
+            "cross_attn.v_img": "attn2.add_v_proj",
+            "cross_attn.norm_k_img": "attn2.norm_added_k",
             "before_proj": "proj_in",
             "after_proj": "proj_out",
         }
