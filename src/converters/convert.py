@@ -206,11 +206,21 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
 
     return state_dict
 
-def needs_conversion(original_state_dict: Dict[str, Any], state_dict: Dict[str, Any]):
+def needs_conversion(original_state_dict: Dict[str, Any], state_dict: Dict[str, Any], keys_to_ignore: List[str] = []):
     for key in state_dict.keys():
+        if any(ignore_key in key for ignore_key in keys_to_ignore):
+            continue
         if key not in original_state_dict or original_state_dict[key].shape != state_dict[key].shape:
             return True
     return False
+
+
+def remove_keys_from_state_dict(state_dict: Dict[str, Any], keys_to_ignore: List[str] = []):
+    keys = list(state_dict.keys())
+    for key in keys:
+        if any(ignore_key in key for ignore_key in keys_to_ignore):
+            state_dict.pop(key)
+    return state_dict
 
 def convert_transformer(
     model_tag: str,
@@ -222,11 +232,11 @@ def convert_transformer(
     **transformer_converter_kwargs,
 ):
 
-    if config is None:
+    if not config:
         config = get_transformer_config(
             model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
         )
-
+    
     if "mlx" in model_base:
         using_mlx = True
         model_base = model_base.replace("mlx.", "")
@@ -243,17 +253,21 @@ def convert_transformer(
     
     original_state_dict = model.state_dict()
     
+    keys_to_ignore = getattr(model, "_keys_to_ignore_on_load_unexpected", [])
+    
     if isinstance(ckpt_path, list):
         state_dict = {}
         for i, ckpt in enumerate(ckpt_path):
             ct_state_dict = load_state_dict(ckpt, model_key, pattern)
-            if needs_conversion(original_state_dict, ct_state_dict):
+            if needs_conversion(original_state_dict, ct_state_dict, keys_to_ignore):
                 converter.convert(ct_state_dict)
             state_dict.update(ct_state_dict)
     else:
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
-        if needs_conversion(original_state_dict, state_dict):
+        if needs_conversion(original_state_dict, state_dict, keys_to_ignore):
             converter.convert(state_dict)
+
+    state_dict = remove_keys_from_state_dict(state_dict, keys_to_ignore)
 
     if not using_mlx:
         state_dict = strip_common_prefix(state_dict, model.state_dict())
@@ -275,27 +289,30 @@ def convert_vae(
     config: dict = None,
     **vae_converter_kwargs,
 ):
-    if config is None:
+    if not config:
         config = get_vae_config(
             vae_tag, config_path=vae_converter_kwargs.get("config_path", None)
         )
     model_class = get_model_class(vae_type, config, model_type="vae")
     model = get_empty_model(model_class, config)
     original_state_dict = model.state_dict()
+    keys_to_ignore = getattr(model, "_keys_to_ignore_on_load_unexpected", [])
 
     converter = get_vae_converter(vae_type, **vae_converter_kwargs)
     if isinstance(ckpt_path, list):
         state_dict = {}
         for ckpt in ckpt_path:
             ct_state_dict = load_state_dict(ckpt, model_key, pattern)
-            if needs_conversion(original_state_dict, ct_state_dict):
+            if needs_conversion(original_state_dict, ct_state_dict, keys_to_ignore):
                 converter.convert(ct_state_dict)
             state_dict.update(ct_state_dict)
     else:
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
-        if needs_conversion(original_state_dict, state_dict):
+        if needs_conversion(original_state_dict, state_dict, keys_to_ignore):
             converter.convert(state_dict)
 
+    
+    state_dict = remove_keys_from_state_dict(state_dict, keys_to_ignore)
     state_dict = strip_common_prefix(state_dict, model.state_dict())
 
     model.load_state_dict(state_dict, strict=True, assign=True)
@@ -306,7 +323,7 @@ def convert_vae(
 def get_transformer_keys(
     model_base: str, model_tag: str, transformer_converter_kwargs: dict, config: dict = None
 ):
-    if config is None:
+    if not config:
         config = get_transformer_config(
             model_tag, config_path=transformer_converter_kwargs.get("config_path", None)
         )
@@ -317,6 +334,7 @@ def get_transformer_keys(
         model_type = "mlx.transformer"
     else:
         model_type = "transformer"
+    
     model_class = get_model_class(model_base, config, model_type=model_type)
     model = get_empty_model(model_class, config)
 
@@ -332,7 +350,7 @@ def get_vae_keys(vae_type: str, vae_tag: str, vae_converter_kwargs: dict, config
     if vae_type != "ltx":
         return []
     model_class = get_vae(vae_type)
-    if config is None:
+    if not config:
         config = get_vae_config(
             vae_tag, config_path=vae_converter_kwargs.get("config_path", None)
         )
