@@ -33,6 +33,7 @@ class WanT2VEngine(WanBaseEngine):
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
         expand_timesteps: bool = False,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
         **kwargs,
     ):
 
@@ -47,7 +48,7 @@ class WanT2VEngine(WanBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-
+        
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
@@ -136,6 +137,7 @@ class WanT2VEngine(WanBaseEngine):
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
+            ip_image=ip_image,
         )
 
         if offload:

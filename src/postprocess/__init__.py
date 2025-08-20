@@ -1,10 +1,13 @@
 from .ltx import LatentUpsamplerPostprocessor
 from .cosmos import CosmosGuardrailPostprocessor
-from .base import BasePostprocessor, postprocessor_registry
+from .rife import RifePostprocessor
+from .base import BasePostprocessor, PostprocessorCategory, postprocessor_registry
 
 __all__ = [
     "LatentUpsamplerPostprocessor",
     "CosmosGuardrailPostprocessor",
+    "RifePostprocessor",
     "BasePostprocessor",
+    "PostprocessorCategory",
     "postprocessor_registry",
 ]

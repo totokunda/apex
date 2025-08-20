@@ -32,7 +32,10 @@ class Attention(nn.Module):
         self.to_q = nn.Linear(dim, self.inner_dim, bias=bias)
         self.to_k = nn.Linear(dim, self.kv_inner_dim, bias=bias)
         self.to_v = nn.Linear(dim, self.kv_inner_dim, bias=bias)
-        self.to_out = [nn.Linear(self.inner_dim, dim, bias=out_bias), nn.Dropout(dropout)]
+        self.to_out = [
+            nn.Linear(self.inner_dim, dim, bias=out_bias),
+            nn.Dropout(dropout),
+        ]
 
         self.norm_q = nn.RMSNorm(dim_head * heads, eps=eps)
         self.norm_k = nn.RMSNorm(dim_head * heads, eps=eps)

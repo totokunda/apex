@@ -58,10 +58,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
                 tokenizer_name=self.config.get("tokenizer_name", None),
                 **self.config.get("tokenizer_kwargs", {}),
             )
-        
+
         self.model = None
         self.model_loaded = False
-    
+
     def load_model(self, no_weights: bool = False):
         return self._load_model(
             {
@@ -101,7 +101,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         max_sequence_length: int = 512,
         pad_to_max_length: bool = True,
         num_videos_per_prompt: int = 1,
-        dtype: torch.dtype | None = None,
+        dtype: torch.dtype | str | None = None,
         device: torch.device | None = None,
         batch_size: int = 1,
         add_special_tokens: bool = True,
@@ -118,8 +118,31 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             text = [text]
         if clean_text:
             text = [self.prompt_clean(t, lower_case=lower_case) for t in text]
+            
+        if dtype is not None:
+            if isinstance(dtype, str):
+                dtype = getattr(torch, dtype.lstrip("torch."))
+        
+        kwargs = {
+            "text": text,
+            "max_sequence_length": max_sequence_length,
+            "pad_to_max_length": pad_to_max_length,
+            "num_videos_per_prompt": num_videos_per_prompt,
+            "dtype": dtype,
+            "device": device,
+            "batch_size": batch_size,
+            "add_special_tokens": add_special_tokens,
+            "return_attention_mask": return_attention_mask,
+            "use_mask_in_input": use_mask_in_input,
+            "use_position_ids": use_position_ids,
+            "use_token_type_ids": use_token_type_ids,
+            "pad_with_zero": pad_with_zero,
+            "clean_text": clean_text,
+            "output_type": output_type,
+            "lower_case": lower_case,
+        }
 
-        prompt_hash = self.hash_prompt(text)
+        prompt_hash = self.hash_prompt(kwargs)
 
         if self.enable_cache:
             cached = self.load_cached_prompt(prompt_hash)
@@ -138,7 +161,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
                     return cached_embeds, cached_mask
                 else:
                     return cached_embeds
-        
+
         if not self.model_loaded:
             self.model = self.load_model(no_weights=False)
             self.model_loaded = True

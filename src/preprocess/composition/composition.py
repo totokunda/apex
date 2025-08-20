@@ -17,7 +17,7 @@ from tqdm import tqdm
 class CompositionOutput(BaseOutput):
     video: List[Image.Image]
     mask: List[Image.Image] | None = None
-    
+
 
 class ReferenceAnythingOutput(BaseOutput):
     images: List[Image.Image]

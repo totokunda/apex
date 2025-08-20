@@ -38,6 +38,7 @@ class WanFFLFEngine(WanBaseEngine):
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
         **kwargs,
     ):
         """
@@ -242,6 +243,7 @@ class WanFFLFEngine(WanBaseEngine):
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
+            ip_image=ip_image,
         )
 
         if offload:

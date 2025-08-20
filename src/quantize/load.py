@@ -98,7 +98,11 @@ def load_text_encoder_gguf(
             torch_tensor = torch.from_numpy(tensor.data)
 
             ggml_tensor = GGMLTensor(
-                torch_tensor.view(torch.int8) if is_quantized(torch_tensor) else torch_tensor,
+                (
+                    torch_tensor.view(torch.int8)
+                    if is_quantized(torch_tensor)
+                    else torch_tensor
+                ),
                 tensor_type=tensor.tensor_type,
                 tensor_shape=shape,
                 dequant_dtype=dequant_dtype,
@@ -129,8 +133,14 @@ def get_orig_shape(reader, tensor_name):
     if field is None:
         return None
     # Has original shape metadata, so we try to decode it.
-    if len(field.types) != 2 or field.types[0] != gguf.GGUFValueType.ARRAY or field.types[1] != gguf.GGUFValueType.INT32:
-        raise TypeError(f"Bad original shape metadata for {field_key}: Expected ARRAY of INT32, got {field.types}")
+    if (
+        len(field.types) != 2
+        or field.types[0] != gguf.GGUFValueType.ARRAY
+        or field.types[1] != gguf.GGUFValueType.INT32
+    ):
+        raise TypeError(
+            f"Bad original shape metadata for {field_key}: Expected ARRAY of INT32, got {field.types}"
+        )
     return torch.Size(tuple(int(field.parts[part_idx][0]) for part_idx in field.data))
 
 
@@ -153,11 +163,16 @@ def load_transformer_gguf(
             shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
 
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
+            warnings.filterwarnings(
+                "ignore", message="The given NumPy array is not writable"
+            )
             base = torch.from_numpy(tensor.data)
 
             # For F16/F32, present the logical shape now; quantized shapes are handled by dequant
-            if tensor.tensor_type in {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16}:
+            if tensor.tensor_type in {
+                gguf.GGMLQuantizationType.F32,
+                gguf.GGMLQuantizationType.F16,
+            }:
                 base = base.view(*shape)
 
             ggml_tensor = GGMLTensor(

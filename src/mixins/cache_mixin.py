@@ -2,7 +2,7 @@ import hashlib
 import os
 import re
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import torch
 from safetensors.torch import safe_open
@@ -16,8 +16,8 @@ class CacheMixin:
     max_cache_size: int | None = None
     model_path: str | None = None
 
-    def hash_prompt(self, text: List[str]) -> str:
-        hashes = [hashlib.sha256(str(t).encode()).hexdigest() for t in text]
+    def hash_prompt(self, kwargs: Dict[str, Any]) -> str:
+        hashes = [hashlib.sha256(str(t).encode()).hexdigest() for t in kwargs.values()]
         return ".".join(hashes)
 
     def get_cached_keys_for_prompt(

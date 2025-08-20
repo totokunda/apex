@@ -8,12 +8,23 @@ from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.quantize.ggml_tensor import GGMLTensor
 
 
-def cast_to(t: Optional[torch.Tensor], dtype: Optional[torch.dtype], device, copy=False, non_blocking=False):
+def cast_to(
+    t: Optional[torch.Tensor],
+    dtype: Optional[torch.dtype],
+    device,
+    copy=False,
+    non_blocking=False,
+):
     if t is None:
         return None
     if (dtype is None or t.dtype == dtype) and (t.device == device):
         return t
-    return t.to(device=device, dtype=dtype if dtype is not None else t.dtype, copy=copy, non_blocking=non_blocking)
+    return t.to(
+        device=device,
+        dtype=dtype if dtype is not None else t.dtype,
+        copy=copy,
+        non_blocking=non_blocking,
+    )
 
 
 class GGMLLayer(nn.Module):
@@ -21,7 +32,9 @@ class GGMLLayer(nn.Module):
     Base mixin for GGML-backed layers that need on-the-fly dequantization.
     """
 
-    dequant_dtype: Optional[torch.dtype] = None  # preferred dequant dtype (fallback to input/bfloat16/fp16)
+    dequant_dtype: Optional[torch.dtype] = (
+        None  # preferred dequant dtype (fallback to input/bfloat16/fp16)
+    )
     largest_layer: bool = False
 
     torch_compatible_tensor_types = {
@@ -39,19 +52,26 @@ class GGMLLayer(nn.Module):
             bias = getattr(self, "bias", None)
         return is_quantized(weight) or is_quantized(bias)
 
-    def _effective_dequant_dtype(self, requested: Optional[torch.dtype], tensor: Optional[torch.Tensor]) -> torch.dtype:
+    def _effective_dequant_dtype(
+        self, requested: Optional[torch.dtype], tensor: Optional[torch.Tensor]
+    ) -> torch.dtype:
         # priority: explicit requested dtype -> layer.default -> tensor.dequant_dtype -> torch.float16
 
         if requested is not None:
             return requested
         if getattr(self, "dequant_dtype", None) is not None:
             return self.dequant_dtype
-        if isinstance(tensor, GGMLTensor) and getattr(tensor, "dequant_dtype", None) is not None:
+        if (
+            isinstance(tensor, GGMLTensor)
+            and getattr(tensor, "dequant_dtype", None) is not None
+        ):
             return tensor.dequant_dtype
         # sensible default for speed/memory (change to float32 if you prefer accuracy)
         return torch.float16
 
-    def _materialize_weight(self, t: Optional[torch.Tensor], *, target_dtype: Optional[torch.dtype], device) -> Optional[torch.Tensor]:
+    def _materialize_weight(
+        self, t: Optional[torch.Tensor], *, target_dtype: Optional[torch.dtype], device
+    ) -> Optional[torch.Tensor]:
         if t is None:
             return None
 
@@ -64,7 +84,9 @@ class GGMLLayer(nn.Module):
             # dequantize_tensor interfaces differ across repos; prefer (tensor, out_dtype),
             # and fall back to (tensor, out_dtype, dq_dtype_hint) if available.
             try:
-                out = dequantize_tensor(t, dq_dtype)  # common signature: (tensor, out_dtype)
+                out = dequantize_tensor(
+                    t, dq_dtype
+                )  # common signature: (tensor, out_dtype)
             except TypeError:
                 out = dequantize_tensor(t, dq_dtype, getattr(t, "dequant_dtype", None))
 
@@ -86,13 +108,25 @@ class GGMLLayer(nn.Module):
                 dtype = input.dtype
 
         # Weight
-        weight = self._materialize_weight(getattr(self, "weight", None), target_dtype=dtype, device=device)
+        weight = self._materialize_weight(
+            getattr(self, "weight", None), target_dtype=dtype, device=device
+        )
 
         # Bias (if present)
         bias = None
         if hasattr(self, "bias") and self.bias is not None:
-            bdtype = bias_dtype if bias_dtype is not None else (dtype if dtype is not None else self._effective_dequant_dtype(None, self.bias))
-            bias = self._materialize_weight(self.bias, target_dtype=bdtype, device=device)
+            bdtype = (
+                bias_dtype
+                if bias_dtype is not None
+                else (
+                    dtype
+                    if dtype is not None
+                    else self._effective_dequant_dtype(None, self.bias)
+                )
+            )
+            bias = self._materialize_weight(
+                self.bias, target_dtype=bdtype, device=device
+            )
 
         return weight, bias
 
@@ -103,8 +137,14 @@ class GGMLLayer(nn.Module):
         weight = state_dict.get(f"{prefix}weight", None)
         bias = state_dict.get(f"{prefix}bias", None)
 
-        should_route = self.is_ggml_quantized(weight=weight, bias=bias) or isinstance(self, nn.Linear)
-        if not should_route and isinstance(self, nn.Embedding) and getattr(self, "weight", torch.empty(0)).shape[0] >= (64 * 1024):
+        should_route = self.is_ggml_quantized(weight=weight, bias=bias) or isinstance(
+            self, nn.Linear
+        )
+        if (
+            not should_route
+            and isinstance(self, nn.Embedding)
+            and getattr(self, "weight", torch.empty(0)).shape[0] >= (64 * 1024)
+        ):
             should_route = True
 
         if should_route:
@@ -165,6 +205,7 @@ class GGMLLayer(nn.Module):
 
 # -------------------- Patched layers --------------------
 
+
 class GGMLLinear(GGMLLayer, nn.Linear):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         w, b = self.cast_bias_weight(x)
@@ -186,7 +227,11 @@ class GGMLConv1d(GGMLLayer, nn.Conv1d):
 class GGMLEmbedding(GGMLLayer, nn.Embedding):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Use input's device/dtype; bias is irrelevant for Embedding
-        w, _ = self.cast_bias_weight(x, dtype=self.weight.dtype if hasattr(self, "weight") else None, device=x.device)
+        w, _ = self.cast_bias_weight(
+            x,
+            dtype=self.weight.dtype if hasattr(self, "weight") else None,
+            device=x.device,
+        )
         return F.embedding(
             x,
             w,
@@ -224,7 +269,12 @@ _TYPE_MAP = {
 }
 
 
-def patch_model(model: nn.Module, name_filter=None, *, default_dequant_dtype: Optional[torch.dtype] = None):
+def patch_model(
+    model: nn.Module,
+    name_filter=None,
+    *,
+    default_dequant_dtype: Optional[torch.dtype] = None,
+):
     """
     In-place class swap. If name_filter is provided, only patch qualified names
     for which name_filter(qname) == True.

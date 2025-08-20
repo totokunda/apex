@@ -36,6 +36,7 @@ class WanI2VEngine(WanBaseEngine):
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
         expand_timesteps: bool = False,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
     ):
 
         if not self.text_encoder:
@@ -260,6 +261,7 @@ class WanI2VEngine(WanBaseEngine):
             guidance_scale=guidance_scale,
             expand_timesteps=expand_timesteps,
             first_frame_mask=first_frame_mask,
+            ip_image=ip_image,
         )
 
         if offload:

@@ -127,9 +127,9 @@ class WanRotaryPosEmbed(nn.Module):
                 freqs_dtype=freqs_dtype,
             )
             freqs.append(freq)
-        
+
         self._buffers = {"freqs": mx.concatenate(freqs, axis=1)}
-    
+
     def get_freqs(self):
         return self._buffers["freqs"]
 
@@ -245,13 +245,11 @@ class WanTransformerBlock(nn.Module):
         norm_hidden_states = (
             self.norm1(hidden_states.astype(mx.float32)) * (1 + scale_msa) + shift_msa
         ).astype(hidden_states.dtype)
-        
 
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
-        
-       
+
         hidden_states = (
             hidden_states.astype(mx.float32) + attn_output * gate_msa
         ).astype(hidden_states.dtype)
@@ -407,7 +405,7 @@ class WanTransformer3DModel(nn.Module, ConfigMixin, FromModelMixin):
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[Tuple[mx.array], Transformer2DModelOutput]:
-        
+
         if attention_kwargs is not None:
             attention_kwargs = attention_kwargs.copy()
             lora_scale = attention_kwargs.pop("scale", 1.0)

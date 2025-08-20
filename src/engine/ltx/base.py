@@ -3,7 +3,6 @@ import math
 from typing import Dict, Any, Callable, List, Union, Optional
 from diffusers.utils.torch_utils import randn_tensor
 
-
 class LTXBaseEngine:
     """Base class for LTX engine implementations"""
 

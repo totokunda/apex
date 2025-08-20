@@ -8,7 +8,7 @@ from huggingface_hub import snapshot_download
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import SiglipModel, SiglipProcessor
 import cv2
-from src.postprocess.base import BasePostprocessor, postprocessor_registry
+from src.postprocess.base import BasePostprocessor, PostprocessorCategory, postprocessor_registry
 
 from retinaface.data import cfg_re50
 from retinaface.layers.functions.prior_box import PriorBox
@@ -764,7 +764,7 @@ class CosmosGuardrailPostprocessor(BasePostprocessor):
         save_path: str = DEFAULT_POSTPROCESSOR_SAVE_PATH,
         **kwargs,
     ):
-        super().__init__(engine, **kwargs)
+        super().__init__(engine, PostprocessorCategory.SAFETY_CHECKER,  **kwargs)
         self.model_path = model_path
         self.save_path = save_path
         self.runner = GuardrailRunner(

@@ -7,6 +7,7 @@ from tqdm import tqdm
 from src.utils.type import EnumType
 from src.utils.mlx import convert_dtype_to_mlx, torch_to_mlx, to_torch
 
+
 class DenoiseType(EnumType):
     BASE = "mlx.base"
     MOE = "mlx.moe"
@@ -15,9 +16,7 @@ class DenoiseType(EnumType):
 
 
 class WanDenoise:
-    def __init__(
-        self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs
-    ):
+    def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
         # The following attributes are expected to be provided by the engine hosting this class:
@@ -75,7 +74,7 @@ class WanDenoise:
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
-        
+
         transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 
         log = self._get_logger()
@@ -134,9 +133,9 @@ class WanDenoise:
                     noise_pred - uncond_noise_pred
                 )
             mx.eval(noise_pred)
-            
+
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-            
+
             mx.eval(latents)
 
             if render_on_step and render_on_step_callback:
@@ -162,7 +161,7 @@ class WanDenoise:
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps: bool = kwargs.get("expand_timesteps", False)
         first_frame_mask: Optional[mx.array] = kwargs.get("first_frame_mask", None)
-        
+
         transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 
         if not hasattr(self, "transformer") or self.transformer is None:
@@ -219,7 +218,7 @@ class WanDenoise:
                 return_dict=False,
                 **kwargs.get("transformer_kwargs", {}),
             )[0]
-            
+
             mx.eval(noise_pred)
 
             if use_cfg_guidance and kwargs.get(
@@ -235,9 +234,9 @@ class WanDenoise:
                     noise_pred - uncond_noise_pred
                 )
             mx.eval(noise_pred)
-            
+
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-            
+
             mx.eval(latents)
 
             if render_on_step and render_on_step_callback:
@@ -256,5 +255,5 @@ class WanDenoise:
             ) * latent_condition + first_frame_mask * latents
 
         log.info("Denoising completed.")
-        
-        return to_torch(latents)  
+
+        return to_torch(latents)

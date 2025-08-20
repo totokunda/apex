@@ -25,10 +25,14 @@ def convert_dtype_to_mlx(dtype: str | torch.dtype | mx.Dtype) -> mx.Dtype:
     else:
         return mx.Dtype(dtype)
 
+
 def to_mlx(t: torch.Tensor) -> mx.array:
     torch_dtype = t.dtype
     mx_dtype = convert_dtype_to_mlx(torch_dtype)
-    return mx.array(t.detach().to("cpu", copy=False).numpy()).astype(dtype=mx_dtype, stream=mx.default_device())
+    return mx.array(t.detach().to("cpu", copy=False).numpy()).astype(
+        dtype=mx_dtype, stream=mx.default_device()
+    )
+
 
 def to_torch(a: mx.array) -> torch.Tensor:
     mx_dtype = a.dtype
@@ -41,25 +45,33 @@ def to_torch(a: mx.array) -> torch.Tensor:
         return torch.from_numpy(np.array(a, copy=False)).to(torch_dtype)
 
 
-def check_mlx_convolutional_weights(state_dict:Dict[str, mx.array], model:nn.Module) -> bool:
+def check_mlx_convolutional_weights(
+    state_dict: Dict[str, mx.array], model: nn.Module
+) -> bool:
     # Go through model and find all the conv3d and conv2d layers and check that weights are in the same shape, as mlx has them backwrads compatible
-    for (name, param) in model.named_modules():
+    for name, param in model.named_modules():
         if isinstance(param, nn.Conv3d):
             if name in state_dict:
                 if state_dict[name].shape != param.weight.shape:
                     state_dict[name] = state_dict[name].transpose(0, 2, 3, 4, 1)
                     if state_dict[name].shape != param.weight.shape:
-                        raise ValueError(f"Weight {name} has shape {state_dict[name].shape} but expected {param.weight.shape}")
+                        raise ValueError(
+                            f"Weight {name} has shape {state_dict[name].shape} but expected {param.weight.shape}"
+                        )
         elif isinstance(param, nn.Conv2d):
             if name in state_dict:
                 if state_dict[name].shape != param.weight.shape:
                     state_dict[name] = state_dict[name].transpose(0, 2, 3, 1)
                     if state_dict[name].shape != param.weight.shape:
-                        raise ValueError(f"Weight {name} has shape {state_dict[name].shape} but expected {param.weight.shape}")
+                        raise ValueError(
+                            f"Weight {name} has shape {state_dict[name].shape} but expected {param.weight.shape}"
+                        )
     return True
 
 
-def torch_to_mlx(state_dict:Dict[str, Any] | List[torch.Tensor] | torch.Tensor) -> Dict[str, Any] | List[mx.array] | mx.array:
+def torch_to_mlx(
+    state_dict: Dict[str, Any] | List[torch.Tensor] | torch.Tensor,
+) -> Dict[str, Any] | List[mx.array] | mx.array:
     if isinstance(state_dict, list):
         return [torch_to_mlx(item) for item in state_dict]
     elif isinstance(state_dict, dict):
@@ -70,7 +82,10 @@ def torch_to_mlx(state_dict:Dict[str, Any] | List[torch.Tensor] | torch.Tensor) 
         else:
             return state_dict
 
-def mlx_to_torch(state_dict:Dict[str, Any] | List[mx.array] | mx.array) -> Dict[str, Any] | List[torch.Tensor] | torch.Tensor:
+
+def mlx_to_torch(
+    state_dict: Dict[str, Any] | List[mx.array] | mx.array,
+) -> Dict[str, Any] | List[torch.Tensor] | torch.Tensor:
     if isinstance(state_dict, list):
         return [mlx_to_torch(item) for item in state_dict]
     elif isinstance(state_dict, dict):

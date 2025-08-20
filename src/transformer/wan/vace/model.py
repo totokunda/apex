@@ -241,6 +241,7 @@ class WanVACETransformer3DModel(
         pos_embed_seq_len: Optional[int] = None,
         vace_layers: List[int] = [0, 5, 10, 15, 20, 25, 30, 35],
         vace_in_channels: int = 96,
+        ip_adapter: bool = False,
     ) -> None:
         super().__init__()
 
@@ -290,6 +291,9 @@ class WanVACETransformer3DModel(
             ]
         )
 
+        if ip_adapter:
+            self.init_ip_projections()
+
         self.vace_blocks = nn.ModuleList(
             [
                 WanVACETransformerBlock(
@@ -317,6 +321,10 @@ class WanVACETransformer3DModel(
 
         self.gradient_checkpointing = False
 
+    def init_ip_projections(self, train: bool = False):
+        for block in self.blocks:
+            block.attn1.init_ip_projections(train=train)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -325,6 +333,7 @@ class WanVACETransformer3DModel(
         encoder_hidden_states_image: Optional[torch.Tensor] = None,
         control_hidden_states: torch.Tensor = None,
         control_hidden_states_scale: torch.Tensor = None,
+        ip_image_hidden_states: Optional[torch.Tensor] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -365,6 +374,15 @@ class WanVACETransformer3DModel(
 
         # 1. Rotary position embedding
         rotary_emb = self.rope(hidden_states)
+        ip_hidden_states_len = 0
+        if ip_image_hidden_states is not None:
+            hidden_states_ip = self.patch_embedding(ip_image_hidden_states)
+            hidden_states_ip = hidden_states_ip.flatten(2).transpose(1, 2)
+            ip_hidden_states_len = hidden_states_ip.shape[1]
+            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states)
+            rotary_emb = torch.concat([rotary_emb, rotary_emb_ip], dim=2)
+        else:
+            hidden_states_ip = None
 
         # 2. Patch embedding
         hidden_states = self.patch_embedding(hidden_states)
@@ -382,12 +400,23 @@ class WanVACETransformer3DModel(
         )
 
         # 3. Time embedding
-        temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = (
-            self.condition_embedder(
-                timestep, encoder_hidden_states, encoder_hidden_states_image
-            )
+        (
+            temb,
+            timestep_proj,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            timestep_proj_ip,
+        ) = self.condition_embedder(
+            timestep,
+            encoder_hidden_states,
+            encoder_hidden_states_image,
+            ip_image_hidden_states,
         )
+
         timestep_proj = timestep_proj.unflatten(1, (6, -1))
+
+        if timestep_proj_ip is not None:
+            timestep_proj_ip = timestep_proj_ip.unflatten(1, (6, -1))
 
         # 4. Image embedding
         if encoder_hidden_states_image is not None:
@@ -422,7 +451,15 @@ class WanVACETransformer3DModel(
                     encoder_hidden_states,
                     timestep_proj,
                     rotary_emb,
+                    hidden_states_ip,
+                    timestep_proj_ip,
                 )
+                if hidden_states_ip is not None:
+                    hidden_states, hidden_states_ip = (
+                        hidden_states[:, :-ip_hidden_states_len],
+                        hidden_states[:, -ip_hidden_states_len:],
+                    )
+
                 if i in self.config.vace_layers:
                     control_hint, scale = control_hidden_states_list.pop()
                     hidden_states = hidden_states + control_hint * scale
@@ -444,8 +481,19 @@ class WanVACETransformer3DModel(
 
             for i, block in enumerate(self.blocks):
                 hidden_states = block(
-                    hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
+                    hidden_states,
+                    encoder_hidden_states,
+                    timestep_proj,
+                    rotary_emb,
+                    hidden_states_ip,
+                    timestep_proj_ip,
                 )
+                if hidden_states_ip is not None:
+                    hidden_states, hidden_states_ip = (
+                        hidden_states[:, :-ip_hidden_states_len],
+                        hidden_states[:, -ip_hidden_states_len:],
+                    )
+
                 if i in self.config.vace_layers:
                     control_hint, scale = control_hidden_states_list.pop()
                     hidden_states = hidden_states + control_hint * scale

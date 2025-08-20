@@ -258,11 +258,13 @@ class SAM2VideoPreprocessor(BasePreprocessor):
 
         video_path = None
         tmp_video = None
-        
+
         if isinstance(video, str):
             video_path = video
         elif isinstance(video, list):
-            tmp_video = tempfile.NamedTemporaryFile(suffix=".mp4", dir=DEFAULT_CACHE_PATH, delete=False)
+            tmp_video = tempfile.NamedTemporaryFile(
+                suffix=".mp4", dir=DEFAULT_CACHE_PATH, delete=False
+            )
             export_to_video(video, tmp_video.name, fps=fps)
             video_path = tmp_video.name
         else:
