@@ -145,13 +145,6 @@ class WanBaseEngine:
 
         return control
 
-    def _apply_color_correction(
-        self, videos: torch.Tensor, reference_image: torch.Tensor, strength: float
-    ) -> torch.Tensor:
-        """Apply color correction to match reference image."""
-        # Simple color matching - can be enhanced with more sophisticated methods
-        # This is a placeholder implementation
-        return videos
 
     def resize_and_centercrop(self, cond_image, target_size):
         """
