@@ -9,7 +9,6 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import shutil
 import accelerate
-from src.converters.convert_torch_mlx import convert_weights_to_mlx
 from src.utils.defaults import DEFAULT_CACHE_PATH
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -358,7 +357,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         # Atomically replace file with directory
                         shutil.rmtree(model_path, ignore_errors=True)
                         model_dir = os.path.dirname(model_path)
-                        vae_path = os.path.join(model_dir, "vae")
+                        if component.get("converted_model_path"):
+                            vae_path = component["converted_model_path"]
+                            # check if absolute path or relative path
+                            if not os.path.isabs(vae_path):
+                                vae_path = os.path.join(model_dir, vae_path)
+                        else:
+                            vae_path = os.path.join(model_dir, "vae")
                         os.makedirs(vae_path, exist_ok=True)
                         os.rename(tmp_dir, vae_path)
                 finally:
@@ -464,7 +469,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
                 model_path = component.get("model_path", None)
 
-                tmp_dir = tempfile.mkdtemp(dir=DEFAULT_CACHE_DIR)
+                tmp_dir = tempfile.mkdtemp(dir=DEFAULT_CACHE_PATH)
                 component_name = component.get("name", component.get("type"))
                 try:
                     self.save_component(
@@ -484,7 +489,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         # Atomically replace file with directory
                         shutil.rmtree(model_path, ignore_errors=True)
                         model_dir = os.path.dirname(model_path)
-                        transformer_path = os.path.join(model_dir, component_name)
+                        if component.get("converted_model_path"):
+                            transformer_path = component["converted_model_path"]
+                            # check if absolute path or relative path
+                            if not os.path.isabs(transformer_path):
+                                transformer_path = os.path.join(model_dir, transformer_path)
+                        else:
+                            transformer_path = os.path.join(model_dir, component_name)
                         os.makedirs(transformer_path, exist_ok=True)
                         os.rename(tmp_dir, transformer_path)
                 finally:
@@ -555,6 +566,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         ], "Only transformer and vae are supported for now"
         model_path = component["model_path"]
         component_name = component.get("name", component.get("type"))
+        
+        model_dir = os.path.dirname(model_path)
+        
+        if component.get("converted_model_path"):
+            if not os.path.isabs(component["converted_model_path"]):
+                component["converted_model_path"] = os.path.join(model_dir, component["converted_model_path"])
+            if os.path.isfile(component["converted_model_path"]):
+                return component["converted_model_path"], True
+            elif os.path.isdir(component["converted_model_path"]):
+                return component["converted_model_path"], True
+            
         if os.path.isfile(model_path):
             # check base directory
             if os.path.isdir(os.path.join(os.path.dirname(model_path), component_name)):

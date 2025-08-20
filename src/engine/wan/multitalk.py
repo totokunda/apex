@@ -86,6 +86,7 @@ class WanMultitalkEngine(WanBaseEngine):
         
         if video is not None:
             input_video = self._load_video(video)
+            image = input_video[0]
             for idx, frame in enumerate(input_video):
                 frame, height, width = self._aspect_ratio_resize(
                     frame, max_area=height * width, mod_value=16
@@ -232,6 +233,7 @@ class WanMultitalkEngine(WanBaseEngine):
             image_embeds = clip_processor(loaded_image, hidden_states_layer=-2).to(
                 transformer_dtype
             )
+            
             if offload:
                 self._offload(clip_processor)
 

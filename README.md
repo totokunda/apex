@@ -9,3 +9,8 @@ cd apex
 bash scripts/install.sh 
 ```
 This will create a new environment and install all the requirements for this project. 
+
+### Clone the submodules
+```
+git submodule update --init --recursive
+```
