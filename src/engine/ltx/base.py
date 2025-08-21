@@ -303,16 +303,10 @@ class LTXBaseEngine:
             latents = (1 - decode_noise_scale) * latents + decode_noise_scale * noise
 
         decoded_video = self.vae.decode(latents, timestep, return_dict=False)[0]
-        video = self._postprocess(decoded_video)
+        video = self._tensor_to_frames(decoded_video)
 
         if offload:
             self._offload(self.vae)
 
         return video
 
-    def upsample_latents(self, latents: torch.Tensor, **kwargs):
-        if "latent_upsampler" not in self.postprocessors:
-            self.load_postprocessor_by_type("latent_upsampler")
-        self.to_device(self.postprocessors["latent_upsampler"])
-        latents = self.postprocessors["latent_upsampler"](latents, **kwargs)
-        return latents

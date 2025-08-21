@@ -29,7 +29,6 @@ components:
     config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/transformer/config.json
     tag: "wan_vace_14b"
 
-preprocessors: []
 
 defaults:
   run:

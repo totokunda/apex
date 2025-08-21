@@ -11,7 +11,6 @@ import shutil
 import accelerate
 from src.utils.defaults import DEFAULT_CACHE_PATH
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
 from src.mlx.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_MLX
 from src.text_encoder.text_encoder import TextEncoder
@@ -57,9 +56,36 @@ import inspect
 from src.preprocess import preprocessor_registry
 from src.postprocess import postprocessor_registry
 from src.lora import LoraManager, LoraItem
+from src.helpers.helpers import helpers
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+class AutoLoadingHelperDict(dict):
+    """A dictionary wrapper that automatically loads helpers when accessed."""
+    
+    def __init__(self, engine_instance):
+        super().__init__()
+        self._engine = engine_instance
+    
+    def __getitem__(self, key):
+        # If helper exists, return it
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        
+        # Try to load helper automatically
+        helper = self._engine._auto_load_helper(key)
+        if helper is not None:
+            self[key] = helper
+            return helper
+        
+        # If couldn't load, raise KeyError
+        raise KeyError(f"Helper '{key}' not found and could not be auto-loaded")
+    
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
 class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     engine_type: Literal["torch", "mlx"] = "torch"
@@ -69,8 +95,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     text_encoder: TextEncoder | None = None
     transformer: ModelMixin | None = None
     device: torch.device | None = None
-    preprocessors: Dict[str, Any] = {}
-    postprocessors: Dict[str, Any] = {}
+    _helpers: AutoLoadingHelperDict
+    _preprocessors: Dict[str, Any] = {}
+    _postprocessors: Dict[str, Any] = {}
     offload_to_cpu: bool = False
     video_processor: VideoProcessor
     config_save_path: str | None = None
@@ -82,7 +109,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     save_path: str | None = None
     logger: Logger
     attention_type: str = "sdpa"
-    tag: str | None = None
     check_weights: bool = True
     save_converted_weights: bool = True
     vae_scale_factor_temporal: float = 1.0
@@ -101,6 +127,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         **kwargs,
     ):
         self.device = device
+        self._helpers = AutoLoadingHelperDict(self)
         self._init_logger()
         self.config = self._load_yaml(yaml_path)
 
@@ -217,6 +244,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.load_preprocessors(
             config.get("preprocessors", []) or [], preprocessors_to_load
         )
+        
         self.load_postprocessors(
             config.get("postprocessors", []) or [], postprocessors_to_load
         )
@@ -249,9 +277,93 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
         final_kwargs = {**default_kwargs, **preprocessed_kwargs}
         if hasattr(self, "implementation_engine"):
-            return self.implementation_engine.run(*args, **final_kwargs)
+            args, kwargs = self.run_preprocessors(args, final_kwargs)
+            out = self.implementation_engine.run(*args, **kwargs)
+            return self.run_postprocessors(out)
         else:
             raise NotImplementedError("Subclasses must implement this method")
+        
+    def run_postprocessors(self, out):
+        self.load_postprocessors(self.config.get("postprocessors", []))
+        for postprocessor in self._postprocessors.values():
+            out = postprocessor(out)
+        return out
+    
+    def run_preprocessors(self, args, kwargs):
+        # If no preprocessors configured, passthrough
+        preprocessors_cfg = self.config.get("preprocessors", []) or []
+        if len(preprocessors_cfg) == 0:
+            return args, kwargs
+
+        # Ensure preprocessors are loaded
+        self.load_preprocessors(preprocessors_cfg)
+
+        # Start with original kwargs intended for the model
+        kwargs_out = dict(kwargs)
+
+        for key, preprocessor in self._preprocessors.items():
+  
+            # Inspect signature and only pass supported kwargs
+            try:
+                call_sig = inspect.signature(preprocessor.__call__)
+                accepted_params = {
+                    name
+                    for name, p in call_sig.parameters.items()
+                    if name != "self"
+                    and p.kind in (
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        inspect.Parameter.KEYWORD_ONLY,
+                    )
+                }
+                has_var_kw = any(
+                    p.kind == inspect.Parameter.VAR_KEYWORD
+                    for p in call_sig.parameters.values()
+                )
+            except (TypeError, ValueError):
+                accepted_params = set()
+                has_var_kw = False
+
+            if has_var_kw:
+                call_kwargs = dict(kwargs_out)
+            else:
+                call_kwargs = {k: v for k, v in kwargs_out.items() if k in accepted_params}
+
+            # Execute preprocessor
+            try:
+                result = preprocessor(**call_kwargs)
+            except TypeError:
+                # As a last resort, try calling without kwargs if signature is unusual
+                result = preprocessor()
+
+            if result is None:
+                continue
+
+            # Read optional mapped_names from preprocessor config (if provided)
+            mapped_names = {}
+            try:
+                if hasattr(preprocessor, "name_map") and isinstance(getattr(preprocessor, "name_map"), dict):
+                    mapped_names = getattr(preprocessor, "name_map") or {}
+                elif hasattr(preprocessor, "kwargs") and isinstance(preprocessor.kwargs, dict):
+                    maybe_map = preprocessor.kwargs.get("name_map", {})
+                    if isinstance(maybe_map, dict):
+                        mapped_names = maybe_map
+            except Exception:
+                mapped_names = {}
+
+            # Merge outputs into kwargs_out with key remapping
+            try:
+                items_iter = result.items() if hasattr(result, "items") else dict(result).items()
+            except Exception:
+                # If not dict-like, skip
+                items_iter = []
+
+            for out_key, out_val in items_iter:
+                target_key = mapped_names.get(out_key, out_key)
+                if out_val is not None:
+                    kwargs_out[target_key] = out_val
+
+        # Do not alter positional args
+        return args, kwargs_out
 
     def load_component(
         self,
@@ -273,11 +385,92 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         elif component_type == "transformer":
             transformer = self.load_transformer(component, load_dtype, no_weights)
             component_module = transformer
+        elif component_type == "helper":
+            helper = self.load_helper(component)
+            component_module = helper
         else:
             raise ValueError(f"Component type {component_type} not supported")
         empty_cache()
         return component_module
 
+    def load_helper(self, component: Dict[str, Any]):
+        config = component.copy()  # Don't modify the original
+        base = config.pop("base")
+        # get the helper class
+        helper_class = helpers.get(base)
+        if helper_class is None:
+            raise ValueError(f"Helper class {base} not found")
+        
+        # create an instance of the helper class
+        helper = helper_class(**config.get("kwargs", {}))
+        
+        # Store helper with multiple keys for easier access
+        helper_name = component.get("name", base)
+        self._helpers[base] = helper
+        if helper_name != base:
+            self._helpers[helper_name] = helper
+            # Also store with just the last part of the name (after /)
+            if "/" in helper_name:
+                short_name = helper_name.split("/")[-1]
+                self._helpers[short_name] = helper
+        
+        # Move helper to device if possible
+        if hasattr(helper, 'to') and self.device is not None:
+            helper = helper.to(self.device)
+            
+        return helper
+    
+    def load_helper_by_type(self, helper_type: str):
+        for helper in self.config.get("helpers", []):
+            if helper.get("type") == helper_type:
+                self._helpers[helper_type] = self.load_helper(helper)
+                return
+        raise ValueError(f"Helper type {helper_type} not found")
+    
+    def _auto_load_helper(self, helper_key: str):
+        """Automatically load a helper by searching for it in the configuration."""
+        # First, check if there's a helper component with matching name or base
+        for component in self.config.get("components", []):
+            if component.get("type") == "helper":
+                component_name = component.get("name", "")
+                component_base = component.get("base", "")
+                
+                # Match by name or base (with or without namespace prefixes)
+                if (component_name == helper_key or 
+                    component_name.endswith(f"/{helper_key}") or
+                    component_base == helper_key or
+                    component_base.endswith(f".{helper_key}")):
+                    
+                    try:
+                        helper = self.load_helper(component)
+                        self.logger.info(f"Auto-loaded helper '{helper_key}' from configuration")
+                        # Move helper to device
+                        self.to_device(helper)
+                        return helper
+                    except Exception as e:
+                        self.logger.warning(f"Failed to auto-load helper '{helper_key}': {e}")
+                        return None
+        
+        # If not found in current config, check if it's a known helper type that can be loaded
+        if helper_key in helpers:
+            try:
+                helper_class = helpers.get(helper_key)
+                helper = helper_class()
+                self.logger.info(f"Auto-loaded helper '{helper_key}' from registry")
+                # Move helper to device
+                if hasattr(helper, 'to') and self.device is not None:
+                    helper = helper.to(self.device)
+                return helper
+            except Exception as e:
+                self.logger.warning(f"Failed to auto-load helper '{helper_key}' from registry: {e}")
+                return None
+        
+        return None
+        
+    @property.getter
+    def helpers(self):
+        return self._helpers
+        
     def load_scheduler(self, component: Dict[str, Any]):
         scheduler = self._load_scheduler(component)
 
@@ -594,6 +787,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         model_path = component["model_path"]
         base = component.get("base", None)
         component_type = component.get("type")
+        
         assert component_type in [
             "transformer",
             "vae",
@@ -602,6 +796,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         if model_path.endswith(".gguf"):
             return True  # We don't need to check weights for gguf models
+            
 
         extensions = tuple(["pt", "bin", "pth", "ckpt", "safetensors"])
         model_key = component.get("model_key", None)
@@ -615,7 +810,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if component.get("config", None):
             config.update(component.get("config", {}))  
             
-
+        if not config:
+            return True # We can assume that the model is valid is no config is provided 
 
         if os.path.isdir(model_path):
             if file_pattern:
@@ -692,8 +888,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             _keys = set(
                 get_transformer_keys(
                     base,
-                    component.get("tag", None),
-                    component.get("converter_kwargs", {}),
                     config,
                 )
             )
@@ -702,8 +896,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             _keys = set(
                 get_vae_keys(
                     base,
-                    component.get("tag", None),
-                    component.get("converter_kwargs", {}),
                     config,
                 )
             )
@@ -742,12 +934,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             config.update(component.get("config", {}))
             
         return convert_transformer(
-            component.get("tag", None),
+            config,
             component["base"],
             model_path,
             component.get("model_key", None),
-            component.get("file_pattern", None),
-            config,
+            component.get("file_pattern", None)
         )
 
     def convert_vae_weights(self, component: Dict[str, Any]):
@@ -755,8 +946,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         component_type = component.get("type")
         assert component_type == "vae", "Only vae is supported for now"
         self.logger.info(f"Converting old model weights to diffusers format")
+        config = {}
+        config_path = component.get("config_path", None)
+        if config_path:
+            config = self.fetch_config(config_path)
+        if component.get("config", None):
+            config.update(component.get("config", {}))
+            
         return convert_vae(
-            component.get("tag", None),
+            config,
             component["base"],
             (
                 component["model_path"]
@@ -873,19 +1071,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 setattr(self, component.get("name"), component_module)
                 break
 
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        for preprocessor in self.config.get("preprocessors", []):
-            if preprocessor.get("type") == preprocessor_type:
-                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
-                    preprocessor
-                )
-
-    def load_preprocessor_by_name(self, preprocessor_name: str):
-        for preprocessor in self.config.get("preprocessors", []):
-            if preprocessor.get("name") == preprocessor_name:
-                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
-                    preprocessor
-                )
 
     def load_preprocessor(self, config: Dict[str, Any]):
         preprocessor_type = config.get("type")
@@ -905,33 +1090,23 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 or (preprocessor.get("type") in preprocessors_to_load)
                 or (preprocessor.get("name") in preprocessors_to_load)
             ):
-                self.preprocessors[preprocessor.get("type")] = self.load_preprocessor(
+                self._preprocessors[preprocessor.get("type")] = self.load_preprocessor(
                     preprocessor
                 )
-
-    def load_postprocessor_by_type(self, postprocessor_type: str):
-        for postprocessor in self.config.get("postprocessors", []):
-            if postprocessor.get("type") == postprocessor_type:
-                self.postprocessors[postprocessor.get("type")] = (
-                    self.load_postprocessor(postprocessor)
-                )
-
-    def load_postprocessor_by_name(self, postprocessor_name: str):
-        for postprocessor in self.config.get("postprocessors", []):
-            if postprocessor.get("name") == postprocessor_name:
-                self.postprocessors[postprocessor.get("type")] = (
-                    self.load_postprocessor(postprocessor)
-                )
-
+                
     def load_postprocessor(self, config: Dict[str, Any]):
         postprocessor_type = config.get("type")
+        if postprocessor_type in self._postprocessors:
+            return self._postprocessors[postprocessor_type]
         postprocessor_class = postprocessor_registry.get(postprocessor_type)
         if postprocessor_class is None:
             raise ValueError(f"Postprocessor type {postprocessor_type} not supported")
         # check if engine is part of signature of postprocessor_class
         if "engine" in inspect.signature(postprocessor_class).parameters:
             config["engine"] = self
-        return postprocessor_class(**config)
+        postprocessor = postprocessor_class(**config)
+        self._postprocessors[postprocessor_type] = postprocessor
+        return postprocessor
 
     def load_postprocessors(
         self,
@@ -944,9 +1119,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 or (postprocessor.get("type") in postprocessors_to_load)
                 or (postprocessor.get("name") in postprocessors_to_load)
             ):
-                self.postprocessors[postprocessor.get("type")] = (
-                    self.load_postprocessor(postprocessor)
-                )
+                self.load_postprocessor(postprocessor)
 
     def apply_lora(self, lora_path: str):
         # Backward-compat shim: allow direct single-path call
@@ -1179,14 +1352,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         video = self.vae_decode(latents)
-        rendered_video = self._postprocess(video)
+        rendered_video = self._tensor_to_frames(video)
         render_on_step_callback(rendered_video)
 
-    def _postprocess(self, video: torch.Tensor, output_type: str = "pil"):
+    def _tensor_to_frames(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
             video, output_type=output_type
         )
         return postprocessed_video
+    
 
     def _get_timesteps(
         self,

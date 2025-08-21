@@ -44,11 +44,8 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         use_cache: bool = True,
         **kwargs,
     ):
-        # 1. Load preprocessor and VAE
-        if "hunyuan.avatar" not in self.preprocessors:
-            self.load_preprocessor_by_type("hunyuan.avatar")
-        hyavatar_preprocessor = self.preprocessors["hunyuan.avatar"]
-        self.to_device(hyavatar_preprocessor)
+
+        hyavatar = self.helpers["hunyuan.avatar"]
 
         if not self.vae:
             self.load_component_by_type("vae")
@@ -88,7 +85,7 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         )
 
         # 2. Preprocess inputs
-        preprocessed_inputs = hyavatar_preprocessor(
+        preprocessed_inputs = hyavatar(
             image=loaded_image,
             audio=audio,
             fps=fps,
@@ -324,5 +321,5 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

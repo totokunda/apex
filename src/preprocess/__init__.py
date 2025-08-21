@@ -1,5 +1,4 @@
-from .clip import CLIPPreprocessor
-from .camera import CameraPreprocessor
+from .face import FacePreprocessor, StandinFacePreprocessor
 from .frameref import FrameRefExtractPreprocessor, FrameRefExpandPreprocessor
 from .gdino import GDINOPreprocessor
 from .gray import GrayPreprocessor, GrayVideoPreprocessor
@@ -44,16 +43,12 @@ from .composition import (
     ExpandAnythingPreprocessor,
     MoveAnythingPreprocessor,
 )
-from .wan import MultiTalkPreprocessor, ATIPreprocessor, RecamPreprocessor
-from .hunyuan import AvatarPreprocessor, LlamaPreprocessor
-from .stepvideo import Step1TextEncoderPreprocessor
+
 from .base import BasePreprocessor, preprocessor_registry
 from .prompt_extend import PromptExtendPreprocessor
 
 
 __all__ = [
-    "CLIPPreprocessor",
-    "CameraPreprocessor",
     "FrameRefExtractPreprocessor",
     "FrameRefExpandPreprocessor",
     "GDINOPreprocessor",
@@ -90,15 +85,11 @@ __all__ = [
     "SwapAnythingPreprocessor",
     "ExpandAnythingPreprocessor",
     "MoveAnythingPreprocessor",
-    "MultiTalkPreprocessor",
     "BasePreprocessor",
     "preprocessor_registry",
-    "AvatarPreprocessor",
-    "LlamaPreprocessor",
-    "Step1TextEncoderPreprocessor",
     "PromptExtendPreprocessor",
     "SAM2GDINOVideoPreprocessor",
     "SAM2SalientVideoPreprocessor",
-    "ATIPreprocessor",
-    "RecamPreprocessor",
-    ]
+    "FacePreprocessor",
+    "StandinFacePreprocessor",
+]

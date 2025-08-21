@@ -72,11 +72,6 @@ class WanFFLFEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if not self.preprocessors or "clip" not in self.preprocessors:
-            self.load_preprocessor_by_type("clip")
-
-        self.to_device(self.preprocessors["clip"])
-
         loaded_first_frame = self._load_image(first_frame)
         loaded_last_frame = self._load_image(last_frame)
 
@@ -102,12 +97,8 @@ class WanFFLFEngine(WanBaseEngine):
 
         transformer_dtype = self.component_dtypes["transformer"]
 
-        if "clip" not in self.preprocessors and boundary_ratio is None:
-            self.load_preprocessor_by_type("clip")
-            self.to_device(self.preprocessors["clip"])
-
         if boundary_ratio is None:
-            image_embeds = self.preprocessors["clip"](
+            image_embeds = self.helpers["clip"](
                 [loaded_first_frame, loaded_last_frame], hidden_states_layer=-2
             ).to(self.device, dtype=transformer_dtype)
         else:
@@ -121,7 +112,7 @@ class WanFFLFEngine(WanBaseEngine):
             )
 
         if offload:
-            self._offload(self.preprocessors["clip"])
+            self._offload(self.helpers["clip"])
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -256,5 +247,5 @@ class WanFFLFEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

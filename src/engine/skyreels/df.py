@@ -263,7 +263,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
                 return latents
             else:
                 video = self.vae_decode(latents, offload=offload)
-                postprocessed_video = self._postprocess(video)
+                postprocessed_video = self._tensor_to_frames(video)
                 return postprocessed_video
 
         else:
@@ -417,5 +417,5 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
                 self._offload(self.transformer)
 
             if output_video is not None:
-                postprocessed_video = self._postprocess(output_video)
+                postprocessed_video = self._tensor_to_frames(output_video)
                 return postprocessed_video

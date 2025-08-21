@@ -220,5 +220,5 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
             if additional_frames > 0:
                 latents = latents[:, additional_frames:]
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

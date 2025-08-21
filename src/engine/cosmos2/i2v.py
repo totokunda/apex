@@ -29,7 +29,6 @@ class Cosmos2I2VEngine(Cosmos2BaseEngine):
         render_on_step_callback: Callable = None,
         render_on_step: bool = False,
         offload: bool = True,
-        disable_guardrail: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
@@ -173,20 +172,4 @@ class Cosmos2I2VEngine(Cosmos2BaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            if "cosmos.guardrail" not in self.postprocessors and not disable_guardrail:
-                self.load_postprocessor_by_type("cosmos.guardrail")
-
-            guardrail = self.postprocessors.get("cosmos.guardrail")
-
-            if guardrail is not None and not disable_guardrail:
-                self.to_device(guardrail)
-                video = guardrail(video)
-            else:
-                self.logger.warning(
-                    "Using cosmos without the guardrail postprocessor may violates the NVIDIA Open Model License Agreement."
-                )
-
-            if guardrail is not None and offload:
-                self._offload(guardrail)
-
-            return self._postprocess(video)
+            return self._tensor_to_frames(video)

@@ -213,7 +213,7 @@ class ToMixin:
         Move specified modules (or defaults) to a device, then clear CUDA cache.
 
         If no components are provided, tries attributes:
-        vae, text_encoder, transformer, scheduler, and self.preprocessors.values().
+        vae, text_encoder, transformer, scheduler, and self.helpers.values().
         """
         # Determine target device
         if device is None:
@@ -228,7 +228,7 @@ class ToMixin:
                 comp = getattr(self, attr, None)
                 if comp is not None:
                     defaults.append(comp)
-            extras = getattr(self, "preprocessors", {}).values()
+            extras = getattr(self, "helpers", {}).values()
             components = (*defaults, *extras)
 
         # Move each to device

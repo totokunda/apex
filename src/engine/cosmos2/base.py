@@ -98,9 +98,9 @@ class Cosmos2BaseEngine:
         """Progress bar context manager"""
         return self.main_engine._progress_bar(*args, **kwargs)
 
-    def _postprocess(self, *args, **kwargs):
-        """Postprocess video"""
-        return self.main_engine._postprocess(*args, **kwargs)
+    def _tensor_to_frames(self, *args, **kwargs):
+        """Convert torch.tensor to list of PIL images or np.ndarray"""
+        return self.main_engine._tensor_to_frames(*args, **kwargs)
 
     def vae_encode(self, *args, **kwargs):
         """VAE encode"""

@@ -1,6 +1,6 @@
 from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
-from src.engine.denoise.wan_denoise import WanDenoise, DenoiseType
+from src.denoise.wan_denoise import WanDenoise, DenoiseType
 from src.mlx.denoise.wan_denoise import (
     DenoiseType as DenoiseTypeMLX,
 )
@@ -19,7 +19,6 @@ from .apex_framepack import WanApexFramepackEngine
 from .multitalk import WanMultitalkEngine
 from .recam import WanRecamEngine
 from src.utils.type import EnumType
-
 
 class ModelType(EnumType):
     VACE = "vace"  # vace

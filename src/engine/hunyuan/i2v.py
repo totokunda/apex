@@ -268,5 +268,5 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
                 video_latents = latents
 
             video = self.vae_decode(video_latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

@@ -35,8 +35,8 @@ class HunyuanBaseEngine:
         return self.main_engine.vae
 
     @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
+    def helpers(self):
+        return self.main_engine.helpers
 
     @property
     def component_dtypes(self):
@@ -45,10 +45,6 @@ class HunyuanBaseEngine:
     def load_component_by_type(self, component_type: str):
         """Load a component by type"""
         return self.main_engine.load_component_by_type(component_type)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
 
     def to_device(self, component):
         """Move component to device"""
@@ -86,9 +82,9 @@ class HunyuanBaseEngine:
         """Progress bar context manager"""
         return self.main_engine._progress_bar(*args, **kwargs)
 
-    def _postprocess(self, *args, **kwargs):
-        """Postprocess video"""
-        return self.main_engine._postprocess(*args, **kwargs)
+    def _tensor_to_frames(self, *args, **kwargs):
+        """Convert torch.tensor to list of PIL images or np.ndarray"""
+        return self.main_engine._tensor_to_frames(*args, **kwargs)
 
     def vae_encode(self, *args, **kwargs):
         """VAE encode"""
@@ -161,13 +157,8 @@ class HunyuanBaseEngine:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-
-        if not "hunyuan.llama" in self.preprocessors:
-            self.load_preprocessor_by_type("hunyuan.llama")
-        self.to_device(self.preprocessors["hunyuan.llama"])
-
-        if self.llama_text_encoder is None:
-            self.llama_text_encoder = self.preprocessors["hunyuan.llama"]
+        
+        self.llama_text_encoder = self.helpers["hunyuan.llama"]
 
         if isinstance(prompt, str):
             prompt = [prompt]

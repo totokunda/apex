@@ -53,8 +53,8 @@ class WanBaseEngine:
         self.main_engine.vae = vae
 
     @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
+    def helpers(self):
+        return self.main_engine.helpers
 
     @property
     def component_dtypes(self):
@@ -67,10 +67,6 @@ class WanBaseEngine:
     def load_config_by_type(self, component_type: str):
         """Load a component by type and config"""
         return self.main_engine.load_config_by_type(component_type)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
 
     def to_device(self, component):
         """Move component to device"""
@@ -108,9 +104,9 @@ class WanBaseEngine:
         """Progress bar context manager"""
         return self.main_engine._progress_bar(*args, **kwargs)
 
-    def _postprocess(self, *args, **kwargs):
-        """Postprocess video"""
-        return self.main_engine._postprocess(*args, **kwargs)
+    def _tensor_to_frames(self, *args, **kwargs):
+        """Convert torch.tensor to list of PIL images or np.ndarray"""
+        return self.main_engine._tensor_to_frames(*args, **kwargs)
 
     def vae_encode(self, *args, **kwargs):
         """VAE encode"""

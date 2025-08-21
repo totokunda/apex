@@ -405,5 +405,5 @@ class WanCausalEngine(WanBaseEngine):
             return output
         else:
             video = self.vae_decode(output, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

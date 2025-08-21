@@ -194,6 +194,6 @@ class MagiV2VEngine(MagiBaseEngine):
             videos = []
             for latent in tqdm(latents, desc="Decoding latents"):
                 video = self.vae_decode(latent, offload=False)
-                video = self._postprocess(video, output_type="pil")[0]
+                video = self._tensor_to_frames(video, output_type="pil")[0]
                 videos.extend(video)
             return [videos]

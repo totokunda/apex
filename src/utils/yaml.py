@@ -29,12 +29,40 @@ def _real_include(loader: LoaderWithInclude, node):
 
     manifest = loader.shared_manifests.get(alias)
     if manifest is None:
-        raise yaml.constructor.ConstructorError(
-            None, None, f"Unknown shared alias {alias!r}", node.start_mark
-        )
+        # Try to auto-resolve typical shared file layouts
+        base_dir = getattr(loader, "base_dir", None)
+        manifest_root = getattr(loader, "manifest_root", None)
+        candidates = []
+        for root in filter(None, [base_dir, manifest_root]):
+            root = Path(root)
+            candidates.extend(
+                [
+                    root / f"shared_{alias}.yml",
+                    root / f"shared_{alias}.yaml",
+                    root / alias / "shared.yml",
+                    root / alias / "shared.yaml",
+                    root / alias / "shared.v1.yml",
+                    root / alias / "shared.v1.yaml",
+                ]
+            )
+        found = next((p for p in candidates if p.exists()), None)
+        if found is not None:
+            loader.shared_manifests[alias] = found
+            manifest = found
+        else:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"Unknown shared alias {alias!r}", node.start_mark
+            )
 
-    # load the shared manifest _with_ our LoaderWithInclude (so nested !includes also work)
-    shared_doc = yaml.load(manifest.read_text(), Loader=LoaderWithInclude)
+    # Load shared manifest. Support v1 shared files via shared_loader.
+    text = manifest.read_text()
+    try:
+        from src.manifest.shared_loader import load_shared_manifest
+
+        shared_doc = load_shared_manifest(manifest)
+    except Exception:
+        # Fallback: load raw with includes
+        shared_doc = yaml.load(text, Loader=LoaderWithInclude)
 
     # find the component by name in any top-level list
     for value in shared_doc.values():
@@ -58,17 +86,43 @@ LoaderWithInclude.add_constructor("!include", _real_include)
 def load_yaml(file_path: str | Path):
     file_path = Path(file_path)
     text = file_path.read_text()
-    # --- PASS 1: extract your `shared:` list with a loader that skips !include tags ---
+    # --- PASS 1: extract `shared:` or `spec.shared` with a loader that skips !include tags ---
     prelim = yaml.load(text, Loader=yaml.FullLoader)
-    # prelim.get("shared", [...]) is now a list of file-paths strings.
+    shared_entries = []
+    if isinstance(prelim, dict):
+        shared_entries.extend(prelim.get("shared", []) or [])
+        spec = prelim.get("spec", {}) or {}
+        if isinstance(spec, dict):
+            shared_entries.extend(spec.get("shared", []) or [])
     # build alias → manifest Path
     shared_manifests = {}
-    for entry in prelim.get("shared", []):
+    for entry in shared_entries:
         p = (file_path.parent / entry).resolve()
-        # assume e.g. "shared_wan.yml" → alias "wan"
-        alias = p.stem.split("_", 1)[1]
+        stem = p.stem  # e.g. 'shared_wan' or 'shared.v1' or 'shared'
+        alias = None
+        if stem.startswith("shared_"):
+            alias = stem.split("_", 1)[1]
+        elif stem == "shared" or stem.startswith("shared."):
+            # Infer alias from parent directory (e.g., manifest/wan/shared.v1.yml → 'wan')
+            parent_name = p.parent.name
+            if parent_name and parent_name != "manifest":
+                alias = parent_name
+        if not alias:
+            # Fallbacks: try parent dir name, else stem
+            parent_name = p.parent.name
+            alias = parent_name if parent_name else stem
         shared_manifests[alias] = p
     # attach it to our custom loader
+
     LoaderWithInclude.shared_manifests = shared_manifests
+    # Provide resolution hints to the include loader
+    LoaderWithInclude.base_dir = file_path.parent
+    # Find nearest 'manifest' directory as root for shared lookups
+    manifest_root = None
+    for parent in file_path.parents:
+        if parent.name == "manifest":
+            manifest_root = parent
+            break
+    LoaderWithInclude.manifest_root = manifest_root or file_path.parent
     # --- PASS 2: real load with !include expansion ---
     return yaml.load(text, Loader=LoaderWithInclude)

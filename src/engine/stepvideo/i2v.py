@@ -63,10 +63,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if "stepvideo.llm" not in self.preprocessors:
-            self.load_preprocessor_by_type("stepvideo.llm")
-
-        llm_preprocessor = self.preprocessors["stepvideo.llm"]
+        llm_preprocessor = self.helpers["stepvideo.text_encoder"]
         self.to_device(llm_preprocessor)
         llm_prompt_embeds, llm_mask = llm_preprocessor(
             prompt, with_mask=True, max_length=320
@@ -200,5 +197,5 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
         else:
             video = self.vae_decode(latents, offload=offload)
             video = video.permute(0, 2, 1, 3, 4)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

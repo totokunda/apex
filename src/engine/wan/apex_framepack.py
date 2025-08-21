@@ -1,10 +1,6 @@
 import torch
-from typing import Dict, Any, Callable, List, Union, Optional
-from PIL import Image
-import numpy as np
-
+from typing import Dict, Any, Callable, List
 from .base import WanBaseEngine
-
 
 class WanApexFramepackEngine(WanBaseEngine):
     """WAN Apex Framepack Engine Implementation"""
@@ -186,5 +182,5 @@ class WanApexFramepackEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video
