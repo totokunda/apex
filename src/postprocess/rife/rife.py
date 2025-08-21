@@ -14,7 +14,7 @@ from loguru import logger
 from src.utils.defaults import DEFAULT_POSTPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
 from src.postprocess.rife.module import Model
 from src.postprocess.rife.ssim import ssim_matlab
-from src.postprocess.base import BasePostprocessor, PostprocessorCategory, postprocessor_registry  # or: from src.postprocessors.base import BasePostprocessor
+from src.postprocess.base import BasePostprocessor, PostprocessorCategory, postprocessor_registry 
 from PIL import Image
 from collections import deque
 from tqdm import tqdm

@@ -81,11 +81,6 @@ class WanInpEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if not self.preprocessors or "clip" not in self.preprocessors:
-            self.load_preprocessor_by_type("clip")
-
-        self.to_device(self.preprocessors["clip"])
-
         transformer_config = self.load_config_by_type("transformer")
 
         transformer_dtype = self.component_dtypes["transformer"]
@@ -234,7 +229,7 @@ class WanInpEngine(WanBaseEngine):
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width
             )
-            image_embeds = self.preprocessors["clip"](
+            image_embeds = self.helpers["clip"](
                 loaded_image, hidden_states_layer=-2
             ).to(self.device, dtype=transformer_dtype)
         else:
@@ -248,7 +243,7 @@ class WanInpEngine(WanBaseEngine):
             )
 
         if offload:
-            self._offload(self.preprocessors["clip"])
+            self._offload(self.helpers["clip"])
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -317,5 +312,5 @@ class WanInpEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

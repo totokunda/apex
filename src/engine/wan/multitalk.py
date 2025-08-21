@@ -110,10 +110,7 @@ class WanMultitalkEngine(WanBaseEngine):
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
-        if "wan.multitalk" not in self.preprocessors:
-            self.load_preprocessor_by_type("wan.multitalk")
-
-        preprocessor = self.preprocessors["wan.multitalk"]
+        preprocessor = self.helpers["wan.multitalk"]
         processed_inputs = preprocessor(
             image=image,
             audio_paths=audio_paths,
@@ -230,11 +227,7 @@ class WanMultitalkEngine(WanBaseEngine):
             mask_lat_size = mask_lat_size.transpose(1, 2)
 
             # get clip embedding
-            if "clip" not in self.preprocessors:
-                self.load_preprocessor_by_type("clip")
-
-            clip_processor = self.preprocessors["clip"]
-            self.to_device(clip_processor)
+            clip_processor = self.helpers["clip"]
 
             image_embeds = clip_processor(loaded_image, hidden_states_layer=-2).to(
                 transformer_dtype
@@ -454,5 +447,5 @@ class WanMultitalkEngine(WanBaseEngine):
                 else:
                     gen_video_samples = gen_video_samples[:, :, : -1 * miss_lengths[0]]
 
-            postprocessed_video = self._postprocess(gen_video_samples)
+            postprocessed_video = self._tensor_to_frames(gen_video_samples)
             return postprocessed_video

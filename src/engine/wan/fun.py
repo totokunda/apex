@@ -3,7 +3,7 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
-from src.preprocess.camera.camera import Camera
+from src.helpers.wan.fun_camera import Camera
 from .base import WanBaseEngine
 
 
@@ -103,11 +103,6 @@ class WanFunEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if not self.preprocessors or "clip" not in self.preprocessors:
-            self.load_preprocessor_by_type("clip")
-
-        self.to_device(self.preprocessors["clip"])
-
         if start_image is not None:
             loaded_image = self._load_image(start_image)
 
@@ -154,7 +149,7 @@ class WanFunEngine(WanBaseEngine):
             control_latents = None
             if isinstance(camera_poses, Camera):
                 camera_poses = [camera_poses]
-            camera_preprocessor = self.preprocessors["camera"]
+            camera_preprocessor = self.helpers["wan.fun_camera"]
             control_camera_video = camera_preprocessor(
                 camera_poses, H=height, W=width, device=self.device
             )
@@ -353,7 +348,7 @@ class WanFunEngine(WanBaseEngine):
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width
             )
-            image_embeds = self.preprocessors["clip"](
+            image_embeds = self.helpers["clip"](
                 loaded_image, hidden_states_layer=-2
             ).to(self.device, dtype=transformer_dtype)
         else:
@@ -367,7 +362,7 @@ class WanFunEngine(WanBaseEngine):
             )
 
         if offload:
-            self._offload(self.preprocessors["clip"])
+            self._offload(self.helpers["clip"])
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -470,5 +465,5 @@ class WanFunEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

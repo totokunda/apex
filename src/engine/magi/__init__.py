@@ -1,10 +1,7 @@
 from src.engine.base_engine import BaseEngine
-import torch
-from typing import List
 from src.utils.type import EnumType
-from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
-from src.engine.denoise import MagiDenoise, MagiDenoiseType
+from src.denoise import MagiDenoise, MagiDenoiseType
 
 from .t2v import MagiT2VEngine
 from .i2v import MagiI2VEngine

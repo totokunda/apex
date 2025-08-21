@@ -65,17 +65,6 @@ class WanI2VEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        if (
-            not self.preprocessors
-            or "clip" not in self.preprocessors
-            and boundary_ratio is None
-            and not expand_timesteps
-        ):
-            self.load_preprocessor_by_type("clip")
-
-        if boundary_ratio is None and not expand_timesteps:
-            self.to_device(self.preprocessors["clip"])
-
         loaded_image = self._load_image(image)
 
         loaded_image, height, width = self._aspect_ratio_resize(
@@ -95,16 +84,9 @@ class WanI2VEngine(WanBaseEngine):
 
         self.to_device(self.transformer)
 
-        if (
-            "clip" not in self.preprocessors
-            and boundary_ratio is None
-            and not expand_timesteps
-        ):
-            self.load_preprocessor_by_type("clip")
-            self.to_device(self.preprocessors["clip"])
 
         if boundary_ratio is None and not expand_timesteps:
-            image_embeds = self.preprocessors["clip"](
+            image_embeds = self.helpers["clip"](
                 loaded_image, hidden_states_layer=-2
             ).to(self.device, dtype=transformer_dtype)
         else:
@@ -117,7 +99,7 @@ class WanI2VEngine(WanBaseEngine):
             )
 
         if offload and boundary_ratio is None and not expand_timesteps:
-            self._offload(self.preprocessors["clip"])
+            self._offload(self.helpers["clip"])
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -274,5 +256,5 @@ class WanI2VEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

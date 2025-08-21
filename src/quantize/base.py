@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import yaml
 from src.utils.yaml import LoaderWithInclude
+from src.manifest.loader import validate_and_normalize
 from src.mixins.download_mixin import DownloadMixin
 from loguru import logger
 import os
@@ -19,23 +20,38 @@ class BaseQuantizer(ABC, DownloadMixin):
         file_path = Path(file_path)
         text = file_path.read_text()
 
-        # --- PASS 1: extract your `shared:` list with a loader that skips !include tags ---
+        # --- PASS 1: extract `shared:` (legacy) or `spec.shared` (v1) ---
         prelim = yaml.load(text, Loader=yaml.FullLoader)
-        # prelim.get("shared", [...]) is now a list of file-paths strings.
+        shared_entries = []
+        if isinstance(prelim, dict):
+            shared_entries.extend(prelim.get("shared", []) or [])
+            spec = prelim.get("spec", {}) or {}
+            if isinstance(spec, dict):
+                shared_entries.extend(spec.get("shared", []) or [])
 
         # build alias → manifest Path
         shared_manifests = {}
-        for entry in prelim.get("shared", []):
+        for entry in shared_entries:
             p = (file_path.parent / entry).resolve()
-            # assume e.g. "shared_wan.yml" → alias "wan"
-            alias = p.stem.split("_", 1)[1]
+            try:
+                alias = p.stem.split("_", 1)[1]
+            except Exception:
+                alias = p.stem
             shared_manifests[alias] = p
 
         # attach it to our custom loader
         LoaderWithInclude.shared_manifests = shared_manifests
 
         # --- PASS 2: real load with !include expansion ---
-        return yaml.load(text, Loader=LoaderWithInclude)
+        loaded = yaml.load(text, Loader=LoaderWithInclude)
+
+        # Validate and normalize if this is a v1 manifest
+        try:
+            loaded = validate_and_normalize(loaded)
+        except Exception:
+            raise
+
+        return loaded
 
     def _fix_output_path(self, output_path: str, quantization_str: str):
         file_ending = f".gguf"

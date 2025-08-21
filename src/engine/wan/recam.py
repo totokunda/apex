@@ -70,9 +70,7 @@ class WanRecamEngine(WanBaseEngine):
             num_frames = (len(loaded_video) // self.vae_scale_factor_temporal) * self.vae_scale_factor_temporal + 1
         
         if isinstance(camera_extrinsics, str):
-            self.load_preprocessor_by_type("wan.recam")
-            preprocessor = self.preprocessors["wan.recam"]
-            camera_extrinsics = preprocessor(camera_extrinsics, num_frames=num_frames, cam_type=cam_type).to(self.device)
+            camera_extrinsics = self.helpers["wan.recam"](camera_extrinsics, num_frames=num_frames, cam_type=cam_type).to(self.device)
         elif isinstance(camera_extrinsics, np.ndarray):
             camera_extrinsics = torch.from_numpy(camera_extrinsics).to(self.device)
         else:
@@ -197,5 +195,5 @@ class WanRecamEngine(WanBaseEngine):
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._postprocess(video)
+            postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video

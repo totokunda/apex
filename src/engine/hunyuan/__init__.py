@@ -1,11 +1,7 @@
 from src.engine.base_engine import BaseEngine
-import torch
-from typing import List
 from src.utils.type import EnumType
-from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
-from src.engine.denoise import HunyuanDenoise
-from src.engine.denoise.hunyuan_denoise import DenoiseType as HunyuanDenoiseType
+from src.denoise.hunyuan_denoise import DenoiseType as HunyuanDenoiseType, HunyuanDenoise
 
 from .t2v import HunyuanT2VEngine
 from .i2v import HunyuanI2VEngine
@@ -18,7 +14,6 @@ class ModelType(EnumType):
     I2V = "i2v"  # image to video
     FRAMEPACK = "framepack"  # framepack
     AVATAR = "avatar"  # avatar
-
 
 class HunyuanEngine(BaseEngine, HunyuanDenoise):
     def __init__(

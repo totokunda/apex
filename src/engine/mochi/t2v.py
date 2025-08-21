@@ -157,5 +157,5 @@ class MochiT2VEngine(MochiBaseEngine):
             return latents
 
         video = self.vae_decode(latents, offload=offload, dtype=prompt_embeds.dtype)
-        video = self._postprocess(video, output_type=output_type)
+        video = self._tensor_to_frames(video, output_type=output_type)
         return video

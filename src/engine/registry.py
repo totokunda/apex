@@ -3,6 +3,7 @@ from enum import Enum
 import torch
 from src.ui.nodes import UINode
 from src.engine.base_engine import BaseEngine
+from src.manifest.resolver import resolve_manifest_reference
 
 
 class EngineType(Enum):
@@ -126,7 +127,8 @@ class EngineRegistry:
         if model_type is not None:
             kwargs["model_type"] = self._get_model_type_enum(engine_type, model_type)
 
-        return engine_class(yaml_path=yaml_path, **kwargs)
+        resolved = resolve_manifest_reference(yaml_path) or yaml_path
+        return engine_class(yaml_path=resolved, **kwargs)
 
     def _get_model_type_enum(self, engine_type: str, model_type: str):
         """Get the appropriate ModelType enum for an engine"""

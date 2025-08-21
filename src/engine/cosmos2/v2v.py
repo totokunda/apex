@@ -203,4 +203,4 @@ class Cosmos2V2VEngine(Cosmos2BaseEngine):
             if guardrail is not None and offload:
                 self._offload(guardrail)
 
-            return self._postprocess(video)
+            return self._tensor_to_frames(video)

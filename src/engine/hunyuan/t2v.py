@@ -186,5 +186,5 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
                 self.to_device(self.vae)
 
             video = self.vae_decode(latents, offload=offload)
-            video = self._postprocess(video)
+            video = self._tensor_to_frames(video)
             return video

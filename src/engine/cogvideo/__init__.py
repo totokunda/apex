@@ -4,19 +4,19 @@ from typing import List
 from src.utils.type import EnumType
 from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
-from src.engine.denoise import CogVideoDenoise, CogVideoDenoiseType
+from src.denoise import CogVideoDenoise, CogVideoDenoiseType
 
 from .t2v import CogVideoT2VEngine
 from .i2v import CogVideoI2VEngine
-from .fun_control import CogVideoFunControlEngine
-from .fun_inp import CogVideoFunInpEngine
+from .control import CogVideoControlEngine
+from .inp import CogVideoInpEngine
 
 
 class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
-    FUN_CONTROL = "fun_control"  # fun control video
-    FUN_INP = "fun_inp"  # fun inpainting video
+    CONTROL = "control"  # fun control video
+    INP = "inp"  # fun inpainting video
 
 
 class CogVideoEngine(BaseEngine, CogVideoDenoise):
@@ -32,9 +32,9 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
 
         if self.model_type == ModelType.I2V:
             self.denoise_type = CogVideoDenoiseType.I2V
-        elif self.model_type == ModelType.FUN_CONTROL:
+        elif self.model_type == ModelType.CONTROL:
             self.denoise_type = CogVideoDenoiseType.FUN
-        elif self.model_type == ModelType.FUN_INP:
+        elif self.model_type == ModelType.INP:
             self.denoise_type = CogVideoDenoiseType.FUN
         else:
             self.denoise_type = CogVideoDenoiseType.T2V

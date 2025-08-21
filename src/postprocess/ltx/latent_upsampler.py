@@ -116,7 +116,7 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         self,
         latents: torch.Tensor | None = None,
         video: str | list[str] | list[Image.Image] | list[np.ndarray] | None = None,
-        return_latents: bool = True,
+        return_latents: bool = False,
         output_type: Literal["pil", "np"] = "pil",
         **kwargs,
     ) -> torch.Tensor:
@@ -200,7 +200,7 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         decoded_video = self.engine.vae.decode(
             upsampled_latents, timestep=timestep, return_dict=False
         )[0]
-        decoded_video = self.engine._postprocess(decoded_video)
+        decoded_video = self.engine._tensor_to_frames(decoded_video)
 
         return decoded_video
 

@@ -99,11 +99,8 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                 **text_encoder_kwargs,
             )
 
-        # 3. Encode images
-        if not self.preprocessors or "clip" not in self.preprocessors:
-            self.load_preprocessor_by_type("clip")
 
-        clip_image_encoder = self.preprocessors["clip"]
+        clip_image_encoder = self.helpers["clip"]
         self.to_device(clip_image_encoder)
 
         image_embeds = clip_image_encoder(loaded_image, hidden_states_layer=-1).to(
@@ -466,5 +463,5 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                 generated_frames - 1
             ) // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
             history_video = history_video[:, :, :generated_frames]
-            postprocessed_video = self._postprocess(history_video)
+            postprocessed_video = self._tensor_to_frames(history_video)
             return postprocessed_video
