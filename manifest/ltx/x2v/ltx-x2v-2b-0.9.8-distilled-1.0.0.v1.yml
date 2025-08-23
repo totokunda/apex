@@ -17,7 +17,7 @@ spec:
   - i2v
   - control
   engine_type: torch
-
+  
   components:
   - type: text_encoder
     name: ltx/text_encoder

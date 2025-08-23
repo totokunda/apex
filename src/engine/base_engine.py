@@ -17,6 +17,7 @@ from src.mlx.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGIS
 from src.text_encoder.text_encoder import TextEncoder
 from src.vae import get_vae
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+from diffusers.image_processor import VaeImageProcessor
 from diffusers.video_processor import VideoProcessor
 from src.ui.nodes import UINode
 from src.utils.dtype import select_ideal_dtypes
@@ -103,6 +104,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     _postprocessors: Dict[str, Any] = {}
     offload_to_cpu: bool = False
     video_processor: VideoProcessor
+    image_processor: VaeImageProcessor
     config_save_path: str | None = None
     component_load_dtypes: Dict[str, torch.dtype] | None = None
     component_dtypes: Dict[str, torch.dtype] | None = None
@@ -116,6 +118,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     save_converted_weights: bool = True
     vae_scale_factor_temporal: float = 1.0
     vae_scale_factor_spatial: float = 1.0
+    vae_scale_factor: float = 1.0
     num_channels_latents: int = 4
     denoise_type: str | None = None
     vae_tiling: bool = False
@@ -1344,6 +1347,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             video, output_type=output_type
         )
         return postprocessed_video
+    
+    def _tensor_to_frame(self, image: torch.Tensor, output_type: str = "pil"):
+        postprocessed_frame = self.image_processor.postprocess(
+            image, output_type=output_type
+        )
+        return postprocessed_frame
 
     def _get_timesteps(
         self,

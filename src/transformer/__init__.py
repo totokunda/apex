@@ -20,6 +20,7 @@ from .wan.causal.model import CausalWanTransformer3DModel
 from .wan.vace.model import WanVACETransformer3DModel
 from .wan.multitalk.model import WanMultiTalkTransformer3DModel
 from .wan.apex_framepack.model import WanApexFramepackTransformer3DModel
+from .qwenimage.base.model import QwenImageTransformer2DModel
 
 __all__ = [
     "TRANSFORMERS_REGISTRY",
@@ -40,4 +41,5 @@ __all__ = [
     "WanVACETransformer3DModel",
     "WanMultiTalkTransformer3DModel",
     "WanApexFramepackTransformer3DModel",
+    "QwenImageTransformer2DModel",
 ]
