@@ -5,7 +5,6 @@ from src.ui.nodes import UINode
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
 
-
 class EngineType(Enum):
     """Supported engine types"""
 
@@ -18,6 +17,7 @@ class EngineType(Enum):
     MOCHI = "mochi"
     SKYREELS = "skyreels"
     COSMOS2 = "cosmos2"
+    QWENIMAGE = "qwenimage"
 
 
 class EngineRegistry:
@@ -102,6 +102,13 @@ class EngineRegistry:
             self._engines[EngineType.COSMOS2.value] = Cosmos2Engine
         except ImportError as e:
             print(f"Warning: Could not import Cosmos engine: {e}")
+
+        # Register QwenImage engine
+        try:
+            from src.engine.qwenimage import QwenImageEngine
+            self._engines[EngineType.QWENIMAGE.value] = QwenImageEngine
+        except ImportError as e:
+            print(f"Warning: Could not import QwenImage engine: {e}")
 
     def get_engine_class(self, engine_type: str) -> Optional[Type]:
         """Get engine class by type"""

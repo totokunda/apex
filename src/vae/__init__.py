@@ -5,6 +5,7 @@ from src.vae.ltx.model import AutoencoderKLLTXVideo as LTXVideoVAE
 from src.vae.magi.model import AutoencoderKLMagi as MagiVAE
 from src.vae.mochi.model import AutoencoderKLMochi as MochiVAE
 from src.vae.stepvideo.model import AutoencoderKL as StepVideoVAE
+from src.vae.qwenimage.model import AutoencoderKLQwenImage as QwenImageVAE
 
 __all__ = [
     "CogVideoXVAE",
@@ -14,8 +15,8 @@ __all__ = [
     "MagiVAE",
     "MochiVAE",
     "StepVideoVAE",
+    "QwenImageVAE",
 ]
-
 
 def get_vae(vae_name: str):
     if vae_name == "cogvideo":
@@ -32,5 +33,7 @@ def get_vae(vae_name: str):
         return MochiVAE
     elif vae_name == "stepvideo":
         return StepVideoVAE
+    elif vae_name == "qwenimage":
+        return QwenImageVAE
     else:
         raise ValueError(f"VAE {vae_name} not found")

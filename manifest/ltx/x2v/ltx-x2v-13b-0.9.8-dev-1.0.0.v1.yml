@@ -19,7 +19,7 @@ spec:
   - v2v
   - control
   engine_type: torch
-
+  denoise_type: base
   components:
   - type: text_encoder
     name: ltx/text_encoder

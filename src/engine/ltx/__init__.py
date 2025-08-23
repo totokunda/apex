@@ -5,40 +5,24 @@ from src.mixins import OffloadMixin
 from src.denoise.ltx_denoise import LTXDenoise, DenoiseType
 from src.mixins.loader_mixin import LoaderMixin
 
-from .t2v import LTXT2VEngine
-from .i2v import LTXI2VEngine
-from .control import LTXControlEngine
+
 from .x2v import LTXX2VEngine
 
 
 class ModelType(EnumType):
-    T2V = "t2v"  # text to video
-    I2V = "i2v"  # image to video
-    CONTROL = "control"
-    X2V = "x2v"
+    X2V = "x2v" # Any  to video
 
 
 class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
     def __init__(
         self,
         yaml_path: str,
-        model_type: ModelType = ModelType.T2V,
+        model_type: ModelType = ModelType.X2V,
         **kwargs,
     ):
         super().__init__(yaml_path, **kwargs)
 
         self.model_type = model_type
-
-        if self.model_type == ModelType.CONTROL:
-            self.denoise_type = DenoiseType.CONDITION
-        elif self.model_type == ModelType.T2V:
-            self.denoise_type = DenoiseType.T2V
-        elif self.model_type == ModelType.I2V:
-            self.denoise_type = DenoiseType.I2V
-        elif self.model_type == ModelType.X2V:
-            self.denoise_type = DenoiseType.BASE
-        else:
-            raise ValueError(f"Model type {self.model_type} not supported")
 
         self.vae_scale_factor_spatial = (
             self.vae.spatial_compression_ratio
@@ -77,13 +61,7 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
 
     def _init_implementation_engine(self):
         """Initialize the specific implementation engine based on model type"""
-        if self.model_type == ModelType.T2V:
-            self.implementation_engine = LTXT2VEngine(self)
-        elif self.model_type == ModelType.I2V:
-            self.implementation_engine = LTXI2VEngine(self)
-        elif self.model_type == ModelType.CONTROL:
-            self.implementation_engine = LTXControlEngine(self)
-        elif self.model_type == ModelType.X2V:
+        if self.model_type == ModelType.X2V:
             self.implementation_engine = LTXX2VEngine(self)
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
