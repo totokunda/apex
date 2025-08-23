@@ -21,6 +21,7 @@ import yaml
 from typing import Dict, Any
 from gdown import download
 
+
 class DownloadMixin:
     logger: Logger = logger
 
@@ -32,7 +33,10 @@ class DownloadMixin:
             return False
 
     def fetch_config(
-        self, config_path: str, config_save_path: str = DEFAULT_CONFIG_SAVE_PATH, return_path: bool = False
+        self,
+        config_path: str,
+        config_save_path: str = DEFAULT_CONFIG_SAVE_PATH,
+        return_path: bool = False,
     ):
         path = self._download(config_path, config_save_path)
         if return_path:
@@ -376,15 +380,17 @@ class DownloadMixin:
                 self.logger.error(
                     f"Failed to download from Hugging Face Hub: {repo_id}. Error: {e}"
                 )
-                
+
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)
     )
     def _download_from_google_drive(self, url: str, save_path: str):
         try:
-            return download(url, save_path, user_agent=DEFAULT_HEADERS['User-Agent'])
+            return download(url, save_path, user_agent=DEFAULT_HEADERS["User-Agent"])
         except Exception as e:
-            self.logger.error(f"Failed to download from Google Drive: {url}. Error: {e}")
+            self.logger.error(
+                f"Failed to download from Google Drive: {url}. Error: {e}"
+            )
 
     @retry(
         stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=15)

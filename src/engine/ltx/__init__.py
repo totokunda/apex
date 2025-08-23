@@ -8,12 +8,14 @@ from src.mixins.loader_mixin import LoaderMixin
 from .t2v import LTXT2VEngine
 from .i2v import LTXI2VEngine
 from .control import LTXControlEngine
+from .x2v import LTXX2VEngine
 
 
 class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     CONTROL = "control"
+    X2V = "x2v"
 
 
 class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
@@ -33,6 +35,8 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
             self.denoise_type = DenoiseType.T2V
         elif self.model_type == ModelType.I2V:
             self.denoise_type = DenoiseType.I2V
+        elif self.model_type == ModelType.X2V:
+            self.denoise_type = DenoiseType.BASE
         else:
             raise ValueError(f"Model type {self.model_type} not supported")
 
@@ -65,7 +69,7 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
         )
 
         self.num_channels_latents: int = (
-            self.vae.config.get("latent_channels", 128) if self.vae is not None else 128
+            self.vae.config.latent_channels if self.vae is not None else 128
         )
 
         # Initialize the appropriate implementation engine
@@ -79,5 +83,7 @@ class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):
             self.implementation_engine = LTXI2VEngine(self)
         elif self.model_type == ModelType.CONTROL:
             self.implementation_engine = LTXControlEngine(self)
+        elif self.model_type == ModelType.X2V:
+            self.implementation_engine = LTXX2VEngine(self)
         else:
             raise ValueError(f"Model type {self.model_type} not supported")

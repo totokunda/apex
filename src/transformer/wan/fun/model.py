@@ -489,7 +489,7 @@ class WanFunTransformer3DModel(
         )
 
         self.gradient_checkpointing = False
-        
+
     def set_enhance(self, enhance_weight: float, num_frames: int):
         for block in self.blocks:
             block.attn1.processor.set_enhance_weight(enhance_weight)
@@ -508,7 +508,7 @@ class WanFunTransformer3DModel(
         attention_kwargs: Optional[Dict[str, Any]] = None,
         enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        
+
         if enhance_kwargs is not None:
             enhance_weight = enhance_kwargs.get("enhance_weight", None)
             num_frames = enhance_kwargs.get("num_frames", None)

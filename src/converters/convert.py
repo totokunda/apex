@@ -203,21 +203,36 @@ def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None =
 
     return state_dict
 
-def needs_conversion(original_state_dict: Dict[str, Any], state_dict: Dict[str, Any], keys_to_ignore: List[str] = []):
+
+def needs_conversion(
+    original_state_dict: Dict[str, Any],
+    state_dict: Dict[str, Any],
+    keys_to_ignore: List[str] = [],
+):
+    if not keys_to_ignore:
+        keys_to_ignore = []
     for key in state_dict.keys():
         if any(ignore_key in key for ignore_key in keys_to_ignore):
             continue
-        if key not in original_state_dict or original_state_dict[key].shape != state_dict[key].shape:
+        if (
+            key not in original_state_dict
+            or original_state_dict[key].shape != state_dict[key].shape
+        ):
             return True
     return False
 
 
-def remove_keys_from_state_dict(state_dict: Dict[str, Any], keys_to_ignore: List[str] = []):
+def remove_keys_from_state_dict(
+    state_dict: Dict[str, Any], keys_to_ignore: List[str] = []
+):
     keys = list(state_dict.keys())
+    if not keys_to_ignore:
+        keys_to_ignore = []
     for key in keys:
         if any(ignore_key in key for ignore_key in keys_to_ignore):
             state_dict.pop(key)
     return state_dict
+
 
 def convert_transformer(
     config: dict,
@@ -228,7 +243,6 @@ def convert_transformer(
     **transformer_converter_kwargs,
 ):
 
-    
     if "mlx" in model_base:
         using_mlx = True
         model_base = model_base.replace("mlx.", "")
@@ -240,13 +254,13 @@ def convert_transformer(
     model_class = get_model_class(model_base, config, model_type=model_type)
 
     converter = get_transformer_converter(model_base)
-    
+
     model = get_empty_model(model_class, config)
-    
+
     original_state_dict = model.state_dict()
-    
+
     keys_to_ignore = getattr(model, "_keys_to_ignore_on_load_unexpected", [])
-    
+
     if isinstance(ckpt_path, list):
         state_dict = {}
         for i, ckpt in enumerate(ckpt_path):
@@ -306,10 +320,8 @@ def convert_vae(
     return model
 
 
-def get_transformer_keys(
-    model_base: str, config: dict
-):
-    
+def get_transformer_keys(model_base: str, config: dict):
+
     using_mlx = False
     if "mlx" in model_base:
         using_mlx = True
@@ -317,7 +329,7 @@ def get_transformer_keys(
         model_type = "mlx.transformer"
     else:
         model_type = "transformer"
-    
+
     model_class = get_model_class(model_base, config, model_type=model_type)
     model = get_empty_model(model_class, config)
 
@@ -333,7 +345,7 @@ def get_vae_keys(vae_type: str, config: dict):
     if vae_type != "ltx":
         return []
     model_class = get_vae(vae_type)
-   
+
     model = get_empty_model(model_class, config)
     return model.state_dict().keys()
 

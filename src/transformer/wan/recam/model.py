@@ -1,4 +1,8 @@
-from src.transformer.wan.base.model import WanRotaryPosEmbed, WanTimeTextImageEmbedding, WanTransformerBlock
+from src.transformer.wan.base.model import (
+    WanRotaryPosEmbed,
+    WanTimeTextImageEmbedding,
+    WanTransformerBlock,
+)
 import math
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -27,16 +31,26 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 class WanRecamTransformerBlock(WanTransformerBlock):
-    def __init__(self, dim: int, ffn_dim: int, num_heads: int, qk_norm: str = "rms_norm_across_heads", cross_attn_norm: bool = False, eps: float = 1e-6, added_kv_proj_dim: Optional[int] = None):
-        super().__init__(dim, ffn_dim, num_heads, qk_norm, cross_attn_norm, eps, added_kv_proj_dim)
+    def __init__(
+        self,
+        dim: int,
+        ffn_dim: int,
+        num_heads: int,
+        qk_norm: str = "rms_norm_across_heads",
+        cross_attn_norm: bool = False,
+        eps: float = 1e-6,
+        added_kv_proj_dim: Optional[int] = None,
+    ):
+        super().__init__(
+            dim, ffn_dim, num_heads, qk_norm, cross_attn_norm, eps, added_kv_proj_dim
+        )
         self.cam_encoder = nn.Linear(in_features=12, out_features=dim)
         self.projector = nn.Linear(in_features=dim, out_features=dim)
         self.cam_encoder.weight.data.zero_()
         self.cam_encoder.bias.data.zero_()
         self.projector.weight = nn.Parameter(torch.eye(dim))
         self.projector.bias = nn.Parameter(torch.zeros(dim))
-        
-    
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -70,22 +84,26 @@ class WanRecamTransformerBlock(WanTransformerBlock):
         norm_hidden_states = (
             self.norm1(hidden_states) * (1 + scale_msa) + shift_msa
         ).type_as(hidden_states)
-        
+
         ## Encode camera hidden states
         cam_hidden_states = self.cam_encoder(cam_hidden_states)
         cam_hidden_states = cam_hidden_states.repeat(1, 2, 1)
-        cam_hidden_states = cam_hidden_states.unsqueeze(2).unsqueeze(3).repeat(1, 1, post_patch_height, post_patch_width, 1)
+        cam_hidden_states = (
+            cam_hidden_states.unsqueeze(2)
+            .unsqueeze(3)
+            .repeat(1, 1, post_patch_height, post_patch_width, 1)
+        )
 
-        cam_hidden_states = rearrange(cam_hidden_states, 'b f h w d -> b (f h w) d')
+        cam_hidden_states = rearrange(cam_hidden_states, "b f h w d -> b (f h w) d")
         norm_hidden_states = norm_hidden_states + cam_hidden_states
-        
+
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
-        
+
         attn_output = self.projector(attn_output)
 
-        hidden_states = (hidden_states + attn_output * gate_msa)
+        hidden_states = hidden_states + attn_output * gate_msa
         # 2. Cross-attention
         norm_hidden_states = self.norm2(hidden_states)
         attn_output = self.attn2(
@@ -95,16 +113,11 @@ class WanRecamTransformerBlock(WanTransformerBlock):
         )
 
         hidden_states = hidden_states + attn_output
-        
-        # 3. Feed-forward
-        norm_hidden_states = (
-            self.norm3(hidden_states) * (1 + c_scale_msa) + c_shift_msa
-        )
-        ff_output = self.ffn(norm_hidden_states)
-        hidden_states = (
-            hidden_states + ff_output * c_gate_msa
-        )        
 
+        # 3. Feed-forward
+        norm_hidden_states = self.norm3(hidden_states) * (1 + c_scale_msa) + c_shift_msa
+        ff_output = self.ffn(norm_hidden_states)
+        hidden_states = hidden_states + ff_output * c_gate_msa
 
         return hidden_states
 
@@ -173,7 +186,7 @@ class WanRecamTransformer3DModel(
         image_dim: Optional[int] = None,
         added_kv_proj_dim: Optional[int] = None,
         rope_max_seq_len: int = 1024,
-        pos_embed_seq_len: Optional[int] = None
+        pos_embed_seq_len: Optional[int] = None,
     ) -> None:
         super().__init__()
 
@@ -255,13 +268,12 @@ class WanRecamTransformer3DModel(
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
         post_patch_width = width // p_w
-        
+
         rotary_emb = self.rope(hidden_states)
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        
-        
+
         if timestep.ndim == 2:
             ts_seq_len = timestep.shape[1]
             timestep = timestep.flatten()  # batch_size * seq_len
@@ -292,7 +304,6 @@ class WanRecamTransformer3DModel(
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1
             )
-            
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -305,7 +316,7 @@ class WanRecamTransformer3DModel(
                     rotary_emb,
                     cam_hidden_states,
                     post_patch_height,
-                    post_patch_width,   
+                    post_patch_width,
                 )
         else:
             for block in self.blocks:
@@ -318,7 +329,6 @@ class WanRecamTransformer3DModel(
                     post_patch_height,
                     post_patch_width,
                 )
-                
 
         if temb.ndim == 3:
             # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
@@ -352,8 +362,8 @@ class WanRecamTransformer3DModel(
             p_h,
             p_w,
             -1,
-        ) 
-        
+        )
+
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

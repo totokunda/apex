@@ -16,6 +16,7 @@ from torchvision.transforms import ToPILImage
 import torch.nn as nn
 from src.helpers.helpers import helpers
 
+
 @helpers("hunyuan.avatar")
 class HunyuanAvatar(nn.Module, LoaderMixin, OffloadMixin):
     def __init__(
@@ -26,9 +27,7 @@ class HunyuanAvatar(nn.Module, LoaderMixin, OffloadMixin):
         device: str = "cuda",
         **kwargs,
     ):
-        super().__init__(
-            model_path, save_path
-        )
+        super().__init__(model_path, save_path)
         self.model_path = model_path
         self.save_path = save_path
         self.wav2vec_model = WhisperModel.from_pretrained(

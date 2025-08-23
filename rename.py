@@ -3,7 +3,7 @@ from glob import glob
 import yaml
 from src.utils.yaml import load_yaml
 
-path = "manifest/wan"
+path = "manifest"
 
 yaml_files = glob(f"{path}/**/*.yml", recursive=True)
 

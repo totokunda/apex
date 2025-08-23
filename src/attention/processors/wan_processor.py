@@ -7,7 +7,6 @@ import torch.nn as nn
 from src.attention.functions import attention_register
 
 
-
 def enhance_score(query_image, key_image, head_dim, num_frames, enhance_weight):
     scale = head_dim**-0.5
     query_image = query_image * scale
@@ -41,6 +40,7 @@ def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
     x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
     return x_out.type_as(hidden_states)
 
+
 def rope_apply_ip_adapter(x, freqs, num_heads):
     x = rearrange(x, "b s (n d) -> b s n d", n=num_heads)
     x_out = torch.view_as_complex(
@@ -59,7 +59,6 @@ class WanAttnProcessor2_0:
         self.use_enhance = use_enhance
         self.num_frames = None
         self.enhance_weight = None
-
 
     def set_num_frames(self, num_frames: int):
         self.num_frames = num_frames
@@ -85,7 +84,7 @@ class WanAttnProcessor2_0:
             N=num_heads,
             C=head_dim,
         )
-        
+
         key_image = rearrange(
             img_k,
             "B N (T S) C -> (B S) N T C",
@@ -95,7 +94,9 @@ class WanAttnProcessor2_0:
             C=head_dim,
         )
 
-        return enhance_score(query_image, key_image, head_dim, num_frames, self.enhance_weight)
+        return enhance_score(
+            query_image, key_image, head_dim, num_frames, self.enhance_weight
+        )
 
     def process_with_kv_cache(
         self,
@@ -104,49 +105,44 @@ class WanAttnProcessor2_0:
         attention_mask: Optional[torch.Tensor] = None,
         rotary_emb: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        
-    
+
         if attn.kv_cache is None:
             hidden_states_main, hidden_states_ip = (
                 hidden_states[:, : -attn.cond_size],
                 hidden_states[:, -attn.cond_size :],
             )
-            
-            
+
             rotary_emb_split_point = rotary_emb.shape[2] - attn.cond_size
             rotary_emb_main = rotary_emb[:, :, :rotary_emb_split_point]
             rotary_emb_ip = rotary_emb[:, :, rotary_emb_split_point:]
-            
+
             query_main = attn.to_q(hidden_states_main)
             key_main = attn.to_k(hidden_states_main)
             value_main = attn.to_v(hidden_states_main)
-            
+
             if attn.norm_q is not None:
                 query_main = attn.norm_q(query_main)
             if attn.norm_k is not None:
                 key_main = attn.norm_k(key_main)
-                
+
             rotary_emb_main = rotary_emb_main.squeeze(0).transpose(0, 1)
             rotary_emb_ip = rotary_emb_ip.squeeze(0).transpose(0, 1)
 
-
             query_main = rope_apply_ip_adapter(query_main, rotary_emb_main, attn.heads)
             key_main = rope_apply_ip_adapter(key_main, rotary_emb_main, attn.heads)
-            
- 
+
             query_ip = attn.to_q(hidden_states_ip) + attn.add_q_lora(hidden_states_ip)
             key_ip = attn.to_k(hidden_states_ip) + attn.add_k_lora(hidden_states_ip)
             value_ip = attn.to_v(hidden_states_ip) + attn.add_v_lora(hidden_states_ip)
-            
-            
+
             if attn.norm_q is not None:
-                query_ip = attn.norm_q(query_ip) 
+                query_ip = attn.norm_q(query_ip)
             if attn.norm_k is not None:
                 key_ip = attn.norm_k(key_ip)
-                
+
             query_ip = rope_apply_ip_adapter(query_ip, rotary_emb_ip, attn.heads)
             key_ip = rope_apply_ip_adapter(key_ip, rotary_emb_ip, attn.heads)
-            
+
             attn.kv_cache = {
                 "key_ip": key_ip.detach(),
                 "value_ip": value_ip.detach(),
@@ -155,15 +151,14 @@ class WanAttnProcessor2_0:
             full_key = torch.concat([key_main, key_ip], dim=1)
             full_value = torch.concat([value_main, value_ip], dim=1)
 
-            
             query_main = query_main.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             full_key = full_key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             full_value = full_value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
-            
+
             query_ip = query_ip.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             key_ip = key_ip.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             value_ip = value_ip.unflatten(2, (attn.heads, -1)).transpose(1, 2)
-            
+
             cond_hidden_states = attention_register.call(
                 query_ip,
                 key_ip,
@@ -172,7 +167,7 @@ class WanAttnProcessor2_0:
                 dropout_p=0.0,
                 is_causal=False,
             ).transpose(1, 2)
-            
+
             hidden_states_main = attention_register.call(
                 query_main,
                 full_key,
@@ -184,17 +179,17 @@ class WanAttnProcessor2_0:
 
             hidden_states_main = hidden_states_main.flatten(2, 3)
             hidden_states_main = hidden_states_main.type_as(query_main)
-            
+
             cond_hidden_states = cond_hidden_states.flatten(2, 3)
             cond_hidden_states = cond_hidden_states.type_as(query_main)
-            
+
             hidden_states = torch.concat(
                 [hidden_states_main, cond_hidden_states], dim=1
             )
-   
+
             hidden_states = attn.to_out[0](hidden_states)
             hidden_states = attn.to_out[1](hidden_states)
-            
+
             return hidden_states
 
         else:
@@ -204,20 +199,19 @@ class WanAttnProcessor2_0:
             query_main = attn.to_q(hidden_states)
             key_main = attn.to_k(hidden_states)
             value_main = attn.to_v(hidden_states)
-            
+
             if attn.norm_q is not None:
                 query_main = attn.norm_q(query_main)
             if attn.norm_k is not None:
                 key_main = attn.norm_k(key_main)
-                
-            
+
             rotary_emb = rotary_emb.squeeze(0).transpose(0, 1)
             query_main = rope_apply_ip_adapter(query_main, rotary_emb, attn.heads)
             key_main = rope_apply_ip_adapter(key_main, rotary_emb, attn.heads)
 
             full_key = torch.concat([key_main, key_ip], dim=1)
             full_value = torch.concat([value_main, value_ip], dim=1)
-            
+
             query_main = query_main.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             full_key = full_key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
             full_value = full_value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
@@ -230,7 +224,7 @@ class WanAttnProcessor2_0:
                 dropout_p=0.0,
                 is_causal=False,
             ).transpose(1, 2)
-            
+
             hidden_states = hidden_states.flatten(2, 3)
             hidden_states = hidden_states.type_as(query_main)
 
@@ -248,7 +242,7 @@ class WanAttnProcessor2_0:
         rotary_emb: Optional[torch.Tensor] = None,
         no_cache: bool = False,
     ) -> torch.Tensor:
-        
+
         if hasattr(attn, "cond_size") and attn.cond_size is not None and not no_cache:
             return self.process_with_kv_cache(
                 attn, hidden_states, attention_mask, rotary_emb

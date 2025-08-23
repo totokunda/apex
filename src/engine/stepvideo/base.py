@@ -270,7 +270,7 @@ class StepVideoBaseEngine:
         """VAE encode"""
         return self.main_engine.vae_encode(*args, **kwargs)
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def vae_decode(
         self,
         latents: torch.Tensor,

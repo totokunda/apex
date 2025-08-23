@@ -218,7 +218,7 @@ class RectifiedFlowScheduler(SchedulerMixin, ConfigMixin, TimestepShifter):
             ), "Shift must be provided for constant time shift sampler."
             return time_shift(
                 shift, 1, torch.linspace(1, 1 / num_timesteps, num_timesteps)
-            )
+            ) 
 
     def shift_timesteps(self, samples_shape: torch.Size, timesteps: Tensor) -> Tensor:
         if self.shifting == "SD3":
@@ -323,6 +323,7 @@ class RectifiedFlowScheduler(SchedulerMixin, ConfigMixin, TimestepShifter):
                 If return_dict is `True`, [`~schedulers.rf_scheduler.RectifiedFlowSchedulerOutput`] is returned,
                 otherwise a tuple is returned where the first element is the sample tensor.
         """
+
         if self.num_inference_steps is None:
             raise ValueError(
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"

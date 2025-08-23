@@ -8,10 +8,14 @@ class TransformerConverter:
     def __init__(self):
         self.rename_dict = {}
         self.special_keys_map = {}
-        
+
     def _sort_rename_dict(self):
         """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
-        self.rename_dict = dict(sorted(self.rename_dict.items(), key=lambda item: len(item[0]), reverse=True))
+        self.rename_dict = dict(
+            sorted(
+                self.rename_dict.items(), key=lambda item: len(item[0]), reverse=True
+            )
+        )
 
     def convert(self, state_dict: Dict[str, Any]):
         self._sort_rename_dict()
@@ -88,7 +92,6 @@ class SkyReelsTransformerConverter(WanTransformerConverter):
                 "fps_projection": "condition_embedder.fps_projection",
             }
         )
-        
 
 
 class WanMultiTalkTransformerConverter(TransformerConverter):
@@ -292,12 +295,12 @@ class CogVideoXTransformerConverter(TransformerConverter):
 class LTXTransformerConverter(TransformerConverter):
     def __init__(self):
         self.rename_dict = {
-            "patchify_proj": "proj_in",
-            "adaln_single": "time_embed",
-            "attn1.k_norm.weight": "attn1.norm_k.weight",
-            "attn1.q_norm.weight": "attn1.norm_q.weight",
-            "attn2.k_norm.weight": "attn2.norm_k.weight",
-            "attn2.q_norm.weight": "attn2.norm_q.weight",
+            "proj_in": "patchify_proj",
+            "time_embed": "adaln_single",
+            "attn1.norm_k.weight": "attn1.k_norm.weight",
+            "attn1.norm_q.weight": "attn1.q_norm.weight",
+            "attn2.norm_k.weight": "attn2.k_norm.weight",
+            "attn2.norm_q.weight": "attn2.q_norm.weight",
         }
         self.special_keys_map = {
             "vae": self.remove_keys_inplace,

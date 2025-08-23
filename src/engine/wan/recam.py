@@ -11,11 +11,15 @@ class WanRecamEngine(WanBaseEngine):
     def run(
         self,
         camera_extrinsics: str | np.ndarray | torch.Tensor,
-        source_video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor],
+        source_video: Union[
+            List[Image.Image], List[str], str, np.ndarray, torch.Tensor
+        ],
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
         cam_type: int = None,
-        video: Union[List[Image.Image], List[str], str, np.ndarray, torch.Tensor] = None,
+        video: Union[
+            List[Image.Image], List[str], str, np.ndarray, torch.Tensor
+        ] = None,
         height: int = 480,
         width: int = 832,
         duration: int | str = 81,
@@ -34,7 +38,7 @@ class WanRecamEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
-        boundary_ratio: float | None = None
+        boundary_ratio: float | None = None,
     ):
 
         if not self.text_encoder:
@@ -61,27 +65,31 @@ class WanRecamEngine(WanBaseEngine):
 
         if offload:
             self._offload(self.text_encoder)
-            
-        
+
         loaded_video = self._load_video(source_video)
-            
+
         num_frames = self._parse_num_frames(duration, fps)
         if num_frames > len(loaded_video):
-            num_frames = (len(loaded_video) // self.vae_scale_factor_temporal) * self.vae_scale_factor_temporal + 1
-        
+            num_frames = (
+                len(loaded_video) // self.vae_scale_factor_temporal
+            ) * self.vae_scale_factor_temporal + 1
+
         if isinstance(camera_extrinsics, str):
-            camera_extrinsics = self.helpers["wan.recam"](camera_extrinsics, num_frames=num_frames, cam_type=cam_type).to(self.device)
+            camera_extrinsics = self.helpers["wan.recam"](
+                camera_extrinsics, num_frames=num_frames, cam_type=cam_type
+            ).to(self.device)
         elif isinstance(camera_extrinsics, np.ndarray):
             camera_extrinsics = torch.from_numpy(camera_extrinsics).to(self.device)
         else:
             camera_extrinsics = camera_extrinsics.to(self.device)
 
-    
         preprocessed_video = self.video_processor.preprocess_video(
             loaded_video, height=height, width=width
         ).to(self.device, dtype=torch.float32)
 
-        source_latents = self.vae_encode(preprocessed_video, offload=offload, sample_mode='mode')
+        source_latents = self.vae_encode(
+            preprocessed_video, offload=offload, sample_mode="mode"
+        )
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -135,7 +143,7 @@ class WanRecamEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         if video is not None:
             video = self._load_video(video)
             preprocessed_video = self.video_processor.preprocess_video(
@@ -148,9 +156,13 @@ class WanRecamEngine(WanBaseEngine):
 
         if cond_latent is not None:
             if hasattr(self.scheduler, "add_noise"):
-                latents = self.scheduler.add_noise(cond_latent, latents, latent_timestep)
+                latents = self.scheduler.add_noise(
+                    cond_latent, latents, latent_timestep
+                )
             else:
-                latents = self.scheduler.scale_noise(latents, latent_timestep, cond_latent)
+                latents = self.scheduler.scale_noise(
+                    latents, latent_timestep, cond_latent
+                )
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
@@ -158,9 +170,9 @@ class WanRecamEngine(WanBaseEngine):
             )
         else:
             boundary_timestep = None
-            
-        source_latents = source_latents[:, :, :latents.shape[2], :, :]
-            
+
+        source_latents = source_latents[:, :, : latents.shape[2], :, :]
+
         latents = self.denoise(
             boundary_timestep=boundary_timestep,
             timesteps=timesteps,
@@ -185,7 +197,7 @@ class WanRecamEngine(WanBaseEngine):
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
-            guidance_scale=guidance_scale
+            guidance_scale=guidance_scale,
         )
 
         if offload:

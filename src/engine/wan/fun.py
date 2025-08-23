@@ -390,15 +390,13 @@ class WanFunEngine(WanBaseEngine):
             )
         elif control_latents is None and start_image_latents_in is not None:
             control_latents = start_image_latents_in
-            
-        
+
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
         else:
             boundary_timestep = None
-
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,

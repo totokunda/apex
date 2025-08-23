@@ -44,5 +44,3 @@ SHARED_MANIFEST_SCHEMA_V1: dict = {
     },
     "additional_properties": True,
 }
-
-

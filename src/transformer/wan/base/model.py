@@ -33,7 +33,7 @@ from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.embeddings import (
     PixArtAlphaTextProjection,
     TimestepEmbedding,
-    Timesteps
+    Timesteps,
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
@@ -110,7 +110,7 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
                 torch.nn.Dropout(dropout),
             ]
         )
-        
+
         self.norm_q = torch.nn.RMSNorm(
             dim_head * heads, eps=eps, elementwise_affine=True
         )
@@ -132,7 +132,6 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
         self.cond_size = None
 
         self.set_processor(processor)
-        
 
     def fuse_projections(self):
         if getattr(self, "fused_projections", False):
@@ -185,11 +184,22 @@ class WanAttention(torch.nn.Module, AttentionModuleMixin):
 
         self.fused_projections = True
 
-    def init_ip_projections(self, train: bool = False, device: torch.device = "cpu", dtype: torch.dtype = torch.float32):
+    def init_ip_projections(
+        self,
+        train: bool = False,
+        device: torch.device = "cpu",
+        dtype: torch.dtype = torch.float32,
+    ):
         dim = self.inner_dim
-        self.add_q_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
-        self.add_k_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
-        self.add_v_lora = LoRALinearLayerIP(dim, dim, rank=128, device=device, dtype=dtype)
+        self.add_q_lora = LoRALinearLayerIP(
+            dim, dim, rank=128, device=device, dtype=dtype
+        )
+        self.add_k_lora = LoRALinearLayerIP(
+            dim, dim, rank=128, device=device, dtype=dtype
+        )
+        self.add_v_lora = LoRALinearLayerIP(
+            dim, dim, rank=128, device=device, dtype=dtype
+        )
 
         requires_grad = train
         for lora in [self.add_q_lora, self.add_k_lora, self.add_v_lora]:
@@ -323,7 +333,7 @@ class WanTimeTextImageEmbedding(nn.Module):
         timestep_proj = self.time_proj(self.act_fn(temb))
 
         encoder_hidden_states = self.text_embedder(encoder_hidden_states)
-        
+
         if encoder_hidden_states_image is not None:
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image
@@ -338,34 +348,40 @@ class WanTimeTextImageEmbedding(nn.Module):
         )
 
 
-def rope_1d(dim: int,
-            length: int,
-            theta: float = 10000.0,
-            start: int = 0,
-            dtype: torch.dtype = torch.float64,
-            device: Optional[torch.device] = None) -> torch.Tensor:
+def rope_1d(
+    dim: int,
+    length: int,
+    theta: float = 10000.0,
+    start: int = 0,
+    dtype: torch.dtype = torch.float64,
+    device: Optional[torch.device] = None,
+) -> torch.Tensor:
     """
     Return complex RoPE table of shape [length, dim//2] with positions = [start, ..., start+length-1].
     """
     if dim % 2 != 0:
         raise ValueError(f"RoPE dim must be even, got {dim}")
-    base = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=dtype, device=device).double() / dim))
-    pos  = torch.arange(start, start + length, dtype=dtype, device=device)
-    ang  = torch.outer(pos, base)                             # [length, dim//2]
+    base = 1.0 / (
+        theta ** (torch.arange(0, dim, 2, dtype=dtype, device=device).double() / dim)
+    )
+    pos = torch.arange(start, start + length, dtype=dtype, device=device)
+    ang = torch.outer(pos, base)  # [length, dim//2]
     return torch.polar(torch.ones_like(ang, dtype=dtype), ang)
+
 
 class WanRotaryPosEmbed(nn.Module):
     """
     3D RoPE split across (time, height, width) halves of the head-dim.
     Complex representation; returns [1, 1, num_patches, head_dim//2] table.
     """
+
     def __init__(
         self,
         attention_head_dim: int,
         patch_size: Tuple[int, int, int],
         max_seq_len: int,
         theta: float = 10000.0,
-        time_offset: int = -1,           # use -1 to include sentinel row at t=-1
+        time_offset: int = -1,  # use -1 to include sentinel row at t=-1
     ):
         super().__init__()
         self.attention_head_dim = attention_head_dim
@@ -378,10 +394,14 @@ class WanRotaryPosEmbed(nn.Module):
         h_dim = w_dim = 2 * (attention_head_dim // 6)
         t_dim = attention_head_dim - h_dim - w_dim
         if any(d % 2 for d in (t_dim, h_dim, w_dim)):
-            raise ValueError(f"t/h/w dims must be even, got t={t_dim}, h={h_dim}, w={w_dim}")
+            raise ValueError(
+                f"t/h/w dims must be even, got t={t_dim}, h={h_dim}, w={w_dim}"
+            )
 
         # sequence lengths
-        t_len = max_seq_len + (1 if time_offset < 0 else 0)   # add sentinel if starting < 0
+        t_len = max_seq_len + (
+            1 if time_offset < 0 else 0
+        )  # add sentinel if starting < 0
         h_len = max_seq_len
         w_len = max_seq_len
 
@@ -413,8 +433,10 @@ class WanRotaryPosEmbed(nn.Module):
     def _patch_grid(self, T: int, H: int, W: int):
         pt, ph, pw = self.patch_size
         if (T % pt) or (H % ph) or (W % pw):
-            raise ValueError(f"Input dims must be divisible by patch_size. "
-                             f"Got (T,H,W)=({T},{H},{W}), patch={self.patch_size}")
+            raise ValueError(
+                f"Input dims must be divisible by patch_size. "
+                f"Got (T,H,W)=({T},{H},{W}), patch={self.patch_size}"
+            )
         return (T // pt, H // ph, W // pw)  # (ppf, pph, ppw)
 
     def forward_hidden_states(self, hidden_states: torch.Tensor) -> torch.Tensor:
@@ -428,20 +450,23 @@ class WanRotaryPosEmbed(nn.Module):
         # time starts at t=0 for “normal” frames; if we keep sentinel, skip index 0
         t_start = 1 if self.time_offset < 0 else 0
         if t_start + ppf > self.freqs_t.size(0):
-            raise IndexError(f"time slice out of range: need {t_start+ppf} rows, have {self.freqs_t.size(0)}")
+            raise IndexError(
+                f"time slice out of range: need {t_start+ppf} rows, have {self.freqs_t.size(0)}"
+            )
 
-        t = self.freqs_t[t_start : t_start + ppf]                # [ppf, t_half]
-        h = self.freqs_h[:pph]                                   # [pph, h_half]
-        w = self.freqs_w[:ppw]                                   # [ppw, w_half]
-        
+        t = self.freqs_t[t_start : t_start + ppf]  # [ppf, t_half]
+        h = self.freqs_h[:pph]  # [pph, h_half]
+        w = self.freqs_w[:ppw]  # [ppw, w_half]
 
         # expand to 3D grid and concat along the last (feature) axis
         t3 = t.view(ppf, 1, 1, self.t_half).expand(ppf, pph, ppw, self.t_half)
         h3 = h.view(1, pph, 1, self.h_half).expand(ppf, pph, ppw, self.h_half)
         w3 = w.view(1, 1, ppw, self.w_half).expand(ppf, pph, ppw, self.w_half)
 
-        freqs = torch.cat([t3, h3, w3], dim=-1)                  # [ppf, pph, ppw, sum_halfs]
-        return freqs.reshape(1, 1, ppf * pph * ppw, self.t_half + self.h_half + self.w_half).to(hidden_states.device)
+        freqs = torch.cat([t3, h3, w3], dim=-1)  # [ppf, pph, ppw, sum_halfs]
+        return freqs.reshape(
+            1, 1, ppf * pph * ppw, self.t_half + self.h_half + self.w_half
+        ).to(hidden_states.device)
 
     def forward_ip(
         self,
@@ -456,7 +481,7 @@ class WanRotaryPosEmbed(nn.Module):
             If None and time_offset>=0, defaults to 0.
         Returns: [1, 1, ppf_ip*pph_ip*ppw_ip, (t_half+h_half+w_half)]
         """
-        
+
         # main volume patch grid (not strictly needed here but kept for parity)
         _, _, T, H, W = hidden_states.shape
         ppf_main, pph_main, ppw_main = self._patch_grid(T, H, W)
@@ -464,7 +489,7 @@ class WanRotaryPosEmbed(nn.Module):
         # IP volume patch grid (what we will emit)
         _, _, T_ip, H_ip, W_ip = ip_image_hidden_states.shape
         ppf_ip, pph_ip, ppw_ip = self._patch_grid(T_ip, H_ip, W_ip)
-        
+
         # choose time row(s)
         if time_index is None:
             time_index = 0 if self.time_offset < 0 else 0
@@ -472,25 +497,40 @@ class WanRotaryPosEmbed(nn.Module):
         if ppf_ip == 1:
             # match your manual path: take a single time row and broadcast
             if not (0 <= time_index < self.freqs_t.size(0)):
-                raise IndexError(f"time_index {time_index} out of range [0, {self.freqs_t.size(0)})")
-            t = self.freqs_t[time_index]                          # [t_half]
-            t3 = t.view(1, 1, 1, self.t_half).expand(ppf_ip, pph_ip, ppw_ip, self.t_half)
+                raise IndexError(
+                    f"time_index {time_index} out of range [0, {self.freqs_t.size(0)})"
+                )
+            t = self.freqs_t[time_index]  # [t_half]
+            t3 = t.view(1, 1, 1, self.t_half).expand(
+                ppf_ip, pph_ip, ppw_ip, self.t_half
+            )
         else:
             # multi-frame crop: use a contiguous range
             if time_index + ppf_ip > self.freqs_t.size(0):
-                raise IndexError(f"time slice out of range: need {time_index+ppf_ip} rows, have {self.freqs_t.size(0)}")
-            t = self.freqs_t[time_index : time_index + ppf_ip]    # [ppf_ip, t_half]
-            t3 = t.view(ppf_ip, 1, 1, self.t_half).expand(ppf_ip, pph_ip, ppw_ip, self.t_half)
+                raise IndexError(
+                    f"time slice out of range: need {time_index+ppf_ip} rows, have {self.freqs_t.size(0)}"
+                )
+            t = self.freqs_t[time_index : time_index + ppf_ip]  # [ppf_ip, t_half]
+            t3 = t.view(ppf_ip, 1, 1, self.t_half).expand(
+                ppf_ip, pph_ip, ppw_ip, self.t_half
+            )
 
         h = self.freqs_h[pph_main : pph_main + pph_ip]
-        w = self.freqs_w[ppw_main : ppw_main + ppw_ip]   
+        w = self.freqs_w[ppw_main : ppw_main + ppw_ip]
 
-        h3 = h.view(1, pph_ip, 1, self.h_half).expand(ppf_ip, pph_ip, ppw_ip, self.h_half)
-        w3 = w.view(1, 1, ppw_ip, self.w_half).expand(ppf_ip, pph_ip, ppw_ip, self.w_half)
+        h3 = h.view(1, pph_ip, 1, self.h_half).expand(
+            ppf_ip, pph_ip, ppw_ip, self.h_half
+        )
+        w3 = w.view(1, 1, ppw_ip, self.w_half).expand(
+            ppf_ip, pph_ip, ppw_ip, self.w_half
+        )
 
-        freqs_ip = torch.cat([t3, h3, w3], dim=-1)                # [ppf_ip, pph_ip, ppw_ip, sum_halfs]
-        return freqs_ip.reshape(1, 1, ppf_ip * pph_ip * ppw_ip, self.t_half + self.h_half + self.w_half).to(hidden_states.device)
-
+        freqs_ip = torch.cat(
+            [t3, h3, w3], dim=-1
+        )  # [ppf_ip, pph_ip, ppw_ip, sum_halfs]
+        return freqs_ip.reshape(
+            1, 1, ppf_ip * pph_ip * ppw_ip, self.t_half + self.h_half + self.w_half
+        ).to(hidden_states.device)
 
 
 class WanTransformerBlock(nn.Module):
@@ -572,7 +612,7 @@ class WanTransformerBlock(nn.Module):
         norm_hidden_states = (
             self.norm1(hidden_states.float()) * (1 + scale_msa) + shift_msa
         ).type_as(hidden_states)
-        
+
         if hidden_states_ip is not None:
             (
                 shift_msa_ip,
@@ -581,9 +621,7 @@ class WanTransformerBlock(nn.Module):
                 c_shift_msa_ip,
                 c_scale_msa_ip,
                 c_gate_msa_ip,
-            ) = (self.scale_shift_table + timestep_proj_ip.float()).chunk(
-                6, dim=1
-            )
+            ) = (self.scale_shift_table + timestep_proj_ip.float()).chunk(6, dim=1)
 
             self.attn1.cond_size = hidden_states_ip.shape[1]
 
@@ -595,7 +633,7 @@ class WanTransformerBlock(nn.Module):
                 [norm_hidden_states, norm_hidden_states_ip], dim=1
             )
             self.attn1.kv_cache = None
-        
+
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
@@ -609,7 +647,7 @@ class WanTransformerBlock(nn.Module):
         hidden_states = (hidden_states.float() + attn_output * gate_msa).type_as(
             hidden_states
         )
-        
+
         # 2. Cross-attention
         norm_hidden_states = self.norm2(hidden_states.float()).type_as(hidden_states)
         attn_output = self.attn2(
@@ -619,7 +657,7 @@ class WanTransformerBlock(nn.Module):
         )
 
         hidden_states = hidden_states + attn_output
-        
+
         # 3. Feed-forward
         norm_hidden_states = (
             self.norm3(hidden_states.float()) * (1 + c_scale_msa) + c_shift_msa
@@ -628,18 +666,17 @@ class WanTransformerBlock(nn.Module):
         hidden_states = (
             hidden_states.float() + ff_output.float() * c_gate_msa
         ).type_as(hidden_states)
-        
-        
+
         if hidden_states_ip is not None:
             gated_hidden_states_ip = (
                 hidden_states_ip.float() + attn_output_ip.float() * gate_msa_ip
             ).type_as(hidden_states_ip)
-            
+
             norm3_hidden_states_ip = (
                 self.norm3(gated_hidden_states_ip.float()) * (1 + c_scale_msa_ip)
                 + c_shift_msa_ip
             ).type_as(hidden_states_ip)
-            
+
             ffn_output_ip = self.ffn(norm3_hidden_states_ip)
             hidden_states_ip = (
                 gated_hidden_states_ip.float() + ffn_output_ip.float() * c_gate_msa_ip
@@ -774,10 +811,15 @@ class WanTransformer3DModel(
 
         self.gradient_checkpointing = False
 
-    def init_ip_projections(self, train: bool = False, device: torch.device = "cpu", dtype: torch.dtype = torch.float32):
+    def init_ip_projections(
+        self,
+        train: bool = False,
+        device: torch.device = "cpu",
+        dtype: torch.dtype = torch.float32,
+    ):
         for block in self.blocks:
             block.attn1.init_ip_projections(train=train, device=device, dtype=dtype)
-            
+
     def set_enhance(self, enhance_weight: float, num_frames: int):
         for block in self.blocks:
             block.attn1.processor.set_enhance_weight(enhance_weight)
@@ -823,22 +865,23 @@ class WanTransformer3DModel(
         post_patch_num_frames = num_frames // p_t
         post_patch_height = height // p_h
         post_patch_width = width // p_w
-        
+
         rotary_emb = self.rope(hidden_states)
         ip_hidden_states_len = 0
         if ip_image_hidden_states is not None:
             hidden_states_ip = self.patch_embedding(ip_image_hidden_states)
             hidden_states_ip = hidden_states_ip.flatten(2).transpose(1, 2)
             ip_hidden_states_len = hidden_states_ip.shape[1]
-            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states, time_index=0)
+            rotary_emb_ip = self.rope(
+                hidden_states, ip_image_hidden_states, time_index=0
+            )
             rotary_emb = torch.concat([rotary_emb, rotary_emb_ip], dim=2)
         else:
             hidden_states_ip = None
 
         hidden_states = self.patch_embedding(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        
-        
+
         if timestep.ndim == 2:
             ts_seq_len = timestep.shape[1]
             timestep = timestep.flatten()  # batch_size * seq_len
@@ -873,7 +916,6 @@ class WanTransformer3DModel(
             encoder_hidden_states = torch.concat(
                 [encoder_hidden_states_image, encoder_hidden_states], dim=1
             )
-            
 
         # 4. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -940,8 +982,8 @@ class WanTransformer3DModel(
             p_h,
             p_w,
             -1,
-        ) 
-        
+        )
+
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

@@ -157,7 +157,7 @@ class HunyuanBaseEngine:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
+
         self.llama_text_encoder = self.helpers["hunyuan.llama"]
 
         if isinstance(prompt, str):

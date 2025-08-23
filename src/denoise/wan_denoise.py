@@ -6,6 +6,7 @@ from src.mlx.denoise import WanDenoise as WanDenoiseMLX, DenoiseType as DenoiseT
 import numpy as np
 from PIL import Image
 
+
 class DenoiseType(EnumType):
     BASE = "base"
     MOE = "moe"
@@ -135,14 +136,12 @@ class WanDenoise(WanDenoiseMLX):
         expand_timesteps = kwargs.get("expand_timesteps", False)
         first_frame_mask = kwargs.get("first_frame_mask", None)
         ip_image = kwargs.get("ip_image", None)
-        
 
         if ip_image is not None:
             ip_image_latent = self._encode_ip_image(ip_image, dtype=transformer_dtype)
         else:
             ip_image_latent = None
-            
-        
+
         if expand_timesteps and first_frame_mask is not None:
             mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         else:
@@ -181,7 +180,6 @@ class WanDenoise(WanDenoiseMLX):
                         ).to(transformer_dtype)
                     else:
                         latent_model_input = latents.to(transformer_dtype)
-                
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -243,9 +241,11 @@ class WanDenoise(WanDenoiseMLX):
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
             for i, t in enumerate(timesteps):
-                
+
                 timestep = t.expand(latents.shape[0])
-                latent_model_input = torch.cat([latents, source_latents], dim=2).to(transformer_dtype)
+                latent_model_input = torch.cat([latents, source_latents], dim=2).to(
+                    transformer_dtype
+                )
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -267,7 +267,12 @@ class WanDenoise(WanDenoiseMLX):
                         noise_pred - uncond_noise_pred
                     )
 
-                latents = scheduler.step(noise_pred[:, :, :target_length], t, latents[:, :, :target_length], return_dict=False)[0]
+                latents = scheduler.step(
+                    noise_pred[:, :, :target_length],
+                    t,
+                    latents[:, :, :target_length],
+                    return_dict=False,
+                )[0]
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
@@ -276,7 +281,6 @@ class WanDenoise(WanDenoiseMLX):
             self.logger.info("Denoising completed.")
 
         return latents
-
 
     def diffusion_forcing_denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents", None)
@@ -400,16 +404,14 @@ class WanDenoise(WanDenoiseMLX):
         using_video_input = kwargs.get("using_video_input", False)
         cur_motion_frames_latent_num = kwargs.get("cur_motion_frames_latent_num", None)
         latent_motion_frames = kwargs.get("latent_motion_frames", None)
-        
-        
-        
-        
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
             for i, t in enumerate(timesteps):
                 if using_video_input:
-                    latents[:, :, :cur_motion_frames_latent_num] = latent_motion_frames.unsqueeze(0)
-                
+                    latents[:, :, :cur_motion_frames_latent_num] = (
+                        latent_motion_frames.unsqueeze(0)
+                    )
+
                 latent_model_input = torch.cat([latents, latent_condition], dim=1).to(
                     transformer_dtype
                 )
@@ -425,7 +427,7 @@ class WanDenoise(WanDenoiseMLX):
                     ref_target_masks=ref_target_masks,
                     human_num=human_num,
                     return_dict=False,
-                    **attention_kwargs
+                    **attention_kwargs,
                 )[0]
 
                 if math.isclose(guidance_scale, 1.0):
@@ -491,9 +493,11 @@ class WanDenoise(WanDenoiseMLX):
                     )
                     _, T_m, _, _ = add_latent.shape
                     latents[:, :T_m] = add_latent
-                
+
                 if using_video_input:
-                    latents[:, :, :cur_motion_frames_latent_num] = latent_motion_frames.unsqueeze(0)
+                    latents[:, :, :cur_motion_frames_latent_num] = (
+                        latent_motion_frames.unsqueeze(0)
+                    )
 
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
@@ -502,15 +506,17 @@ class WanDenoise(WanDenoiseMLX):
             self.logger.info("Denoising completed.")
 
         return latents
-    
-    def _encode_ip_image(self, ip_image: Image.Image | str | np.ndarray | torch.Tensor, dtype: torch.dtype = None):
+
+    def _encode_ip_image(
+        self,
+        ip_image: Image.Image | str | np.ndarray | torch.Tensor,
+        dtype: torch.dtype = None,
+    ):
         ip_image = self._load_image(ip_image)
         ip_image = (
             torch.tensor(np.array(ip_image)).permute(2, 0, 1).float() / 255.0
         )  # [3, H, W]
-        ip_image = (
-            ip_image.unsqueeze(1).unsqueeze(0).to(dtype=dtype)
-        )  # [B, 3, 1, H, W]
+        ip_image = ip_image.unsqueeze(1).unsqueeze(0).to(dtype=dtype)  # [B, 3, 1, H, W]
         ip_image = ip_image * 2 - 1
 
         encoded_image = self.vae_encode(ip_image, sample_mode="mode", dtype=dtype)

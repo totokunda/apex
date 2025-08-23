@@ -6,6 +6,7 @@ from loguru import logger
 
 try:
     import jsonschema
+
     _HAS_JSONSCHEMA = True
 except Exception:  # pragma: no cover - fail-soft if dependency missing
     jsonschema = None  # type: ignore
@@ -89,9 +90,7 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
     spec = doc.get("spec", {}) or {}
 
     # Allow UI under top-level UI, top-level ui, or spec.ui
-    ui_spec = (
-        doc.get("ui") or doc.get("UI") or spec.get("ui") or spec.get("UI")
-    )
+    ui_spec = doc.get("ui") or doc.get("UI") or spec.get("ui") or spec.get("UI")
 
     # Build normalized config expected by engines
     normalized: Dict[str, Any] = {}
@@ -128,7 +127,14 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         normalized["denoise_type"] = spec["denoiseType"]
 
     # components and stages
-    for key in ("components", "preprocessors", "postprocessors", "shared", "helpers", "loras"):
+    for key in (
+        "components",
+        "preprocessors",
+        "postprocessors",
+        "shared",
+        "helpers",
+        "loras",
+    ):
         if key in spec:
             normalized[key] = spec[key]
 
@@ -150,5 +156,3 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         normalized["ui"] = _normalize_ui(ui_spec)
 
     return normalized
-
-

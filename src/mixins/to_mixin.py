@@ -85,7 +85,7 @@ class ToMixin:
 
         keep_fp32_patterns = tuple(getattr(module, "_keep_in_fp32_modules", []) or [])
         no_split_patterns = tuple(getattr(module, "_no_split_modules", []) or [])
-
+        
         # ------------------------------------------------------------------
         # 1. Fast path – use the official API when layer-wise casting is wanted
         # ------------------------------------------------------------------
@@ -98,7 +98,7 @@ class ToMixin:
                 compute_dtype=compute_dtype or torch.float32,
                 skip_modules_pattern=skip_patterns,
             )  # Diffusers handles the heavy lifting :contentReference[oaicite:3]{index=3}
-            return module
+            return module      
 
         # ------------------------------------------------------------------
         # 2. Uniform cast (like `from_pretrained(torch_dtype=…)`)

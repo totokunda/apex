@@ -1,3 +1,3 @@
-from .llm import Step1TextEncoderPreprocessor
+from .text_encoder import StepVideoTextEncoder
 
-__all__ = ["Step1TextEncoderPreprocessor"]
+__all__ = ["StepVideoTextEncoder"]

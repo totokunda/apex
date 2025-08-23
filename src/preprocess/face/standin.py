@@ -15,31 +15,46 @@ from insightface.utils import ensure_available
 from insightface.model_zoo import model_zoo
 import os.path as osp
 
+
 class SubFaceAnalysis(FaceAnalysis):
-    def __init__(self, name=DEFAULT_MP_NAME, root='~/.insightface', allowed_modules=None, **kwargs):
+    def __init__(
+        self,
+        name=DEFAULT_MP_NAME,
+        root="~/.insightface",
+        allowed_modules=None,
+        **kwargs
+    ):
         onnxruntime.set_default_logger_severity(3)
         self.models = {}
-        self.model_dir = ensure_available('models', name, root=root)
-        onnx_files = glob.glob(osp.join(self.model_dir, name, '*.onnx'))
+        self.model_dir = ensure_available("models", name, root=root)
+        onnx_files = glob.glob(osp.join(self.model_dir, name, "*.onnx"))
         onnx_files = sorted(onnx_files)
         for onnx_file in onnx_files:
             model = model_zoo.get_model(onnx_file, **kwargs)
             if model is None:
-                print('model not recognized:', onnx_file)
+                print("model not recognized:", onnx_file)
             elif allowed_modules is not None and model.taskname not in allowed_modules:
-                print('model ignore:', onnx_file, model.taskname)
+                print("model ignore:", onnx_file, model.taskname)
                 del model
-            elif model.taskname not in self.models and (allowed_modules is None or model.taskname in allowed_modules):
-                print('find model:', onnx_file, model.taskname, model.input_shape, model.input_mean, model.input_std)
+            elif model.taskname not in self.models and (
+                allowed_modules is None or model.taskname in allowed_modules
+            ):
+                print(
+                    "find model:",
+                    onnx_file,
+                    model.taskname,
+                    model.input_shape,
+                    model.input_mean,
+                    model.input_std,
+                )
                 self.models[model.taskname] = model
             else:
-                print('duplicated model task type, ignore:', onnx_file, model.taskname)
+                print("duplicated model task type, ignore:", onnx_file, model.taskname)
                 del model
-        assert 'detection' in self.models
-        self.det_model = self.models['detection']
-        
-        
-        
+        assert "detection" in self.models
+        self.det_model = self.models["detection"]
+
+
 def _img2tensor(img: np.ndarray, bgr2rgb: bool = True) -> torch.Tensor:
     if bgr2rgb:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -102,7 +117,9 @@ class FacePreprocessor(BasePreprocessor):
             else ["CPUExecutionProvider"]
         )
 
-        self.app = SubFaceAnalysis(name="antelopev2", root=save_path, providers=providers)
+        self.app = SubFaceAnalysis(
+            name="antelopev2", root=save_path, providers=providers
+        )
         self.app.prepare(ctx_id=0, det_size=(640, 640))
 
         self.parsing_model = init_parsing_model(

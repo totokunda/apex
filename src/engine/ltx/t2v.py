@@ -18,14 +18,15 @@ class LTXT2VEngine(LTXBaseEngine):
         num_videos: int = 1,
         seed: int | None = None,
         fps: int = 25,
-        use_cfg_guidance: bool = True,
         text_encoder_kwargs: Dict[str, Any] = {},
-        guidance_scale: float = 3.0,
-        guidance_rescale: float = 0.0,
+        guidance_scale: float | List[float] = 3.0,
+        guidance_rescale: float | List[float] = 0.0,
+        guidance_scale_stg: float | List[float] = 1.0,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
+        guidance_timesteps: List[int] | None = None,
         render_on_step_callback: Callable = None,
         attention_kwargs: Dict[str, Any] = {},
         return_latents: bool = False,
@@ -33,8 +34,6 @@ class LTXT2VEngine(LTXBaseEngine):
         decode_noise_scale: Optional[Union[float, List[float]]] = None,
         **kwargs,
     ):
-
-        postprocessor_kwargs = kwargs.get("postprocessor_kwargs", None)
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -49,7 +48,12 @@ class LTXT2VEngine(LTXBaseEngine):
             **text_encoder_kwargs,
         )
 
-        if negative_prompt is not None and use_cfg_guidance:
+        if (
+            negative_prompt is not None
+            and guidance_scale != 1
+            and guidance_scale != [1]
+            and guidance_scale != [1.0]
+        ):
             negative_prompt_embeds, negative_prompt_attention_mask = (
                 self.text_encoder.encode(
                     negative_prompt,
@@ -64,7 +68,7 @@ class LTXT2VEngine(LTXBaseEngine):
                 prompt_embeds
             ), torch.zeros_like(prompt_attention_mask)
 
-        if use_cfg_guidance:
+        if guidance_scale != 1 and guidance_scale != [1] and guidance_scale != [1.0]:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask], dim=0
@@ -124,11 +128,45 @@ class LTXT2VEngine(LTXBaseEngine):
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler,
             num_inference_steps=num_inference_steps,
-            device=self.device,
             timesteps=timesteps,
             sigmas=sigmas if not timesteps else None,
             mu=mu,
         )
+
+        if guidance_timesteps:
+            guidance_mapping = []
+            for timestep in timesteps:
+                indices = [
+                    i for i, val in enumerate(guidance_timesteps) if val <= timestep
+                ]
+                # assert len(indices) > 0, f"No guidance timestep found for {timestep}"
+                guidance_mapping.append(
+                    indices[0] if len(indices) > 0 else (len(guidance_timesteps) - 1)
+                )
+
+        # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
+        # corresponds to doing no classifier free guidance.
+        if not isinstance(guidance_scale, List):
+            guidance_scale = [guidance_scale] * len(timesteps)
+        else:
+            guidance_scale = [
+                guidance_scale[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
+
+        if not isinstance(guidance_scale_stg, List):
+            guidance_scale_stg = [guidance_scale_stg] * len(timesteps)
+        else:
+            guidance_scale_stg = [
+                guidance_scale_stg[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
+
+        if not isinstance(guidance_rescale, List):
+            guidance_rescale = [guidance_rescale] * len(timesteps)
+        else:
+            guidance_rescale = [
+                guidance_rescale[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
 
         prompt_embeds = prompt_embeds.to(device=self.device, dtype=transformer_dtype)
         prompt_attention_mask = prompt_attention_mask.to(device=self.device)
@@ -161,9 +199,10 @@ class LTXT2VEngine(LTXBaseEngine):
             latent_width=latent_width,
             rope_interpolation_scale=rope_interpolation_scale,
             attention_kwargs=attention_kwargs,
-            guidance_rescale=guidance_rescale,
-            use_cfg_guidance=use_cfg_guidance,
+            # CFG controlled purely by guidance_scale in denoiser
             guidance_scale=guidance_scale,
+            guidance_rescale=guidance_rescale,
+            guidance_scale_stg=guidance_scale_stg,
             render_on_step=render_on_step,
             scheduler=scheduler,
             transformer_dtype=transformer_dtype,
@@ -181,5 +220,4 @@ class LTXT2VEngine(LTXBaseEngine):
             decode_timestep=decode_timestep,
             decode_noise_scale=decode_noise_scale,
             dtype=prompt_embeds.dtype,
-            postprocessor_kwargs=postprocessor_kwargs,
         )

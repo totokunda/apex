@@ -2,6 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List
 from .base import WanBaseEngine
 
+
 class WanApexFramepackEngine(WanBaseEngine):
     """WAN Apex Framepack Engine Implementation"""
 
