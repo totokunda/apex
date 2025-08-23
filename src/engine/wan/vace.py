@@ -30,7 +30,7 @@ class WanVaceEngine(WanBaseEngine):
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
         use_cfg_guidance: bool = True,
-        seed: int | None = None,    
+        seed: int | None = None,
         num_videos: int = 1,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},

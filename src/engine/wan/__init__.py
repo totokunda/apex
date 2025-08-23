@@ -20,6 +20,7 @@ from .multitalk import WanMultitalkEngine
 from .recam import WanRecamEngine
 from src.utils.type import EnumType
 
+
 class ModelType(EnumType):
     VACE = "vace"  # vace
     T2V = "t2v"  # text to video

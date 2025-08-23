@@ -694,15 +694,13 @@ class StepVideoTextEncoder(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
         self,
         model_path,
         tokenizer_path=None,
-        save_path=DEFAULT_COMPONENTS_PATH,  
+        save_path=DEFAULT_COMPONENTS_PATH,
         dtype=torch.bfloat16,
         max_length=320,
         gguf_path=None,
         **kwargs,
     ):
-        super(StepVideoTextEncoder, self).__init__(
-            model_path, save_path
-        )
+        super(StepVideoTextEncoder, self).__init__(model_path, save_path)
 
         self.max_length = max_length
         self.save_path = save_path

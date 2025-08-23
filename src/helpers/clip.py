@@ -12,6 +12,7 @@ from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 import torch.nn as nn
 
+
 @helpers("clip")
 class CLIP(nn.Module, LoaderMixin, OffloadMixin):
 
@@ -28,9 +29,7 @@ class CLIP(nn.Module, LoaderMixin, OffloadMixin):
         dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
-        super().__init__(
-            model_path=model_path, save_path=save_path
-        )
+        super().__init__(model_path=model_path, save_path=save_path)
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
@@ -54,7 +53,7 @@ class CLIP(nn.Module, LoaderMixin, OffloadMixin):
                 return key
         return None
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def __call__(
         self,
         image: Union[

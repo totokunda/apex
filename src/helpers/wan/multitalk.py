@@ -165,9 +165,7 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
         device: str = "cuda",
         **kwargs,
     ):
-        super().__init__(
-            model_path, save_path
-        )
+        super().__init__(model_path, save_path)
         self.model_path = model_path
         self.save_path = save_path
         self.device = device

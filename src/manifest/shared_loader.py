@@ -8,6 +8,7 @@ import yaml
 
 try:
     import jsonschema
+
     _HAS_JSONSCHEMA = True
 except Exception:  # pragma: no cover
     jsonschema = None  # type: ignore
@@ -31,9 +32,7 @@ def load_shared_manifest(file_path: str | Path) -> Dict[str, Any]:
         except Exception as e:
             raise ValueError(f"Shared manifest validation failed: {e}")
     else:
-        logger.warning(
-            "jsonschema not installed; skipping shared manifest validation."
-        )
+        logger.warning("jsonschema not installed; skipping shared manifest validation.")
 
     spec = doc.get("spec", {}) or {}
     # Normalize to legacy-like structure with top-level lists for lookup
@@ -44,5 +43,3 @@ def load_shared_manifest(file_path: str | Path) -> Dict[str, Any]:
     # Also keep metadata for tooling
     normalized["metadata"] = doc.get("metadata", {}) or {}
     return normalized
-
-

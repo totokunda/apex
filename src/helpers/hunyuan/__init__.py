@@ -1,4 +1,4 @@
-from .llama import LlamaPreprocessor
-from .avatar import AvatarPreprocessor
+from .llama import HunyuanLlama
+from .avatar import HunyuanAvatar
 
-__all__ = ["LlamaPreprocessor", "AvatarPreprocessor"]
+__all__ = ["HunyuanLlama", "HunyuanAvatar"]

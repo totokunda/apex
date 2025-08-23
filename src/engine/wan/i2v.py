@@ -84,7 +84,6 @@ class WanI2VEngine(WanBaseEngine):
 
         self.to_device(self.transformer)
 
-
         if boundary_ratio is None and not expand_timesteps:
             image_embeds = self.helpers["clip"](
                 loaded_image, hidden_states_layer=-2

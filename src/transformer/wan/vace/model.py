@@ -134,7 +134,7 @@ class WanVACETransformerBlock(nn.Module):
         attn_output = self.attn1(
             hidden_states=norm_hidden_states, rotary_emb=rotary_emb
         )
-        
+
         control_hidden_states = (
             control_hidden_states.float() + attn_output * gate_msa
         ).type_as(control_hidden_states)
@@ -329,7 +329,7 @@ class WanVACETransformer3DModel(
     def init_ip_projections(self, train: bool = False):
         for block in self.blocks:
             block.attn1.init_ip_projections(train=train)
-            
+
     def set_enhance(self, enhance_weight: float, num_frames: int):
         for block in self.blocks:
             block.attn1.processor.set_enhance_weight(enhance_weight)
@@ -348,7 +348,7 @@ class WanVACETransformer3DModel(
         attention_kwargs: Optional[Dict[str, Any]] = None,
         enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        
+
         if enhance_kwargs is not None:
             enhance_weight = enhance_kwargs.get("enhance_weight", None)
             num_frames = enhance_kwargs.get("num_frames", None)
@@ -397,7 +397,9 @@ class WanVACETransformer3DModel(
             hidden_states_ip = self.patch_embedding(ip_image_hidden_states)
             hidden_states_ip = hidden_states_ip.flatten(2).transpose(1, 2)
             ip_hidden_states_len = hidden_states_ip.shape[1]
-            rotary_emb_ip = self.rope(hidden_states, ip_image_hidden_states, time_index=0)
+            rotary_emb_ip = self.rope(
+                hidden_states, ip_image_hidden_states, time_index=0
+            )
             rotary_emb = torch.concat([rotary_emb, rotary_emb_ip], dim=2)
         else:
             hidden_states_ip = None

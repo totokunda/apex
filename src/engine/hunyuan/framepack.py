@@ -99,7 +99,6 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                 **text_encoder_kwargs,
             )
 
-
         clip_image_encoder = self.helpers["clip"]
         self.to_device(clip_image_encoder)
 

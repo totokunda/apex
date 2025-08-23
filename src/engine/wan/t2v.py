@@ -49,7 +49,7 @@ class WanT2VEngine(WanBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,

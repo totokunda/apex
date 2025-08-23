@@ -74,10 +74,9 @@ class LoaderMixin(DownloadMixin):
             config.update(self.fetch_config(config_path))
         if component.get("config"):
             config.update(component.get("config"))
+        
 
-        if os.path.isdir(model_path) and os.path.exists(
-            os.path.join(model_path, "config.json")
-            ) and not component.get("extra_model_paths"):
+        if (not config or (os.path.isdir(model_path) and os.path.exists(os.path.join(model_path, "config.json")))) and not component.get("extra_model_paths"):
             if config:
                 # replace the config.json with the config
                 config_path = os.path.join(model_path, "config.json")
@@ -160,7 +159,9 @@ class LoaderMixin(DownloadMixin):
             model.load_weights(gguf_weights)
         else:
             if os.path.isdir(model_path):
-                extensions = component.get("extensions", ["safetensors", "bin", "pt", "ckpt"])
+                extensions = component.get(
+                    "extensions", ["safetensors", "bin", "pt", "ckpt"]
+                )
                 self.logger.info(f"Loading model from {model_path}")
                 files_to_load = []
                 for ext in extensions:
@@ -171,7 +172,7 @@ class LoaderMixin(DownloadMixin):
                 if not os.path.exists(model_path):
                     raise FileNotFoundError(f"Model file not found at {model_path}")
                 files_to_load = [model_path]
-            
+
             extra_model_paths = component.get("extra_model_paths", [])
             if isinstance(extra_model_paths, str):
                 extra_model_paths = [extra_model_paths]
@@ -422,11 +423,6 @@ class LoaderMixin(DownloadMixin):
     ) -> List[Image.Image]:
 
         if isinstance(video_input, List):
-            if not video_input:
-                if return_fps:
-                    return video_input, fps
-                else:
-                    return video_input
             out_frames = []
             for v in video_input:
                 out_frames.append(self._load_image(v, convert_method=convert_method))

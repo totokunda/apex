@@ -28,11 +28,7 @@ def _iter_manifest_files() -> List[Path]:
     base = _manifest_dir()
     if not base.exists():
         return []
-    return [
-        p
-        for p in base.rglob("*.yml")
-        if p.is_file()
-    ]
+    return [p for p in base.rglob("*.yml") if p.is_file()]
 
 
 def _slugify(text: str) -> str:
@@ -99,7 +95,11 @@ def _build_index() -> Dict[str, str]:
 
     for path in _iter_manifest_files():
         engine, mtype, slug, version = _extract_minimal_info(path)
-        ver_str = f"{version[0]}.{version[1]}.{version[2]}" if version != (0, 0, 0) else "0.0.0"
+        ver_str = (
+            f"{version[0]}.{version[1]}.{version[2]}"
+            if version != (0, 0, 0)
+            else "0.0.0"
+        )
         # Construct keys and add
         candidates = []
         if engine and mtype and slug:
@@ -126,7 +126,12 @@ def _build_index() -> Dict[str, str]:
                 continue
             prev = latest.get(str(sk))
             if prev is None or version > prev[0:3]:
-                latest[str(sk)] = (version[0], version[1], version[2], str(path.resolve()))
+                latest[str(sk)] = (
+                    version[0],
+                    version[1],
+                    version[2],
+                    str(path.resolve()),
+                )
 
     # Overwrite :latest to the true highest version for each scope
     for sk, (ma, mi, pa, pth) in latest.items():
@@ -160,6 +165,7 @@ def resolve_manifest_reference(ref: str) -> Optional[str]:
         return str(p.resolve())
 
     idx = _build_index()
+
     # Allow implicit :latest
     if ":" not in ref:
         ref = ref + ":latest"
@@ -175,5 +181,3 @@ def resolve_manifest_reference(ref: str) -> Optional[str]:
 
     logger.debug(f"Manifest reference not found locally: {ref}")
     return None
-
-

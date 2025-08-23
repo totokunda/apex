@@ -74,7 +74,10 @@ MANIFEST_SCHEMA_V1: dict = {
                             "config_path": {"type": "string"},
                             "file_pattern": {"type": "string"},
                             "tag": {"type": "string"},
-                            "key_map": {"type": "object", "additional_properties": True},
+                            "key_map": {
+                                "type": "object",
+                                "additional_properties": True,
+                            },
                             "extra_kwargs": {
                                 "type": "object",
                                 "additional_properties": True,
@@ -227,7 +230,9 @@ MANIFEST_SCHEMA_V1: dict = {
                                         {"type": "array", "items": {"type": "string"}},
                                     ]
                                 },
-                                "inputs": {"$ref": "#/properties/spec/properties/ui/properties/simple/properties/inputs"},
+                                "inputs": {
+                                    "$ref": "#/properties/spec/properties/ui/properties/simple/properties/inputs"
+                                },
                             },
                             "additional_properties": True,
                         },
@@ -242,5 +247,3 @@ MANIFEST_SCHEMA_V1: dict = {
     },
     "additional_properties": True,
 }
-
-

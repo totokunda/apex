@@ -5,6 +5,7 @@ from packaging import version as pver
 from einops import rearrange
 from src.helpers.helpers import helpers
 
+
 class Camera(object):
     """Copied from https://github.com/hehao13/CameraCtrl/blob/main/inference.py"""
 
@@ -80,9 +81,10 @@ def ray_condition(K, c2w, H, W, device):
     # plucker = plucker.permute(0, 1, 4, 2, 3)
     return plucker
 
+
 @helpers("wan.fun_camera")
 class WanFunCamera:
-    
+
     def read_camera_poses(self, path: str):
         with open(path, "r") as f:
             lines = f.readlines()
@@ -148,6 +150,3 @@ class WanFunCamera:
 
     def __repr__(self):
         return self.__str__()
-
-
-

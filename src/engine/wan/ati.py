@@ -37,7 +37,10 @@ def ind_sel(target: torch.Tensor, ind: torch.Tensor, dim: int = 1):
     """
     assert (
         len(ind.shape) > dim
-    ), "Index must have the target dim, but get dim: %d, ind shape: %s" % (dim, str(ind.shape))
+    ), "Index must have the target dim, but get dim: %d, ind shape: %s" % (
+        dim,
+        str(ind.shape),
+    )
 
     target = target.expand(
         *tuple(
@@ -59,7 +62,9 @@ def ind_sel(target: torch.Tensor, ind: torch.Tensor, dim: int = 1):
     return torch.gather(target, dim=dim, index=ind_pad)
 
 
-def merge_final(vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: torch.Tensor):
+def merge_final(
+    vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: torch.Tensor
+):
     """
 
     :param vert_attr: [n, d] or [b, n, d] color or feature of each vertex
@@ -72,12 +77,16 @@ def merge_final(vert_attr: torch.Tensor, weight: torch.Tensor, vert_assign: torc
         assert vert_attr.shape[0] > vert_assign.max()
         # [n, d] ind: [b(optional), w, h, M]-> [b(optional), w, h, M, d]
         sel_attr = ind_sel(
-            vert_attr[(None,) * target_dim], vert_assign.type(torch.long), dim=target_dim
+            vert_attr[(None,) * target_dim],
+            vert_assign.type(torch.long),
+            dim=target_dim,
         )
     else:
         assert vert_attr.shape[1] > vert_assign.max()
         sel_attr = ind_sel(
-            vert_attr[(slice(None),) + (None,)*(target_dim-1)], vert_assign.type(torch.long), dim=target_dim
+            vert_attr[(slice(None),) + (None,) * (target_dim - 1)],
+            vert_assign.type(torch.long),
+            dim=target_dim,
         )
 
     # [b(optional), w, h, M]
@@ -100,7 +109,9 @@ def patch_motion(
         _, tracks, visible = torch.split(
             tracks, [1, 2, 1], dim=-1
         )  # (B, T, N, 2) | (B, T, N, 1)
-        tracks_n = tracks / torch.tensor([W / min(H, W), H / min(H, W)], device=tracks.device)
+        tracks_n = tracks / torch.tensor(
+            [W / min(H, W), H / min(H, W)], device=tracks.device
+        )
         tracks_n = tracks_n.clamp(-1, 1)
         visible = visible.clamp(0, 1)
 
@@ -127,9 +138,9 @@ def patch_motion(
         visible_pad = visible[:, 1:]
 
         visible_align = visible_pad.view(T - 1, 4, *visible_pad.shape[2:]).sum(1)
-        tracks_align = (tracks_pad * visible_pad).view(T - 1, 4, *tracks_pad.shape[2:]).sum(
-            1
-        ) / (visible_align + 1e-5)
+        tracks_align = (tracks_pad * visible_pad).view(
+            T - 1, 4, *tracks_pad.shape[2:]
+        ).sum(1) / (visible_align + 1e-5)
         dist_ = (
             (tracks_align[:, None, None] - grid[None, :, :, None]).pow(2).sum(-1)
         )  # T, H, W, N
@@ -142,23 +153,31 @@ def patch_motion(
 
     grid_mode = "bilinear"
     point_feature = torch.nn.functional.grid_sample(
-        vid[vae_divide[0]:].permute(1, 0, 2, 3)[:1],
+        vid[vae_divide[0] :].permute(1, 0, 2, 3)[:1],
         tracks_n[:, :1].type(vid.dtype),
         mode=grid_mode,
         padding_mode="zeros",
         align_corners=None,
     )
-    point_feature = point_feature.squeeze(0).squeeze(1).permute(1, 0) # N, C=16
+    point_feature = point_feature.squeeze(0).squeeze(1).permute(1, 0)  # N, C=16
 
-    out_feature = merge_final(point_feature, vert_weight, vert_index).permute(3, 0, 1, 2) # T - 1, H, W, C => C, T - 1, H, W
-    out_weight = vert_weight.sum(-1) # T - 1, H, W
+    out_feature = merge_final(point_feature, vert_weight, vert_index).permute(
+        3, 0, 1, 2
+    )  # T - 1, H, W, C => C, T - 1, H, W
+    out_weight = vert_weight.sum(-1)  # T - 1, H, W
 
     # out feature -> already soft weighted
-    mix_feature = out_feature + vid[vae_divide[0]:, 1:] * (1 - out_weight.clamp(0, 1))
+    mix_feature = out_feature + vid[vae_divide[0] :, 1:] * (1 - out_weight.clamp(0, 1))
 
-    out_feature_full = torch.cat([vid[vae_divide[0]:, :1], mix_feature], dim=1) # C, T, H, W
-    out_mask_full = torch.cat([torch.ones_like(out_weight[:1]), out_weight], dim=0)  # T, H, W
-    return torch.cat([out_mask_full[None].expand(vae_divide[0], -1, -1, -1), out_feature_full], dim=0)
+    out_feature_full = torch.cat(
+        [vid[vae_divide[0] :, :1], mix_feature], dim=1
+    )  # C, T, H, W
+    out_mask_full = torch.cat(
+        [torch.ones_like(out_weight[:1]), out_weight], dim=0
+    )  # T, H, W
+    return torch.cat(
+        [out_mask_full[None].expand(vae_divide[0], -1, -1, -1), out_feature_full], dim=0
+    )
 
 
 class WanATIEngine(WanBaseEngine):
@@ -199,8 +218,6 @@ class WanATIEngine(WanBaseEngine):
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
-        
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -222,7 +239,6 @@ class WanATIEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-
         loaded_image = self._load_image(image)
 
         loaded_image, height, width = self._aspect_ratio_resize(
@@ -230,7 +246,7 @@ class WanATIEngine(WanBaseEngine):
             max_area=height * width,
             mod_value=32 if expand_timesteps else 16,
         )
-        
+
         if isinstance(trajectory, str):
             preprocessor = self.helpers["wan.ati"]
             tracks = preprocessor(trajectory, width, height)
@@ -248,7 +264,6 @@ class WanATIEngine(WanBaseEngine):
         transformer_dtype = self.component_dtypes["transformer"]
 
         self.to_device(self.transformer)
-
 
         if boundary_ratio is None and not expand_timesteps:
             image_embeds = self.helpers["clip"](
@@ -376,8 +391,14 @@ class WanATIEngine(WanBaseEngine):
             latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
 
         if tracks is not None:
-            tracks = tracks.to(latent_condition).unsqueeze(0).repeat(num_videos, 1, 1, 1)
-            latent_condition = patch_motion(tracks, latent_condition.squeeze(0), training=False).unsqueeze(0).repeat(num_videos, 1, 1, 1, 1)
+            tracks = (
+                tracks.to(latent_condition).unsqueeze(0).repeat(num_videos, 1, 1, 1)
+            )
+            latent_condition = (
+                patch_motion(tracks, latent_condition.squeeze(0), training=False)
+                .unsqueeze(0)
+                .repeat(num_videos, 1, 1, 1, 1)
+            )
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(

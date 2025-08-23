@@ -1,31 +1,124 @@
 {
-    "_class_name": "AutoencoderKLLTXVideo",
+  "_class_name": "AutoencoderKLLTXVideo",
+    "dims": 3,
     "in_channels": 3,
     "out_channels": 3,
     "latent_channels": 128,
-    "block_out_channels": [128, 256, 512, 1024, 2048],
-    "down_block_types": [
-        "LTXVideo095DownBlock3D",
-        "LTXVideo095DownBlock3D",
-        "LTXVideo095DownBlock3D",
-        "LTXVideo095DownBlock3D"
-    ],
-    "decoder_block_out_channels": [256, 512, 1024],
-    "layers_per_block": [4, 6, 6, 2, 2],
-    "decoder_layers_per_block": [5, 5, 5, 5],
-    "spatio_temporal_scaling": [true, true, true, true],
-    "decoder_spatio_temporal_scaling": [true, true, true],
-    "decoder_inject_noise": [false, false, false, false],
-    "downsample_type": ["spatial", "temporal", "spatiotemporal", "spatiotemporal"],
-    "upsample_residual": [true, true, true],
-    "upsample_factor": [2, 2, 2],
-    "timestep_conditioning": true,
-    "patch_size": 4,
-    "patch_size_t": 1,
-    "resnet_norm_eps": 1e-6,
-    "scaling_factor": 1.0,
-    "encoder_causal": true,
-    "decoder_causal": false,
     "spatial_compression_ratio": 32,
-    "temporal_compression_ratio": 8
+    "temporal_compression_ratio": 8,
+    "encoder_blocks": [
+      [
+        "res_x",
+        {
+          "num_layers": 4
+        }
+      ],
+      [
+        "compress_space_res",
+        {
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 6
+        }
+      ],
+      [
+        "compress_time_res",
+        {
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 6
+        }
+      ],
+      [
+        "compress_all_res",
+        {
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 2
+        }
+      ],
+      [
+        "compress_all_res",
+        {
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 2
+        }
+      ]
+    ],
+    "decoder_blocks": [
+      [
+        "res_x",
+        {
+          "num_layers": 5,
+          "inject_noise": false
+        }
+      ],
+      [
+        "compress_all",
+        {
+          "residual": true,
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 5,
+          "inject_noise": false
+        }
+      ],
+      [
+        "compress_all",
+        {
+          "residual": true,
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 5,
+          "inject_noise": false
+        }
+      ],
+      [
+        "compress_all",
+        {
+          "residual": true,
+          "multiplier": 2
+        }
+      ],
+      [
+        "res_x",
+        {
+          "num_layers": 5,
+          "inject_noise": false
+        }
+      ]
+    ],
+    "scaling_factor": 1,
+    "norm_layer": "pixel_norm",
+    "patch_size": 4,
+    "latent_log_var": "uniform",
+    "use_quant_conv": false,
+    "causal_decoder": false,
+    "timestep_conditioning": true,
+    "normalize_latent_channels": false
 }

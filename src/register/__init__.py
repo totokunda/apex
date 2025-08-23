@@ -218,7 +218,7 @@ class ClassRegister:
             return cls
 
         return decorator
-    
+
     def register(self, key: str, cls: type):
         self._add(key, cls, self._allow_overwrite, True)
 

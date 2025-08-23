@@ -4,7 +4,7 @@ from src.engine import create_engine
 from diffusers.utils import export_to_video
 import torch
 
-engine = create_engine("wan", "manifest/wan/wan_t2v_1.3b.yml", "t2v", attention_type="sdpa", component_dtypes={"text_encoder": torch.float32})
+engine = create_engine("wan", "wan-2-1-1-3b-text-to-video-1-0-0-v1", "t2v", attention_type="flash")
 
 space_prompt = "Deep space: a velvet-black void studded with shimmering stars. Center frame: a colossal spiral galaxy, its cerulean and rose arms rotating against cosmic darkness. In the foreground, a sleek silver spacecraft hovers silently, its hull reflecting swirling nebulae.  \
 Through panoramic windows, two astronauts drift weightlessly, their visors glowing with the light of a nearby supernova. Suddenly, iridescent plasma tendrils burst from a distant pulsar, casting rippling shadows as electric arcs dance like liquid light through glittering interstellar dust. \
@@ -19,7 +19,7 @@ video = engine.run(
     width=832,
     duration=81,
     num_videos=1,
-    num_inference_steps=40,
+    num_inference_steps=30,
     guidance_scale=5.0
 )
 export_to_video(video[0], "test_wan_t2v_1_3b_space.mp4", fps=16, quality=8)

@@ -1,16 +1,15 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  name: LTX X2V 13B 0.9.7 FP8 Distilled
+  name: LTX X2V 13B 0.9.8 Distilled
   version: 1.0.0
-  description: LTX X2V 13B 0.9.7 FP8 Distilled is a 13B parameter model for any-to-video
+  description: LTX X2V 13B 0.9.8 Distilled is a 13B parameter model for any-to-video
     generation.
   tags:
   - ltx
   - x2v
   - 13b
-  - 0.9.7
-  - fp8
+  - 0.9.8
   - distilled
 spec:
   engine: ltx
@@ -33,18 +32,18 @@ spec:
     config_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/scheduler/scheduler_config.json
   - type: vae
     base: ltx
-    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-fp8.safetensors
+    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled.safetensors
   - type: transformer
     base: ltx.base
-    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-fp8.safetensors
+    model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled.safetensors
   defaults:
     run:
       num_inference_steps: 30
       guidance_scale: 1
       guidance_scale_stg: 0
       guidance_rescale: 1
-      return_latents: false
       timesteps: [1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250]
+      return_latents: false
       text_encoder_kwargs:
         max_sequence_length: 256
         use_mask_in_input: true

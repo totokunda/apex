@@ -8,7 +8,6 @@ from .base import HunyuanBaseEngine
 class HunyuanT2VEngine(HunyuanBaseEngine):
     """Hunyuan Text-to-Video Engine Implementation"""
 
-    @torch.inference_mode()
     def run(
         self,
         prompt: Union[List[str], str],

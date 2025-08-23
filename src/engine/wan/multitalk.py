@@ -8,6 +8,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from src.utils.models.wan import match_and_blend_colors
 import numpy as np
 
+
 class WanMultitalkEngine(WanBaseEngine):
     """WAN MultiTalk (Audio-driven) Engine Implementation"""
 
@@ -70,20 +71,22 @@ class WanMultitalkEngine(WanBaseEngine):
         """
 
         num_frames = self._parse_num_frames(duration, fps)
-        
-        assert image is not None or video is not None, "Either image or video must be provided"
- 
+
+        assert (
+            image is not None or video is not None
+        ), "Either image or video must be provided"
+
         if image is not None:
             loaded_image = self._load_image(image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width, mod_value=16
             )
-            
+
             cond_image = self.video_processor.preprocess(
                 loaded_image, height=height, width=width
             ).to(self.device, dtype=torch.float32)
             cond_image = cond_image.unsqueeze(2)
-        
+
         if video is not None:
             input_video = self._load_video(video)
             image = input_video[0]
@@ -92,7 +95,7 @@ class WanMultitalkEngine(WanBaseEngine):
                     frame, max_area=height * width, mod_value=16
                 )
                 input_video[idx] = frame
-            
+
             loaded_image = input_video[0]
             input_video = self.video_processor.preprocess_video(
                 input_video, height=height, width=width
@@ -100,7 +103,7 @@ class WanMultitalkEngine(WanBaseEngine):
             cond_image = input_video[:, :, :1, :, :]
         else:
             input_video = None
-        
+
         cond_frame = None
 
         original_color_reference = None
@@ -164,7 +167,7 @@ class WanMultitalkEngine(WanBaseEngine):
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-        
+
         self.transformer = torch.compile(self.transformer)
 
         batch_size = num_videos
@@ -232,7 +235,7 @@ class WanMultitalkEngine(WanBaseEngine):
             image_embeds = clip_processor(loaded_image, hidden_states_layer=-2).to(
                 transformer_dtype
             )
-            
+
             if offload:
                 self._offload(clip_processor)
 
@@ -279,7 +282,11 @@ class WanMultitalkEngine(WanBaseEngine):
                 )
                 latent_motion_frames = motion_latents[0]
             else:
-                latent_motion_frames = latent_condition[:, :, :cur_motion_frames_latent_num][0]  # C T H W
+                latent_motion_frames = latent_condition[
+                    :, :, :cur_motion_frames_latent_num
+                ][
+                    0
+                ]  # C T H W
             latent_condition = torch.concat(
                 [mask_lat_size.to(latent_condition), latent_condition], dim=1
             )  # B 4+C T H W
@@ -381,17 +388,16 @@ class WanMultitalkEngine(WanBaseEngine):
             is_first_clip = False
             cur_motion_frames_num = motion_frames
             cond_frame = (
-                    videos[:, :, -cur_motion_frames_num:].to(torch.float32).to(self.device)
+                videos[:, :, -cur_motion_frames_num:].to(torch.float32).to(self.device)
             )
-            
+
             if video is None:
                 loaded_image = cond_frame[:, :, -1, :, :]
             else:
                 # Clamp index to available frames
                 next_src_idx = min(audio_start_idx, input_video.shape[2] - 1)
                 loaded_image = input_video[:, :, next_src_idx, :, :]
-                
-                
+
             loaded_image = loaded_image.squeeze(0).permute(1, 2, 0)
 
             loaded_image = Image.fromarray(
@@ -443,7 +449,9 @@ class WanMultitalkEngine(WanBaseEngine):
             if max_num_frames > num_frames and sum(miss_lengths) > 0:
                 # split video frames
                 if using_video_input:
-                    gen_video_samples = gen_video_samples[:, :, : full_audio_embs[0].shape[0]]
+                    gen_video_samples = gen_video_samples[
+                        :, :, : full_audio_embs[0].shape[0]
+                    ]
                 else:
                     gen_video_samples = gen_video_samples[:, :, : -1 * miss_lengths[0]]
 

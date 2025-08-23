@@ -6,10 +6,12 @@ from .i2v import SkyReelsI2VEngine
 from .df import SkyReelsDFEngine
 from src.engine.wan import WanEngine
 
+
 class ModelType(EnumType):
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
     DF = "df"  # diffusion forcing
+
 
 class SkyReelsEngine(WanEngine):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2V, **kwargs):

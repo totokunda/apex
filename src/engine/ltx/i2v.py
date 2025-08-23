@@ -20,10 +20,11 @@ class LTXI2VEngine(LTXBaseEngine):
         num_videos: int = 1,
         seed: int | None = None,
         fps: int = 25,
-        use_cfg_guidance: bool = True,
         text_encoder_kwargs: Dict[str, Any] = {},
-        guidance_scale: float = 5.0,
-        guidance_rescale: float = 0.0,
+        guidance_scale: float | List[float] = 5.0,
+        guidance_rescale: float | List[float] = 0.0,
+        guidance_scale_stg: float | List[float] = 0.0,
+        guidance_timesteps: List[int] | None = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -33,9 +34,7 @@ class LTXI2VEngine(LTXBaseEngine):
         return_latents: bool = False,
         decode_timestep: Union[float, List[float]] = 0.0,
         decode_noise_scale: Optional[Union[float, List[float]]] = None,
-        **kwargs,
     ):
-        postprocessor_kwargs = kwargs.get("postprocessor_kwargs", None)
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -57,7 +56,12 @@ class LTXI2VEngine(LTXBaseEngine):
             **text_encoder_kwargs,
         )
 
-        if negative_prompt is not None and use_cfg_guidance:
+        if (
+            negative_prompt is not None
+            and guidance_scale != 1
+            and guidance_scale != [1]
+            and guidance_scale != [1.0]
+        ):
             negative_prompt_embeds, negative_prompt_attention_mask = (
                 self.text_encoder.encode(
                     negative_prompt,
@@ -72,7 +76,7 @@ class LTXI2VEngine(LTXBaseEngine):
                 prompt_embeds
             ), torch.zeros_like(prompt_attention_mask)
 
-        if use_cfg_guidance:
+        if guidance_scale != 1 and guidance_scale != [1] and guidance_scale != [1.0]:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_attention_mask = torch.cat(
                 [negative_prompt_attention_mask, prompt_attention_mask], dim=0
@@ -169,7 +173,7 @@ class LTXI2VEngine(LTXBaseEngine):
 
         scheduler = self.scheduler
 
-        if use_cfg_guidance:
+        if guidance_scale != 1 and guidance_scale != [1] and guidance_scale != [1.0]:
             conditioning_mask = torch.cat([conditioning_mask, conditioning_mask])
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
@@ -184,7 +188,6 @@ class LTXI2VEngine(LTXBaseEngine):
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler,
             num_inference_steps,
-            self.device,
             timesteps,
             mu=mu,
             sigmas=sigmas if not timesteps else None,
@@ -200,6 +203,41 @@ class LTXI2VEngine(LTXBaseEngine):
             self.vae_scale_factor_spatial,
             self.vae_scale_factor_spatial,
         )
+
+        if guidance_timesteps:
+            guidance_mapping = []
+            for timestep in timesteps:
+                indices = [
+                    i for i, val in enumerate(guidance_timesteps) if val <= timestep
+                ]
+                # assert len(indices) > 0, f"No guidance timestep found for {timestep}"
+                guidance_mapping.append(
+                    indices[0] if len(indices) > 0 else (len(guidance_timesteps) - 1)
+                )
+
+        # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
+        # corresponds to doing no classifier free guidance.
+        if not isinstance(guidance_scale, List):
+            guidance_scale = [guidance_scale] * len(timesteps)
+        else:
+            guidance_scale = [
+                guidance_scale[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
+
+        if not isinstance(guidance_scale_stg, List):
+            guidance_scale_stg = [guidance_scale_stg] * len(timesteps)
+        else:
+            guidance_scale_stg = [
+                guidance_scale_stg[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
+
+        if not isinstance(guidance_rescale, List):
+            guidance_rescale = [guidance_rescale] * len(timesteps)
+        else:
+            guidance_rescale = [
+                guidance_rescale[guidance_mapping[i]] for i in range(len(timesteps))
+            ]
 
         latents = self.denoise(
             latents=latents,
@@ -219,8 +257,8 @@ class LTXI2VEngine(LTXBaseEngine):
             rope_interpolation_scale=rope_interpolation_scale,
             attention_kwargs=attention_kwargs,
             guidance_rescale=guidance_rescale,
-            use_cfg_guidance=use_cfg_guidance,
             guidance_scale=guidance_scale,
+            guidance_scale_stg=guidance_scale_stg,
             render_on_step=render_on_step,
             transformer_dtype=transformer_dtype,
             render_on_step_callback=render_on_step_callback,
@@ -238,5 +276,4 @@ class LTXI2VEngine(LTXBaseEngine):
             generator=generator,
             decode_timestep=decode_timestep,
             decode_noise_scale=decode_noise_scale,
-            postprocessor_kwargs=postprocessor_kwargs,
         )

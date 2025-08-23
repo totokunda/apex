@@ -7,12 +7,12 @@ import re
 import html
 from src.utils.defaults import DEFAULT_CACHE_PATH, DEFAULT_COMPONENTS_PATH
 import os
+from src.mixins.to_mixin import ToMixin
 from src.mixins.cache_mixin import CacheMixin
 from src.utils.module import find_class_recursive
 import transformers
 
-
-class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
+class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
         self,
         config: Dict[str, Any],
@@ -20,6 +20,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         enable_cache: bool = True,
         cache_file: str = None,
         max_cache_size: int = 100,
+        device: torch.device | None = None,
         *args,
         **kwargs,
     ):
@@ -33,8 +34,12 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         self.tokenizer_path = config.get("tokenizer_path", None)
         self.model_config = config.get("config", {})
         self.config = config
-        self.enable_cache = enable_cache
+        self.enable_cache = config.get("enable_cache", enable_cache)
+        self.load_dtype = config.get("load_dtype", None)
+        self.dtype = config.get("dtype", None)
+        self.module_name = config.get("module_name", "transformers")
         self.cache_file = cache_file
+        self.device = device
         self.max_cache_size = max_cache_size
         if self.enable_cache and self.cache_file is None:
             self.cache_file = os.path.join(
@@ -63,7 +68,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         self.model_loaded = False
 
     def load_model(self, no_weights: bool = False):
-        return self._load_model(
+        model =  self._load_model(
             {
                 "config": self.model_config,
                 "config_path": self.config_path,
@@ -72,11 +77,17 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
                 "type": "text_encoder",
                 "gguf_kwargs": self.config.get("gguf_kwargs", {}),
             },
-            module_name="transformers",
+            load_dtype=self.load_dtype,
+            module_name=self.module_name,
             no_weights=no_weights,
             key_map=self.config.get("key_map", {}),
             extra_kwargs=self.config.get("extra_kwargs", {}),
         )
+        
+        self.to_device(model, device=self.device)
+        self.to_dtype(model, self.dtype)
+        
+        return model
 
     def basic_clean(self, text):
         text = ftfy.fix_text(text)
@@ -94,7 +105,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             text = text.lower()
         return text
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def encode(
         self,
         text: str | List[str],
@@ -118,11 +129,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             text = [text]
         if clean_text:
             text = [self.prompt_clean(t, lower_case=lower_case) for t in text]
-            
+
         if dtype is not None:
             if isinstance(dtype, str):
                 dtype = getattr(torch, dtype.lstrip("torch."))
-        
+
         kwargs = {
             "text": text,
             "max_sequence_length": max_sequence_length,
@@ -165,7 +176,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
         if not self.model_loaded:
             self.model = self.load_model(no_weights=False)
             self.model_loaded = True
-
+            
+        
         text_inputs = self.tokenizer(
             text,
             padding="max_length" if pad_to_max_length else "longest",
@@ -175,7 +187,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             return_tensors="pt",
             return_attention_mask=True,
         )
-
+        
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
         # mask = mask.bool()
@@ -198,8 +210,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             inputs["attention_mask"] = mask.to(device=self.model.device)
 
         result = self.model(
-            **inputs, output_hidden_states=output_type == "hidden_states"
+            **inputs, #output_hidden_states=output_type == "hidden_states"
         )
+        
 
         if output_type == "hidden_states":
             prompt_embeds = result.last_hidden_state
@@ -209,6 +222,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin):
             raise ValueError(f"Invalid output type: {output_type}")
 
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        
+        
 
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)

@@ -14,7 +14,11 @@ from loguru import logger
 from src.utils.defaults import DEFAULT_POSTPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
 from src.postprocess.rife.module import Model
 from src.postprocess.rife.ssim import ssim_matlab
-from src.postprocess.base import BasePostprocessor, PostprocessorCategory, postprocessor_registry 
+from src.postprocess.base import (
+    BasePostprocessor,
+    PostprocessorCategory,
+    postprocessor_registry,
+)
 from PIL import Image
 from collections import deque
 from tqdm import tqdm
@@ -45,18 +49,18 @@ class RifePostprocessor(BasePostprocessor):
 
     def __init__(
         self,
-        engine = None,
+        engine=None,
         # Targeting / control
         target_fps: Optional[float] = None,
-        exp: Optional[int] = None,            # if set, overrides target_fps
-        scale: float = 1.0,                   # RIFE's 'scale' (try 0.5 for UHD)
+        exp: Optional[int] = None,  # if set, overrides target_fps
+        scale: float = 1.0,  # RIFE's 'scale' (try 0.5 for UHD)
         # SSIM gating (optional, mirrors RIFE script behavior)
-        ssim_static_thresh: float = 0.996,    # treat near-identical frames as static
-        ssim_hardcut_thresh: float = 0.20,    # when < thresh, fill with duplicates
+        ssim_static_thresh: float = 0.996,  # treat near-identical frames as static
+        ssim_hardcut_thresh: float = 0.20,  # when < thresh, fill with duplicates
         # Weights / code locations
         device: torch.device = DEFAULT_DEVICE,
         save_path: str = DEFAULT_POSTPROCESSOR_SAVE_PATH,
-        model_dir: str = 'https://drive.google.com/uc?id=1gViYvvQrtETBgU1w8axZSsr7YUuw31uy',
+        model_dir: str = "https://drive.google.com/uc?id=1gViYvvQrtETBgU1w8axZSsr7YUuw31uy",
         **kwargs: Any,
     ):
         super().__init__(engine, PostprocessorCategory.FRAME_INTERPOLATION, **kwargs)
@@ -71,21 +75,21 @@ class RifePostprocessor(BasePostprocessor):
         # Build model
         self.device = device
         self.model = _load_rife_model(model_dir, self.device, logger=logger)
-        
+
     def download_rife(self, model_dir: str, save_path: str):
         if self._is_url(model_dir):
             # check if the save_path exists
-            save_rife_path = os.path.join(save_path, 'rife')
-            if os.path.exists(os.path.join(save_rife_path, 'train_log')):
-                return os.path.join(save_rife_path, 'train_log')
+            save_rife_path = os.path.join(save_path, "rife")
+            if os.path.exists(os.path.join(save_rife_path, "train_log")):
+                return os.path.join(save_rife_path, "train_log")
             os.makedirs(save_rife_path, exist_ok=True)
             path = self._download_from_url(model_dir, save_path=save_path)
             # extract from train_log directory and only extract the flownet.pkl file
 
-            with zipfile.ZipFile(path, 'r') as zip_ref:
-                zip_ref.extract('train_log/flownet.pkl', save_rife_path)
+            with zipfile.ZipFile(path, "r") as zip_ref:
+                zip_ref.extract("train_log/flownet.pkl", save_rife_path)
             os.remove(path)
-            return os.path.join(save_rife_path, 'train_log')
+            return os.path.join(save_rife_path, "train_log")
         else:
             return model_dir
 
@@ -110,13 +114,18 @@ class RifePostprocessor(BasePostprocessor):
         self.target_fps = kwargs.get("target_fps", self.target_fps)
         self.exp = kwargs.get("exp", self.exp)
         self.scale = kwargs.get("scale", self.scale)
-        self.ssim_static_thresh = kwargs.get("ssim_static_thresh", self.ssim_static_thresh)
-        self.ssim_hardcut_thresh = kwargs.get("ssim_hardcut_thresh", self.ssim_hardcut_thresh)
-
+        self.ssim_static_thresh = kwargs.get(
+            "ssim_static_thresh", self.ssim_static_thresh
+        )
+        self.ssim_hardcut_thresh = kwargs.get(
+            "ssim_hardcut_thresh", self.ssim_hardcut_thresh
+        )
 
         # ---- 2) Determine multi (like argparse logic) ----
         # Priority: explicit kwargs.multi -> exp (2**exp if exp != 1) -> target_fps vs orig_fps -> default 2
-        multi = int(kwargs.get("multi", 0)) if kwargs.get("multi", None) is not None else 0
+        multi = (
+            int(kwargs.get("multi", 0)) if kwargs.get("multi", None) is not None else 0
+        )
         if multi < 2:
             if self.exp is not None:
                 multi = (2 ** int(self.exp)) if int(self.exp) != 1 else 2
@@ -136,7 +145,9 @@ class RifePostprocessor(BasePostprocessor):
                 arr = np.expand_dims(arr, 2)
             if arr.shape[2] == 1:
                 arr = np.repeat(arr, 3, axis=2)  # grayscale → RGB
-            t = torch.from_numpy(arr.transpose(2, 0, 1)).to(dev).float() / 255.0  # C,H,W
+            t = (
+                torch.from_numpy(arr.transpose(2, 0, 1)).to(dev).float() / 255.0
+            )  # C,H,W
             t_list.append(t.unsqueeze(0))
         seq = torch.cat(t_list, dim=0)  # (F, C, H, W)
 
@@ -166,7 +177,10 @@ class RifePostprocessor(BasePostprocessor):
                 return []
             if version >= 3.9:
                 # Evenly spaced t in (0,1) with n samples
-                return [self.model.inference(I0, I1, (i + 1) * 1.0 / (n + 1), self.scale) for i in range(n)]
+                return [
+                    self.model.inference(I0, I1, (i + 1) * 1.0 / (n + 1), self.scale)
+                    for i in range(n)
+                ]
             else:
                 # Classic recursive midpoint
                 mid = self.model.inference(I0, I1, self.scale)
@@ -174,7 +188,7 @@ class RifePostprocessor(BasePostprocessor):
                     return [mid]
                 left = make_inference(I0, mid, n // 2)
                 right = make_inference(mid, I1, n // 2)
-                return ([*left, mid, *right] if (n % 2) else [*left, *right])
+                return [*left, mid, *right] if (n % 2) else [*left, *right]
 
         # ---- 6) SSIM helper (32x32 like script) ----
         def to_small(x: torch.Tensor) -> torch.Tensor:
@@ -187,6 +201,7 @@ class RifePostprocessor(BasePostprocessor):
             b32 = to_small(b)
             try:
                 from src.postprocess.rife.ssim import ssim_matlab as _ssim
+
                 return float(_ssim(a32[:, :3], b32[:, :3]))
             except Exception:
                 # Lightweight proxy if module not importable
@@ -194,14 +209,16 @@ class RifePostprocessor(BasePostprocessor):
 
         # ---- 7) Main loop (mirrors script ordering & gates) ----
         # Use a deque so we can "push back" the real next frame when we insert a synthesized mid-frame on static scenes.
-        remaining = deque([seq[i : i + 1, ...] for i in range(1, F_total)])  # list of 1,C,H,W
+        remaining = deque(
+            [seq[i : i + 1, ...] for i in range(1, F_total)]
+        )  # list of 1,C,H,W
         cur = seq[0:1, ...]  # 1,C,H,W
         cur_pad = pad_image(cur)
 
         out_frames: List[torch.Tensor] = []
         # The script writes the first original frame before any inserts of the first pair.
         out_frames.append(unpad_image(cur_pad))  # write first frame
-        
+
         pbar = tqdm(total=F_total, desc="RIFE Interpolation")
 
         while True:
@@ -216,8 +233,11 @@ class RifePostprocessor(BasePostprocessor):
             # Branching like the script
             if ssim > 0.996:
                 # Read a new frame: here we synthesize the MID and push the real nxt back for the next iteration
-                mid_pad = self.model.inference(cur_pad, nxt_pad, self.scale) if version < 3.9 \
-                          else self.model.inference(cur_pad, nxt_pad, 0.5, self.scale)
+                mid_pad = (
+                    self.model.inference(cur_pad, nxt_pad, self.scale)
+                    if version < 3.9
+                    else self.model.inference(cur_pad, nxt_pad, 0.5, self.scale)
+                )
                 # Recompute ssim as in script (not used for branching beyond parity, but we keep it)
                 _ = ssim_val(cur_pad, mid_pad)
 
@@ -258,10 +278,15 @@ class RifePostprocessor(BasePostprocessor):
                 continue
 
         # ---- 8) Stack & normalize to [-1,1], (1, C, F_out, H, W) ----
-        torch_frames = torch.stack(out_frames, dim=0)          # (F_out, 1, C, H, W)
-        torch_frames = torch_frames.squeeze(1)                 # (F_out, C, H, W)
+        torch_frames = torch.stack(out_frames, dim=0)  # (F_out, 1, C, H, W)
+        torch_frames = torch_frames.squeeze(1)  # (F_out, C, H, W)
         pbar.close()
         frames = torch_frames.clamp(0, 1)
         # convert to PIL Images
-        frames = [Image.fromarray((frame.cpu().numpy().transpose(1, 2, 0) * 255.0).astype(np.uint8)) for frame in frames]
+        frames = [
+            Image.fromarray(
+                (frame.cpu().numpy().transpose(1, 2, 0) * 255.0).astype(np.uint8)
+            )
+            for frame in frames
+        ]
         return frames

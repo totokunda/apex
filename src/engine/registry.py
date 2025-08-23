@@ -189,7 +189,7 @@ class UniversalEngine:
         self.engine_type = engine_type
         self.model_type = model_type
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def run(self, input_nodes: List[UINode] | None = None, **kwargs):
         """Run the engine with given parameters"""
         return self.engine.run(input_nodes=input_nodes, **kwargs)

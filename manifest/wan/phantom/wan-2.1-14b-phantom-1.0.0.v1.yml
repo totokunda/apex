@@ -31,9 +31,8 @@ spec:
     config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
   - type: transformer
     base: wan.fun
-    model_path: bytedance-research/Phantom
-    file_patttern: *.safetensors
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers/resolve/main/transformer/config.json
+    model_path: https://huggingface.co/bytedance-research/Phantom/resolve/main/Phantom-Wan-1.3B.safetensors
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/transformer/config.json
     config: 
       _class_name: WanFunTransformer3DModel
   - type: helper

@@ -14,6 +14,7 @@ from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 import torch.nn as nn
 
+
 def _expand_input_ids_with_image_tokens(
     text_input_ids,
     prompt_attention_mask,

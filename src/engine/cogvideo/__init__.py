@@ -76,14 +76,14 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             self.implementation_engine = CogVideoT2VEngine(self)
         elif self.model_type == ModelType.I2V:
             self.implementation_engine = CogVideoI2VEngine(self)
-        elif self.model_type == ModelType.FUN_CONTROL:
-            self.implementation_engine = CogVideoFunControlEngine(self)
-        elif self.model_type == ModelType.FUN_INP:
-            self.implementation_engine = CogVideoFunInpEngine(self)
+        elif self.model_type == ModelType.CONTROL:
+            self.implementation_engine = CogVideoControlEngine(self)
+        elif self.model_type == ModelType.INP:
+            self.implementation_engine = CogVideoInpEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def run(
         self,
         input_nodes: List[UINode] = None,

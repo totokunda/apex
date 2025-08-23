@@ -23,7 +23,7 @@ class WanBaseEngine:
     @property
     def text_encoder(self):
         return self.main_engine.text_encoder
-    
+
     @text_encoder.setter
     def text_encoder(self, text_encoder):
         self.main_engine.text_encoder = text_encoder
@@ -31,7 +31,7 @@ class WanBaseEngine:
     @property
     def transformer(self):
         return self.main_engine.transformer
-    
+
     @transformer.setter
     def transformer(self, transformer):
         self.main_engine.transformer = transformer
@@ -39,7 +39,7 @@ class WanBaseEngine:
     @property
     def scheduler(self):
         return self.main_engine.scheduler
-    
+
     @scheduler.setter
     def scheduler(self, scheduler):
         self.main_engine.scheduler = scheduler
@@ -47,7 +47,7 @@ class WanBaseEngine:
     @property
     def vae(self):
         return self.main_engine.vae
-    
+
     @vae.setter
     def vae(self, vae):
         self.main_engine.vae = vae
@@ -141,7 +141,6 @@ class WanBaseEngine:
 
         return control
 
-
     def resize_and_centercrop(self, cond_image, target_size):
         """
         Resize image or tensor to the target size without padding.
@@ -193,4 +192,3 @@ class WanBaseEngine:
             cropped_tensor = cropped_tensor[:, :, None, :, :]
 
         return cropped_tensor
-
