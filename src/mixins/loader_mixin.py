@@ -74,9 +74,14 @@ class LoaderMixin(DownloadMixin):
             config.update(self.fetch_config(config_path))
         if component.get("config"):
             config.update(component.get("config"))
-        
 
-        if (not config or (os.path.isdir(model_path) and os.path.exists(os.path.join(model_path, "config.json")))) and not component.get("extra_model_paths"):
+        if (
+            not config
+            or (
+                os.path.isdir(model_path)
+                and os.path.exists(os.path.join(model_path, "config.json"))
+            )
+        ) and not component.get("extra_model_paths"):
             if config:
                 # replace the config.json with the config
                 config_path = os.path.join(model_path, "config.json")
@@ -90,6 +95,7 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["dtype"] = load_dtype
             else:
                 extra_kwargs["torch_dtype"] = load_dtype
+
             model = model_class.from_pretrained(model_path, **extra_kwargs)
             return model
 

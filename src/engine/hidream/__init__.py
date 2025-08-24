@@ -1,17 +1,15 @@
 from src.utils.type import EnumType
 from src.engine.base_engine import BaseEngine
-from .t2i import QwenImageT2IEngine
-from .edit import QwenImageEditEngine
+from .t2i import HidreamT2IEngine
 from diffusers.image_processor import VaeImageProcessor
-from src.denoise.qwenimage_denoise import QwenImageDenoise
+from src.denoise.hidream_denoise import HidreamDenoise
 
 
 class ModelType(EnumType):
     T2I = "t2i"  # text to image
-    EDIT = "edit"  # edit
 
 
-class QwenImageEngine(BaseEngine, QwenImageDenoise):
+class HidreamEngine(BaseEngine, HidreamDenoise):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2I, **kwargs):
 
         super().__init__(yaml_path, model_type=model_type, **kwargs)
@@ -19,6 +17,7 @@ class QwenImageEngine(BaseEngine, QwenImageDenoise):
         self.vae_scale_factor = (
             2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
         )
+        self.default_sample_size = 128
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor * 2
         )
@@ -31,14 +30,12 @@ class QwenImageEngine(BaseEngine, QwenImageDenoise):
     def _init_implementation_engine(self):
         """Initialize the specific implementation engine based on model type"""
         if self.model_type == ModelType.T2I:
-            self.implementation_engine = QwenImageT2IEngine(self)
-        elif self.model_type == ModelType.EDIT:
-            self.implementation_engine = QwenImageEditEngine(self)
+            self.implementation_engine = HidreamT2IEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 
     def __str__(self):
-        return f"QwenImageEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
+        return f"HidreamEngine(config={self.config}, device={self.device}, model_type={self.model_type})"
 
     def __repr__(self):
         return self.__str__()

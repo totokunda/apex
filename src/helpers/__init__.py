@@ -7,6 +7,7 @@ from src.helpers.wan.fun_camera import WanFunCamera
 from src.helpers.wan.multitalk import WanMultiTalk
 from src.helpers.wan.recam import WanRecam
 from src.helpers.ltx import SymmetricPatchifier, Patchifier
+from src.helpers.hidream.llama import HidreamLlama
 
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "WanRecam",
     "SymmetricPatchifier",
     "Patchifier",
+    "HidreamLlama",
 ]

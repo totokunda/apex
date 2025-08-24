@@ -72,7 +72,7 @@ class LTXVideoAttentionProcessor2_0:
             )
 
         query = attn.to_q(hidden_states)
-        query = attn.q_norm(query)  
+        query = attn.q_norm(query)
 
         if encoder_hidden_states is not None:
             if attn.norm_cross:

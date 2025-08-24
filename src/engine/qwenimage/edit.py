@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List
 from PIL import Image
 from .base import QwenImageBaseEngine
 
+
 class QwenImageEditEngine(QwenImageBaseEngine):
     """QwenImage Edit Engine Implementation"""
 

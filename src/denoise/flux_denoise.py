@@ -2,22 +2,19 @@ import torch
 from src.utils.type import EnumType
 
 
-class QwenImageDenoiseType(EnumType):
+class FluxDenoiseType(EnumType):
     BASE = "base"
 
 
-class QwenImageDenoise:
+class FluxDenoise:
     def __init__(
-        self,
-        denoise_type: QwenImageDenoiseType = QwenImageDenoiseType.BASE,
-        *args,
-        **kwargs,
+        self, denoise_type: FluxDenoiseType = FluxDenoiseType.BASE, *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
 
     def denoise(self, *args, **kwargs):
-        if self.denoise_type == QwenImageDenoiseType.BASE:
+        if self.denoise_type == FluxDenoiseType.BASE:
             return self.base_denoise(*args, **kwargs)
         else:
             raise ValueError(f"Invalid denoise type: {self.denoise_type}")
@@ -28,56 +25,63 @@ class QwenImageDenoise:
         num_inference_steps = kwargs.get("num_inference_steps")
         guidance = kwargs.get("guidance")
         prompt_embeds = kwargs.get("prompt_embeds")
-        prompt_embeds_mask = kwargs.get("prompt_embeds_mask")
-        img_shapes = kwargs.get("img_shapes")
-        use_cfg_guidance = kwargs.get("use_cfg_guidance")
+        pooled_prompt_embeds = kwargs.get("pooled_prompt_embeds")
         negative_prompt_embeds = kwargs.get("negative_prompt_embeds")
-        negative_prompt_embeds_mask = kwargs.get("negative_prompt_embeds_mask")
-        txt_seq_lens = kwargs.get("txt_seq_lens")
-        negative_txt_seq_lens = kwargs.get("negative_txt_seq_lens")
-        attention_kwargs = kwargs.get("attention_kwargs")
+        negative_pooled_prompt_embeds = kwargs.get("negative_pooled_prompt_embeds")
+        true_cfg_scale = kwargs.get("true_cfg_scale")
+        latent_image_ids = kwargs.get("latent_image_ids")
+        text_ids = kwargs.get("text_ids")
+        negative_text_ids = kwargs.get("negative_text_ids")
+        image_embeds = kwargs.get("image_embeds")
+        negative_image_embeds = kwargs.get("negative_image_embeds")
+        num_warmup_steps = kwargs.get("num_warmup_steps")
+        use_cfg_guidance = kwargs.get("use_cfg_guidance")
+        joint_attention_kwargs = kwargs.get("joint_attention_kwargs")
         render_on_step = kwargs.get("render_on_step")
         render_on_step_callback = kwargs.get("render_on_step_callback")
-        num_warmup_steps = kwargs.get("num_warmup_steps")
-        true_cfg_scale = kwargs.get("true_cfg_scale")
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+
+                if image_embeds is not None:
+                    joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
+
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
                         hidden_states=latents,
                         timestep=timestep / 1000,
                         guidance=guidance,
-                        encoder_hidden_states_mask=prompt_embeds_mask,
+                        pooled_projections=pooled_prompt_embeds,
                         encoder_hidden_states=prompt_embeds,
-                        img_shapes=img_shapes,
-                        txt_seq_lens=txt_seq_lens,
-                        attention_kwargs=attention_kwargs,
+                        txt_ids=text_ids,
+                        img_ids=latent_image_ids,
+                        joint_attention_kwargs=joint_attention_kwargs,
                         return_dict=False,
                     )[0]
 
                 if use_cfg_guidance:
+                    if negative_image_embeds is not None:
+                        joint_attention_kwargs["ip_adapter_image_embeds"] = (
+                            negative_image_embeds
+                        )
+
                     with self.transformer.cache_context("uncond"):
                         neg_noise_pred = self.transformer(
                             hidden_states=latents,
                             timestep=timestep / 1000,
                             guidance=guidance,
-                            encoder_hidden_states_mask=negative_prompt_embeds_mask,
+                            pooled_projections=negative_pooled_prompt_embeds,
                             encoder_hidden_states=negative_prompt_embeds,
-                            img_shapes=img_shapes,
-                            txt_seq_lens=negative_txt_seq_lens,
-                            attention_kwargs=attention_kwargs,
+                            txt_ids=negative_text_ids,
+                            img_ids=latent_image_ids,
+                            joint_attention_kwargs=joint_attention_kwargs,
                             return_dict=False,
                         )[0]
-                    comb_pred = neg_noise_pred + true_cfg_scale * (
+                    noise_pred = neg_noise_pred + true_cfg_scale * (
                         noise_pred - neg_noise_pred
                     )
-
-                    cond_norm = torch.norm(noise_pred, dim=-1, keepdim=True)
-                    noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
-                    noise_pred = comb_pred * (cond_norm / noise_norm)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
@@ -87,6 +91,7 @@ class QwenImageDenoise:
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
+                        # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
                 if render_on_step and render_on_step_callback:

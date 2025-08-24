@@ -5,6 +5,7 @@ from src.ui.nodes import UINode
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
 
+
 class EngineType(Enum):
     """Supported engine types"""
 
@@ -18,6 +19,8 @@ class EngineType(Enum):
     SKYREELS = "skyreels"
     COSMOS2 = "cosmos2"
     QWENIMAGE = "qwenimage"
+    FLUX = "flux"
+    HIDREAM = "hidream"
 
 
 class EngineRegistry:
@@ -106,9 +109,27 @@ class EngineRegistry:
         # Register QwenImage engine
         try:
             from src.engine.qwenimage import QwenImageEngine
+
             self._engines[EngineType.QWENIMAGE.value] = QwenImageEngine
         except ImportError as e:
             print(f"Warning: Could not import QwenImage engine: {e}")
+
+        # Register Flux engine
+
+        try:
+            from src.engine.flux import FluxEngine
+
+            self._engines[EngineType.FLUX.value] = FluxEngine
+        except ImportError as e:
+            print(f"Warning: Could not import Flux engine: {e}")
+
+        # Register Hidream engine
+        try:
+            from src.engine.hidream import HidreamEngine
+
+            self._engines[EngineType.HIDREAM.value] = HidreamEngine
+        except ImportError as e:
+            print(f"Warning: Could not import Hidream engine: {e}")
 
     def get_engine_class(self, engine_type: str) -> Optional[Type]:
         """Get engine class by type"""
@@ -169,6 +190,15 @@ class EngineRegistry:
             return ModelType(model_type)
         elif engine_type == EngineType.COSMOS2.value:
             from src.engine.cosmos2 import ModelType
+
+            return ModelType(model_type)
+        elif engine_type == EngineType.FLUX.value:
+            from src.engine.flux import ModelType
+
+            return ModelType(model_type)
+
+        elif engine_type == EngineType.HIDREAM.value:
+            from src.engine.hidream import ModelType
 
             return ModelType(model_type)
         else:
@@ -232,6 +262,8 @@ def create_engine(
         "mochi",
         "skyreels",
         "cosmos2",
+        "flux",
+        "hidream",
     ],
     yaml_path: str,
     model_type: str | None = None,

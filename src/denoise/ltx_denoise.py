@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+
 class DenoiseType(EnumType):
     BASE = "base"
 
@@ -159,23 +160,23 @@ class LTXDenoise:
                     current_timestep = torch.min(
                         current_timestep, 1.0 - conditioning_mask
                     )
-                
-            
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input.to(transformer_dtype),
                     video_coords=fractional_coords,
                     encoder_hidden_states=prompt_embeds_batch[indices].to(
                         transformer_dtype
                     ),
-                    encoder_attention_mask=prompt_attention_mask_batch[indices].to(self.device),
+                    encoder_attention_mask=prompt_attention_mask_batch[indices].to(
+                        self.device
+                    ),
                     timestep=current_timestep,
                     skip_layer_mask=skip_layer_mask,
                     skip_layer_strategy=skip_layer_strategy,
                     return_dict=False,
                 )[0]
-                
+
                 init_noise_pred = noise_pred.clone()
-                
 
                 # perform guidance
                 if do_spatio_temporal_guidance:

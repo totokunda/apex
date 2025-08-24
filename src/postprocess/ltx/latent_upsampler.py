@@ -159,7 +159,6 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
 
         if latents is None and video is None:
             raise ValueError("Either latents or video must be provided")
-        
 
         if latents is None:
             video = self.engine._load_video(video)
@@ -209,16 +208,21 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
             latents = self.engine.implementation_engine.tone_map_latents(
                 latents, tone_map_compression_ratio
             )
-            
+
         *_, fl, hl, wl = latents.shape
-        decoded_video = vae.decode(latents, target_shape=(
+        decoded_video = vae.decode(
+            latents,
+            target_shape=(
                 1,
                 3,
                 fl * self.engine.vae_scale_factor_temporal,
                 hl * self.engine.vae_scale_factor_spatial,
                 wl * self.engine.vae_scale_factor_spatial,
-            ), timestep=timestep, return_dict=False)[0]
-    
+            ),
+            timestep=timestep,
+            return_dict=False,
+        )[0]
+
         video = self.engine._tensor_to_frames(decoded_video, output_type=output_type)
 
         if offload:

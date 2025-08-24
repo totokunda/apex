@@ -108,6 +108,10 @@ class WanBaseEngine:
         """Convert torch.tensor to list of PIL images or np.ndarray"""
         return self.main_engine._tensor_to_frames(*args, **kwargs)
 
+    def _tensor_to_frame(self, *args, **kwargs):
+        """Convert torch.tensor to PIL image"""
+        return self.main_engine._tensor_to_frame(*args, **kwargs)
+
     def vae_encode(self, *args, **kwargs):
         """VAE encode"""
         return self.main_engine.vae_encode(*args, **kwargs)

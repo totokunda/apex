@@ -21,6 +21,8 @@ from .wan.vace.model import WanVACETransformer3DModel
 from .wan.multitalk.model import WanMultiTalkTransformer3DModel
 from .wan.apex_framepack.model import WanApexFramepackTransformer3DModel
 from .qwenimage.base.model import QwenImageTransformer2DModel
+from .flux.base.model import FluxTransformer2DModel
+from .hidream.base.model import HiDreamImageTransformer2DModel
 
 __all__ = [
     "TRANSFORMERS_REGISTRY",
@@ -42,4 +44,6 @@ __all__ = [
     "WanMultiTalkTransformer3DModel",
     "WanApexFramepackTransformer3DModel",
     "QwenImageTransformer2DModel",
+    "FluxTransformer2DModel",
+    "HiDreamImageTransformer2DModel",
 ]

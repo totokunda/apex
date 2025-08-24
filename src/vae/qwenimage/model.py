@@ -31,7 +31,10 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 from diffusers.models.activations import get_activation
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.autoencoders.vae import DecoderOutput, DiagonalGaussianDistribution
+from diffusers.models.autoencoders.vae import (
+    DecoderOutput,
+    DiagonalGaussianDistribution,
+)
 from src.attention import attention_register
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -71,7 +74,14 @@ class QwenImageCausalConv3d(nn.Conv3d):
         )
 
         # Set up causal padding
-        self._padding = (self.padding[2], self.padding[2], self.padding[1], self.padding[1], 2 * self.padding[0], 0)
+        self._padding = (
+            self.padding[2],
+            self.padding[2],
+            self.padding[1],
+            self.padding[1],
+            2 * self.padding[0],
+            0,
+        )
         self.padding = (0, 0, 0)
 
     def forward(self, x, cache_x=None):
@@ -96,7 +106,13 @@ class QwenImageRMS_norm(nn.Module):
         bias (bool, optional): Whether to include a learnable bias term. Default is False.
     """
 
-    def __init__(self, dim: int, channel_first: bool = True, images: bool = True, bias: bool = False) -> None:
+    def __init__(
+        self,
+        dim: int,
+        channel_first: bool = True,
+        images: bool = True,
+        bias: bool = False,
+    ) -> None:
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
         shape = (dim, *broadcastable_dims) if channel_first else (dim,)
@@ -107,7 +123,12 @@ class QwenImageRMS_norm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return F.normalize(x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma + self.bias
+        return (
+            F.normalize(x, dim=(1 if self.channel_first else -1))
+            * self.scale
+            * self.gamma
+            + self.bias
+        )
 
 
 class QwenImageUpsample(nn.Upsample):
@@ -155,13 +176,21 @@ class QwenImageResample(nn.Module):
                 QwenImageUpsample(scale_factor=(2.0, 2.0), mode="nearest-exact"),
                 nn.Conv2d(dim, dim // 2, 3, padding=1),
             )
-            self.time_conv = QwenImageCausalConv3d(dim, dim * 2, (3, 1, 1), padding=(1, 0, 0))
+            self.time_conv = QwenImageCausalConv3d(
+                dim, dim * 2, (3, 1, 1), padding=(1, 0, 0)
+            )
 
         elif mode == "downsample2d":
-            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
+            self.resample = nn.Sequential(
+                nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2))
+            )
         elif mode == "downsample3d":
-            self.resample = nn.Sequential(nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2)))
-            self.time_conv = QwenImageCausalConv3d(dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0))
+            self.resample = nn.Sequential(
+                nn.ZeroPad2d((0, 1, 0, 1)), nn.Conv2d(dim, dim, 3, stride=(2, 2))
+            )
+            self.time_conv = QwenImageCausalConv3d(
+                dim, dim, (3, 1, 1), stride=(2, 1, 1), padding=(0, 0, 0)
+            )
 
         else:
             self.resample = nn.Identity()
@@ -176,13 +205,30 @@ class QwenImageResample(nn.Module):
                     feat_idx[0] += 1
                 else:
                     cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] != "Rep":
+                    if (
+                        cache_x.shape[2] < 2
+                        and feat_cache[idx] is not None
+                        and feat_cache[idx] != "Rep"
+                    ):
                         # cache last frame of last two chunk
                         cache_x = torch.cat(
-                            [feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2
+                            [
+                                feat_cache[idx][:, :, -1, :, :]
+                                .unsqueeze(2)
+                                .to(cache_x.device),
+                                cache_x,
+                            ],
+                            dim=2,
                         )
-                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None and feat_cache[idx] == "Rep":
-                        cache_x = torch.cat([torch.zeros_like(cache_x).to(cache_x.device), cache_x], dim=2)
+                    if (
+                        cache_x.shape[2] < 2
+                        and feat_cache[idx] is not None
+                        and feat_cache[idx] == "Rep"
+                    ):
+                        cache_x = torch.cat(
+                            [torch.zeros_like(cache_x).to(cache_x.device), cache_x],
+                            dim=2,
+                        )
                     if feat_cache[idx] == "Rep":
                         x = self.time_conv(x)
                     else:
@@ -206,7 +252,9 @@ class QwenImageResample(nn.Module):
                     feat_idx[0] += 1
                 else:
                     cache_x = x[:, :, -1:, :, :].clone()
-                    x = self.time_conv(torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2))
+                    x = self.time_conv(
+                        torch.cat([feat_cache[idx][:, :, -1:, :, :], x], 2)
+                    )
                     feat_cache[idx] = cache_x
                     feat_idx[0] += 1
         return x
@@ -241,7 +289,11 @@ class QwenImageResidualBlock(nn.Module):
         self.norm2 = QwenImageRMS_norm(out_dim, images=False)
         self.dropout = nn.Dropout(dropout)
         self.conv2 = QwenImageCausalConv3d(out_dim, out_dim, 3, padding=1)
-        self.conv_shortcut = QwenImageCausalConv3d(in_dim, out_dim, 1) if in_dim != out_dim else nn.Identity()
+        self.conv_shortcut = (
+            QwenImageCausalConv3d(in_dim, out_dim, 1)
+            if in_dim != out_dim
+            else nn.Identity()
+        )
 
     def forward(self, x, feat_cache=None, feat_idx=[0]):
         # Apply shortcut connection
@@ -255,7 +307,13 @@ class QwenImageResidualBlock(nn.Module):
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
 
             x = self.conv1(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -274,7 +332,13 @@ class QwenImageResidualBlock(nn.Module):
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
 
             x = self.conv2(x, feat_cache[idx])
             feat_cache[idx] = cache_x
@@ -319,7 +383,11 @@ class QwenImageAttentionBlock(nn.Module):
         # apply attention
         x = attention_register.call(q, k, v)
 
-        x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
+        x = (
+            x.squeeze(1)
+            .permute(0, 2, 1)
+            .reshape(batch_size * time, channels, height, width)
+        )
 
         # output projection
         x = self.proj(x)
@@ -341,7 +409,13 @@ class QwenImageMidBlock(nn.Module):
         non_linearity (str): Type of non-linearity to use.
     """
 
-    def __init__(self, dim: int, dropout: float = 0.0, non_linearity: str = "silu", num_layers: int = 1):
+    def __init__(
+        self,
+        dim: int,
+        dropout: float = 0.0,
+        non_linearity: str = "silu",
+        num_layers: int = 1,
+    ):
         super().__init__()
         self.dim = dim
 
@@ -417,7 +491,9 @@ class QwenImageEncoder3d(nn.Module):
         for i, (in_dim, out_dim) in enumerate(zip(dims[:-1], dims[1:])):
             # residual (+attention) blocks
             for _ in range(num_res_blocks):
-                self.down_blocks.append(QwenImageResidualBlock(in_dim, out_dim, dropout))
+                self.down_blocks.append(
+                    QwenImageResidualBlock(in_dim, out_dim, dropout)
+                )
                 if scale in attn_scales:
                     self.down_blocks.append(QwenImageAttentionBlock(out_dim))
                 in_dim = out_dim
@@ -429,7 +505,9 @@ class QwenImageEncoder3d(nn.Module):
                 scale /= 2.0
 
         # middle blocks
-        self.mid_block = QwenImageMidBlock(out_dim, dropout, non_linearity, num_layers=1)
+        self.mid_block = QwenImageMidBlock(
+            out_dim, dropout, non_linearity, num_layers=1
+        )
 
         # output blocks
         self.norm_out = QwenImageRMS_norm(out_dim, images=False)
@@ -443,7 +521,13 @@ class QwenImageEncoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
             x = self.conv_in(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
@@ -468,7 +552,13 @@ class QwenImageEncoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
             x = self.conv_out(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
@@ -508,7 +598,9 @@ class QwenImageUpBlock(nn.Module):
         # Add residual blocks and attention if needed
         current_dim = in_dim
         for _ in range(num_res_blocks + 1):
-            resnets.append(QwenImageResidualBlock(current_dim, out_dim, dropout, non_linearity))
+            resnets.append(
+                QwenImageResidualBlock(current_dim, out_dim, dropout, non_linearity)
+            )
             current_dim = out_dim
 
         self.resnets = nn.ModuleList(resnets)
@@ -516,7 +608,9 @@ class QwenImageUpBlock(nn.Module):
         # Add upsampling layer if needed
         self.upsamplers = None
         if upsample_mode is not None:
-            self.upsamplers = nn.ModuleList([QwenImageResample(out_dim, mode=upsample_mode)])
+            self.upsamplers = nn.ModuleList(
+                [QwenImageResample(out_dim, mode=upsample_mode)]
+            )
 
         self.gradient_checkpointing = False
 
@@ -590,7 +684,9 @@ class QwenImageDecoder3d(nn.Module):
         self.conv_in = QwenImageCausalConv3d(z_dim, dims[0], 3, padding=1)
 
         # middle blocks
-        self.mid_block = QwenImageMidBlock(dims[0], dropout, non_linearity, num_layers=1)
+        self.mid_block = QwenImageMidBlock(
+            dims[0], dropout, non_linearity, num_layers=1
+        )
 
         # upsample blocks
         self.up_blocks = nn.ModuleList([])
@@ -632,7 +728,13 @@ class QwenImageDecoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
             x = self.conv_in(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1
@@ -654,7 +756,13 @@ class QwenImageDecoder3d(nn.Module):
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
                 # cache last frame of last two chunk
-                cache_x = torch.cat([feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device), cache_x], dim=2)
+                cache_x = torch.cat(
+                    [
+                        feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
+                        cache_x,
+                    ],
+                    dim=2,
+                )
             x = self.conv_out(x, feat_cache[idx])
             feat_cache[idx] = cache_x
             feat_idx[0] += 1

@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional, Tuple, Union, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os 
+import os
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.utils import (
@@ -60,6 +60,7 @@ from pathlib import Path
 from safetensors import safe_open
 import glob
 import json
+
 
 def make_hashable_key(dict_key):
     def convert_value(value):
@@ -1257,7 +1258,9 @@ class LTXVideoTransformer3DModel(
             torch.randn(2, inner_dim) / inner_dim**0.5
         )
 
-        self.adaln_single = AdaLayerNormSingle(inner_dim, use_additional_conditions=False)
+        self.adaln_single = AdaLayerNormSingle(
+            inner_dim, use_additional_conditions=False
+        )
 
         self.caption_projection = PixArtAlphaTextProjection(
             in_features=caption_channels, hidden_size=inner_dim
@@ -1375,11 +1378,9 @@ class LTXVideoTransformer3DModel(
 
         batch_size = hidden_states.size(0)
         hidden_states = self.patchify_proj(hidden_states)
-        
+
         if self.timestep_scale_multiplier:
             timestep = self.timestep_scale_multiplier * timestep
-        
- 
 
         temb, embedded_timestep = self.adaln_single(
             timestep.flatten(),
@@ -1399,7 +1400,6 @@ class LTXVideoTransformer3DModel(
             encoder_hidden_states = encoder_hidden_states.view(
                 batch_size, -1, hidden_states.shape[-1]
             )
-  
 
         for block_idx, block in enumerate(self.transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -1437,7 +1437,6 @@ class LTXVideoTransformer3DModel(
                     skip_layer_strategy=skip_layer_strategy,
                 )
 
- 
         scale_shift_values = (
             self.scale_shift_table[None, None] + embedded_timestep[:, :, None]
         )
@@ -1454,8 +1453,7 @@ class LTXVideoTransformer3DModel(
         if not return_dict:
             return (output,)
         return Transformer2DModelOutput(sample=output)
-    
-    
+
     def load_state_dict(
         self,
         state_dict: Dict,

@@ -218,7 +218,7 @@ class RectifiedFlowScheduler(SchedulerMixin, ConfigMixin, TimestepShifter):
             ), "Shift must be provided for constant time shift sampler."
             return time_shift(
                 shift, 1, torch.linspace(1, 1 / num_timesteps, num_timesteps)
-            ) 
+            )
 
     def shift_timesteps(self, samples_shape: torch.Size, timesteps: Tensor) -> Tensor:
         if self.shifting == "SD3":

@@ -7,6 +7,7 @@ import math
 from src.attention.processors.ltx_processor import SkipLayerStrategy
 from src.scheduler.rf import TimestepShifter
 
+
 class LTXX2VEngine(LTXBaseEngine):
     """LTX Text-to-Video Engine Implementation"""
 
@@ -88,7 +89,6 @@ class LTXX2VEngine(LTXBaseEngine):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
 
-
         # load transformer
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -163,8 +163,7 @@ class LTXX2VEngine(LTXBaseEngine):
             generator=generator,
             parse_frames=(video_input is None and initial_latents is None),
         )
-     
-        
+
         noise = noise * self.scheduler.init_noise_sigma
 
         retrieve_timesteps_kwargs = {}
@@ -180,7 +179,7 @@ class LTXX2VEngine(LTXBaseEngine):
             skip_final_inference_steps=skip_final_inference_steps,
             **retrieve_timesteps_kwargs,
         )
-        
+
         if latent_input is not None:
             latents = timesteps[0] * noise + (1 - timesteps[0]) * latent_input
         else:
@@ -188,7 +187,7 @@ class LTXX2VEngine(LTXBaseEngine):
 
         latent_height = latents.shape[3]
         latent_width = latents.shape[4]
-        
+
         if guidance_timesteps:
             guidance_mapping = []
             for timestep in timesteps:
@@ -232,9 +231,8 @@ class LTXX2VEngine(LTXBaseEngine):
                 for i, timestep in enumerate(timesteps):
                     new_skip_block_list.append(skip_block_list[guidance_mapping[i]])
                 skip_block_list = new_skip_block_list
-   
-    
-          # patch latents
+
+        # patch latents
         patchifier = self.helpers["ltx.patchifier"]
         causal_fix = getattr(
             self.transformer.config, "causal_temporal_positioning", False
@@ -258,7 +256,7 @@ class LTXX2VEngine(LTXBaseEngine):
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
-        
+
         latents = self.denoise(
             conditioning_mask=conditioning_mask,
             latents=latents,
@@ -288,7 +286,7 @@ class LTXX2VEngine(LTXBaseEngine):
         if offload:
             self._offload(self.transformer)
 
-        latents = latents[:, num_cond_latents:] 
+        latents = latents[:, num_cond_latents:]
 
         latents = patchifier.unpatchify(
             latents=latents,
