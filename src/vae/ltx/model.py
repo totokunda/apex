@@ -53,6 +53,7 @@ from src.transformer.ltx.base.model import LTXVideoAttention as Attention
 PER_CHANNEL_STATISTICS_PREFIX = "per_channel_statistics."
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+
 def make_hashable_key(dict_key):
     def convert_value(value):
         if isinstance(value, list):
@@ -63,6 +64,7 @@ def make_hashable_key(dict_key):
             return value
 
     return tuple(sorted((k, convert_value(v)) for k, v in dict_key.items()))
+
 
 DIFFUSERS_VAE_CONFIG = {
     "_class_name": "AutoencoderKLLTXVideo",
@@ -138,6 +140,7 @@ OURS_VAE_CONFIG = {
 diffusers_and_ours_config_mapping = {
     make_hashable_key(DIFFUSERS_VAE_CONFIG): OURS_VAE_CONFIG,
 }
+
 
 def make_conv_nd(
     dims: Union[int, Tuple[int, int]],
@@ -222,6 +225,7 @@ def make_linear_nd(
     else:
         raise ValueError(f"unsupported dimensions: {dims}")
 
+
 def patchify(x, patch_size_hw, patch_size_t=1):
     if patch_size_hw == 1 and patch_size_t == 1:
         return x
@@ -271,6 +275,7 @@ class PixelNorm(nn.Module):
 
     def forward(self, x):
         return x / torch.sqrt(torch.mean(x**2, dim=self.dim, keepdim=True) + self.eps)
+
 
 class PixelShuffleND(nn.Module):
     def __init__(self, dims, upscale_factors=(2, 2, 2)):
@@ -480,8 +485,6 @@ class DualConv3d(nn.Module):
     @property
     def weight(self):
         return self.weight2
-    
-    
 
 
 class CausalConv3d(nn.Module):
@@ -996,7 +999,7 @@ class AutoencoderKLLTXVideo(AutoencoderKLWrapper):
                 for k in f.keys():
                     state_dict[k] = f.get_tensor(k)
             configs = json.loads(metadata["config"])
-  
+
             config = configs["vae"]
 
         video_vae = cls.from_config(config)
@@ -1130,7 +1133,9 @@ class AutoencoderKLLTXVideo(AutoencoderKLWrapper):
 
         return json.dumps(self.config.__dict__)
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = True):
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = True
+    ):
         if any([key.startswith("vae.") for key in state_dict.keys()]):
             state_dict = {
                 key.replace("vae.", ""): value
@@ -1195,8 +1200,7 @@ class AutoencoderKLLTXVideo(AutoencoderKLWrapper):
             if isinstance(block, UNetMidBlock3D) and block.attention_blocks:
                 for attention_block in block.attention_blocks:
                     attention_block.set_use_tpu_flash_attention()
-                    
-    
+
     def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         latents_mean = self.mean_of_means.view(1, -1, 1, 1, 1).to(
             latents.device, latents.dtype
@@ -2252,7 +2256,3 @@ class ResnetBlock3D(nn.Module):
         output_tensor = input_tensor + hidden_states
 
         return output_tensor
-
-
-
-    

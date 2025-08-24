@@ -10,7 +10,7 @@ from .x2v import LTXX2VEngine
 
 
 class ModelType(EnumType):
-    X2V = "x2v" # Any  to video
+    X2V = "x2v"  # Any  to video
 
 
 class LTXEngine(BaseEngine, LoaderMixin, OffloadMixin, LTXDenoise):

@@ -11,13 +11,15 @@ from src.mixins.to_mixin import ToMixin
 from src.mixins.cache_mixin import CacheMixin
 from src.utils.module import find_class_recursive
 import transformers
+from transformers import T5EncoderModel
+
 
 class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
         self,
         config: Dict[str, Any],
         no_weights: bool = True,
-        enable_cache: bool = True,
+        enable_cache: bool = False,
         cache_file: str = None,
         max_cache_size: int = 100,
         device: torch.device | None = None,
@@ -68,7 +70,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self.model_loaded = False
 
     def load_model(self, no_weights: bool = False):
-        model =  self._load_model(
+        model = self._load_model(
             {
                 "config": self.model_config,
                 "config_path": self.config_path,
@@ -77,7 +79,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 "type": "text_encoder",
                 "gguf_kwargs": self.config.get("gguf_kwargs", {}),
             },
-            load_dtype=self.load_dtype,
+            load_dtype=self.dtype,
             module_name=self.module_name,
             no_weights=no_weights,
             key_map=self.config.get("key_map", {}),
@@ -85,8 +87,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         )
         
         self.to_device(model, device=self.device)
-        self.to_dtype(model, self.dtype)
-        
+
         return model
 
     def basic_clean(self, text):
@@ -105,7 +106,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             text = text.lower()
         return text
     
-    
+
 
     @torch.no_grad()
     def encode(
@@ -124,7 +125,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         use_token_type_ids: bool = False,
         pad_with_zero: bool = True,
         clean_text: bool = True,
-        output_type: Literal["hidden_states", "pooler_output", "raw"] = "hidden_states",
+        output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
         lower_case: bool = False,
     ):
         if isinstance(text, str):
@@ -152,7 +153,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "pad_with_zero": pad_with_zero,
             "clean_text": clean_text,
             "output_type": output_type,
-            "lower_case": lower_case,
+            "lower_case": lower_case
         }
 
         prompt_hash = self.hash_prompt(kwargs)
@@ -179,7 +180,6 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             self.model = self.load_model(no_weights=False)
             self.model_loaded = True
             
-        
         text_inputs = self.tokenizer(
             text,
             padding="max_length" if pad_to_max_length else "longest",
@@ -189,12 +189,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             return_tensors="pt",
             return_attention_mask=True,
         )
-        
+
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
         # mask = mask.bool()
-        
-        
+
         inputs = {"input_ids": text_input_ids.to(device=self.model.device)}
 
         if use_position_ids:
@@ -213,13 +212,18 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             inputs["attention_mask"] = mask.to(device=self.model.device)
 
         result = self.model(
-            **inputs, output_hidden_states=(output_type == "hidden_states" or output_type == "raw")
+            **inputs,
+            output_hidden_states=(
+                output_type == "hidden_states" or output_type == "raw"
+            ),
         )
-        
-        if output_type == "hidden_states":
+
+        if output_type == "hidden_states" and hasattr(result, "last_hidden_state"):
             prompt_embeds = result.last_hidden_state
-        elif output_type == "pooler_output":
+        elif output_type == "pooler_output" and hasattr(result, "pooler_output"):
             prompt_embeds = result.pooler_output
+        elif output_type == "text_embeds" and hasattr(result, "text_embeds"):
+            prompt_embeds = result.text_embeds
         elif output_type == "raw":
             if return_attention_mask:
                 return result, mask
@@ -227,9 +231,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 return result
         else:
             raise ValueError(f"Invalid output type: {output_type}")
-
-        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
         
+        prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
             prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, -1)
@@ -256,6 +260,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             prompt_embeds = prompt_embeds.view(
                 batch_size * num_videos_per_prompt, seq_len, -1
             )
+            
+        elif output_type == "text_embeds":
+            prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
+            mask = mask.repeat(num_videos_per_prompt, 1)
         else:
             _, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
@@ -263,13 +271,14 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             prompt_embeds = prompt_embeds.view(
                 batch_size * num_videos_per_prompt, seq_len, -1
             )
+        
             mask = mask.repeat(1, num_videos_per_prompt)
 
         if self.enable_cache:
             self.cache_prompt(
                 prompt_hash,
                 prompt_embeds,
-                mask if return_attention_mask or True else None,
+                mask,
             )
 
         if return_attention_mask:

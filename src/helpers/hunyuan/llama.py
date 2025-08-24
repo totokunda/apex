@@ -85,10 +85,8 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
         base_model: str = "LlamaModel",
         **kwargs,
     ):
-        super().__init__(
-            model_path=model_path,
-            save_path=save_path,
-        )
+        super().__init__()
+        self.model_path = self._download(model_path, save_path)
         # Default prompt template for HunyuanVideo
         self.default_prompt_template_text = {
             "template": (

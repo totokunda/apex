@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List
 from .base import QwenImageBaseEngine
 import numpy as np
 
+
 class QwenImageT2IEngine(QwenImageBaseEngine):
     """QwenImage Text-to-Image Engine Implementation"""
 
@@ -28,7 +29,7 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
-        
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -49,7 +50,6 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
         else:
             negative_prompt_embeds = None
             negative_prompt_embeds_mask = None
-            
 
         if offload:
             self._offload(self.text_encoder)
@@ -57,16 +57,18 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         prompt_embeds_mask = prompt_embeds_mask.to(self.device)
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
-        
+
         if negative_prompt_embeds is not None:
-            negative_prompt_embeds = negative_prompt_embeds.to(self.device, dtype=transformer_dtype)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                self.device, dtype=transformer_dtype
+            )
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
-            
+
         latents = self._get_latents(
             batch_size=num_images,
             num_channels_latents=self.num_channels_latents,
@@ -77,16 +79,24 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
             seed=seed,
             generator=generator,
         )
-        
-        img_shapes = [[(1, height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2)]] * num_images
-        
+
+        img_shapes = [
+            [
+                (
+                    1,
+                    height // self.vae_scale_factor // 2,
+                    width // self.vae_scale_factor // 2,
+                )
+            ]
+        ] * num_images
+
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
         image_seq_len = latents.shape[1]
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-        
+
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -94,27 +104,37 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
-        
+
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
             mu=mu,
-            timesteps=timesteps 
+            timesteps=timesteps,
         )
 
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
-        
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
+
         # handle guidance
         if self.transformer.config.guidance_embeds:
-            guidance = torch.full([1], guidance_scale, device=self.device, dtype=torch.float32)
+            guidance = torch.full(
+                [1], guidance_scale, device=self.device, dtype=torch.float32
+            )
             guidance = guidance.expand(latents.shape[0])
         else:
             guidance = None
 
-        txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist() if prompt_embeds_mask is not None else None
+        txt_seq_lens = (
+            prompt_embeds_mask.sum(dim=1).tolist()
+            if prompt_embeds_mask is not None
+            else None
+        )
         negative_txt_seq_lens = (
-            negative_prompt_embeds_mask.sum(dim=1).tolist() if negative_prompt_embeds_mask is not None else None
+            negative_prompt_embeds_mask.sum(dim=1).tolist()
+            if negative_prompt_embeds_mask is not None
+            else None
         )
 
         self.scheduler.set_begin_index(0)
@@ -138,13 +158,12 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
             render_on_step_callback=render_on_step_callback,
             use_cfg_guidance=use_cfg_guidance,
         )
-        
+
         if offload:
             self._offload(self.transformer)
-        
+
         if return_latents:
             return latents
-        
 
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]

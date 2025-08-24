@@ -556,7 +556,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             extra_kwargs=component.get("extra_kwargs", {}),
         )
         self.vae = vae
-        
+
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(vae, self.component_dtypes["vae"])
         if self.vae_tiling:
@@ -610,8 +610,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             raise ValueError(f"Component type {component_type} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
-        component['load_dtype'] = self.component_load_dtypes.get("text_encoder", None)
-        component['dtype'] = self.component_dtypes.get("text_encoder", None)
+        component["load_dtype"] = self.component_load_dtypes.get("text_encoder", None)
+        component["dtype"] = self.component_dtypes.get("text_encoder", None)
         text_encoder = TextEncoder(component, no_weights, device=self.device)
         return text_encoder
 
@@ -1347,11 +1347,16 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             video, output_type=output_type
         )
         return postprocessed_video
-    
+
     def _tensor_to_frame(self, image: torch.Tensor, output_type: str = "pil"):
-        postprocessed_frame = self.image_processor.postprocess(
-            image, output_type=output_type
-        )
+        if hasattr(self, "image_processor"):
+            postprocessed_frame = self.image_processor.postprocess(
+                image, output_type=output_type
+            )
+        else:
+            postprocessed_frame = self.video_processor.postprocess(
+                image, output_type=output_type
+            )
         return postprocessed_frame
 
     def _get_timesteps(

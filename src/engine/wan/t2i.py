@@ -6,20 +6,18 @@ import numpy as np
 from .base import WanBaseEngine
 
 
-class WanT2VEngine(WanBaseEngine):
-    """WAN Text-to-Video Engine Implementation"""
+class WanT2IEngine(WanBaseEngine):
+    """WAN Text-to-Image Engine Implementation"""
 
     def run(
         self,
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
-        height: int = 480,
-        width: int = 832,
-        duration: int | str = 16,
+        height: int = 1024,
+        width: int = 1024,
         num_inference_steps: int = 30,
-        num_videos: int = 1,
+        num_images: int = 1,
         seed: int | None = None,
-        fps: int = 16,
         guidance_scale: float = 5.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
@@ -46,7 +44,7 @@ class WanT2VEngine(WanBaseEngine):
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
-            num_videos_per_prompt=num_videos,
+            num_videos_per_prompt=num_images,
             **text_encoder_kwargs,
         )
 
@@ -54,7 +52,7 @@ class WanT2VEngine(WanBaseEngine):
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
-                num_videos_per_prompt=num_videos,
+                num_videos_per_prompt=num_images,
                 **text_encoder_kwargs,
             )
         else:
@@ -96,12 +94,12 @@ class WanT2VEngine(WanBaseEngine):
         latents = self._get_latents(
             height,
             width,
-            duration,
+            1,
             num_channels_latents=getattr(vae_config, "z_dim", 16),
             vae_scale_factor_spatial=vae_scale_factor_spatial,
             vae_scale_factor_temporal=vae_scale_factor_temporal,
-            fps=fps,
-            num_videos=num_videos,
+            fps=16,
+            num_videos=num_images,
             seed=seed,
             dtype=torch.float32,
             generator=generator,
@@ -149,6 +147,6 @@ class WanT2VEngine(WanBaseEngine):
         if return_latents:
             return latents
         else:
-            video = self.vae_decode(latents, offload=offload)
-            postprocessed_video = self._tensor_to_frames(video)
-            return postprocessed_video
+            tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
+            image = self._tensor_to_frame(tensor_image)
+            return [image]

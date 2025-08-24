@@ -3,8 +3,8 @@ from diffusers.utils.torch_utils import randn_tensor
 from typing import Union, List, Optional, Dict, Any
 
 
-class QwenImageBaseEngine:
-    """Base class for QwenImage engine implementations containing common functionality"""
+class FluxBaseEngine:
+    """Base class for Flux engine implementations containing common functionality"""
 
     def __init__(self, main_engine):
         self.main_engine = main_engine
@@ -13,14 +13,14 @@ class QwenImageBaseEngine:
         self.vae_scale_factor = main_engine.vae_scale_factor
         self.num_channels_latents = main_engine.num_channels_latents
         self.image_processor = main_engine.image_processor
-        self.tokenizer_max_length = 1024
-        self.prompt_template_encode = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
-        self.prompt_template_encode_start_idx = 34
-        self.default_sample_size = 128
 
     @property
     def text_encoder(self):
         return self.main_engine.text_encoder
+
+    @property
+    def text_encoder_2(self):
+        return getattr(self.main_engine, "text_encoder_2", None)
 
     @property
     def transformer(self):
@@ -45,6 +45,10 @@ class QwenImageBaseEngine:
     def load_component_by_type(self, component_type: str):
         """Load a component by type"""
         return self.main_engine.load_component_by_type(component_type)
+
+    def load_component_by_name(self, component_name: str):
+        """Load a component by name"""
+        return self.main_engine.load_component_by_name(component_name)
 
     def load_preprocessor_by_type(self, preprocessor_type: str):
         """Load a preprocessor by type"""
@@ -82,7 +86,7 @@ class QwenImageBaseEngine:
         latents = latents.view(batch_size, height // 2, width // 2, channels // 4, 2, 2)
         latents = latents.permute(0, 3, 1, 4, 2, 5)
 
-        latents = latents.reshape(batch_size, channels // (2 * 2), 1, height, width)
+        latents = latents.reshape(batch_size, channels // (2 * 2), height, width)
 
         return latents
 
@@ -181,92 +185,112 @@ class QwenImageBaseEngine:
         """Convert torch.tensor to PIL image"""
         return self.main_engine._tensor_to_frame(*args, **kwargs)
 
-    def encode_prompt(
-        self,
-        prompt: Union[str, List[str]] = None,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-        max_sequence_length: int = 1024,
-        num_images_per_prompt: int = 1,
-        text_encoder_kwargs: Optional[Dict[str, Any]] = {},
+    def encode_image(self, image):
+        image_encoder = self.main_engine["helpers"]["image_encoder"]
+        return image_encoder(image)
+
+    def prepare_ip_adapter_image_embeds(
+        self, ip_adapter_image, ip_adapter_image_embeds, device, num_images
     ):
+        if not self.transformer:
+            self.load_component_by_type("transformer")
 
-        prompt = [prompt] if isinstance(prompt, str) else prompt
+        image_embeds = []
+        if ip_adapter_image_embeds is None:
+            if not isinstance(ip_adapter_image, list):
+                ip_adapter_image = [ip_adapter_image]
 
-        template = self.prompt_template_encode
-        drop_idx = self.prompt_template_encode_start_idx
-        txt = [template.format(e) for e in prompt]
-
-        input_kwargs = {
-            "text": txt,
-            "max_sequence_length": self.tokenizer_max_length + drop_idx,
-            "use_mask_in_input": True,
-            "return_attention_mask": True,
-            "output_type": "raw",
-            **text_encoder_kwargs,
-        }
-
-        prompt_hash = self.text_encoder.hash_prompt(input_kwargs)
-        cached = None
-        if self.text_encoder.enable_cache:
-            cached = self.text_encoder.load_cached_prompt(prompt_hash)
-
-        if cached is not None:
-            prompt_embeds, prompt_embeds_mask = cached
-        else:
-            encoder_hidden_states, attention_mask = self.text_encoder.encode(
-                **input_kwargs,
-            )
-            hidden_states = encoder_hidden_states.hidden_states[-1]
-
-            split_hidden_states = self._extract_masked_hidden(
-                hidden_states, attention_mask
-            )
-            split_hidden_states = [e[drop_idx:] for e in split_hidden_states]
-            attn_mask_list = [
-                torch.ones(e.size(0), dtype=torch.long, device=e.device)
-                for e in split_hidden_states
-            ]
-            max_seq_len = max([e.size(0) for e in split_hidden_states])
-            prompt_embeds = torch.stack(
-                [
-                    torch.cat([u, u.new_zeros(max_seq_len - u.size(0), u.size(1))])
-                    for u in split_hidden_states
-                ]
-            )
-            prompt_embeds_mask = torch.stack(
-                [
-                    torch.cat([u, u.new_zeros(max_seq_len - u.size(0))])
-                    for u in attn_mask_list
-                ]
-            )
-
-            prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-
-            prompt_embeds = prompt_embeds[:, :max_sequence_length]
-            prompt_embeds_mask = prompt_embeds_mask[:, :max_sequence_length]
-
-            _, seq_len, _ = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-            prompt_embeds = prompt_embeds.view(num_images_per_prompt, seq_len, -1)
-            prompt_embeds_mask = prompt_embeds_mask.repeat(1, num_images_per_prompt, 1)
-            prompt_embeds_mask = prompt_embeds_mask.view(num_images_per_prompt, seq_len)
-
-            if self.text_encoder.enable_cache:
-                prompt_hash = self.text_encoder.hash_prompt(input_kwargs)
-
-                self.text_encoder.cache_prompt(
-                    prompt_hash,
-                    prompt_embeds,
-                    prompt_embeds_mask,
+            if (
+                len(ip_adapter_image)
+                != self.transformer.encoder_hid_proj.num_ip_adapters
+            ):
+                raise ValueError(
+                    f"`ip_adapter_image` must have same length as the number of IP Adapters. Got {len(ip_adapter_image)} images and {self.transformer.encoder_hid_proj.num_ip_adapters} IP Adapters."
                 )
 
-        return prompt_embeds, prompt_embeds_mask
+            for single_ip_adapter_image in ip_adapter_image:
+                single_image_embeds = self.encode_image(single_ip_adapter_image)
+                image_embeds.append(single_image_embeds[None, :])
+        else:
+            if not isinstance(ip_adapter_image_embeds, list):
+                ip_adapter_image_embeds = [ip_adapter_image_embeds]
 
-    def _extract_masked_hidden(self, hidden_states: torch.Tensor, mask: torch.Tensor):
-        bool_mask = mask.bool()
-        valid_lengths = bool_mask.sum(dim=1)
-        selected = hidden_states[bool_mask]
-        split_result = torch.split(selected, valid_lengths.tolist(), dim=0)
+            if (
+                len(ip_adapter_image_embeds)
+                != self.transformer.encoder_hid_proj.num_ip_adapters
+            ):
+                raise ValueError(
+                    f"`ip_adapter_image_embeds` must have same length as the number of IP Adapters. Got {len(ip_adapter_image_embeds)} image embeds and {self.transformer.encoder_hid_proj.num_ip_adapters} IP Adapters."
+                )
 
-        return split_result
+            for single_image_embeds in ip_adapter_image_embeds:
+                image_embeds.append(single_image_embeds)
+
+        ip_adapter_image_embeds = []
+        for single_image_embeds in image_embeds:
+            single_image_embeds = torch.cat([single_image_embeds] * num_images, dim=0)
+            single_image_embeds = single_image_embeds.to(device=device)
+            ip_adapter_image_embeds.append(single_image_embeds)
+
+        return ip_adapter_image_embeds
+
+    def _get_latents(
+        self,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator,
+        latents=None,
+    ):
+        # VAE applies 8x compression on images but we must also account for packing which requires
+        # latent height and width to be divisible by 2.
+        height = 2 * (int(height) // (self.vae_scale_factor * 2))
+        width = 2 * (int(width) // (self.vae_scale_factor * 2))
+
+        shape = (batch_size, num_channels_latents, height, width)
+
+        if latents is not None:
+            latent_image_ids = self._prepare_latent_image_ids(
+                batch_size, height // 2, width // 2, device, dtype
+            )
+            return latents.to(device=device, dtype=dtype), latent_image_ids
+
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        latents = self._pack_latents(
+            latents, batch_size, num_channels_latents, height, width
+        )
+
+        latent_image_ids = self._prepare_latent_image_ids(
+            batch_size, height // 2, width // 2, device, dtype
+        )
+
+        return latents, latent_image_ids
+
+    @staticmethod
+    def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
+        latent_image_ids = torch.zeros(height, width, 3)
+        latent_image_ids[..., 1] = (
+            latent_image_ids[..., 1] + torch.arange(height)[:, None]
+        )
+        latent_image_ids[..., 2] = (
+            latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        )
+
+        latent_image_id_height, latent_image_id_width, latent_image_id_channels = (
+            latent_image_ids.shape
+        )
+
+        latent_image_ids = latent_image_ids.reshape(
+            latent_image_id_height * latent_image_id_width, latent_image_id_channels
+        )
+
+        return latent_image_ids.to(device=device, dtype=dtype)

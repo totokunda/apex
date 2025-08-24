@@ -6,6 +6,7 @@ from src.mlx.denoise.wan_denoise import (
 )
 from .t2v import WanT2VEngine
 from .i2v import WanI2VEngine
+from .t2i import WanT2IEngine
 from .v2v import WanV2VEngine
 from .ati import WanATIEngine
 from .vace import WanVaceEngine
@@ -25,6 +26,7 @@ class ModelType(EnumType):
     VACE = "vace"  # vace
     T2V = "t2v"  # text to video
     I2V = "i2v"  # image to video
+    T2I = "t2i"  # text to image
     FFLF = "fflf"  # first frame last frame
     CAUSAL = "causal"  # causal
     FUN = "fun"  # fun (combined)
@@ -121,6 +123,8 @@ class WanEngine(BaseEngine, WanDenoise):
             self.implementation_engine = WanMultitalkEngine(self)
         elif self.model_type == ModelType.ATI:
             self.implementation_engine = WanATIEngine(self)
+        elif self.model_type == ModelType.T2I:
+            self.implementation_engine = WanT2IEngine(self)
         elif self.model_type == ModelType.V2V:
             self.implementation_engine = WanV2VEngine(self)
         elif self.model_type == ModelType.RECAM:

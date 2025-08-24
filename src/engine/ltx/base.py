@@ -14,6 +14,7 @@ import av
 import numpy as np
 import torchvision.transforms.functional as TVF
 
+
 def _encode_single_frame(output_file, image_array: np.ndarray, crf):
     container = av.open(output_file, "w", format="mp4")
     try:
@@ -29,6 +30,7 @@ def _encode_single_frame(output_file, image_array: np.ndarray, crf):
         container.mux(stream.encode())
     finally:
         container.close()
+
 
 def calculate_padding(
     source_height: int, source_width: int, target_height: int, target_width: int
@@ -49,6 +51,7 @@ def calculate_padding(
     padding = (pad_left, pad_right, pad_top, pad_bottom)
     return padding
 
+
 def _decode_single_frame(video_file):
     container = av.open(video_file)
     try:
@@ -57,6 +60,7 @@ def _decode_single_frame(video_file):
     finally:
         container.close()
     return frame.to_ndarray(format="rgb24")
+
 
 def compress(image: torch.Tensor, crf=29):
     if crf == 0:
@@ -75,6 +79,7 @@ def compress(image: torch.Tensor, crf=29):
         image_array = _decode_single_frame(video_file)
     tensor = torch.tensor(image_array, dtype=image.dtype, device=image.device) / 255.0
     return tensor
+
 
 class LTXVideoCondition(LoaderMixin):
     def __init__(
@@ -104,13 +109,22 @@ class LTXVideoCondition(LoaderMixin):
         self.height = height
         self.width = width
         self.vae_scale_factor_spatial = vae_scale_factor_spatial
-        num_frames = 1 if isinstance(self._media_item, Image.Image) else len(self._media_item)
-        
+        num_frames = (
+            1 if isinstance(self._media_item, Image.Image) else len(self._media_item)
+        )
+
         num_frames = self.trim_conditioning_sequence(
             self.frame_number, num_frames, target_frames or num_frames
         )
-        
-        self.media_item = self.load_media_file(self._media_item, self.height, self.width, num_frames, padding, just_crop=True)
+
+        self.media_item = self.load_media_file(
+            self._media_item,
+            self.height,
+            self.width,
+            num_frames,
+            padding,
+            just_crop=True,
+        )
 
     def load_media_file(
         self,
@@ -142,7 +156,7 @@ class LTXVideoCondition(LoaderMixin):
             )
             media_tensor = torch.nn.functional.pad(media_tensor, padding)
         return media_tensor
-    
+
     def load_image_to_tensor_with_resize_and_crop(
         self,
         image_input: Union[str, Image.Image],
@@ -163,12 +177,14 @@ class LTXVideoCondition(LoaderMixin):
         elif isinstance(image_input, Image.Image):
             image = image_input
         else:
-            raise ValueError("image_input must be either a file path or a PIL Image object")
+            raise ValueError(
+                "image_input must be either a file path or a PIL Image object"
+            )
 
         input_width, input_height = image.size
         aspect_ratio_target = target_width / target_height
         aspect_ratio_frame = input_width / input_height
-        
+
         if aspect_ratio_frame > aspect_ratio_target:
             new_width = int(input_height * aspect_ratio_target)
             new_height = input_height
@@ -180,7 +196,9 @@ class LTXVideoCondition(LoaderMixin):
             x_start = 0
             y_start = (input_height - new_height) // 2
 
-        image = image.crop((x_start, y_start, x_start + new_width, y_start + new_height))
+        image = image.crop(
+            (x_start, y_start, x_start + new_width, y_start + new_height)
+        )
         if not just_crop:
             image = image.resize((target_width, target_height))
 
@@ -188,11 +206,12 @@ class LTXVideoCondition(LoaderMixin):
         frame_tensor = TVF.gaussian_blur(frame_tensor, kernel_size=3, sigma=1.0)
         frame_tensor_hwc = frame_tensor.permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
         frame_tensor_hwc = compress(frame_tensor_hwc)
-        frame_tensor = frame_tensor_hwc.permute(2, 0, 1) * 255.0  # (H, W, C) -> (C, H, W)
+        frame_tensor = (
+            frame_tensor_hwc.permute(2, 0, 1) * 255.0
+        )  # (H, W, C) -> (C, H, W)
         frame_tensor = (frame_tensor / 127.5) - 1.0
         # Create 5D tensor: (batch_size=1, channels=3, num_frames=1, height, width)
         return frame_tensor.unsqueeze(0).unsqueeze(2)
-    
 
     def trim_conditioning_sequence(
         self, start_frame: int, sequence_num_frames: int, target_num_frames: int
@@ -208,7 +227,7 @@ class LTXVideoCondition(LoaderMixin):
         Returns:
             int: updated sequence length
         """
-        
+
         scale_factor = self.vae_scale_factor_spatial
         num_frames = min(sequence_num_frames, target_num_frames - start_frame)
         # Trim down to a multiple of temporal_scale_factor frames plus 1
@@ -433,13 +452,18 @@ class LTXBaseEngine:
                 generator = torch.Generator(device=device).manual_seed(seed)
         else:
             device = generator.device
-        
+
         if shape is not None:
             b, c, f, h, w = shape
         else:
-            b, c, f, h, w = num_videos, num_channels_latents or self.num_channels_latents, latent_num_frames, latent_height, latent_width
-        
-   
+            b, c, f, h, w = (
+                num_videos,
+                num_channels_latents or self.num_channels_latents,
+                latent_num_frames,
+                latent_height,
+                latent_width,
+            )
+
         noise = randn_tensor(
             (b, f * h * w, c), generator=generator, device=device, dtype=dtype
         )
@@ -515,7 +539,6 @@ class LTXBaseEngine:
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
 
-
     def prepare_output(
         self,
         latents: torch.Tensor,
@@ -562,14 +585,19 @@ class LTXBaseEngine:
 
         latents = self.tone_map_latents(latents, tone_map_compression_ratio)
         *_, fl, hl, wl = latents.shape
-        
-        decoded_video = self.vae.decode(latents, target_shape=(
+
+        decoded_video = self.vae.decode(
+            latents,
+            target_shape=(
                 1,
                 3,
                 fl * self.vae_scale_factor_temporal,
                 hl * self.vae_scale_factor_spatial,
                 wl * self.vae_scale_factor_spatial,
-            ), timestep=timestep, return_dict=False)[0]
+            ),
+            timestep=timestep,
+            return_dict=False,
+        )[0]
         video = self._tensor_to_frames(decoded_video)
 
         if offload:
@@ -700,9 +728,7 @@ class LTXBaseEngine:
 
                 # Encode the provided conditioning media item
                 media_item_latents = self.vae_encode(
-                    media_item,
-                    dtype=init_latents.dtype,
-                    sample_mode="mode"
+                    media_item, dtype=init_latents.dtype, sample_mode="mode"
                 )
 
                 # Handle the different conditioning cases
@@ -784,13 +810,11 @@ class LTXBaseEngine:
 
         # Patchify the updated latents and calculate their pixel coordinates
         init_latents, init_latent_coords = patchifier.patchify(latents=init_latents)
-        
+
         init_pixel_coords = self.latent_to_pixel_coords(
             init_latent_coords,
             causal_fix=causal_fix,
         )
-        
-        
 
         if not conditioning_items:
             return init_latents, init_pixel_coords, None, 0
@@ -798,10 +822,8 @@ class LTXBaseEngine:
         init_conditioning_mask, _ = patchifier.patchify(
             latents=init_conditioning_mask.unsqueeze(1)
         )
-        
-        
+
         init_conditioning_mask = init_conditioning_mask.squeeze(-1)
-        
 
         if extra_conditioning_latents:
             # Stack the extra conditioning latents, pixel coordinates and mask
