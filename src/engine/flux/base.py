@@ -1,7 +1,7 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 from typing import Union, List, Optional, Dict, Any
-
+from PIL import Image
 
 class FluxBaseEngine:
     """Base class for Flux engine implementations containing common functionality"""
@@ -87,44 +87,6 @@ class FluxBaseEngine:
         latents = latents.permute(0, 3, 1, 4, 2, 5)
 
         latents = latents.reshape(batch_size, channels // (2 * 2), height, width)
-
-        return latents
-
-    def _get_latents(
-        self,
-        batch_size: int,
-        num_channels_latents: int,
-        height: int,
-        width: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        seed: int,
-        generator=None,
-        latents=None,
-    ):
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (self.vae_scale_factor * 2))
-        width = 2 * (int(width) // (self.vae_scale_factor * 2))
-
-        shape = (batch_size, 1, num_channels_latents, height, width)
-
-        if seed is not None:
-            generator = torch.Generator(device=device).manual_seed(seed)
-
-        if latents is not None:
-            return latents.to(device=device, dtype=dtype)
-
-        if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
-
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        latents = self._pack_latents(
-            latents, batch_size, num_channels_latents, height, width
-        )
 
         return latents
 
@@ -244,7 +206,29 @@ class FluxBaseEngine:
         device,
         generator,
         latents=None,
+        image=None,
+        offload=True,
+        timestep=None,
     ):
+        
+        if image is not None:
+            image_latents = self.vae_encode(image, offload=offload)
+            image_latent_height, image_latent_width = image_latents.shape[2:]
+            if timestep is None:
+                image_latents = self._pack_latents(
+                    image_latents, batch_size, num_channels_latents, image_latent_height, image_latent_width
+                )
+                latent_image_ids = self._prepare_latent_image_ids(
+                    batch_size, image_latent_height // 2, image_latent_width // 2, device, dtype
+                )
+                # image ids are the same as latent ids with the first dimension set to 1 instead of 0
+                latent_image_ids[..., 0] = 1
+            else:
+                latent_image_ids = None
+        else:
+            image_latents = None
+            latent_image_ids = None
+            
         # VAE applies 8x compression on images but we must also account for packing which requires
         # latent height and width to be divisible by 2.
         height = 2 * (int(height) // (self.vae_scale_factor * 2))
@@ -253,27 +237,32 @@ class FluxBaseEngine:
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is not None:
-            latent_image_ids = self._prepare_latent_image_ids(
+            latent_ids = self._prepare_latent_image_ids(
                 batch_size, height // 2, width // 2, device, dtype
             )
-            return latents.to(device=device, dtype=dtype), latent_image_ids
+            return latents.to(device=device, dtype=dtype), latent_ids
+    
+        noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            
+        if timestep is not None:
+            assert image_latents is not None, "Image latents are required for timestep scaling"
+            image_latents = torch.cat([image_latents] * batch_size, dim=0)
+            latents = self.scheduler.scale_noise(image_latents, timestep, noise)
+        else:
+            latents = noise
 
-        if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
-
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         latents = self._pack_latents(
             latents, batch_size, num_channels_latents, height, width
         )
-
-        latent_image_ids = self._prepare_latent_image_ids(
+        
+        latent_ids = self._prepare_latent_image_ids(
             batch_size, height // 2, width // 2, device, dtype
         )
+        
+        if image_latents is not None and timestep is None:
+            return latents, image_latents, latent_ids, latent_image_ids
 
-        return latents, latent_image_ids
+        return latents, latent_ids
 
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
@@ -373,4 +362,123 @@ class FluxBaseEngine:
             negative_text_ids = None
             
         return pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids
+    
+    
+    def resize_to_preferred_resolution(self, image: Image.Image):
+        PREFERRED_KONTEXT_RESOLUTIONS = [
+            (672, 1568),
+            (688, 1504),
+            (720, 1456),
+            (752, 1392),
+            (800, 1328),
+            (832, 1248),
+            (880, 1184),
+            (944, 1104),
+            (1024, 1024),
+            (1104, 944),
+            (1184, 880),
+            (1248, 832),
+            (1328, 800),
+            (1392, 752),
+            (1456, 720),
+            (1504, 688),
+            (1568, 672),
+        ]
         
+        original_width, original_height = image.size
+        original_aspect = original_width / original_height
+        
+        best_resolution = None
+        min_area_diff = float('inf')
+        
+        for width, height in PREFERRED_KONTEXT_RESOLUTIONS:
+            target_aspect = width / height
+            area_diff = abs((width * height) - (original_width * original_height))
+            aspect_diff = abs(target_aspect - original_aspect)
+            
+            if area_diff < min_area_diff and aspect_diff < 0.2:
+                min_area_diff = area_diff
+                best_resolution = (width, height)
+        
+        if best_resolution is None:
+            best_resolution = min(PREFERRED_KONTEXT_RESOLUTIONS, 
+                                key=lambda res: abs((res[0] * res[1]) - (original_width * original_height)))
+        
+        return image.resize(best_resolution, Image.Resampling.LANCZOS)
+    
+    def prepare_mask_latents(
+        self,
+        mask,
+        masked_image,
+        batch_size,
+        num_channels_latents,
+        num_images_per_prompt,
+        height,
+        width,
+        dtype,
+        device,
+        offload=False,
+    ):
+        # 1. calculate the height and width of the latents
+        # VAE applies 8x compression on images but we must also account for packing which requires
+        # latent height and width to be divisible by 2.
+        height = 2 * (int(height) // (self.vae_scale_factor * 2))
+        width = 2 * (int(width) // (self.vae_scale_factor * 2))
+
+        # 2. encode the masked image
+        if masked_image.shape[1] == num_channels_latents:
+            masked_image_latents = masked_image
+        else:
+            masked_image_latents = self.vae_encode(masked_image, offload=offload)
+
+        # 3. duplicate mask and masked_image_latents for each generation per prompt, using mps friendly method
+        batch_size = batch_size * num_images_per_prompt
+        if mask.shape[0] < batch_size:
+            if not batch_size % mask.shape[0] == 0:
+                raise ValueError(
+                    "The passed mask and the required batch size don't match. Masks are supposed to be duplicated to"
+                    f" a total batch size of {batch_size}, but {mask.shape[0]} masks were passed. Make sure the number"
+                    " of masks that you pass is divisible by the total requested batch size."
+                )
+            mask = mask.repeat(batch_size // mask.shape[0], 1, 1, 1)
+        if masked_image_latents.shape[0] < batch_size:
+            if not batch_size % masked_image_latents.shape[0] == 0:
+                raise ValueError(
+                    "The passed images and the required batch size don't match. Images are supposed to be duplicated"
+                    f" to a total batch size of {batch_size}, but {masked_image_latents.shape[0]} images were passed."
+                    " Make sure the number of images that you pass is divisible by the total requested batch size."
+                )
+            masked_image_latents = masked_image_latents.repeat(batch_size // masked_image_latents.shape[0], 1, 1, 1)
+
+        # 4. pack the masked_image_latents
+        # batch_size, num_channels_latents, height, width -> batch_size, height//2 * width//2 , num_channels_latents*4
+        masked_image_latents = self._pack_latents(
+            masked_image_latents,
+            batch_size,
+            num_channels_latents,
+            height,
+            width,
+        )
+
+        # 5.resize mask to latents shape we we concatenate the mask to the latents
+        mask = mask[:, 0, :, :]  # batch_size, 8 * height, 8 * width (mask has not been 8x compressed)
+        mask = mask.view(
+            batch_size, height, self.vae_scale_factor, width, self.vae_scale_factor
+        )  # batch_size, height, 8, width, 8
+        mask = mask.permute(0, 2, 4, 1, 3)  # batch_size, 8, 8, height, width
+        mask = mask.reshape(
+            batch_size, self.vae_scale_factor * self.vae_scale_factor, height, width
+        )  # batch_size, 8*8, height, width
+
+        # 6. pack the mask:
+        # batch_size, 64, height, width -> batch_size, height//2 * width//2 , 64*2*2
+        mask = self._pack_latents(
+            mask,
+            batch_size,
+            self.vae_scale_factor * self.vae_scale_factor,
+            height,
+            width,
+        )
+        mask = mask.to(device=device, dtype=dtype)
+
+        return mask, masked_image_latents

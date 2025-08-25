@@ -29,16 +29,18 @@ class FluxDenoise:
         negative_prompt_embeds = kwargs.get("negative_prompt_embeds")
         negative_pooled_prompt_embeds = kwargs.get("negative_pooled_prompt_embeds")
         true_cfg_scale = kwargs.get("true_cfg_scale")
-        latent_image_ids = kwargs.get("latent_image_ids")
+        latent_ids = kwargs.get("latent_ids")
         text_ids = kwargs.get("text_ids")
         negative_text_ids = kwargs.get("negative_text_ids")
-        image_embeds = kwargs.get("image_embeds")
-        negative_image_embeds = kwargs.get("negative_image_embeds")
+        image_embeds = kwargs.get("image_embeds", None)
+        negative_image_embeds = kwargs.get("negative_image_embeds", None)
         num_warmup_steps = kwargs.get("num_warmup_steps")
         use_cfg_guidance = kwargs.get("use_cfg_guidance")
         joint_attention_kwargs = kwargs.get("joint_attention_kwargs")
         render_on_step = kwargs.get("render_on_step")
         render_on_step_callback = kwargs.get("render_on_step_callback")
+        image_latents = kwargs.get("image_latents")
+        masked_image_latents = kwargs.get("masked_image_latents")
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -47,19 +49,29 @@ class FluxDenoise:
                     joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
+                
+                if image_latents is not None:
+                    latent_model_input = torch.cat([latents, image_latents], dim=1)
+                elif masked_image_latents is not None:
+                    latent_model_input = torch.cat([latents, masked_image_latents], dim=2)
+                else:
+                    latent_model_input = latents
 
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
-                        hidden_states=latents,
+                        hidden_states=latent_model_input,
                         timestep=timestep / 1000,
                         guidance=guidance,
                         pooled_projections=pooled_prompt_embeds,
                         encoder_hidden_states=prompt_embeds,
                         txt_ids=text_ids,
-                        img_ids=latent_image_ids,
+                        img_ids=latent_ids,
                         joint_attention_kwargs=joint_attention_kwargs,
                         return_dict=False,
                     )[0]
+                    
+                    if image_latents is not None:
+                        noise_pred = noise_pred[:, : latents.size(1)]
 
                 if use_cfg_guidance:
                     if negative_image_embeds is not None:
@@ -69,16 +81,19 @@ class FluxDenoise:
 
                     with self.transformer.cache_context("uncond"):
                         neg_noise_pred = self.transformer(
-                            hidden_states=latents,
+                            hidden_states=latent_model_input,
                             timestep=timestep / 1000,
                             guidance=guidance,
                             pooled_projections=negative_pooled_prompt_embeds,
                             encoder_hidden_states=negative_prompt_embeds,
                             txt_ids=negative_text_ids,
-                            img_ids=latent_image_ids,
+                            img_ids=latent_ids,
                             joint_attention_kwargs=joint_attention_kwargs,
                             return_dict=False,
                         )[0]
+                        if image_latents is not None:
+                            neg_noise_pred = neg_noise_pred[:, : latents.size(1)]
+                        
                     noise_pred = neg_noise_pred + true_cfg_scale * (
                         noise_pred - neg_noise_pred
                     )

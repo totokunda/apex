@@ -3,24 +3,29 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 from .base import FluxBaseEngine
+from diffusers.image_processor import VaeImageProcessor
 
 
-class FluxT2IEngine(FluxBaseEngine):
-    """Flux Text-to-Image Engine Implementation"""
+
+
+class FluxFillEngine(FluxBaseEngine):
+    """Flux Fill Engine Implementation"""
 
     def run(
         self,
+        image: Image.Image | str | np.ndarray | torch.Tensor,
         prompt: List[str] | str,
         prompt_2: List[str] | str = None,
         negative_prompt: List[str] | str = None,
         negative_prompt_2: List[str] | str = None,
+        mask_image: Optional[Image.Image | str | np.ndarray | torch.Tensor] = None,
         height: int = 1024,
         width: int = 1024,
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
         true_cfg_scale: float = 1.0,
-        guidance_scale: float = 3.5,
+        guidance_scale: float = 30.0,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         text_encoder_2_kwargs: Dict[str, Any] = {},
@@ -31,15 +36,20 @@ class FluxT2IEngine(FluxBaseEngine):
         generator: torch.Generator | None = None,
         sigmas: List[float] | None = None,
         timesteps: List[int] | None = None,
-        ip_adapter_image: Optional[Image.Image | str | np.ndarray] = None,
-        ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
-        negative_ip_adapter_image: Optional[Image.Image | str | np.ndarray] = None,
-        negative_ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
+        strength: float = 1.0,
         **kwargs,
     ):
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
+            
+        mask_processor = VaeImageProcessor(
+            vae_scale_factor=self.image_processor.config.vae_scale_factor,
+            vae_latent_channels=self.image_processor.config.vae_latent_channels,
+            do_normalize=False,
+            do_binarize=True,
+            do_convert_grayscale=True,
+        )
             
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
             
@@ -55,37 +65,26 @@ class FluxT2IEngine(FluxBaseEngine):
             text_encoder_2_kwargs,
         )
         
-
         if offload:
+            self._offload(self.text_encoder)
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
-
-        latents, latent_ids = self._get_latents(
-            batch_size=num_images,
-            num_channels_latents=self.num_channels_latents,
-            height=height,
-            width=width,
-            dtype=transformer_dtype,
-            device=self.device,
-            generator=generator,
-        )
-
-        if not self.scheduler:
-            self.load_component_by_type("scheduler")
-        self.to_device(self.scheduler)
-
+        
+        image = self._load_image(image)
+        init_image = self.image_processor.preprocess(image, height=height, width=width)
+        init_image = init_image.to(dtype=torch.float32)
+        
+        image_seq_len = (int(height) // self.vae_scale_factor // 2) * (int(width) // self.vae_scale_factor // 2)
         sigmas = (
             np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
             if sigmas is None
             else sigmas
         )
-        if (
-            hasattr(self.scheduler.config, "use_flow_sigmas")
-            and self.scheduler.config.use_flow_sigmas
-        ):
-            sigmas = None
-        image_seq_len = latents.shape[1]
+        if not self.scheduler:
+            self.load_component_by_type("scheduler")
+        self.to_device(self.scheduler)
+        
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -93,14 +92,30 @@ class FluxT2IEngine(FluxBaseEngine):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
+        
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
             timesteps=timesteps,
             mu=mu,
+            strength=strength,
         )
 
+        latent_timestep = timesteps[:1].repeat(prompt_embeds.shape[0])
+
+        latents, latent_ids = self._get_latents(
+            image=init_image,
+            batch_size=num_images,
+            num_channels_latents=self.num_channels_latents,
+            height=height,
+            width=width,
+            dtype=transformer_dtype,
+            device=self.device,
+            generator=generator,
+            timestep=latent_timestep,
+        )
+        
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
@@ -117,54 +132,38 @@ class FluxT2IEngine(FluxBaseEngine):
             guidance = guidance.expand(latents.shape[0])
         else:
             guidance = None
+        
+        mask_image = self._load_image(mask_image)
+        
+        mask_image = mask_processor.preprocess(mask_image, height=height, width=width)
 
-        if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
-            negative_ip_adapter_image is None
-            and negative_ip_adapter_image_embeds is None
-        ):
-            negative_ip_adapter_image = np.zeros((width, height, 3), dtype=np.uint8)
-            negative_ip_adapter_image = [
-                negative_ip_adapter_image
-            ] * self.transformer.encoder_hid_proj.num_ip_adapters
+        masked_image = init_image * (1 - mask_image)
+        
+        masked_image = masked_image.to(device=self.device, dtype=transformer_dtype)
 
-        elif (ip_adapter_image is None and ip_adapter_image_embeds is None) and (
-            negative_ip_adapter_image is not None
-            or negative_ip_adapter_image_embeds is not None
-        ):
-            ip_adapter_image = np.zeros((width, height, 3), dtype=np.uint8)
-            ip_adapter_image = [
-                ip_adapter_image
-            ] * self.transformer.encoder_hid_proj.num_ip_adapters
 
-        image_embeds = None
-        negative_image_embeds = None
-        if ip_adapter_image is not None or ip_adapter_image_embeds is not None:
-            image_embeds = self.prepare_ip_adapter_image_embeds(
-                ip_adapter_image,
-                ip_adapter_image_embeds,
-                self.device,
-                num_images,
-            )
-        if (
-            negative_ip_adapter_image is not None
-            or negative_ip_adapter_image_embeds is not None
-        ):
-            negative_image_embeds = self.prepare_ip_adapter_image_embeds(
-                negative_ip_adapter_image,
-                negative_ip_adapter_image_embeds,
-                self.device,
-                num_images,
-            )
+        height, width = init_image.shape[-2:]
+        mask, masked_image_latents = self.prepare_mask_latents(
+            mask_image,
+            masked_image,
+            latents.shape[0],
+            self.num_channels_latents,
+            num_images,
+            height,
+            width,
+            transformer_dtype,
+            self.device,
+            offload,
+        )
+        
+        masked_image_latents = torch.cat((masked_image_latents, mask), dim=-1)
 
-        # 6. Denoising loop
-        # We set the index here to remove DtoH sync, helpful especially during compilation.
-        # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
-        self.scheduler.set_begin_index(0)
 
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
             num_inference_steps=num_inference_steps,
+            masked_image_latents=masked_image_latents,
             guidance=guidance,
             prompt_embeds=prompt_embeds,
             pooled_prompt_embeds=pooled_prompt_embeds,
@@ -175,8 +174,6 @@ class FluxT2IEngine(FluxBaseEngine):
             latent_ids=latent_ids,
             text_ids=text_ids,
             negative_text_ids=negative_text_ids,
-            image_embeds=image_embeds,
-            negative_image_embeds=negative_image_embeds,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             num_warmup_steps=num_warmup_steps,
