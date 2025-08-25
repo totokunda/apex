@@ -3,7 +3,7 @@ kind: Model
 metadata:
   name: Flux Dev Kontext
   version: 1.0.0
-  description: Flux is a 20B parameter model for text-to-image generation.
+  description: Flux is a 12B parameter model for text-to-image generation.
   tags:
   - flux
   - dev
