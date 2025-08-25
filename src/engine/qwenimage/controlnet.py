@@ -35,8 +35,6 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
         **kwargs,
     ):
         
-        
-
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -77,12 +75,13 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
                 self.device, dtype=transformer_dtype
             )
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
+        
+        if not hasattr(self, "controlnet"):
+            self.load_component_by_name("controlnet")
             
-        controlnet = self.helpers['controlnet']
-        self.to_device(controlnet)
+        self.to_device(self.controlnet)
         
-        
-        if isinstance(controlnet, QwenImageControlNetModel):
+        if isinstance(self.controlnet, QwenImageControlNetModel):
             control_image = self.prepare_control_image(control_image, batch_size, height, width, transformer_dtype, use_cfg_guidance)
             control_image_latents = self.vae_encode(control_image, offload=offload)
             control_image_latents = control_image_latents.permute(0, 2, 1, 3, 4)
@@ -93,7 +92,7 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
                 height=control_image_latents.shape[3],
                 width=control_image_latents.shape[4],
             ).to(dtype=prompt_embeds.dtype, device=self.device)
-        elif isinstance(controlnet, QwenImageMultiControlNetModel):
+        elif isinstance(self.controlnet, QwenImageMultiControlNetModel):
             control_images = []
             for control_image_ in control_image:
                 control_image_ = self.prepare_control_image(control_image_, batch_size, height, width, transformer_dtype, use_cfg_guidance)
@@ -165,7 +164,7 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
                 1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
                 for s, e in zip(control_guidance_start, control_guidance_end)
             ]
-            controlnet_keep.append(keeps[0] if isinstance(controlnet, QwenImageControlNetModel) else keeps)
+            controlnet_keep.append(keeps[0] if isinstance(self.controlnet, QwenImageControlNetModel) else keeps)
 
         # handle guidance
         if self.transformer.config.guidance_embeds:
@@ -209,13 +208,12 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             controlnet_keep=controlnet_keep,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
-            control_image=control_image,
-            controlnet=controlnet,
+            control_image=control_image 
         )
 
         if offload:
             self._offload(self.transformer)
-            self._offload(controlnet)
+            self._offload(self.controlnet)
 
         if return_latents:
             return latents

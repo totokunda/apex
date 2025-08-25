@@ -43,6 +43,10 @@ class QwenImageBaseEngine:
     @property
     def preprocessors(self):
         return self.main_engine.preprocessors
+    
+    @property
+    def controlnet(self):
+        return getattr(self.main_engine, "controlnet", None)
 
     @property
     def component_dtypes(self):

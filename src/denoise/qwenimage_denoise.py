@@ -150,7 +150,6 @@ class QwenImageDenoise:
         controlnet_keep = kwargs.get("controlnet_keep")
         controlnet_conditioning_scale = kwargs.get("controlnet_conditioning_scale")
         control_image = kwargs.get("control_image")
-        controlnet = kwargs.get("controlnet")
         
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -165,7 +164,7 @@ class QwenImageDenoise:
                         controlnet_cond_scale = controlnet_cond_scale[0]
                     cond_scale = controlnet_cond_scale * controlnet_keep[i]
                     
-                controlnet_block_samples = controlnet(
+                controlnet_block_samples = self.controlnet(
                     hidden_states=latents,
                     controlnet_cond=control_image,
                     conditioning_scale=cond_scale,
