@@ -1,22 +1,22 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  name: Flux Dev Fill
+  name: Flux Dev Control Depth
   version: 1.0.0
-  description: Flux fill is a 12B parameter model for image inpainting/outpainting.
+  description: Flux control depth is a 12B parameter model for image control.
   tags:
   - flux
   - dev
-  - fill
+  - control
 spec:
   engine: flux
-  model_type: fill
+  model_type: control
   engine_type: torch
   denoise_type: base
   components:
   - type: scheduler
     base: diffusers.FlowMatchEulerDiscreteScheduler
-    config_path: black-forest-labs/FLUX.1-Fill-dev/scheduler/scheduler_config.json
+    config_path: black-forest-labs/FLUX.1-Depth-dev/scheduler/scheduler_config.json
   - type: vae
     base: auto
     model_path: black-forest-labs/FLUX.1-dev/vae
@@ -38,7 +38,7 @@ spec:
       subfolder: tokenizer_2
   - type: transformer
     base: flux.base
-    model_path: black-forest-labs/FLUX.1-Fill-dev/transformer
+    model_path: black-forest-labs/FLUX.1-Depth-dev/transformer
   defaults:
     run:
       num_inference_steps: 40

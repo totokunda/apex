@@ -40,7 +40,7 @@ class FluxDenoise:
         render_on_step = kwargs.get("render_on_step")
         render_on_step_callback = kwargs.get("render_on_step_callback")
         image_latents = kwargs.get("image_latents")
-        masked_image_latents = kwargs.get("masked_image_latents")
+        concat_latents = kwargs.get("concat_latents")
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -52,8 +52,8 @@ class FluxDenoise:
                 
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1)
-                elif masked_image_latents is not None:
-                    latent_model_input = torch.cat([latents, masked_image_latents], dim=2)
+                elif concat_latents is not None:
+                    latent_model_input = torch.cat([latents, concat_latents], dim=2)
                 else:
                     latent_model_input = latents
 
