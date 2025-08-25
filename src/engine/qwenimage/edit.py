@@ -1,4 +1,5 @@
 import torch
+import math
 from typing import Dict, Any, Callable, List
 from .base import QwenImageBaseEngine
 import numpy as np
@@ -12,8 +13,8 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         image: Image.Image | np.ndarray | torch.Tensor | str,
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
-        height: int = 1024,
-        width: int = 1024,
+        height: int | None = None,
+        width: int | None = None,
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
@@ -36,28 +37,36 @@ class QwenImageEditEngine(QwenImageBaseEngine):
 
         self.to_device(self.text_encoder)
         
-        batch_size = len(prompt) if isinstance(prompt, list) else 1
+        batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
         loaded_image = self._load_image(image)
-        loaded_image, height, width = self._aspect_ratio_resize(loaded_image, max_area=height * width)
-        preprocessed_image = self.image_processor.preprocess(loaded_image, height, width).unsqueeze(2)
+        loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(loaded_image, max_area=math.prod(loaded_image.size), mod_value=32)
+        preprocessed_image = self.image_processor.preprocess(loaded_image).unsqueeze(2)
+        if height is None:
+            height = calculated_height
+        if width is None:
+            width = calculated_width
         
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
             image=loaded_image,
+            device=self.device,
             num_images_per_prompt=num_images,
             text_encoder_kwargs=text_encoder_kwargs,
         )
+      
 
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds, negative_prompt_embeds_mask = self.encode_prompt(
                 negative_prompt,
                 image=loaded_image,
+                device=self.device,
                 num_images_per_prompt=num_images,
                 text_encoder_kwargs=text_encoder_kwargs,
             )
         else:
             negative_prompt_embeds = None
             negative_prompt_embeds_mask = None
+        
 
         if offload:
             self._offload(self.text_encoder)
@@ -72,11 +81,13 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         image_latents = self._pack_latents(
                 image_latents, batch_size, self.num_channels_latents, image_latent_height, image_latent_width
             )
+    
 
         if not self.transformer:
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        
 
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -97,13 +108,10 @@ class QwenImageEditEngine(QwenImageBaseEngine):
 
         img_shapes = [
             [
-                (
-                    1,
-                    height // self.vae_scale_factor // 2,
-                    width // self.vae_scale_factor // 2,
-                )
+                (1, height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2),
+                (1, calculated_height // self.vae_scale_factor // 2, calculated_width // self.vae_scale_factor // 2),
             ]
-        ] * num_images
+        ] * batch_size
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
         image_seq_len = latents.shape[1]

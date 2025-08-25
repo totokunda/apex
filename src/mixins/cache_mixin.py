@@ -3,7 +3,7 @@ import os
 import re
 import time
 from typing import Dict, List, Tuple, Any
-
+import numpy as np
 import torch
 from safetensors.torch import safe_open
 from safetensors.torch import save_file
@@ -15,9 +15,21 @@ class CacheMixin:
     cache_file: str | None = None
     max_cache_size: int | None = None
     model_path: str | None = None
+    
+    def str_encode(self, item: Any) -> str:
+        if isinstance(item, torch.Tensor):
+            return item.cpu().numpy().tobytes().hex()
+        elif isinstance(item, np.ndarray):
+            return item.tobytes().hex()
+        elif isinstance(item, bytes):
+            return item.hex()
+        elif isinstance(item, str):
+            return item
+        else:
+            return str(item)
 
     def hash_prompt(self, kwargs: Dict[str, Any]) -> str:
-        hashes = [hashlib.sha256(str(t).encode()).hexdigest() for t in kwargs.values()]
+        hashes = [hashlib.sha256(self.str_encode(t).encode()).hexdigest() for t in kwargs.values()]
         return ".".join(hashes)
 
     def get_cached_keys_for_prompt(

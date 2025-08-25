@@ -31,6 +31,7 @@ from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
 from src.memory_management import MemoryManager, MemoryConfig
 import torch.nn as nn
 import importlib
+from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
 
 
 from src.utils.defaults import (
@@ -429,12 +430,18 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         config.pop("name", None)
         module = config.pop("module", None)
         # get the helper class
-        helper_class = helpers.get(base) or find_class_recursive(importlib.import_module(module), base)
+        try:
+            helper_class = helpers.get(base)
+        except Exception as e:
+            helper_class = find_class_recursive(importlib.import_module(module), base)
         if helper_class is None:
             raise ValueError(f"Helper class {base} not found")
 
         # create an instance of the helper class
-        helper = helper_class(**config)
+        if hasattr(helper_class, "from_pretrained") and "model_path" in config:
+            helper = helper_class.from_pretrained(config["model_path"])
+        else:
+            helper = helper_class(**config)
 
         # Store helper with multiple keys for easier access
         helper_name = component.get("name", base)

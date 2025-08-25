@@ -64,6 +64,8 @@ class QwenImageDenoise:
                         attention_kwargs=attention_kwargs,
                         return_dict=False,
                     )[0]
+                    if image_latents is not None:
+                        noise_pred = noise_pred[:, : latents.size(1)]
 
                 if use_cfg_guidance:
                     with self.transformer.cache_context("uncond"):
@@ -78,6 +80,8 @@ class QwenImageDenoise:
                             attention_kwargs=attention_kwargs,
                             return_dict=False,
                         )[0]
+                        if image_latents is not None:
+                            neg_noise_pred = neg_noise_pred[:, : latents.size(1)]
                     comb_pred = neg_noise_pred + true_cfg_scale * (
                         noise_pred - neg_noise_pred
                     )
