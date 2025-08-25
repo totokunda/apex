@@ -128,9 +128,19 @@ class MemoryMonitor:
             )
 
     def get_gpu_usage(self) -> float:
-        """Get current GPU memory usage ratio (0.0 to 1.0)."""
+        """Get current GPU memory usage ratio (0.0 to 1.0), honoring VRAM cap if configured."""
         gpu_stats, _, _ = self.get_current_stats()
-        return gpu_stats.usage_ratio if gpu_stats else 0.0
+        if not gpu_stats:
+            return 0.0
+        effective_total = gpu_stats.total
+        if self.config.vram_cap_gb is not None and self.config.vram_cap_gb > 0:
+            cap_bytes = int(self.config.vram_cap_gb * 1e9)
+            effective_total = min(effective_total, cap_bytes)
+        if effective_total <= 0:
+            return 0.0
+        ratio = gpu_stats.used / effective_total
+        # Do not clamp here; allow >1.0 to strongly trigger emergency logic
+        return ratio
 
     def get_cpu_usage(self) -> float:
         """Get current CPU memory usage ratio (0.0 to 1.0)."""
@@ -193,13 +203,22 @@ class MemoryMonitor:
         gpu_stats, cpu_stats, disk_stats = self.get_current_stats()
         predictions = self.predict_memory_pressure()
 
+        # Compute effective total for ratio reporting
+        effective_total = (
+            min(gpu_stats.total, int(self.config.vram_cap_gb * 1e9))
+            if (gpu_stats and self.config.vram_cap_gb)
+            else (gpu_stats.total if gpu_stats else 0)
+        )
+
         summary = {
             "timestamp": time.time(),
             "gpu": {
                 "available": gpu_stats is not None,
-                "usage_ratio": gpu_stats.usage_ratio if gpu_stats else 0.0,
+                "usage_ratio": self.get_gpu_usage(),
                 "used_gb": (gpu_stats.used / 1e9) if gpu_stats else 0.0,
                 "total_gb": (gpu_stats.total / 1e9) if gpu_stats else 0.0,
+                "effective_total_gb": (effective_total / 1e9) if gpu_stats else 0.0,
+                "cap_gb": self.config.vram_cap_gb or None,
                 "predicted_usage": predictions["gpu"],
             },
             "cpu": {

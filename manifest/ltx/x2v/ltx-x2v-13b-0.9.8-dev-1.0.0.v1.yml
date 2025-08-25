@@ -61,7 +61,7 @@ spec:
       return_latents: false
       text_encoder_kwargs:
         max_sequence_length: 256
-        use_mask_in_input: true
+        use_attention_mask: true
         pad_with_zero: false
         clean_text: false
       offload: true

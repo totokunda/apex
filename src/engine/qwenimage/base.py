@@ -29,6 +29,10 @@ class QwenImageBaseEngine:
     @property
     def scheduler(self):
         return self.main_engine.scheduler
+    
+    @property
+    def helpers(self):
+        return self.main_engine.helpers 
 
     @property
     def vae(self):
@@ -184,6 +188,7 @@ class QwenImageBaseEngine:
     def encode_prompt(
         self,
         prompt: Union[str, List[str]] = None,
+        image: Optional[torch.Tensor] = None,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
         max_sequence_length: int = 1024,
@@ -196,27 +201,52 @@ class QwenImageBaseEngine:
         template = self.prompt_template_encode
         drop_idx = self.prompt_template_encode_start_idx
         txt = [template.format(e) for e in prompt]
-
-        input_kwargs = {
-            "text": txt,
-            "max_sequence_length": self.tokenizer_max_length + drop_idx,
-            "use_mask_in_input": True,
-            "return_attention_mask": True,
-            "output_type": "raw",
-            **text_encoder_kwargs,
-        }
+        
+        if image is None:
+            input_kwargs = {
+                "text": txt,
+                "max_sequence_length": self.tokenizer_max_length + drop_idx,
+                "use_attention_mask": True,
+                "return_attention_mask": True,
+                "output_type": "raw",
+                **text_encoder_kwargs,
+            }
+        else:
+            processor = self.helpers["image.processor"]
+            model_inputs = processor(
+                text=txt,
+                images=image,
+                padding=True,
+                return_tensors="pt",
+            ).to(device)
+            
+            input_kwargs = {
+                "input_ids": model_inputs.input_ids,
+                "attention_mask": model_inputs.attention_mask,
+                "pixel_values": model_inputs.pixel_values,
+                "image_grid_thw": model_inputs.image_grid_thw,
+                "output_hidden_states": True,
+                **text_encoder_kwargs,
+            }
 
         prompt_hash = self.text_encoder.hash_prompt(input_kwargs)
         cached = None
         if self.text_encoder.enable_cache:
             cached = self.text_encoder.load_cached_prompt(prompt_hash)
-
         if cached is not None:
             prompt_embeds, prompt_embeds_mask = cached
         else:
-            encoder_hidden_states, attention_mask = self.text_encoder.encode(
+            if image is None:
+                encoder_hidden_states, attention_mask = self.text_encoder.encode(
                 **input_kwargs,
             )
+            else:
+                if not self.text_encoder.model_loaded:
+                    self.text_encoder.model = self.text_encoder.load_model()
+                    self.text_encoder.model_loaded = True
+                    
+                encoder_hidden_states, attention_mask = self.text_encoder.model(**input_kwargs)
+            
             hidden_states = encoder_hidden_states.hidden_states[-1]
 
             split_hidden_states = self._extract_masked_hidden(

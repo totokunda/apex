@@ -70,7 +70,7 @@ spec:
       text_encoder_3_kwargs:
         add_special_tokens: true
         clean_text: false
-        use_mask_in_input: true
+        use_attention_mask: true
         pad_with_zero: false
         max_sequence_length: 128
       attention_kwargs: {}

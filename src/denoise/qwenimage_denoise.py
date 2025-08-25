@@ -28,6 +28,7 @@ class QwenImageDenoise:
         num_inference_steps = kwargs.get("num_inference_steps")
         guidance = kwargs.get("guidance")
         prompt_embeds = kwargs.get("prompt_embeds")
+        image_latents = kwargs.get("image_latents")
         prompt_embeds_mask = kwargs.get("prompt_embeds_mask")
         img_shapes = kwargs.get("img_shapes")
         use_cfg_guidance = kwargs.get("use_cfg_guidance")
@@ -45,9 +46,15 @@ class QwenImageDenoise:
             for i, t in enumerate(timesteps):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
+                
+                if image_latents is not None:
+                    latent_model_input = torch.cat([latents, image_latents], dim=1)
+                else:
+                    latent_model_input = latents
+                    
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
-                        hidden_states=latents,
+                        hidden_states=latent_model_input,
                         timestep=timestep / 1000,
                         guidance=guidance,
                         encoder_hidden_states_mask=prompt_embeds_mask,
@@ -61,7 +68,7 @@ class QwenImageDenoise:
                 if use_cfg_guidance:
                     with self.transformer.cache_context("uncond"):
                         neg_noise_pred = self.transformer(
-                            hidden_states=latents,
+                            hidden_states=latent_model_input,
                             timestep=timestep / 1000,
                             guidance=guidance,
                             encoder_hidden_states_mask=negative_prompt_embeds_mask,

@@ -3,7 +3,7 @@ import re
 import hashlib
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
-from src.converters.convert import get_transformer_converter_by_model_name
+from src.converters.convert import get_transformer_converter_by_model_name, strip_common_prefix
 import torch
 from loguru import logger
 from diffusers.loaders import PeftAdapterMixin
@@ -148,7 +148,8 @@ class LoraManager(DownloadMixin):
         - scales optionally overrides per-adapter scale values
         Returns resolved LoraItem objects in load order.
         """
-        if not hasattr(model, "load_adapter"):
+  
+        if not hasattr(model, "set_adapters"):
             raise ValueError(
                 "Model doesn't support PEFT/LoRA. Ensure transformer inherits PeftAdapterMixin."
             )
@@ -169,6 +170,7 @@ class LoraManager(DownloadMixin):
                 item = src_or_item
             else:
                 item = self.resolve(str(src_or_item))
+            
             # override from global scales list if provided
             if scales is not None and idx < len(scales) and scales[idx] is not None:
                 scale = float(scales[idx])
@@ -185,12 +187,18 @@ class LoraManager(DownloadMixin):
             final_scales.append(item.scale)
             # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
             for local_path in item.local_paths:
-                local_path_state_dict = self.maybe_convert_state_dict(
+                local_path_state_dict, converted = self.maybe_convert_state_dict(
                     local_path, model.config._class_name
                 )
+                
+                if converted:
+                    local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
+                
                 model.load_lora_adapter(
                     local_path_state_dict, adapter_name=adapter_name
                 )
+                
+                logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 
         # Activate all adapters with their weights in one call
         try:
@@ -204,9 +212,11 @@ class LoraManager(DownloadMixin):
     def maybe_convert_state_dict(self, local_path: str, model_name: str) -> str:
         state_dict = self.load_file(local_path)
         converter = get_transformer_converter_by_model_name(model_name)
+        converted = False
         if converter is not None:
-            return converter.convert(state_dict)
-        return state_dict
+            converter.convert(state_dict)
+            converted = True
+        return state_dict, converted
 
     def _download_from_civitai_spec(self, spec: str) -> str:
         """

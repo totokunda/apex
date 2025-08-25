@@ -49,6 +49,16 @@ class MemoryManager:
 
         self._is_active = True
 
+        # If simulating a smaller VRAM, cap the CUDA caching allocator fraction
+        if torch.cuda.is_available() and self.config.vram_cap_gb and self.config.vram_cap_gb > 0:
+            try:
+                total_mem = torch.cuda.get_device_properties(0).total_memory
+                cap_bytes = int(self.config.vram_cap_gb * 1e9)
+                fraction = max(0.01, min(1.0, cap_bytes / float(total_mem)))
+                torch.cuda.set_per_process_memory_fraction(fraction, device=0)
+            except Exception as e:
+                print(f"Warning: failed to set CUDA memory fraction: {e}")
+
         # Start memory monitoring
         self.memory_monitor.start_monitoring()
 
@@ -146,8 +156,17 @@ class MemoryManager:
             ):  # 2 second threshold
                 modules_to_offload.append(module)
 
+        # If GPU is above cap threshold, offload more aggressively
+        gpu_usage = self.memory_monitor.get_gpu_usage()
+        if self.config.vram_cap_gb is not None and gpu_usage >= self.config.gpu_offload_threshold:
+            # Sort by least recently used and offload more layers
+            modules_to_offload.sort(key=lambda m: m._last_forward_time)
+            batch_size = max(self.config.offload_batch_size, 20)
+        else:
+            batch_size = self.config.offload_batch_size
+
         # Offload selected modules
-        for module in modules_to_offload[: self.config.offload_batch_size]:
+        for module in modules_to_offload[: batch_size]:
             try:
                 module.offload_all()
                 self._stats["total_offloads"] += 1

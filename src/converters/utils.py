@@ -102,6 +102,7 @@ def strip_common_prefix(
     if ref_state is None:
         # Heuristic: do *all* keys share the same first token?
         first_tokens = {k.split(".", 1)[0] for k in src_state.keys()}
+        
         if len(first_tokens) == 1:  # unanimous
             prefix = next(iter(first_tokens)) + "."
         else:
@@ -109,6 +110,45 @@ def strip_common_prefix(
     else:
         ref_keys = set(ref_state.keys())
         prefix_counter: Counter[str] = Counter()
+
+        # Normalize LoRA-style suffixes so we can compare against base model keys.
+        # Examples:
+        #   "attn1.to_q.lora_down.weight" -> "attn1.to_q.weight"
+        #   "attn1.to_q.lora_A.weight"   -> "attn1.to_q.weight"
+        #   "... .lora.up.weight"        -> "... .weight"
+        def _normalize_lora_suffix(suffix: str) -> str:
+            tokens = suffix.split(".")
+            if not tokens:
+                return suffix
+
+            has_lora_marker = any(
+                t == "lora" or t.startswith("lora_") or t.endswith("_lora")
+                for t in tokens
+            )
+
+            drop_tokens = {
+                "lora",
+                "loras",
+                "lora_up",
+                "lora_down",
+                "lora_A",
+                "lora_B",
+                "alpha",
+                "rank",
+                "rank_num",
+                "ranknum",
+            }
+
+            cleaned = []
+            for t in tokens:
+                if t in drop_tokens:
+                    continue
+                # Some formats use "lora.up"/"lora.down" or just "A"/"B" tokens
+                if has_lora_marker and t in {"up", "down", "A", "B"}:
+                    continue
+                cleaned.append(t)
+
+            return ".".join(cleaned)
 
         # Look for candidate prefixes
         for k in src_state.keys():
@@ -118,7 +158,9 @@ def strip_common_prefix(
             # Try every prefix ending at a dot
             for m in re.finditer(r"\.", k):
                 p = k[: m.start() + 1]  # keep the trailing dot
-                if k[len(p) :] in ref_keys:
+                suffix = k[len(p) :]
+                normalized_suffix = _normalize_lora_suffix(suffix)
+                if normalized_suffix in ref_keys:
                     prefix_counter[p] += 1
                     # shortest prefix that works is good enough
                     break

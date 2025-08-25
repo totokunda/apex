@@ -43,7 +43,7 @@ spec:
       return_latents: false
       text_encoder_kwargs:
         max_sequence_length: 256
-        use_mask_in_input: false
+        use_attention_mask: false
         pad_with_zero: false
         clean_text: false
       guidance_rescale: 0.0
