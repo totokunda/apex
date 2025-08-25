@@ -33,6 +33,15 @@ class MemoryConfig:
     prefetch_enabled: bool = True  # Enable predictive loading
     pin_memory: bool = True  # Use pinned memory for faster transfers
 
+    # VRAM cap simulation (treat GPU as if it had at most this VRAM)
+    vram_cap_gb: Optional[float] = None  # If set, enforce effective total VRAM
+
+    # Aggressive offload behavior
+    aggressive_post_forward_offload: bool = False  # Offload immediately after forward if above threshold
+
+    # Cache management
+    empty_cache_after_offload: bool = False  # Call torch.cuda.empty_cache() after offloading
+
     # Safety settings
     min_free_gpu_memory: float = 0.1  # Always keep 10% GPU memory free
     max_disk_usage_gb: float = 50.0  # Max disk usage for cache
@@ -60,6 +69,9 @@ class MemoryConfig:
             cpu_offload_threshold=0.80,
             offload_batch_size=5,
             max_disk_usage_gb=20.0,
+            vram_cap_gb=16.0,
+            aggressive_post_forward_offload=True,
+            empty_cache_after_offload=True,
         )
 
     @classmethod

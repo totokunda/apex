@@ -13,13 +13,15 @@ from .offload_strategies import SmartOffloadStrategy
 class ParameterMetadata:
     """Metadata for managing offloaded parameters."""
 
-    def __init__(self, name: str, param: torch.Tensor, module_id: str):
+    def __init__(self, name: str, param: torch.Tensor, module_id: str, is_parameter: bool):
         self.name = name
         self.original_device = param.device
         self.shape = param.shape
         self.dtype = param.dtype
         self.requires_grad = param.requires_grad
         self.module_id = module_id
+        # Track whether this name was originally registered as a Parameter (vs buffer)
+        self.is_parameter = is_parameter
         self.offload_metadata: Optional[Dict[str, Any]] = None
         self.is_offloaded = False
         self.last_access_time = time.time()
@@ -69,14 +71,14 @@ class OffloadableModule(nn.Module):
             for name, param in self._original_module.named_parameters():
                 if param is not None:
                     self._param_metadata[name] = ParameterMetadata(
-                        name=name, param=param, module_id=self.module_id
+                        name=name, param=param, module_id=self.module_id, is_parameter=True
                     )
 
             # Track buffers (non-gradient tensors)
             for name, buffer in self._original_module.named_buffers():
                 if buffer is not None:
                     self._param_metadata[name] = ParameterMetadata(
-                        name=name, param=buffer, module_id=self.module_id
+                        name=name, param=buffer, module_id=self.module_id, is_parameter=False
                     )
 
     def _register_hooks(self):
@@ -95,7 +97,8 @@ class OffloadableModule(nn.Module):
             self._forward_count += 1
 
             # Reload any offloaded parameters
-            self._ensure_parameters_loaded()
+            target_device = self._infer_target_device(module, input)
+            self._ensure_parameters_loaded(target_device)
 
     def _post_forward_hook(self, module, input, output):
         """Hook called after forward pass - consider offloading if needed."""
@@ -106,12 +109,17 @@ class OffloadableModule(nn.Module):
             if self._should_offload():
                 self._offload_parameters()
 
+            # Aggressive mode: offload immediately if over threshold or VRAM cap exceeded
+            if self.config.aggressive_post_forward_offload:
+                if self.memory_monitor.should_offload_from_gpu() or self.memory_monitor.should_emergency_offload_gpu():
+                    self._offload_parameters()
+
         return output
 
-    def _ensure_parameters_loaded(self):
+    def _ensure_parameters_loaded(self, target_device: Optional[torch.device] = None):
         """Ensure all parameters are loaded on the correct device."""
         for name in list(self._offloaded_params):
-            self._load_parameter(name)
+            self._load_parameter(name, target_device)
 
     def _should_offload(self) -> bool:
         """Determine if this module should offload its parameters."""
@@ -134,7 +142,14 @@ class OffloadableModule(nn.Module):
                 try:
                     self._offload_parameter(name)
                 except Exception as e:
+                    
                     print(f"Failed to offload parameter {name}: {e}")
+        # Optionally free CUDA cache after offloading to release reserved memory
+        if self.config.empty_cache_after_offload and torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     def _offload_parameter(self, param_name: str):
         """Offload a specific parameter."""
@@ -162,9 +177,12 @@ class OffloadableModule(nn.Module):
             self._replace_parameter_with_placeholder(param_name)
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
+            exit()
             print(f"Failed to offload {param_name}: {e}")
 
-    def _load_parameter(self, param_name: str):
+    def _load_parameter(self, param_name: str, target_device: Optional[torch.device] = None):
         """Load a specific parameter back to device."""
         if param_name not in self._offloaded_params:
             return
@@ -175,19 +193,27 @@ class OffloadableModule(nn.Module):
             return
 
         try:
-            # Reload tensor
+            # Reload tensor using the stored strategy
             tensor = self.offload_strategy.reload(metadata.offload_metadata)
 
-            # Always move to original device to ensure correct placement
-            tensor = tensor.to(metadata.original_device)
+            # Determine final desired device
+            desired_device = target_device or self._get_module_current_device()
+            if desired_device is None:
+                desired_device = metadata.original_device
 
-            # Restore parameter
+            # Move to desired device if needed
+            if tensor.device != desired_device:
+                tensor = tensor.to(desired_device)
+
+            # Restore parameter/buffer
             self._restore_parameter_from_tensor(param_name, tensor)
 
             # Update metadata
             metadata.is_offloaded = False
             metadata.last_access_time = time.time()
             metadata.access_count += 1
+            # Update original_device to reflect current placement
+            metadata.original_device = desired_device
             self._offloaded_params.remove(param_name)
 
             # Clean up offload storage
@@ -195,7 +221,51 @@ class OffloadableModule(nn.Module):
             metadata.offload_metadata = None
 
         except Exception as e:
+            
             print(f"Failed to load {param_name}: {e}")
+
+    def _infer_target_device(self, module: nn.Module, input) -> Optional[torch.device]:
+        """Infer the device to place parameters for this forward call."""
+        # 1) Prefer device of first Tensor in input
+        def _find_tensor_device(obj) -> Optional[torch.device]:
+            if torch.is_tensor(obj):
+                return obj.device
+            if isinstance(obj, (list, tuple)):
+                for item in obj:
+                    dev = _find_tensor_device(item)
+                    if dev is not None:
+                        return dev
+            if isinstance(obj, dict):
+                for item in obj.values():
+                    dev = _find_tensor_device(item)
+                    if dev is not None:
+                        return dev
+            return None
+
+        input_device = _find_tensor_device(input)
+        if input_device is not None:
+            return input_device
+
+        # 2) Fallback to device of any existing parameter/buffer in the module
+        for p in module.parameters(recurse=False):
+            if p is not None:
+                return p.device
+        for b in module.buffers(recurse=False):
+            if b is not None:
+                return b.device
+
+        # 3) Unknown
+        return None
+
+    def _get_module_current_device(self) -> Optional[torch.device]:
+        """Get current device of the original module if determinable."""
+        for p in self._original_module.parameters(recurse=False):
+            if p is not None:
+                return p.device
+        for b in self._original_module.buffers(recurse=False):
+            if b is not None:
+                return b.device
+        return None
 
     def _get_parameter_by_name(self, name: str) -> Optional[torch.Tensor]:
         """Get parameter or buffer by name."""
@@ -223,9 +293,9 @@ class OffloadableModule(nn.Module):
             requires_grad=metadata.requires_grad,
         )
 
-        # Convert to Parameter if it was originally a parameter
-        if metadata.requires_grad:
-            placeholder = nn.Parameter(placeholder)
+        # Convert to Parameter if this name was originally a Parameter (even if requires_grad=False)
+        if metadata.is_parameter:
+            placeholder = nn.Parameter(placeholder, requires_grad=metadata.requires_grad)
 
         # Replace in module
         names = param_name.split(".")
@@ -240,15 +310,22 @@ class OffloadableModule(nn.Module):
         """Restore parameter from loaded tensor."""
         metadata = self._param_metadata[param_name]
 
-        # Ensure correct properties
-        if metadata.requires_grad and not tensor.requires_grad:
-            tensor = tensor.requires_grad_(True)
-        elif not metadata.requires_grad and tensor.requires_grad:
-            tensor = tensor.detach()
-
-        # Convert to Parameter if it was originally a parameter
-        if metadata.requires_grad:
-            tensor = nn.Parameter(tensor)
+        # Ensure correct properties and wrap appropriately based on original registration type
+        if metadata.is_parameter:
+            # Always restore as nn.Parameter, preserving original requires_grad
+            if isinstance(tensor, nn.Parameter):
+                restored = tensor
+                restored.requires_grad = metadata.requires_grad
+            else:
+                restored = nn.Parameter(tensor, requires_grad=metadata.requires_grad)
+            tensor_to_set = restored
+        else:
+            # Restore as a plain tensor (buffer). Ensure it does not require grad.
+            if isinstance(tensor, nn.Parameter):
+                tensor = tensor.detach()
+            if tensor.requires_grad:
+                tensor = tensor.detach()
+            tensor_to_set = tensor
 
         # Replace in module
         names = param_name.split(".")
@@ -257,10 +334,17 @@ class OffloadableModule(nn.Module):
         for name in names[:-1]:
             obj = getattr(obj, name)
 
-        setattr(obj, names[-1], tensor)
+        setattr(obj, names[-1], tensor_to_set)
 
     def forward(self, *args, **kwargs):
         """Forward pass through the wrapped module."""
+        # Extra safety: ensure parameters are on the appropriate device inferred from inputs
+        with self._lock:
+            target_device = self._infer_target_device(self._original_module, args)
+            if target_device is None and kwargs:
+                target_device = self._infer_target_device(self._original_module, kwargs)
+            self._ensure_parameters_loaded(target_device)
+
         return self._original_module(*args, **kwargs)
 
     def offload_all(self):

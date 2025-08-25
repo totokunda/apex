@@ -23,6 +23,7 @@ from .wan.apex_framepack.model import WanApexFramepackTransformer3DModel
 from .qwenimage.base.model import QwenImageTransformer2DModel
 from .flux.base.model import FluxTransformer2DModel
 from .hidream.base.model import HiDreamImageTransformer2DModel
+from .chroma.base.model import ChromaTransformer2DModel
 
 __all__ = [
     "TRANSFORMERS_REGISTRY",
@@ -46,4 +47,5 @@ __all__ = [
     "QwenImageTransformer2DModel",
     "FluxTransformer2DModel",
     "HiDreamImageTransformer2DModel",
+    "ChromaTransformer2DModel",
 ]

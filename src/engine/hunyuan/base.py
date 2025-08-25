@@ -184,7 +184,7 @@ class HunyuanBaseEngine:
             prompt_2,
             max_sequence_length=77,
             pad_to_max_length=True,
-            use_mask_in_input=False,
+            use_attention_mask=False,
             use_position_ids=True,
             num_videos_per_prompt=num_videos_per_prompt,
             dtype=dtype,

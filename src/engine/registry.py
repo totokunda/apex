@@ -21,7 +21,7 @@ class EngineType(Enum):
     QWENIMAGE = "qwenimage"
     FLUX = "flux"
     HIDREAM = "hidream"
-
+    CHROMA = "chroma"
 
 class EngineRegistry:
     """Central registry for all engine implementations"""
@@ -131,6 +131,14 @@ class EngineRegistry:
         except ImportError as e:
             print(f"Warning: Could not import Hidream engine: {e}")
 
+        # Register Chroma engine
+
+        try:
+            from src.engine.chroma import ChromaEngine
+            self._engines[EngineType.CHROMA.value] = ChromaEngine
+        except ImportError as e:
+            print(f"Warning: Could not import Chroma engine: {e}")
+
     def get_engine_class(self, engine_type: str) -> Optional[Type]:
         """Get engine class by type"""
         return self._engines.get(engine_type)
@@ -201,6 +209,9 @@ class EngineRegistry:
             from src.engine.hidream import ModelType
 
             return ModelType(model_type)
+        elif engine_type == EngineType.CHROMA.value:
+            from src.engine.chroma import ModelType
+            return ModelType(model_type)
         else:
             # Fall back to string for engines without ModelType enum
             return model_type
@@ -264,6 +275,7 @@ def create_engine(
         "cosmos2",
         "flux",
         "hidream",
+        "chroma",
     ],
     yaml_path: str,
     model_type: str | None = None,

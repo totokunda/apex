@@ -22,6 +22,7 @@ from src.converters.transformer_converters import (
     SkyReelsTransformerConverter,
     HunyuanAvatarTransformerConverter,
     MagiTransformerConverter,
+    FluxTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -88,6 +89,8 @@ def get_transformer_converter_by_model_name(model_name: str):
         return SkyReelsTransformerConverter()
     elif "Magi" in model_name:
         return MagiTransformerConverter()
+    elif "Flux" in model_name or "Chroma" in model_name:
+        return FluxTransformerConverter()
     return None
 
 

@@ -10,6 +10,7 @@ from tqdm import tqdm
 import shutil
 import accelerate
 from src.utils.defaults import DEFAULT_CACHE_PATH
+from src.utils.module import find_class_recursive
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
@@ -27,6 +28,10 @@ from logging import Logger
 from src.scheduler import SchedulerInterface
 from typing import Callable
 from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
+from src.memory_management import MemoryManager, MemoryConfig
+import torch.nn as nn
+import importlib
+
 
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -125,6 +130,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     vae_slicing: bool = False
     lora_manager: LoraManager | None = None
     loaded_loras: Dict[str, LoraItem] = {}
+    _memory_management_map: Dict[str, MemoryConfig] | None = None
+    _component_memory_managers: Dict[str, MemoryManager] = {}
 
     def __init__(
         self,
@@ -155,6 +162,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 "device",
             ]:
                 setattr(self, key, value)
+
+        # Normalize optional memory management mapping
+        self._memory_management_map = self._normalize_memory_management(
+            kwargs.get("memory_management", None)
+        )
 
         self._parse_config(
             self.config,
@@ -410,12 +422,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         return component_module
 
     def load_helper(self, component: Dict[str, Any]):
+
         config = component.copy()  # Don't modify the original
         base = config.pop("base")
         config.pop("type")
         config.pop("name", None)
+        module = config.pop("module", None)
         # get the helper class
-        helper_class = helpers.get(base)
+        helper_class = helpers.get(base) or find_class_recursive(importlib.import_module(module), base)
         if helper_class is None:
             raise ValueError(f"Helper class {base} not found")
 
@@ -454,6 +468,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 component_base = component.get("base", "")
 
                 # Match by name or base (with or without namespace prefixes)
+                
                 if (
                     component_name == helper_key
                     or component_name.endswith(f"/{helper_key}")
@@ -564,6 +579,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if self.vae_slicing:
             self.enable_vae_slicing()
         vae = vae.eval()
+
+        # Apply memory management if configured
+        self._maybe_apply_memory_management(component, vae)
         return vae
 
     def enable_vae_tiling(self):
@@ -613,6 +631,26 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         component["load_dtype"] = self.component_load_dtypes.get("text_encoder", None)
         component["dtype"] = self.component_dtypes.get("text_encoder", None)
         text_encoder = TextEncoder(component, no_weights, device=self.device)
+
+        # Lazily wrap its internal model once loaded, if memory management is configured
+        mm_config = self._resolve_memory_config_for_component(component)
+        if mm_config is not None:
+            original_load_model = text_encoder.load_model
+
+            def _patched_load_model(no_weights: bool = False, *args, **kwargs):
+                model = original_load_model(no_weights=no_weights, *args, **kwargs)
+                # Only wrap once per instance
+                if not hasattr(text_encoder, "_mm_wrapped") or not getattr(
+                    text_encoder, "_mm_wrapped"
+                ):
+                    manager = self._get_or_create_memory_manager("text_encoder", mm_config)
+                    wrapped_model = manager.wrap_model(model, layer_types=[nn.Linear])
+                    text_encoder.model = wrapped_model
+                    setattr(text_encoder, "_mm_wrapped", True)
+                return text_encoder.model
+
+            text_encoder.load_model = _patched_load_model  # type: ignore
+
         return text_encoder
 
     def load_transformer(
@@ -703,6 +741,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
         transformer = transformer.eval()
+
+        # Apply memory management if configured
+        self._maybe_apply_memory_management(component, transformer)
         return transformer
 
     def _get_safetensors_keys(
@@ -1016,6 +1057,79 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if component.get("name"):
                     setattr(self, component.get("name"), component_module)
 
+    # -------------------------
+    # Memory management helpers
+    # -------------------------
+    def _normalize_memory_management(
+        self, spec: Optional[Dict[str, Union[str, MemoryConfig]]]
+    ) -> Optional[Dict[str, MemoryConfig]]:
+        if not spec:
+            return None
+
+        normalized: Dict[str, MemoryConfig] = {}
+
+        def to_config(v: Union[str, MemoryConfig]) -> MemoryConfig:
+            if isinstance(v, MemoryConfig):
+                return v
+            preset = str(v).strip().lower().replace(" ", "_")
+            if preset in {"low", "low_memory", "low-memory"}:
+                return MemoryConfig.for_low_memory()
+            if preset in {"high", "high_performance", "high-performance"}:
+                return MemoryConfig.for_high_performance()
+            raise ValueError(
+                f"Unknown memory preset '{v}'. Use 'low_memory' or 'high_performance' or pass MemoryConfig."
+            )
+
+        for key, value in spec.items():
+            try:
+                normalized[key] = to_config(value)
+            except Exception as e:
+                self.logger.warning(f"Invalid memory_management entry for '{key}': {e}")
+
+        return normalized if normalized else None
+
+    def _resolve_memory_config_for_component(
+        self, component: Dict[str, Any]
+    ) -> Optional[MemoryConfig]:
+        if not self._memory_management_map:
+            return None
+        name = component.get("name")
+        ctype = component.get("type")
+        # Prefer explicit name mapping, fallback to type mapping, then 'all'
+        if name and name in self._memory_management_map:
+            return self._memory_management_map[name]
+        if ctype and ctype in self._memory_management_map:
+            return self._memory_management_map[ctype]
+        if "all" in self._memory_management_map:
+            return self._memory_management_map["all"]
+        return None
+
+    def _get_or_create_memory_manager(
+        self, key: str, config: MemoryConfig
+    ) -> MemoryManager:
+        if key in self._component_memory_managers:
+            return self._component_memory_managers[key]
+        manager = MemoryManager(config)
+        manager.start()
+        self._component_memory_managers[key] = manager
+        return manager
+
+    def _maybe_apply_memory_management(self, component: Dict[str, Any], module: Any):
+        mm_config = self._resolve_memory_config_for_component(component)
+        if mm_config is None:
+            return
+        key = component.get("name") or component.get("type")
+        manager = self._get_or_create_memory_manager(key, mm_config)
+        try:
+            wrapped = manager.wrap_model(module, layer_types=[nn.Linear])
+        except Exception as e:
+            self.logger.warning(f"Failed to wrap component '{key}' for memory management: {e}")
+            return
+        # Replace references on engine for known types
+        ctype = component.get("type")
+        if ctype in {"transformer", "vae", "text_encoder"}:
+            setattr(self, ctype, wrapped)
+
     def load_component_by_type(self, component_type: str):
         for component in self.config.get("components", []):
             if component.get("type") == component_type:
@@ -1133,6 +1247,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self._init_lora_manager(DEFAULT_LORA_SAVE_PATH)
         if self.lora_manager is None:
             raise RuntimeError("LoraManager is not available")
+        
 
         resolved = self.lora_manager.load_into(
             self.transformer, loras, adapter_names=adapter_names, scales=scales

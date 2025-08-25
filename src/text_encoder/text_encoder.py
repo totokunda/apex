@@ -117,12 +117,12 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         num_videos_per_prompt: int = 1,
         dtype: torch.dtype | str | None = None,
         device: torch.device | None = None,
-        batch_size: int = 1,
         add_special_tokens: bool = True,
         return_attention_mask: bool = False,
-        use_mask_in_input: bool = False,
+        use_attention_mask: bool = False,
         use_position_ids: bool = False,
         use_token_type_ids: bool = False,
+        arrange_attention_mask: bool = False,
         pad_with_zero: bool = True,
         clean_text: bool = True,
         output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
@@ -136,6 +136,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if dtype is not None:
             if isinstance(dtype, str):
                 dtype = getattr(torch, dtype.lstrip("torch."))
+                
+        batch_size = len(text)
 
         kwargs = {
             "text": text,
@@ -144,10 +146,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "num_videos_per_prompt": num_videos_per_prompt,
             "dtype": dtype,
             "device": device,
-            "batch_size": batch_size,
             "add_special_tokens": add_special_tokens,
             "return_attention_mask": return_attention_mask,
-            "use_mask_in_input": use_mask_in_input,
+            "use_attention_mask": use_attention_mask,
+            "arrange_attention_mask": arrange_attention_mask,
             "use_position_ids": use_position_ids,
             "use_token_type_ids": use_token_type_ids,
             "pad_with_zero": pad_with_zero,
@@ -208,7 +210,13 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 device=self.model.device
             )
 
-        if use_mask_in_input:
+        if use_attention_mask:
+            inputs["attention_mask"] = mask.to(device=self.model.device)
+            
+        if arrange_attention_mask:
+            seq_lengths = mask.sum(dim=1)
+            mask_indices = torch.arange(mask.size(1)).unsqueeze(0).expand(batch_size, -1)
+            mask = (mask_indices <= seq_lengths.unsqueeze(1)).long()
             inputs["attention_mask"] = mask.to(device=self.model.device)
 
         result = self.model(
@@ -256,6 +264,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             _, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
             mask = mask.repeat(1, num_videos_per_prompt)
+            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
 
             prompt_embeds = prompt_embeds.view(
                 batch_size * num_videos_per_prompt, seq_len, -1
@@ -273,6 +282,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             )
         
             mask = mask.repeat(1, num_videos_per_prompt)
+            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
 
         if self.enable_cache:
             self.cache_prompt(

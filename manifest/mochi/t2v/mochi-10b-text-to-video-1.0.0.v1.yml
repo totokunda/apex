@@ -37,6 +37,6 @@ spec:
         use_token_type_ids: false
         use_position_ids: false
         max_sequence_length: 256
-        use_mask_in_input: true
+        use_attention_mask: true
         pad_with_zero: false
         clean_text: false

@@ -132,7 +132,7 @@ class CogVideoBaseEngine:
             max_sequence_length=max_sequence_length,
             pad_to_max_length=True,
             num_videos_per_prompt=num_videos_per_prompt,
-            use_mask_in_input=False,
+            use_attention_mask=False,
             pad_with_zero=False,
             dtype=dtype,
         )
@@ -145,7 +145,7 @@ class CogVideoBaseEngine:
                 max_sequence_length=max_sequence_length,
                 pad_to_max_length=True,
                 num_videos_per_prompt=num_videos_per_prompt,
-                use_mask_in_input=False,
+                use_attention_mask=False,
                 pad_with_zero=False,
                 dtype=dtype,
             )

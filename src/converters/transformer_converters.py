@@ -8,6 +8,7 @@ class TransformerConverter:
     def __init__(self):
         self.rename_dict = {}
         self.special_keys_map = {}
+        self.pre_special_keys_map = {}
 
     def _sort_rename_dict(self):
         """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
@@ -19,6 +20,13 @@ class TransformerConverter:
 
     def convert(self, state_dict: Dict[str, Any]):
         self._sort_rename_dict()
+        # Apply pre-special keys map
+        for key in list(state_dict.keys()):
+            for pre_special_key, handler_fn_inplace in self.pre_special_keys_map.items():
+                if pre_special_key in key:
+                    handler_fn_inplace(key, state_dict)
+                    
+                    
         for key in list(state_dict.keys()):
             new_key = key[:]
             for replace_key, rename_key in self.rename_dict.items():
@@ -623,3 +631,190 @@ class MagiTransformerConverter(TransformerConverter):
             "self_attention.linear_qkv.v": "attn1.to_v",
             "self_attention.linear_kv_xattn": "attn2.to_kv",
         }
+
+class FluxTransformerConverter(TransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            "time_in.in_layer": "time_text_embed.timestep_embedder.linear_1",
+            "time_in.out_layer": "time_text_embed.timestep_embedder.linear_2",
+            "vector_in.in_layer": "time_text_embed.text_embedder.linear_1",
+            "vector_in.out_layer": "time_text_embed.text_embedder.linear_2",
+            "guidance_in.in_layer": "time_text_embed.guidance_embedder.linear_1",
+            "guidance_in.out_layer": "time_text_embed.guidance_embedder.linear_2",
+            "txt_in.weight": "context_embedder.weight",
+            "txt_in.bias": "context_embedder.bias",
+            "img_in.weight": "x_embedder.weight",
+            "img_in.bias": "x_embedder.bias",
+            "double_blocks": "transformer_blocks",
+            "img_mod.lin": "norm1.linear",
+            "txt_mod.lin": "norm1_context.linear",
+            "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
+            "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
+            "txt_attn.norm.query_norm.scale": "attn.norm_added_q.weight",
+            "txt_attn.norm.key_norm.scale": "attn.norm_added_k.weight",
+            "img_mlp.0": "ff.net.0.proj",
+            "img_mlp.2": "ff.net.2",
+            "txt_mlp.0": "ff_context.net.0.proj",
+            "txt_mlp.2": "ff_context.net.2",
+            "img_attn.proj": "attn.to_out.0",
+            "txt_attn.proj": "attn.to_add_out",
+            "modulation.lin": "norm.linear",
+            "linear2": "proj_out",
+            "final_layer.linear": "proj_out",
+            
+        }
+        
+        self.pre_special_keys_map = {
+            "lora_unet_single_blocks_": self.remap_single_transformer_blocks_lora,
+            "lora_unet_double_blocks_": self.remap_double_transformer_blocks_lora,
+        }
+        
+        self.special_keys_map = {
+            "img_attn_qkv": self.remap_img_attn_qkv_,
+            "txt_attn_qkv": self.remap_txt_attn_qkv_,
+            "single_blocks": self.remap_single_transformer_blocks_,
+            "final_layer.adaLN_modulation.1": self.remap_norm_scale_shift_,
+        }
+    
+    @staticmethod
+    def remap_norm_scale_shift_(key, state_dict):
+        weight = state_dict.pop(key)
+        shift, scale = weight.chunk(2, dim=0)
+        new_weight = torch.cat([scale, shift], dim=0)
+        state_dict[key.replace("final_layer.adaLN_modulation.1", "norm_out.linear")] = (
+            new_weight
+        )
+    
+    @staticmethod
+    def remap_img_attn_qkv_(key, state_dict):
+        weight = state_dict.pop(key)
+        to_q, to_k, to_v = weight.chunk(3, dim=0)
+        state_dict[key.replace("img_attn_qkv", "attn.to_q")] = to_q
+        state_dict[key.replace("img_attn_qkv", "attn.to_k")] = to_k
+        state_dict[key.replace("img_attn_qkv", "attn.to_v")] = to_v
+
+    @staticmethod
+    def remap_txt_attn_qkv_(key, state_dict):
+        weight = state_dict.pop(key)
+        to_q, to_k, to_v = weight.chunk(3, dim=0)
+        state_dict[key.replace("txt_attn_qkv", "attn.add_q_proj")] = to_q
+        state_dict[key.replace("txt_attn_qkv", "attn.add_k_proj")] = to_k
+        state_dict[key.replace("txt_attn_qkv", "attn.add_v_proj")] = to_v
+        
+    @staticmethod
+    def remap_single_transformer_blocks_lora(key, state_dict):
+        # Normalize odd markers like "(3)" that can appear in some dumps
+        clean_key = re.sub(r"\(\d+\)", "", key)
+
+        # Expected formats (examples):
+        #   lora_unet_single_blocks_0_linear1.lora_down.weight
+        #   lora_unet_single_blocks_0_linear2.lora_up.weight
+        #   lora_unet_single_blocks_0_modulation_lin.alpha
+        m = re.match(r"^lora_unet_single_blocks_(\d+)_(.+)$", clean_key)
+        if not m:
+            return
+
+        block_idx, rest = m.groups()
+
+        # Convert specific tokens, but keep component names intact
+        # e.g. modulation_lin -> modulation.lin
+        rest = re.sub(r"^modulation_lin", "modulation.lin", rest)
+
+        new_key = f"single_blocks.{block_idx}.{rest}"
+        state_dict[new_key] = state_dict.pop(key)
+    
+    @staticmethod
+    def remap_double_transformer_blocks_lora(key, state_dict):
+        # Normalize odd markers like "(3)" that can appear in some dumps
+        clean_key = re.sub(r"\(\d+\)", "", key)
+
+        # Examples to handle:
+        #   lora_unet_double_blocks_0_img_attn_proj.lora_down.weight
+        #   lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight
+        #   lora_unet_double_blocks_0_img_mlp_0.lora_down.weight
+        #   lora_unet_double_blocks_0_img_mlp_2.lora_up.weight
+        #   lora_unet_double_blocks_0_txt_attn_proj.alpha
+        #   lora_unet_double_blocks_0_txt_attn_qkv.lora_down.weight
+        #   lora_unet_double_blocks_0_txt_mlp_0.lora_up.weight
+        m = re.match(r"^lora_unet_double_blocks_(\d+)_(.+)$", clean_key)
+        if not m:
+            return
+
+        block_idx, rest = m.groups()
+
+        # Map the first token(s) precisely so rename_dict matches later:
+        #   img_attn_proj -> img_attn.proj
+        #   img_attn_qkv  -> img_attn.qkv
+        #   txt_attn_proj -> txt_attn.proj
+        #   txt_attn_qkv  -> txt_attn.qkv
+        #   img_mlp_0     -> img_mlp.0
+        #   img_mlp_2     -> img_mlp.2
+        #   txt_mlp_0     -> txt_mlp.0
+        #   txt_mlp_2     -> txt_mlp.2
+        #   img_mod_lin   -> img_mod.lin
+        #   txt_mod_lin   -> txt_mod.lin
+        substitutions = [
+            (r"^img_attn_proj", "img_attn.proj"),
+            (r"^img_attn_qkv", "img_attn.qkv"),
+            (r"^txt_attn_proj", "txt_attn.proj"),
+            (r"^txt_attn_qkv", "txt_attn.qkv"),
+            (r"^img_mlp_([02])", r"img_mlp.\1"),
+            (r"^txt_mlp_([02])", r"txt_mlp.\1"),
+            (r"^img_mod_lin", "img_mod.lin"),
+            (r"^txt_mod_lin", "txt_mod.lin"),
+        ]
+
+        for pattern, repl in substitutions:
+            rest = re.sub(pattern, repl, rest)
+
+        new_key = f"double_blocks.{block_idx}.{rest}"
+        state_dict[new_key] = state_dict.pop(key)
+
+    @staticmethod
+    def remap_single_transformer_blocks_(key, state_dict):
+        hidden_size = 3072
+
+        if "linear1.weight" in key:
+            linear1_weight = state_dict.pop(key)
+            split_size = (
+                hidden_size,
+                hidden_size,
+                hidden_size,
+                linear1_weight.size(0) - 3 * hidden_size,
+            )
+            q, k, v, mlp = torch.split(linear1_weight, split_size, dim=0)
+            new_key = key.replace(
+                "single_blocks", "single_transformer_blocks"
+            ).removesuffix(".linear1.weight")
+            state_dict[f"{new_key}.attn.to_q.weight"] = q
+            state_dict[f"{new_key}.attn.to_k.weight"] = k
+            state_dict[f"{new_key}.attn.to_v.weight"] = v
+            state_dict[f"{new_key}.proj_mlp.weight"] = mlp
+
+        elif "linear1.bias" in key:
+            linear1_bias = state_dict.pop(key)
+            split_size = (
+                hidden_size,
+                hidden_size,
+                hidden_size,
+                linear1_bias.size(0) - 3 * hidden_size,
+            )
+            q_bias, k_bias, v_bias, mlp_bias = torch.split(
+                linear1_bias, split_size, dim=0
+            )
+            new_key = key.replace(
+                "single_blocks", "single_transformer_blocks"
+            ).removesuffix(".linear1.bias")
+            state_dict[f"{new_key}.attn.to_q.bias"] = q_bias
+            state_dict[f"{new_key}.attn.to_k.bias"] = k_bias
+            state_dict[f"{new_key}.attn.to_v.bias"] = v_bias
+            state_dict[f"{new_key}.proj_mlp.bias"] = mlp_bias
+
+        else:
+            new_key = key.replace("single_blocks", "single_transformer_blocks")
+            new_key = new_key.replace("linear2", "proj_out")
+            new_key = new_key.replace("modulation.lin", "norm.linear")
+            new_key = new_key.replace("norm.query_norm.scale", "attn.norm_q.weight")
+            new_key = new_key.replace("norm.key_norm.scale", "attn.norm_k.weight")
+            state_dict[new_key] = state_dict.pop(key)
