@@ -1,14 +1,17 @@
 from src.utils.type import EnumType
 from src.engine.base_engine import BaseEngine
 from .t2i import FluxT2IEngine
+from .kontext import FluxKontextEngine
+from .fill import FluxFillEngine
 from diffusers.image_processor import VaeImageProcessor
 from src.denoise.flux_denoise import FluxDenoise
 
 
 class ModelType(EnumType):
     T2I = "t2i"  # text to image
-
-
+    KONTEXT = "kontext"  # kontext
+    FILL = "fill"  # fill
+    
 class FluxEngine(BaseEngine, FluxDenoise):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2I, **kwargs):
 
@@ -30,6 +33,10 @@ class FluxEngine(BaseEngine, FluxDenoise):
         """Initialize the specific implementation engine based on model type"""
         if self.model_type == ModelType.T2I:
             self.implementation_engine = FluxT2IEngine(self)
+        elif self.model_type == ModelType.KONTEXT:
+            self.implementation_engine = FluxKontextEngine(self)
+        elif self.model_type == ModelType.FILL:
+            self.implementation_engine = FluxFillEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

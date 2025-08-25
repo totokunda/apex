@@ -4,12 +4,12 @@ from PIL import Image
 import numpy as np
 from .base import FluxBaseEngine
 
-
-class FluxT2IEngine(FluxBaseEngine):
-    """Flux Text-to-Image Engine Implementation"""
+class FluxKontextEngine(FluxBaseEngine):
+    """Flux Kontext Engine Implementation"""
 
     def run(
         self,
+        image: Image.Image | str | np.ndarray | torch.Tensor,
         prompt: List[str] | str,
         prompt_2: List[str] | str = None,
         negative_prompt: List[str] | str = None,
@@ -17,6 +17,7 @@ class FluxT2IEngine(FluxBaseEngine):
         height: int = 1024,
         width: int = 1024,
         num_inference_steps: int = 30,
+        resize_to_preferred_resolution: bool = True,
         num_images: int = 1,
         seed: int | None = None,
         true_cfg_scale: float = 1.0,
@@ -55,13 +56,23 @@ class FluxT2IEngine(FluxBaseEngine):
             text_encoder_2_kwargs,
         )
         
-
         if offload:
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
+        
+        image = self._load_image(image)
+        if resize_to_preferred_resolution:
+            image = self.resize_to_preferred_resolution(image)
+            width, height = image.size
+        else:
+            image, height, width = self._aspect_ratio_resize(image, mod_value=32, max_area=height*width)
+        
+        image = self.image_processor.preprocess(image)
+        image = image.to(dtype=transformer_dtype)
 
-        latents, latent_ids = self._get_latents(
+        latents, image_latents, latent_ids, image_ids = self._get_latents(
+            image=image,
             batch_size=num_images,
             num_channels_latents=self.num_channels_latents,
             height=height,
@@ -70,6 +81,9 @@ class FluxT2IEngine(FluxBaseEngine):
             device=self.device,
             generator=generator,
         )
+        
+        if image_ids is not None:
+            latent_ids = torch.cat([latent_ids, image_ids], dim=0)  # dim 0 is sequence dimension
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -80,11 +94,7 @@ class FluxT2IEngine(FluxBaseEngine):
             if sigmas is None
             else sigmas
         )
-        if (
-            hasattr(self.scheduler.config, "use_flow_sigmas")
-            and self.scheduler.config.use_flow_sigmas
-        ):
-            sigmas = None
+        
         image_seq_len = latents.shape[1]
         mu = self.calculate_shift(
             image_seq_len,
@@ -173,6 +183,7 @@ class FluxT2IEngine(FluxBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             joint_attention_kwargs=joint_attention_kwargs,
             latent_ids=latent_ids,
+            image_latents=image_latents,
             text_ids=text_ids,
             negative_text_ids=negative_text_ids,
             image_embeds=image_embeds,

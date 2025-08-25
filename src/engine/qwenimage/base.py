@@ -309,3 +309,16 @@ class QwenImageBaseEngine:
         split_result = torch.split(selected, valid_lengths.tolist(), dim=0)
 
         return split_result
+    
+    def prepare_control_image(self, control_image, batch_size, height, width, transformer_dtype, use_cfg_guidance):
+        control_image = self._load_image(control_image)
+        control_image = self.image_processor.preprocess(control_image, height=height, width=width)
+        control_image = control_image.repeat_interleave(batch_size, dim=0)
+        control_image = control_image.to(device=self.device, dtype=transformer_dtype)
+        if use_cfg_guidance:
+            control_image = torch.cat([control_image] * 2)
+        
+        if control_image.ndim == 4:
+            control_image = control_image.unsqueeze(2)
+        
+        return control_image
