@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Literal, Tuple
+from typing import Dict, Any, List, Literal
 import torch
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
 from src.mixins.loader_mixin import LoaderMixin
@@ -19,7 +19,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self,
         config: Dict[str, Any],
         no_weights: bool = True,
-        enable_cache: bool = False,
+        enable_cache: bool = True,
         cache_file: str = None,
         max_cache_size: int = 100,
         device: torch.device | None = None,

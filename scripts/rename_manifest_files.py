@@ -13,7 +13,6 @@ for yaml_file in yaml_files:
         continue
     
     data = load_yaml(yaml_file)
-        
     
     dir_name = os.path.dirname(yaml_file)
     name = data["metadata"]["name"].lower().replace(" ", "-")

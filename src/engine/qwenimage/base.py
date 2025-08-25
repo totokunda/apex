@@ -16,6 +16,8 @@ class QwenImageBaseEngine:
         self.tokenizer_max_length = 1024
         self.prompt_template_encode = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
         self.prompt_template_encode_start_idx = 34
+        self.prompt_template_encode_image = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"
+        self.prompt_template_encode_image_start_idx = 64
         self.default_sample_size = 128
 
     @property
@@ -198,8 +200,13 @@ class QwenImageBaseEngine:
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
 
-        template = self.prompt_template_encode
-        drop_idx = self.prompt_template_encode_start_idx
+        if image is None:
+            template = self.prompt_template_encode
+            drop_idx = self.prompt_template_encode_start_idx
+        else:
+            template = self.prompt_template_encode_image
+            drop_idx = self.prompt_template_encode_image_start_idx
+            
         txt = [template.format(e) for e in prompt]
         
         if image is None:
@@ -225,19 +232,20 @@ class QwenImageBaseEngine:
                 "attention_mask": model_inputs.attention_mask,
                 "pixel_values": model_inputs.pixel_values,
                 "image_grid_thw": model_inputs.image_grid_thw,
-                "output_hidden_states": True,
-                **text_encoder_kwargs,
+                "output_hidden_states": True
             }
 
         prompt_hash = self.text_encoder.hash_prompt(input_kwargs)
+
         cached = None
         if self.text_encoder.enable_cache:
             cached = self.text_encoder.load_cached_prompt(prompt_hash)
+        
         if cached is not None:
             prompt_embeds, prompt_embeds_mask = cached
         else:
             if image is None:
-                encoder_hidden_states, attention_mask = self.text_encoder.encode(
+                encoder_outputs, attention_mask = self.text_encoder.encode(
                 **input_kwargs,
             )
             else:
@@ -245,9 +253,10 @@ class QwenImageBaseEngine:
                     self.text_encoder.model = self.text_encoder.load_model()
                     self.text_encoder.model_loaded = True
                     
-                encoder_hidden_states, attention_mask = self.text_encoder.model(**input_kwargs)
+                encoder_outputs = self.text_encoder.model(**input_kwargs)
+                attention_mask = model_inputs.attention_mask
             
-            hidden_states = encoder_hidden_states.hidden_states[-1]
+            hidden_states = encoder_outputs.hidden_states[-1]
 
             split_hidden_states = self._extract_masked_hidden(
                 hidden_states, attention_mask
