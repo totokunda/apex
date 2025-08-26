@@ -108,6 +108,8 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
             sigmas=sigmas,
         )
 
+        batch_size = prompt_embeds.shape[0]
+
         # 5. Prepare latents
         num_channels_latents = getattr(self.transformer.config, "in_channels", 16)
         latents = self._get_latents(
@@ -115,7 +117,7 @@ class HunyuanT2VEngine(HunyuanBaseEngine):
             width,
             duration,
             fps,
-            num_videos,
+            batch_size,
             num_channels_latents,
             seed=seed,
             generator=generator,

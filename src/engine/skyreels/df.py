@@ -76,6 +76,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
         output_video = None
         prefix_latent = None
         end_latent = None
+        batch_size = prompt_embeds.shape[0]
 
         if video is not None:
             loaded_video = self._load_video(video)
@@ -182,7 +183,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
                 width,
                 base_num_frames,
                 fps=fps,
-                num_videos=num_videos,
+                batch_size=batch_size,
                 seed=seed if not generator else None,
                 dtype=torch.float32,
                 layout=torch.strided,
@@ -330,7 +331,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
                         width,
                         latent_base_num_frames_iter,
                         fps=fps,
-                        num_videos=num_videos,
+                        batch_size=batch_size,
                         seed=seed if not generator else None,
                         dtype=torch.float32,
                         layout=torch.strided,

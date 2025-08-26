@@ -39,3 +39,4 @@ pyloudnorm
 ffmpeg-python
 pip==22.3.1
 setuptools==75.8.2
+gdown

@@ -96,7 +96,7 @@ class QwenImageEditEngine(QwenImageBaseEngine):
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
 
         latents = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

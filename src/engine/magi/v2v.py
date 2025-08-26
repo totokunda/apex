@@ -57,6 +57,8 @@ class MagiV2VEngine(MagiBaseEngine):
             **text_encoder_kwargs,
         )
 
+        batch_size = prompt_embeds.shape[0]
+
         loaded_video, fps = self._load_video(video, fps=fps, return_fps=True)
         for i, frame in enumerate(loaded_video):
             loaded_video[i] = self._aspect_ratio_resize(frame, max_area=height * width)[
@@ -141,7 +143,7 @@ class MagiV2VEngine(MagiBaseEngine):
             height=height,
             width=width,
             duration=chunk_width * num_chunks,
-            num_videos=num_videos,
+            batch_size=batch_size,
             parse_frames=False,
             generator=generator,
             seed=seed,

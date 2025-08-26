@@ -48,6 +48,8 @@ class ChromaT2IEngine(ChromaBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             offload=offload
         )
+        
+        batch_size = prompt_embeds.shape[0]
 
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -65,7 +67,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
 
         latents, latent_image_ids = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

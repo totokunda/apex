@@ -108,13 +108,15 @@ class Cosmos2V2VEngine(Cosmos2BaseEngine):
             sample_generator=generator,
             dtype=torch.float32,
         )
+        
+        batch_size = prompt_embeds.shape[0]
 
         latents = self._get_latents(
             height=height,
             width=width,
             duration=num_frames,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             vae_scale_factor_spatial=self.vae_scale_factor_spatial,
             vae_scale_factor_temporal=self.vae_scale_factor_temporal,

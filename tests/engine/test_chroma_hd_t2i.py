@@ -1,21 +1,22 @@
 import os
-os.environ["APEX_HOME_DIR"] = "/mnt/localssd"
+import torch
 from src.engine import create_engine
 
-engine = create_engine("chroma", "chroma-hd-text-to-image-1-0-0-v1", "t2i", attention_type="sdpa", components_to_load=['transformer'])
+engine = create_engine("chroma", "chroma-hd-text-to-image-1-0-0-v1", "t2i", attention_type="sdpa", component_dtypes={"transformer": torch.float32})
 
 prompt = [
     "A high-fashion close-up portrait of a blonde woman in clear sunglasses. The image uses a bold teal and red color split for dramatic lighting. The background is a simple teal-green. The photo is sharp and well-composed, and is designed for viewing with anaglyph 3D glasses for optimal effect. It looks professionally done."
 ]
+
 negative_prompt =  ["low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"]
 
 video = engine.run(
     prompt=prompt,
     negative_prompt=negative_prompt,
-    height=1024,
-    width=1024,
+    height=640,
+    width=640,
     num_images=1,
-    num_inference_steps=40,
+    num_inference_steps=30,
     guidance_scale=3.5
 )
 

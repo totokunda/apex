@@ -74,12 +74,14 @@ class WanApexFramepackEngine(WanBaseEngine):
         self.to_device(self.scheduler)
         scheduler = self.scheduler
 
+        batch_size = prompt_embeds.shape[0]
+
         latents = self._get_latents(
             height,
             width,
             duration,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             seed=seed,
             dtype=torch.float32,
             generator=generator,

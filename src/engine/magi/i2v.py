@@ -55,6 +55,8 @@ class MagiI2VEngine(MagiBaseEngine):
             **text_encoder_kwargs,
         )
 
+        batch_size = prompt_embeds.shape[0]
+
         loaded_image = self._load_image(image)
 
         loaded_image, height, width = self._aspect_ratio_resize(
@@ -124,7 +126,7 @@ class MagiI2VEngine(MagiBaseEngine):
             height=height,
             width=width,
             duration=chunk_width * num_chunks,
-            num_videos=num_videos,
+            batch_size=batch_size,
             parse_frames=False,
             generator=generator,
             seed=seed,

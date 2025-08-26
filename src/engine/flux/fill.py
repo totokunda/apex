@@ -103,10 +103,11 @@ class FluxFillEngine(FluxBaseEngine):
         )
 
         latent_timestep = timesteps[:1].repeat(prompt_embeds.shape[0])
+        batch_size = prompt_embeds.shape[0]
 
         latents, latent_ids = self._get_latents(
             image=init_image,
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

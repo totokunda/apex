@@ -67,6 +67,7 @@ class WanInpEngine(WanBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
+        batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
@@ -90,7 +91,7 @@ class WanInpEngine(WanBaseEngine):
             width,
             duration,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             seed=seed,
             dtype=torch.float32,
             generator=generator,

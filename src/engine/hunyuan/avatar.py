@@ -252,13 +252,15 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
         fps_tensor = fps.to(self.device)
         # 9. Prepare latents
 
+        batch_size = prompt_embeds.shape[0]
+
         latents = self._get_latents(
             height=height,
             width=width,
             duration=infer_length,
             num_channels_latents=num_channels_latents,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             seed=seed,
             generator=generator,
             parse_frames=False,

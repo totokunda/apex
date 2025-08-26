@@ -1418,7 +1418,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         width: int,
         duration: int | str,
         fps: int = 16,
-        num_videos: int = 1,
+        batch_size: int = 1,
         num_channels_latents: int = None,
         vae_scale_factor_spatial: int = None,
         vae_scale_factor_temporal: int = None,
@@ -1459,7 +1459,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         if order == "BCF":
             shape = (
-                num_videos,
+                batch_size,
                 num_channels_latents or self.num_channels_latents,
                 latent_num_frames,
                 latent_height,
@@ -1467,7 +1467,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
         elif order == "BFC":
             shape = (
-                num_videos,
+                batch_size,
                 latent_num_frames,
                 num_channels_latents or self.num_channels_latents,
                 latent_height,
