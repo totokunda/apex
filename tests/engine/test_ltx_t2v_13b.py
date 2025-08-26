@@ -16,7 +16,7 @@ postprocessor = LatentUpsamplerPostprocessor(engine, dtype=torch.float32,
                                              model_path="https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-spatial-upscaler-0.9.8.safetensors",
                                              config={"_class_name": "LatentUpsampler", "in_channels": 128, "mid_channels": 512, "num_blocks_per_stage": 4, "dims": 3})
 
-image = Image.open('/home/tosinkuye/apex/assets/image/dog.png')
+image = Image.open('assets/image/dog.png')
 
 height = 704
 width = 1216

@@ -19,7 +19,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         tokenizer_name: str = "unsloth/Llama-3.1-8B-Instruct",
         tokenizer_class: str = "PreTrainedTokenizerFast",
         save_path: str = DEFAULT_COMPONENTS_PATH,
-        enable_cache: bool = False,
+        enable_cache: bool = True,
         cache_file: str = None,
         max_cache_size: int = 100,
     ):
@@ -52,11 +52,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
                 "model_path": self.model_path,
             },
             module_name="transformers",
-            load_dtype=dtype,
-            extra_kwargs={
-                "output_hidden_states": True,
-                "output_attentions": True,
-            }
+            load_dtype=dtype
         )
         self.to_device(model, device=device)
 
@@ -100,7 +96,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         
         text_input_ids = text_inputs.input_ids
         attention_mask = text_inputs.attention_mask
-
+        
         outputs = self.model(
             text_input_ids.to(device),
             attention_mask=attention_mask.to(device),

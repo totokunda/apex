@@ -8,7 +8,7 @@ engine = create_engine("qwenimage", "qwenimage-edit-1-0-0-v1", "edit", attention
 
 prompt = "Give the guy a black fedora"
 negative_prompt=" "
-image = "/home/tosinkuye/apex/assets/image/couple.jpg"
+image = "assets/image/couple.jpg"
 video = engine.run(
     image=image,
     prompt=prompt,

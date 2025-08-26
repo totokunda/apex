@@ -6,7 +6,7 @@ import torch
 engine = create_engine("flux", "flux-dev-kontext-1-0-0-v1", "kontext", attention_type="sdpa")
 
 prompt = "Give the guy a black fedora"
-image = "/home/tosinkuye/apex/assets/image/couple.jpg"
+image = "assets/image/couple.jpg"
 video = engine.run(
     image=image,
     prompt=prompt,

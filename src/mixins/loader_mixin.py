@@ -95,6 +95,7 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["dtype"] = load_dtype
             else:
                 extra_kwargs["torch_dtype"] = load_dtype
+                
 
             model = model_class.from_pretrained(model_path, **extra_kwargs)
             return model
