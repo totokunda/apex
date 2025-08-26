@@ -85,6 +85,8 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
             max_sequence_length=max_sequence_length,
             **text_encoder_kwargs,
         )
+        
+        batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None:
             (
@@ -190,7 +192,7 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
             history_sizes = [16, 2, 1]
 
         history_latents = torch.zeros(
-            num_videos,
+            batch_size,
             num_channels_latents,
             sum(history_sizes),
             math.ceil(height / self.vae_scale_factor_spatial),
@@ -206,7 +208,7 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
         # 8. Guidance preparation
         guidance = (
             torch.tensor(
-                [guidance_scale] * num_videos,
+                [guidance_scale] * batch_size,
                 dtype=transformer_dtype,
                 device=self.device,
             )
@@ -228,7 +230,7 @@ class HunyuanFramepackEngine(HunyuanBaseEngine):
                     width=width,
                     duration=window_num_frames,
                     fps=fps,
-                    num_videos=num_videos,
+                    batch_size=batch_size,
                     num_channels_latents=num_channels_latents,
                     seed=seed,
                     generator=generator,

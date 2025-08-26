@@ -150,6 +150,8 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
         num_frames = self._parse_num_frames(duration, fps)
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
         image_latents = image_latents.repeat(1, 1, num_latent_frames, 1, 1)
+        
+        batch_size = prompt_embeds.shape[0]
 
         # 5. Prepare latents
         latents = self._get_latents(
@@ -157,7 +159,7 @@ class HunyuanI2VEngine(HunyuanBaseEngine):
             width=width,
             duration=num_latent_frames,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             num_channels_latents=num_channels_latents,
             seed=seed,
             generator=generator,

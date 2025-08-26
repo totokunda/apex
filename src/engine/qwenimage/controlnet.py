@@ -108,10 +108,10 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
                 control_images.append(control_image_)
             control_image = control_images
         else:
-            raise ValueError(f"Unsupported controlnet type: {type(controlnet)}")
+            raise ValueError(f"Unsupported controlnet type.")
 
         latents = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

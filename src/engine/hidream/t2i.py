@@ -46,6 +46,8 @@ class HidreamT2IEngine(HidreamBaseEngine):
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
         self.to_device(self.text_encoder)
+        
+        batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images   
 
         use_cfg_guidance = guidance_scale > 1.0
 
@@ -88,9 +90,9 @@ class HidreamT2IEngine(HidreamBaseEngine):
             llama_prompt_embeds = torch.cat([llama_negative_prompt_embeds.to(self.device), llama_prompt_embeds.to(self.device)], dim=1).to(transformer_dtype)
             prompt_embeds = torch.cat([negative_prompt_embeds.to(self.device), prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds.to(self.device), pooled_prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
-
+    
         latents = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

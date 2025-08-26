@@ -68,6 +68,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
 
         len_clip = prompt_embeds.shape[1]
         llm_mask = torch.nn.functional.pad(llm_mask, (len_clip, 0), value=1)
+        batch_size = prompt_embeds.shape[0]
 
         if use_cfg_guidance:
             llm_negative_prompt_embeds, llm_negative_mask = llm_preprocessor(
@@ -121,7 +122,7 @@ class StepVideoT2VEngine(StepVideoBaseEngine):
             latent_num_frames,
             num_channels_latents=num_channels_latents,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             seed=seed,
             dtype=torch.float32,
             generator=generator,

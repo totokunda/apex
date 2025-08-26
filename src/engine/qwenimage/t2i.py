@@ -35,6 +35,8 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
 
         self.to_device(self.text_encoder)
 
+        batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images
+
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
             num_images_per_prompt=num_images,
@@ -70,7 +72,7 @@ class QwenImageT2IEngine(QwenImageBaseEngine):
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
 
         latents = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

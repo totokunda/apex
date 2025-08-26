@@ -57,6 +57,8 @@ class MagiT2VEngine(MagiBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
+        batch_size = prompt_embeds.shape[0]
+
         num_frames = self._parse_num_frames(duration, fps)
         num_chunks = math.ceil(
             num_frames // self.vae_scale_factor_temporal / chunk_width
@@ -104,7 +106,7 @@ class MagiT2VEngine(MagiBaseEngine):
             height=height,
             width=width,
             duration=chunk_width * num_chunks,
-            num_videos=num_videos,
+            batch_size=batch_size,
             parse_frames=False,
             generator=generator,
             seed=seed,

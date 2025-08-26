@@ -97,6 +97,8 @@ class LTXX2VEngine(LTXBaseEngine):
 
         transformer_dtype = self.component_dtypes["transformer"]
 
+        batch_size = prompt_embeds.shape[0]
+
         prompt_embeds_batch = torch.cat(
             [negative_prompt_embeds, prompt_embeds, prompt_embeds], dim=0
         )
@@ -156,7 +158,7 @@ class LTXX2VEngine(LTXBaseEngine):
             width,
             num_frames,
             fps,
-            num_videos,
+            batch_size,
             shape=shape,
             dtype=transformer_dtype,
             seed=seed,

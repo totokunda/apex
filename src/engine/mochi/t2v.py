@@ -40,7 +40,7 @@ class MochiT2VEngine(MochiBaseEngine):
         duration: int = 97,
         num_inference_steps: int = 64,
         guidance_scale: float = 4.5,
-        num_videos_per_prompt: int = 1,
+        num_videos: int = 1,
         seed: Optional[int] = None,
         generator: Optional[torch.Generator] = None,
         latents: Optional[torch.Tensor] = None,
@@ -64,10 +64,12 @@ class MochiT2VEngine(MochiBaseEngine):
         prompt_embeds, prompt_attention_mask = self.text_encoder.encode(
             prompt,
             device=self.device,
-            num_videos_per_prompt=num_videos_per_prompt,
+            num_videos_per_prompt=num_videos,
             max_sequence_length=max_sequence_length,
             return_attention_mask=True,
         )
+
+        batch_size = prompt_embeds.shape[0]
 
         use_cfg_guidance = guidance_scale > 1.0
         if use_cfg_guidance:
@@ -77,7 +79,7 @@ class MochiT2VEngine(MochiBaseEngine):
                 self.text_encoder.encode(
                     negative_prompt,
                     device=self.device,
-                    num_videos_per_prompt=num_videos_per_prompt,
+                    num_videos_per_prompt=num_videos,
                     max_sequence_length=max_sequence_length,
                     return_attention_mask=True,
                 )
@@ -116,7 +118,7 @@ class MochiT2VEngine(MochiBaseEngine):
                 height=height,
                 width=width,
                 duration=latent_num_frames,
-                num_videos=num_videos_per_prompt,
+                batch_size=batch_size,
                 num_channels_latents=self.num_channels_latents,
                 dtype=torch.float32,
                 generator=generator,

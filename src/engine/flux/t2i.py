@@ -60,9 +60,10 @@ class FluxT2IEngine(FluxBaseEngine):
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
+        batch_size = prompt_embeds.shape[0]
 
         latents, latent_ids = self._get_latents(
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

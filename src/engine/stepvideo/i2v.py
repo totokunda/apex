@@ -84,6 +84,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             self._offload(llm_preprocessor)
 
         transformer_dtype = self.component_dtypes["transformer"]
+        batch_size = prompt_embeds.shape[0]
 
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
@@ -124,7 +125,7 @@ class StepVideoI2VEngine(StepVideoBaseEngine):
             latent_num_frames,
             num_channels_latents=num_channels_latents,
             fps=fps,
-            num_videos=num_videos,
+            batch_size=batch_size,
             seed=seed,
             dtype=torch.float32,
             generator=generator,

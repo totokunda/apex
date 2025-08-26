@@ -116,7 +116,7 @@ class CogVideoInpEngine(CogVideoBaseEngine):
             guidance_scale > 1.0 and negative_prompt_embeds is not None
         )
 
-        batch_size = num_videos
+        batch_size = prompt_embeds.shape[0]
 
         # 4. Load scheduler
         if not self.scheduler:
@@ -175,7 +175,7 @@ class CogVideoInpEngine(CogVideoBaseEngine):
             height,
             width,
             latent_num_frames,
-            num_videos=num_videos,
+            batch_size=batch_size,
             num_channels_latents=num_channels_latents,
             seed=seed,
             generator=generator,
@@ -184,7 +184,7 @@ class CogVideoInpEngine(CogVideoBaseEngine):
             order="BFC",
         )
 
-        latent_timestep = timesteps[:1].repeat(batch_size * num_videos)
+        latent_timestep = timesteps[:1].repeat(batch_size)
         if not is_strength_max:
             latents = self.scheduler.add_noise(video_latents, latents, latent_timestep)
         else:

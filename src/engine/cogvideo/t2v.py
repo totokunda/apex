@@ -88,11 +88,12 @@ class CogVideoT2VEngine(CogVideoBaseEngine):
         latent_num_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
         num_channels_latents = self.transformer.config.get("in_channels", 16)
+        batch_size = prompt_embeds.shape[0]
         latents = self._get_latents(
             height,
             width,
             latent_num_frames,
-            num_videos=num_videos,
+            batch_size=batch_size,
             num_channels_latents=num_channels_latents,
             seed=seed,
             generator=generator,

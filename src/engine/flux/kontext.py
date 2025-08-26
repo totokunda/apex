@@ -70,10 +70,12 @@ class FluxKontextEngine(FluxBaseEngine):
         
         image = self.image_processor.preprocess(image)
         image = image.to(dtype=transformer_dtype)
+        
+        batch_size = prompt_embeds.shape[0]
 
         latents, image_latents, latent_ids, image_ids = self._get_latents(
             image=image,
-            batch_size=num_images,
+            batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
             height=height,
             width=width,

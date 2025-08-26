@@ -144,11 +144,12 @@ class CogVideoI2VEngine(CogVideoBaseEngine):
 
         # Prepare noise latents
         latent_channels = transformer_config.get("in_channels", 16) // 2
+        batch_size = prompt_embeds.shape[0]
         latents = self._get_latents(
             height,
             width,
             latent_num_frames,
-            num_videos=num_videos,
+            batch_size=batch_size,
             num_channels_latents=latent_channels,
             seed=seed,
             generator=generator,
