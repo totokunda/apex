@@ -6,8 +6,8 @@ from src.utils.mlx import torch_to_mlx, mlx_to_torch
 from diffusers import UniPCMultistepScheduler
 from src.mlx.scheduler.unipc import UniPCMultistepScheduler as UniPCMultistepSchedulerMLX
 
-mlx_model = WanTransformer3DModelMLX.from_pretrained("/Users/tosinkuye/apex-diffusion/components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer/mlx", dtype='float16')
-torch_model = WanTransformer3DModelTorch.from_pretrained("/Users/tosinkuye/apex-diffusion/components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer", torch_dtype=torch.float16).to("mps")
+mlx_model = WanTransformer3DModelMLX.from_pretrained("components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer/mlx", dtype='float16')
+torch_model = WanTransformer3DModelTorch.from_pretrained("components/Wan-AI_Wan2.1-T2V-1.3B-Diffusers/transformer", torch_dtype=torch.float16).to("mps")
 
 mlx_model = mlx_model.eval()
 torch_model = torch_model.eval()
@@ -25,8 +25,8 @@ m_timestep = mlx_tensors["timestep"]
 m_t = m_timestep.squeeze()
 m_encoder_hidden_states = mlx_tensors["encoder_hidden_states"]
 
-scheduler = UniPCMultistepScheduler.from_pretrained('/Users/tosinkuye/apex-diffusion/configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
-scheduler_mlx = UniPCMultistepSchedulerMLX.from_pretrained('/Users/tosinkuye/apex-diffusion/configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
+scheduler = UniPCMultistepScheduler.from_pretrained('configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
+scheduler_mlx = UniPCMultistepSchedulerMLX.from_pretrained('configs/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/scheduler')
 scheduler.set_timesteps(30)
 scheduler_mlx.set_timesteps(30)
 

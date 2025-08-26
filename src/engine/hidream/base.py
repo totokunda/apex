@@ -1,6 +1,7 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-
+from PIL import Image
+import math
 
 class HidreamBaseEngine:
     """Base class for Hidream engine implementations containing common functionality"""
@@ -25,7 +26,11 @@ class HidreamBaseEngine:
     @property
     def text_encoder_3(self):
         return getattr(self.main_engine, "text_encoder_3", None)
-
+    
+    @property
+    def refiner(self):
+        return getattr(self.main_engine, "refiner", None)
+    
     @property
     def transformer(self):
         return self.main_engine.transformer
@@ -49,6 +54,14 @@ class HidreamBaseEngine:
     @property
     def helpers(self):
         return self.main_engine.helpers
+    
+    def load_config_by_type(self, component_type: str):
+        """Load a component by type"""
+        return self.main_engine.load_config_by_type(component_type)
+
+    def load_config_by_name(self, component_name: str):
+        """Load a component by name"""
+        return self.main_engine.load_config_by_name(component_name)
 
     def load_component_by_type(self, component_type: str):
         """Load a component by type"""
@@ -181,10 +194,7 @@ class HidreamBaseEngine:
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is not None:
-            latent_image_ids = self._prepare_latent_image_ids(
-                batch_size, height // 2, width // 2, device, dtype
-            )
-            return latents.to(device=device, dtype=dtype), latent_image_ids
+            return latents.to(device=device, dtype=dtype)
 
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
@@ -273,7 +283,7 @@ class HidreamBaseEngine:
 
         if not negative_prompt_2:
             negative_prompt_2 = negative_prompt
-
+            
         pooled_prompt_embeds_2 = self.text_encoder_2.encode(
             f"<|startoftext|>{prompt_2}<|endoftext|>",
             device=self.device,
@@ -345,6 +355,8 @@ class HidreamBaseEngine:
             negative_prompt_4 = negative_prompt
         
         llama_encoder = self.helpers["llama"]
+        self.to_device(llama_encoder)
+        
         llama_prompt_embeds = llama_encoder(prompt_4, device=self.device, dtype=prompt_embeds.dtype, num_images_per_prompt=num_images)
         
         if negative_prompt_4 is not None and use_cfg_guidance:
@@ -363,3 +375,40 @@ class HidreamBaseEngine:
             pooled_prompt_embeds,
             negative_pooled_prompt_embeds,
         )
+
+    def resize_image(self, pil_image: Image.Image, image_size: int = 1024) -> Image.Image:
+        while min(*pil_image.size) >= 2 * image_size:
+            pil_image = pil_image.resize(
+                tuple(x // 2 for x in pil_image.size), resample=Image.BOX
+            )
+
+        m = 16
+        width, height = pil_image.width, pil_image.height
+        S_max = image_size * image_size
+        scale = S_max / (width * height)
+        scale = math.sqrt(scale)
+
+        new_sizes = [
+            (round(width * scale) // m * m, round(height * scale) // m * m),
+            (round(width * scale) // m * m, math.floor(height * scale) // m * m),
+            (math.floor(width * scale) // m * m, round(height * scale) // m * m),
+            (math.floor(width * scale) // m * m, math.floor(height * scale) // m * m),
+        ]
+        new_sizes = sorted(new_sizes, key=lambda x: x[0] * x[1], reverse=True)
+
+        for new_size in new_sizes:
+            if new_size[0] * new_size[1] <= S_max:
+                break
+
+        s1 = width / new_size[0]
+        s2 = height / new_size[1]
+        if s1 < s2:
+            pil_image = pil_image.resize([new_size[0], round(height / s1)], resample=Image.BICUBIC)
+            top = (round(height / s1) - new_size[1]) // 2
+            pil_image = pil_image.crop((0, top, new_size[0], top + new_size[1]))
+        else:
+            pil_image = pil_image.resize([round(width / s2), new_size[1]], resample=Image.BICUBIC)
+            left = (round(width / s2) - new_size[0]) // 2
+            pil_image = pil_image.crop((left, 0, left + new_size[0], new_size[1]))
+
+        return pil_image

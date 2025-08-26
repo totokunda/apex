@@ -10,6 +10,7 @@ from typing import Dict, Any
 from transformers.image_processing_utils import ImageProcessingMixin
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
 from src.helpers.helpers import helpers
+from src.mixins.cache_mixin import CacheMixin
 from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 import torch.nn as nn
@@ -70,7 +71,7 @@ def _expand_input_ids_with_image_tokens(
 
 
 @helpers("hunyuan.llama")
-class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
+class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
     def __init__(
         self,
         model_path: str,
@@ -79,6 +80,9 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
         config: Dict[str, Any] | None = None,
         save_path: str = DEFAULT_COMPONENTS_PATH,
         config_save_path: str = DEFAULT_CONFIG_SAVE_PATH,
+        enable_cache: bool = True,  
+        cache_file: str = None,
+        max_cache_size: int = 100,
         tokenizer_name: str | None = None,
         tokenizer_class: str | None = None,
         tokenizer_kwargs: Dict[str, Any] | None = None,
@@ -86,6 +90,10 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
         **kwargs,
     ):
         super().__init__()
+        self.enable_cache = enable_cache
+        self.cache_file = cache_file
+        self.max_cache_size = max_cache_size
+        
         self.model_path = self._download(model_path, save_path)
         # Default prompt template for HunyuanVideo
         self.default_prompt_template_text = {
@@ -206,6 +214,26 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
         hyavatar: bool = False,
         **kwargs,
     ):
+        
+        input_kwargs = {
+            "prompt": prompt,
+            "image": image,
+            "max_sequence_length": max_sequence_length,
+            "image_embed_interleave": image_embed_interleave,
+            "num_hidden_layers_to_skip": num_hidden_layers_to_skip,
+            "device": device,
+            "dtype": dtype,
+            "num_videos_per_prompt": num_videos_per_prompt,
+            "hyavatar": hyavatar,
+        }
+        
+        prompt_hash = self.hash_prompt(input_kwargs)
+        
+        if self.enable_cache:
+            cached = self.load_cached_prompt(prompt_hash)
+            if cached is not None:
+                return cached
+        
         prompt = [prompt] if isinstance(prompt, str) else prompt
         prompt_template = (
             self.default_prompt_template_text
@@ -404,5 +432,8 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin):
             prompt_attention_mask = prompt_attention_mask.view(
                 bs * num_videos_per_prompt, seq_len
             )
+            
+        if self.enable_cache:
+            self.cache_prompt(prompt_hash, prompt_embeds, prompt_attention_mask)
 
         return prompt_embeds, prompt_attention_mask

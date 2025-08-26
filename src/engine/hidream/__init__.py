@@ -1,13 +1,14 @@
 from src.utils.type import EnumType
 from src.engine.base_engine import BaseEngine
 from .t2i import HidreamT2IEngine
+from .edit import HidreamEditEngine
 from diffusers.image_processor import VaeImageProcessor
 from src.denoise.hidream_denoise import HidreamDenoise
 
 
 class ModelType(EnumType):
     T2I = "t2i"  # text to image
-
+    EDIT = "edit"  # edit
 
 class HidreamEngine(BaseEngine, HidreamDenoise):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2I, **kwargs):
@@ -31,6 +32,8 @@ class HidreamEngine(BaseEngine, HidreamDenoise):
         """Initialize the specific implementation engine based on model type"""
         if self.model_type == ModelType.T2I:
             self.implementation_engine = HidreamT2IEngine(self)
+        elif self.model_type == ModelType.EDIT:
+            self.implementation_engine = HidreamEditEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

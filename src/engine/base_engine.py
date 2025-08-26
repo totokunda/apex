@@ -53,7 +53,6 @@ import mlx.nn as mx_nn
 from src.converters import (
     get_transformer_keys,
     convert_transformer,
-    get_vae_keys,
     convert_vae,
 )
 
@@ -182,7 +181,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
         self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        self._auto_apply_loras()
+        self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
 
     def _init_logger(self):
         self.logger = logger
@@ -633,6 +632,31 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     else:
                         return {}
             raise ValueError(f"Component type {component_type} not found")
+        
+    def load_config_by_name(self, component_name: str):
+        with accelerate.init_empty_weights():
+            # check if the component is already loaded
+            if getattr(self, component_name, None) is not None:
+                return getattr(self, component_name).config
+            for component in self.config.get("components", []):
+                if component.get("name") == component_name:
+                    self.load_component(
+                        component,
+                        (
+                            self.component_load_dtypes.get(component.get("type"))
+                            if self.component_load_dtypes
+                            else None
+                        ),
+                        no_weights=True,
+                    )
+                    config = getattr(getattr(self, component_name), "config", {})
+                    setattr(self, f"{component_name}", None)
+
+                    if config:
+                        return config
+                    else:
+                        return {}
+            raise ValueError(f"Component name {component_name} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
         component["load_dtype"] = self.component_load_dtypes.get("text_encoder", None)
@@ -1242,22 +1266,28 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         loras: List[Union[str, LoraItem, tuple]],
         adapter_names: List[str] | None = None,
         scales: List[float] | None = None,
+        model_name_or_type: str  = "transformer",
     ):
         """
         Apply one or multiple LoRAs to the current transformer using PEFT backend.
         Each entry in `loras` may be a source string, a LoraItem, or (source|LoraItem, scale).
         """
-        if self.transformer is None:
-            self.load_component_by_type("transformer")
+        if model_name_or_type == "transformer":
+            if self.transformer is None:
+                self.load_component_by_type("transformer")
+        else:
+            if getattr(self, model_name_or_type) is None:
+                self.load_component_by_name(model_name_or_type)
+            
+        model = getattr(self, model_name_or_type)
 
         if self.lora_manager is None:
             self._init_lora_manager(DEFAULT_LORA_SAVE_PATH)
         if self.lora_manager is None:
             raise RuntimeError("LoraManager is not available")
         
-
         resolved = self.lora_manager.load_into(
-            self.transformer, loras, adapter_names=adapter_names, scales=scales
+            model, loras, adapter_names=adapter_names, scales=scales
         )
         # Track by adapter name
         for i, item in enumerate(resolved):
@@ -1269,7 +1299,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self.loaded_loras[name] = item
         self.logger.info(f"Applied {len(resolved)} LoRA(s) to transformer")
 
-    def _auto_apply_loras(self):
+    def _auto_apply_loras(self, model_name_or_type: str = "transformer"):
         """If the YAML config includes a top-level `loras` list, apply them on init.
         Supported formats:
         - ["source1", "source2"]
@@ -1298,7 +1328,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             adapter_names if any(n is not None for n in adapter_names) else None
         )
         try:
-            self.apply_loras(formatted, adapter_names=final_names)
+            self.apply_loras(formatted, adapter_names=final_names, model_name_or_type=model_name_or_type)
         except Exception as e:
             self.logger.warning(f"Auto-apply LoRAs failed: {e}")
 
