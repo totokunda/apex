@@ -466,15 +466,16 @@ class LoaderMixin(DownloadMixin):
                     raise IOError(f"Cannot open video file: {video_path}")
 
                 original_fps = cap.get(cv2.CAP_PROP_FPS)
-                frame_skip = 1 if fps is None else max(1, int(original_fps // fps))
-
+                
                 frames = []
                 frame_count = 0
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    if frame_count % frame_skip == 0:
+                
+                if fps is None:
+                    # No fps specified, extract all frames
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
                         # Check if frame is grayscale or color
                         if len(frame.shape) == 2 or (
                             len(frame.shape) == 3 and frame.shape[2] == 1
@@ -489,7 +490,36 @@ class LoaderMixin(DownloadMixin):
                             if convert_method
                             else Image.fromarray(frame_rgb)
                         )
-                    frame_count += 1
+                        frame_count += 1
+                else:
+                    # Extract frames at specified fps using time-based sampling
+                    frame_interval = original_fps / fps  # frames between each sample
+                    next_frame_time = 0.0
+                    
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        
+                        # Check if current frame should be extracted based on timing
+                        if frame_count >= next_frame_time:
+                            # Check if frame is grayscale or color
+                            if len(frame.shape) == 2 or (
+                                len(frame.shape) == 3 and frame.shape[2] == 1
+                            ):
+                                # Grayscale frame, no color conversion needed
+                                frame_rgb = frame
+                            else:
+                                # Color frame, convert from BGR to RGB
+                                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            frames.append(
+                                convert_method(Image.fromarray(frame_rgb))
+                                if convert_method
+                                else Image.fromarray(frame_rgb)
+                            )
+                            next_frame_time += frame_interval
+                        
+                        frame_count += 1
                 if return_fps:
                     return frames, original_fps
                 else:

@@ -99,7 +99,7 @@ class WanCausalEngine(WanBaseEngine):
             )
             num_input_frames = latent_image.shape[2]
         elif video is not None:
-            loaded_video = self._load_video(video)
+            loaded_video = self._load_video(video, fps=fps)
             preprocessed_video = self.video_processor.preprocess_video(
                 loaded_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)

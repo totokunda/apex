@@ -615,7 +615,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 return getattr(self, component_type).config
             for component in self.config.get("components", []):
                 if component.get("type") == component_type:
-                    self.load_component(
+                    component = self.load_component(
                         component,
                         (
                             self.component_load_dtypes.get(component.get("type"))
@@ -624,8 +624,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         ),
                         no_weights=True,
                     )
-                    config = getattr(getattr(self, component_type), "config", {})
-                    setattr(self, f"{component_type}", None)
+                    
+                    config = getattr(component, "config", {})
 
                     if config:
                         return config
@@ -640,7 +640,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 return getattr(self, component_name).config
             for component in self.config.get("components", []):
                 if component.get("name") == component_name:
-                    self.load_component(
+                    component = self.load_component(
                         component,
                         (
                             self.component_load_dtypes.get(component.get("type"))
@@ -649,8 +649,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         ),
                         no_weights=True,
                     )
-                    config = getattr(getattr(self, component_name), "config", {})
-                    setattr(self, f"{component_name}", None)
+                    config = getattr(component, "config", {})
 
                     if config:
                         return config
@@ -862,6 +861,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             config = self.fetch_config(config_path)
         if component.get("config", None):
             config.update(component.get("config", {}))
+        
 
         if not config:
             return (

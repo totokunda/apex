@@ -65,7 +65,7 @@ class WanV2VEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        loaded_video = self._load_video(video)
+        loaded_video = self._load_video(video, fps=fps)
 
         for i, frame in enumerate(loaded_video):
             frame, height, width = self._aspect_ratio_resize(

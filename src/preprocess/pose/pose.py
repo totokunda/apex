@@ -315,3 +315,24 @@ class PoseBodyVideoPreprocessor(PoseBodyPreprocessor, BasePreprocessor):
 
     def __repr__(self):
         return self.__str__()
+
+
+@preprocessor_registry("pose.video")
+class PoseVideoPreprocessor(PosePreprocessor, BasePreprocessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.preprocessor_type = PreprocessorType.VIDEO
+
+    def __call__(self, frames: Union[List[Image.Image], List[str], str]):
+        frames = self._load_video(frames)
+        ret_frames = []
+        for frame in tqdm(frames):
+            anno_frame = super().__call__(frame)
+            ret_frames.append(anno_frame)
+        return PoseVideoOutput(frames=ret_frames)
+
+    def __str__(self):
+        return "PoseVideoPreprocessor(use_body=True, use_face=True, use_hand=False)"
+
+    def __repr__(self):
+        return self.__str__()

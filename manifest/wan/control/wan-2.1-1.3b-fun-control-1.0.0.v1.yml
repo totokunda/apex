@@ -36,6 +36,7 @@ spec:
     config_path: https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B-Diffusers/resolve/main/transformer/config.json
     config: 
       _class_name: WanFunTransformer3DModel
+      qk_norm: rms_norm_across_heads
   - type: helper
     base: clip
     name: wan/clip
@@ -50,5 +51,6 @@ spec:
       num_inference_steps: 30
       guidance_scale: 5.0
       return_latents: false
-      text_encoder_kwargs: {}
+      text_encoder_kwargs: 
+        use_attention_mask: true
       attention_kwargs: {}
