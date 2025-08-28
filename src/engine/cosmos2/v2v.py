@@ -81,7 +81,7 @@ class Cosmos2V2VEngine(Cosmos2BaseEngine):
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
 
-        loaded_video = self._load_video(video)
+        loaded_video = self._load_video(video, fps=fps)
         video = self.video_processor.preprocess_video(loaded_video, height, width)
         num_cond_frames = video.size(2)
         num_frames = self._parse_num_frames(duration, fps)

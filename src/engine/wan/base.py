@@ -67,6 +67,10 @@ class WanBaseEngine:
     def load_config_by_type(self, component_type: str):
         """Load a component by type and config"""
         return self.main_engine.load_config_by_type(component_type)
+    
+    def load_config_by_name(self, component_name: str):
+        """Load a component by name and config"""
+        return self.main_engine.load_config_by_name(component_name)
 
     def to_device(self, component):
         """Move component to device"""
@@ -132,7 +136,6 @@ class WanBaseEngine:
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
         # and half precision
 
-        control = control.to(device=self.device, dtype=dtype)
         bs = 1
         new_control = []
         for i in range(0, control.shape[0], bs):
@@ -144,6 +147,7 @@ class WanBaseEngine:
         control = torch.cat(new_control, dim=0)
 
         return control
+    
 
     def resize_and_centercrop(self, cond_image, target_size):
         """
@@ -196,3 +200,39 @@ class WanBaseEngine:
             cropped_tensor = cropped_tensor[:, :, None, :, :]
 
         return cropped_tensor
+    
+    def _resize_mask(self, mask, latent, process_first_frame_only=True):
+        latent_size = latent.size()
+        batch_size, channels, num_frames, height, width = mask.shape
+
+        if process_first_frame_only:
+            target_size = list(latent_size[2:])
+            target_size[0] = 1
+            first_frame_resized = F.interpolate(
+                mask[:, :, 0:1, :, :],
+                size=target_size,
+                mode='trilinear',
+                align_corners=False
+            )
+
+            target_size = list(latent_size[2:])
+            target_size[0] = target_size[0] - 1
+            if target_size[0] != 0:
+                remaining_frames_resized = F.interpolate(
+                    mask[:, :, 1:, :, :],
+                    size=target_size,
+                    mode='trilinear',
+                    align_corners=False
+                )
+                resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
+            else:
+                resized_mask = first_frame_resized
+        else:
+            target_size = list(latent_size[2:])
+            resized_mask = F.interpolate(
+                mask,
+                size=target_size,
+                mode='trilinear',
+                align_corners=False
+            )
+        return resized_mask

@@ -8,13 +8,11 @@ import numpy as np
 import torch
 from typing import Union, Dict, Any, List
 from src.helpers.helpers import helpers
-from src.mixins.loader_mixin import LoaderMixin
-from src.mixins.offload_mixin import OffloadMixin
 import torch.nn as nn
-
+from src.preprocess.base import BasePreprocessor
 
 @helpers("clip")
-class CLIP(nn.Module, LoaderMixin, OffloadMixin):
+class CLIP(BasePreprocessor):
 
     def __init__(
         self,
@@ -29,12 +27,11 @@ class CLIP(nn.Module, LoaderMixin, OffloadMixin):
         dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
-        super().__init__(model_path=model_path, save_path=save_path)
+        super().__init__(model_path=model_path, save_path=save_path, config_path=model_config_path)
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
         self.processor = self.load_processor(preprocessor_path)
-        self.model_path = self._download(model_path, save_path)
 
         self.model = self._load_model(
             {

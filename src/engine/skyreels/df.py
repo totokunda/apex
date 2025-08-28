@@ -79,7 +79,7 @@ class SkyReelsDFEngine(SkyReelsBaseEngine):
         batch_size = prompt_embeds.shape[0]
 
         if video is not None:
-            loaded_video = self._load_video(video)
+            loaded_video = self._load_video(video, fps=fps)
 
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]

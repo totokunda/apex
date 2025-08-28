@@ -88,7 +88,7 @@ class WanMultitalkEngine(WanBaseEngine):
             cond_image = cond_image.unsqueeze(2)
 
         if video is not None:
-            input_video = self._load_video(video)
+            input_video = self._load_video(video, fps=fps)
             image = input_video[0]
             for idx, frame in enumerate(input_video):
                 frame, height, width = self._aspect_ratio_resize(

@@ -1,4 +1,5 @@
 from src.engine.base_engine import BaseEngine
+from diffusers.image_processor import VaeImageProcessor
 from diffusers.video_processor import VideoProcessor
 from src.denoise.wan_denoise import WanDenoise, DenoiseType
 from src.mlx.denoise.wan_denoise import (
@@ -92,6 +93,10 @@ class WanEngine(BaseEngine, WanDenoise):
             vae_scale_factor=kwargs.get(
                 "vae_scale_factor", self.vae_scale_factor_spatial
             )
+        )
+        
+        self.mask_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial, do_normalize=False, do_binarize=True, do_convert_grayscale=True
         )
 
         # Initialize the appropriate implementation engine

@@ -25,7 +25,7 @@ class WanVaceEngine(WanBaseEngine):
         conditioning_scale: Union[float, List[float], torch.Tensor] = 1.0,
         height: int = 480,
         width: int = 832,
-        duration: int | str | None = None,
+        duration: int | str | None = 81,
         fps: int = 16,
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
@@ -51,7 +51,9 @@ class WanVaceEngine(WanBaseEngine):
 
         self.to_device(self.text_encoder)
 
+
         num_frames = self._parse_num_frames(duration, fps=fps)
+
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -97,7 +99,9 @@ class WanVaceEngine(WanBaseEngine):
             num_inference_steps=num_inference_steps,
         )
         if mask:
-            loaded_mask = self._load_video(mask)
+            loaded_mask = self._load_video(mask, fps=fps)
+            if num_frames < len(loaded_mask):
+                loaded_mask = loaded_mask[:num_frames]
 
         if isinstance(conditioning_scale, (int, float)):
             conditioning_scale = [conditioning_scale] * len(
@@ -119,7 +123,9 @@ class WanVaceEngine(WanBaseEngine):
             )
 
         if video is not None:
-            loaded_video = self._load_video(video)
+            loaded_video = self._load_video(video, fps=fps)
+            if num_frames < len(loaded_video):
+                loaded_video = loaded_video[:num_frames]
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]
             )
@@ -139,10 +145,11 @@ class WanVaceEngine(WanBaseEngine):
             preprocessed_video = self.video_processor.preprocess_video(
                 loaded_video, video_height, video_width
             )
+
             height, width = video_height, video_width
         else:
             preprocessed_video = torch.zeros(
-                num_videos,
+                batch_size,
                 3,
                 num_frames,
                 height,
@@ -150,6 +157,7 @@ class WanVaceEngine(WanBaseEngine):
                 device=self.device,
                 dtype=torch.float32,
             )
+            
 
         if not mask:
             preprocessed_mask = torch.ones_like(preprocessed_video)
@@ -240,7 +248,7 @@ class WanVaceEngine(WanBaseEngine):
             dtype=torch.float32,
             normalize_latents_dtype=torch.float32,
         )
-
+        
         latents = torch.cat([inactive, reactive], dim=1)
 
         latent_list = []
@@ -249,7 +257,6 @@ class WanVaceEngine(WanBaseEngine):
         ):
             for reference_image in reference_images_batch:
                 assert reference_image.ndim == 3
-                reference_image = reference_image.to(dtype=self.vae.dtype)
                 reference_image = reference_image[
                     None, :, None, :, :
                 ]  # [1, C, 1, H, W]
@@ -271,16 +278,16 @@ class WanVaceEngine(WanBaseEngine):
         for mask_, reference_images_batch in zip(
             preprocessed_mask, reference_images_preprocessed
         ):
-            num_channels, num_frames, height, width = mask_.shape
+            num_channels, _num_frames, height, width = mask_.shape
             new_num_frames = (
-                num_frames + self.vae_scale_factor_temporal - 1
+                _num_frames + self.vae_scale_factor_temporal - 1
             ) // self.vae_scale_factor_temporal
 
             new_height = height // (self.vae_scale_factor_spatial * ph) * ph
             new_width = width // (self.vae_scale_factor_spatial * ph) * ph
             mask_ = mask_[0, :, :, :]
             mask_ = mask_.view(
-                num_frames,
+                _num_frames,
                 new_height,
                 self.vae_scale_factor_spatial,
                 new_width,
@@ -313,10 +320,7 @@ class WanVaceEngine(WanBaseEngine):
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
-
-        if duration is None:
-            duration = len(loaded_video)
-
+            
         latents = self._get_latents(
             height,
             width,
@@ -331,7 +335,7 @@ class WanVaceEngine(WanBaseEngine):
             self.logger.warning(
                 "The number of frames in the conditioning latents does not match the number of frames to be generated. Generation quality may be affected."
             )
-
+            
         latents = self.denoise(
             timesteps=timesteps,
             latents=latents,

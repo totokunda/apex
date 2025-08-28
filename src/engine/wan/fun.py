@@ -180,7 +180,7 @@ class WanFunEngine(WanBaseEngine):
         elif video is not None:
 
             pt, ph, pw = transformer_config.patch_size
-            loaded_video = self._load_video(video)
+            loaded_video = self._load_video(video, fps=fps)
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]
             )
@@ -203,7 +203,7 @@ class WanFunEngine(WanBaseEngine):
 
             if mask is not None:
                 batch_size, latent_num_frames, _, _, _ = latents.shape
-                loaded_mask = self._load_video(mask)
+                loaded_mask = self._load_video(mask, fps=fps)
                 preprocessed_mask = self.video_processor.preprocess_video(
                     loaded_mask, video_height, video_width
                 )

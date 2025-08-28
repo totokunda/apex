@@ -4,6 +4,7 @@ from .pose import (
     PoseBodyFaceVideoPreprocessor,
     PoseBodyPreprocessor,
     PoseBodyVideoPreprocessor,
+    PoseVideoPreprocessor,
     PoseBodyFaceOutput,
     PoseBodyOutput,
     PoseVideoOutput,
@@ -15,4 +16,8 @@ __all__ = [
     "PoseBodyFaceVideoPreprocessor",
     "PoseBodyPreprocessor",
     "PoseBodyVideoPreprocessor",
+    "PoseVideoPreprocessor",
+    "PoseBodyFaceOutput",
+    "PoseBodyOutput",
+    "PoseVideoOutput",
 ]

@@ -89,6 +89,7 @@ class WanTransformerConverter(TransformerConverter):
             "cross_attn.norm_k_img": "attn2.norm_added_k",
         }
         self.special_keys_map = {}
+        self.pre_special_keys_map = {}
 
 
 class SkyReelsTransformerConverter(WanTransformerConverter):
@@ -156,6 +157,7 @@ class WanMultiTalkTransformerConverter(TransformerConverter):
         }
 
         self.special_keys_map = {}
+        self.pre_special_keys_map = {}
 
 
 class WanVaceTransformerConverter(WanTransformerConverter):
@@ -205,6 +207,7 @@ class WanVaceTransformerConverter(WanTransformerConverter):
         }
 
         self.special_keys_map = {}
+        self.pre_special_keys_map = {}
 
 
 class CogVideoXTransformerConverter(TransformerConverter):
@@ -240,6 +243,7 @@ class CogVideoXTransformerConverter(TransformerConverter):
             "freqs_cos": self.remove_keys_inplace,
             "position_embedding": self.remove_keys_inplace,
         }
+        self.pre_special_keys_map = {}
 
     @staticmethod
     def reassign_query_key_value_inplace(self, key: str, state_dict: Dict[str, Any]):
@@ -313,7 +317,7 @@ class LTXTransformerConverter(TransformerConverter):
         self.special_keys_map = {
             "vae": self.remove_keys_inplace,
         }
-
+        self.pre_special_keys_map = {}
     @staticmethod
     def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
         state_dict.pop(key)
@@ -367,6 +371,8 @@ class HunyuanTransformerConverter(TransformerConverter):
             "final_layer.adaLN_modulation.1": self.remap_norm_scale_shift_,
         }
 
+        self.pre_special_keys_map = {}
+        
     @staticmethod
     def remap_norm_scale_shift_(key, state_dict):
         weight = state_dict.pop(key)
@@ -519,6 +525,7 @@ class MochiTransformerConverter(TransformerConverter):
             ".attn.proj_x.": ".attn1.to_out.0.",
             ".attn.proj_y.": ".attn1.to_add_out.",
         }
+        self.pre_special_keys_map = {}
 
     def _handle_qkv_x(key: str, sd: Dict[str, Any]):
         """
@@ -631,7 +638,8 @@ class MagiTransformerConverter(TransformerConverter):
             "self_attention.linear_qkv.v": "attn1.to_v",
             "self_attention.linear_kv_xattn": "attn2.to_kv",
         }
-
+        self.pre_special_keys_map = {}
+            
 class FluxTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
@@ -662,7 +670,6 @@ class FluxTransformerConverter(TransformerConverter):
             "modulation.lin": "norm.linear",
             "linear2": "proj_out",
             "final_layer.linear": "proj_out",
-            
         }
         
         self.pre_special_keys_map = {

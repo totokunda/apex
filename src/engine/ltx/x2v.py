@@ -123,7 +123,7 @@ class LTXX2VEngine(LTXBaseEngine):
                 initial_image, height, width
             ).unsqueeze(2)
         elif initial_video is not None:
-            video_input = self._load_video(initial_video)
+            video_input = self._load_video(initial_video, fps=fps)
             for i, frame in enumerate(video_input):
                 frame, height, width = self._aspect_ratio_resize(
                     frame,

@@ -68,7 +68,7 @@ class WanRecamEngine(WanBaseEngine):
         if offload:
             self._offload(self.text_encoder)
 
-        loaded_video = self._load_video(source_video)
+        loaded_video = self._load_video(source_video, fps=fps)
 
         num_frames = self._parse_num_frames(duration, fps)
         if num_frames > len(loaded_video):
@@ -147,7 +147,7 @@ class WanRecamEngine(WanBaseEngine):
         )
 
         if video is not None:
-            video = self._load_video(video)
+            video = self._load_video(video, fps=fps)
             preprocessed_video = self.video_processor.preprocess_video(
                 video, height=height, width=width
             ).to(self.device, dtype=torch.float32)

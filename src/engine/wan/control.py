@@ -5,7 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 from src.helpers.wan.fun_camera import Camera
 from .base import WanBaseEngine
-
+from einops import rearrange
 
 class WanControlEngine(WanBaseEngine):
     """WAN Control Engine Implementation for camera control and video guidance"""
@@ -33,7 +33,14 @@ class WanControlEngine(WanBaseEngine):
         video: Union[
             List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
         ] = None,
+        control_video: Union[
+            List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
+        mask: Union[
+            List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
+        ] = None,
         camera_poses: Union[List[float], str, List[Camera], Camera, None] = None,
+        process_first_mask_frame_only: bool = True, 
         prompt: List[str] | str = None,
         negative_prompt: List[str] | str = None,
         duration: int | str = 16,
@@ -42,7 +49,7 @@ class WanControlEngine(WanBaseEngine):
         num_inference_steps: int = 30,
         num_videos: int = 1,
         seed: int | None = None,
-        fps: int = 16,
+        fps: int = 81,
         guidance_scale: float = 5.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
@@ -54,8 +61,9 @@ class WanControlEngine(WanBaseEngine):
         render_on_step: bool = False,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
-        boundary_ratio: float | None = None,
+        boundary_ratio: float | None = 0.875,
         enhance_kwargs: Dict[str, Any] = {},
+        scheduler_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
 
@@ -71,6 +79,8 @@ class WanControlEngine(WanBaseEngine):
             **text_encoder_kwargs,
         )
         
+        num_frames = self._parse_num_frames(duration, fps)
+        
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -82,7 +92,7 @@ class WanControlEngine(WanBaseEngine):
             )
         else:
             negative_prompt_embeds = None
-
+ 
         if offload:
             self._offload(self.text_encoder)
 
@@ -104,13 +114,10 @@ class WanControlEngine(WanBaseEngine):
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
 
-        if not self.transformer:
-            self.load_component_by_type("transformer")
-
+        transformer_config = self.load_config_by_type("transformer")
+        
         transformer_dtype = self.component_dtypes["transformer"]
-
-        self.to_device(self.transformer)
-
+        
         latents = self._get_latents(
             height,
             width,
@@ -121,11 +128,11 @@ class WanControlEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
-
+        
         if start_image is not None:
-            start_image_latents_in = torch.zeros_like(latents)
-            if start_image_latents_in.shape[2] > 1:
-                start_image_latents_in[:, :, :1] = start_image_latents
+                start_image_latents_in = torch.zeros_like(latents)
+                if start_image_latents_in.shape[2] > 1:
+                    start_image_latents_in[:, :, :1] = start_image_latents
         else:
             start_image_latents_in = torch.zeros_like(latents)
 
@@ -160,9 +167,9 @@ class WanControlEngine(WanBaseEngine):
                 .transpose(1, 2)
             )
 
-        elif video is not None:
-            pt, ph, pw = self.transformer.config.patch_size
-            loaded_video = self._load_video(video)
+        elif control_video is not None:
+            pt, ph, pw = transformer_config.get("patch_size", (1, 2, 2))
+            loaded_video = self._load_video(control_video, fps=fps)
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]
             )
@@ -178,46 +185,117 @@ class WanControlEngine(WanBaseEngine):
                 video_width = (video_width // base) * base
 
             assert video_height * video_width <= height * width
-
-            preprocessed_video = self.video_processor.preprocess_video(
-                loaded_video, video_height, video_width
-            )
+            
+            control_video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+            control_video = control_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
+            
+            video_length = control_video.shape[2]
+            control_video = self.video_processor.preprocess(rearrange(control_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+            control_video = control_video.to(dtype=torch.float32)
+            control_video = rearrange(control_video, "(b f) c h w -> b c f h w", f=video_length)
 
             control_latents = self._prepare_fun_control_latents(
-                preprocessed_video, dtype=torch.float32, generator=generator
+                control_video, dtype=torch.float32, generator=generator
             )
             control_camera_latents = None
         else:
             control_latents = torch.zeros_like(latents)
             control_camera_latents = None
-
-        if reference_image is not None and self.transformer.config.get(
-            "add_ref_control", False
-        ):
-            loaded_image = self._load_image(reference_image)
-            loaded_image, height, width = self._aspect_ratio_resize(
-                loaded_image, max_area=height * width
-            )
-            preprocessed_image = (
-                self.video_processor.preprocess(
-                    loaded_image, height=height, width=width
+            
+        if video is not None and self.main_engine.denoise_type == "moe":
+            if mask is not None:
+                mask = self._load_video(mask, fps=fps)
+                mask = torch.from_numpy(np.array([np.array(frame) for frame in mask]))[:num_frames]
+                mask = mask.permute([3, 0, 1, 2]).unsqueeze(0) / 255
+                mask = self.video_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
+                mask = mask.to(dtype=torch.float32)
+                mask = rearrange(mask, "(b f) c h w -> b c f h w", f=num_frames)
+                
+            if mask is None or (mask == 1.0).all():
+                mask_latents = torch.tile(
+                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype), [1, 4, 1, 1, 1]
                 )
-                .to(self.device, dtype=torch.float32)
-                .unsqueeze(2)
-            )
+                masked_video_latents = torch.zeros_like(latents).to(self.device, transformer_dtype)
+                if self.vae_scale_factor_spatial >= 16:
+                    _mask = torch.ones_like(latents).to(self.device, transformer_dtype)[:, :1].to(self.device, transformer_dtype)
+                else:
+                    _mask = None
+            else:
+                # Ensure we preprocess the provided input video, not an undefined variable
+                loaded_video = self._load_video(video, fps=fps)
+                video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+                video = video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
+                video = self.video_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+                video = video.to(dtype=torch.float32)
+                video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
+                
+                bs, _, video_length, height, width = video.size()
+                mask_condition = self.mask_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
+                mask_condition = mask_condition.to(dtype=torch.float32)
+                mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
 
-            reference_image_latents = self._prepare_fun_control_latents(
-                preprocessed_image, dtype=torch.float32, generator=generator
-            )
+                masked_video = video * (torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5)
+                masked_video_latents = self._prepare_fun_control_latents(
+                    masked_video, dtype=torch.float32, generator=generator
+                )
+                
+                mask_condition = torch.concat(
+                    [
+                        torch.repeat_interleave(mask_condition[:, :, 0:1], repeats=4, dim=2), 
+                        mask_condition[:, :, 1:]
+                    ], dim=2
+                )
+                mask_condition = mask_condition.view(bs, mask_condition.shape[2] // 4, 4, height, width)
+                mask_condition = mask_condition.transpose(1, 2)
+                mask_latents = self._resize_mask(1 - mask_condition, masked_video_latents, process_first_mask_frame_only).to(self.device, transformer_dtype) 
+
+                if self.vae_scale_factor_spatial >= 16:
+                    _mask = F.interpolate(mask_condition[:, :1], size=latents.size()[-3:], mode='trilinear', align_corners=True).to(self.device, transformer_dtype)
+                    if not _mask[:, :, 0, :, :].any():
+                        _mask[:, :, 1:, :, :] = 1
+                        latents = (1 - _mask) * masked_video_latents + _mask * latents 
+                else:
+                    _mask = None
+        elif self.main_engine.denoise_type == "moe":
+            mask_latents = torch.tile(
+                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype), [1, 4, 1, 1, 1]
+                )
+            masked_video_latents = torch.zeros_like(latents).to(self.device, transformer_dtype)
+            if self.vae_scale_factor_spatial >= 16:
+                _mask = torch.ones_like(latents).to(self.device, transformer_dtype)[:, :1].to(self.device, transformer_dtype)
+            else:
+                _mask = None
         else:
-            reference_image_latents = torch.zeros_like(latents)[:, :, :1]
+            mask_latents = None
+            masked_video_latents = None
+            _mask = None
 
+        if transformer_config.get("add_ref_conv", False):
+            if reference_image is not None:
+                loaded_image = self._load_image(reference_image)
+                loaded_image = loaded_image.resize((width, height))
+                preprocessed_image = (
+                    self.video_processor.preprocess(
+                        loaded_image
+                    )
+                    .to(self.device, dtype=torch.float32)
+                    .unsqueeze(2)
+                )
+
+                reference_image_latents = self._prepare_fun_control_latents(
+                    preprocessed_image, dtype=torch.float32, generator=generator
+                )[:, :, 0]
+            else:
+                reference_image_latents = torch.zeros_like(latents)[:, :, 0]
+        else:
+            reference_image_latents = None
+        
         if reference_image is not None:
             clip_image = reference_image
         elif start_image is not None:
             clip_image = start_image
 
-        if clip_image is not None:
+        if clip_image is not None and self.main_engine.denoise_type != "moe":
             loaded_image = self._load_image(clip_image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width
@@ -235,7 +313,7 @@ class WanControlEngine(WanBaseEngine):
                 self.device, dtype=transformer_dtype
             )
 
-        if offload:
+        if offload and image_embeds is not None:
             self._offload(self.helpers["clip"])
 
         if not self.scheduler:
@@ -249,7 +327,7 @@ class WanControlEngine(WanBaseEngine):
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
-                self.scheduler.config, "num_train_timesteps", 1000
+                getattr(self.scheduler, "config", self.scheduler), "num_train_timesteps", 1000
             )
         else:
             boundary_timestep = None
@@ -259,9 +337,10 @@ class WanControlEngine(WanBaseEngine):
             timesteps=timesteps,
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
+            **scheduler_kwargs,
         )
 
-        if control_latents is not None and start_image_latents_in is not None:
+        if control_latents is not None and start_image_latents_in is not None and mask_latents is None:
             control_latents = torch.concat(
                 [
                     control_latents,
@@ -271,12 +350,37 @@ class WanControlEngine(WanBaseEngine):
             )
         elif control_latents is None and start_image_latents_in is not None:
             control_latents = start_image_latents_in
+        
+        if mask_latents is not None and masked_video_latents is not None:
+            mask_latents = torch.concat(
+                [
+                    mask_latents,
+                    masked_video_latents
+                ],
+                dim=1,
+            )
+
+        if mask_latents is not None and control_latents is not None:
+            control_latents = torch.concat(
+                [
+                    control_latents,
+                    mask_latents
+                ],
+                dim=1,
+            )
+        elif mask_latents is not None and control_latents is None:
+            control_latents = mask_latents
+            
 
         latents = self.denoise(
             boundary_timestep=boundary_timestep,
             timesteps=timesteps,
             latents=latents,
             latent_condition=control_latents,
+            mask_kwargs=dict(
+                mask=_mask,
+                masked_video_latents=masked_video_latents,
+            ),
             transformer_kwargs=dict(
                 encoder_hidden_states=prompt_embeds,
                 encoder_hidden_states_image=image_embeds,
