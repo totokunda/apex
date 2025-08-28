@@ -61,5 +61,6 @@ spec:
       num_inference_steps: 30
       guidance_scale: 5.0
       return_latents: false
-      text_encoder_kwargs: {}
+      text_encoder_kwargs: 
+        use_attention_mask: true
       attention_kwargs: {}
