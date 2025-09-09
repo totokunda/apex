@@ -88,6 +88,8 @@ class WanFunCamera:
     def read_camera_poses(self, path: str):
         with open(path, "r") as f:
             lines = f.readlines()
+        # remove empty lines
+        lines = [line for line in lines if line.strip()]
         poses = []
         for line in lines:
             entry = list(map(float, line.strip().split(" ")))
@@ -100,8 +102,8 @@ class WanFunCamera:
         H: int,
         W: int,
         device: torch.device,
-        original_H: int = 640,
-        original_W: int = 480,
+        original_H: int = 480,
+        original_W: int = 640,
     ):
         if isinstance(poses, str):
             poses = self.read_camera_poses(poses)
@@ -111,36 +113,29 @@ class WanFunCamera:
             pass
         else:
             raise ValueError(f"Invalid poses type: {type(poses)}")
-
+    
         sample_wh_ratio = W / H
-        original_wh_ratio = original_W / original_H
-        if sample_wh_ratio > original_wh_ratio:
-            resized_w = H * original_wh_ratio
-            for cam in poses:
-                cam.fx = cam.fx * resized_w / W
-                cam.cx = cam.cx * resized_w / W
+        pose_wh_ratio = original_W / original_H  # Assuming placeholder ratios, change as needed
+
+        if pose_wh_ratio > sample_wh_ratio:
+            resized_ori_w = H * pose_wh_ratio
+            for cam_param in poses:
+                cam_param.fx = resized_ori_w * cam_param.fx / W
         else:
-            resized_h = W * original_wh_ratio
-            for cam in poses:
-                cam.fy = cam.fy * resized_h / H
-                cam.cy = cam.cy * resized_h / H
+            resized_ori_h = W / pose_wh_ratio
+            for cam_param in poses:
+                cam_param.fy = resized_ori_h * cam_param.fy / H
 
-        intrinsic = np.asarray(
-            [
-                [cam_param.fx * W, cam_param.fy * H, cam_param.cx * W, cam_param.cy * H]
-                for cam_param in poses
-            ],
-            dtype=np.float32,
-        )
+        intrinsic = np.asarray([[cam_param.fx * W,
+                                cam_param.fy * H,
+                                cam_param.cx * W,
+                                cam_param.cy * H]
+                                for cam_param in poses], dtype=np.float32)
 
-        K = torch.as_tensor(intrinsic, device=device)[None]  # [1, 1, 4]
+        K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
         c2ws = get_relative_pose(poses)  # Assuming this function is defined elsewhere
-        c2ws = torch.as_tensor(c2ws, device=device)[None]  # [1, n_frame, 4, 4]
-        plucker_embedding = (
-            ray_condition(K, c2ws, H, W, device=device)[0]
-            .permute(0, 3, 1, 2)
-            .contiguous()
-        )  # V, 6, H, W
+        c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
+        plucker_embedding = ray_condition(K, c2ws, H, W, device=device)[0].permute(0, 3, 1, 2).contiguous()  # V, 6, H, W
         plucker_embedding = plucker_embedding[None]
         plucker_embedding = rearrange(plucker_embedding, "b f c h w -> b f h w c")[0]
         return plucker_embedding.permute([3, 0, 1, 2]).unsqueeze(0)
