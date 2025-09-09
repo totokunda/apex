@@ -102,8 +102,8 @@ class WanFunCamera:
         H: int,
         W: int,
         device: torch.device,
-        original_H: int = 480,
-        original_W: int = 640,
+        original_H: int = 720,
+        original_W: int = 1280,
     ):
         if isinstance(poses, str):
             poses = self.read_camera_poses(poses)
