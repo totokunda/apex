@@ -129,10 +129,17 @@ class WanControlEngine(WanBaseEngine):
             generator=generator,
         )
         
-        if start_image is not None:
-                start_image_latents_in = torch.zeros_like(latents)
-                if start_image_latents_in.shape[2] > 1:
-                    start_image_latents_in[:, :, :1] = start_image_latents
+        if self.main_engine.denoise_type == "moe" and start_image is not None:
+            # convert start image into video 
+            start_image = self._load_image(start_image)
+            video = [start_image] * num_frames
+            mask = [Image.new("RGB", (width, height), (0, 0, 0))] * num_frames
+            mask[0] = Image.new("RGB", (width, height), (255, 255, 255))
+            start_image_latents_in = None
+        elif start_image is not None:
+            start_image_latents_in = torch.zeros_like(latents)
+            if start_image_latents_in.shape[2] > 1:
+                start_image_latents_in[:, :, :1] = start_image_latents
         else:
             start_image_latents_in = torch.zeros_like(latents)
 
@@ -201,7 +208,9 @@ class WanControlEngine(WanBaseEngine):
         else:
             control_latents = torch.zeros_like(latents)
             control_camera_latents = None
-            
+        
+        
+        
         if video is not None and self.main_engine.denoise_type == "moe":
             if mask is not None:
                 mask = self._load_video(mask, fps=fps)
