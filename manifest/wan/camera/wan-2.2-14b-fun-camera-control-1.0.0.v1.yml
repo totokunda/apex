@@ -43,7 +43,7 @@ spec:
   - type: transformer
     name: transformer_2
     base: wan.fun
-    model_path: alibaba-pai/Wan2.2-Fun-A14B-Control/low_noise_model
+    model_path: alibaba-pai/Wan2.2-Fun-A14B-Control-Camera/low_noise_model
     config_path: https://huggingface.co/alibaba-pai/Wan2.2-Fun-A14B-Control-Camera/resolve/main/low_noise_model/config.json
     config: 
       _class_name: WanFunTransformer3DModel
