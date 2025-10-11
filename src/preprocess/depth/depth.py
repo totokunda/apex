@@ -16,6 +16,7 @@ from src.preprocess.base import BaseOutput
 from src.utils.preprocessors import MODEL_WEIGHTS
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
 from tqdm import tqdm
+from src.mixins.loader_mixin import InputImage, InputVideo
 
 
 def resize_image(input_image, resolution):
@@ -78,9 +79,7 @@ class MidasDepthPreprocessor(BasePreprocessor):
     @torch.inference_mode()
     def __call__(
         self,
-        image: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
-        ],
+        image: InputImage,
     ):
         loaded_image = self._load_image(image)
         np_image = np.array(loaded_image)
@@ -107,7 +106,6 @@ class MidasDepthPreprocessor(BasePreprocessor):
 
     def __str__(self):
         return f"MidasDepthPreprocessor(model_path={self.model_path}, save_path={self.save_path}, model_type={self.model_type})"
-
 
 @preprocessor_registry("depth.anything_v2")
 class DepthAnythingV2Preprocessor(BasePreprocessor):
@@ -140,9 +138,7 @@ class DepthAnythingV2Preprocessor(BasePreprocessor):
     @torch.inference_mode()
     def __call__(
         self,
-        image: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
-        ],
+        image: InputImage,
     ):
         loaded_image = self._load_image(image)
         np_image = np.array(loaded_image)
@@ -163,9 +159,7 @@ class VideoDepthAnythingV2Preprocessor(DepthAnythingV2Preprocessor):
 
     def __call__(
         self,
-        video: Union[
-            str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]
-        ],
+        video: InputVideo,
     ):
         frames = self._load_video(video)
         depths = []
@@ -182,9 +176,7 @@ class VideoMidasDepthPreprocessor(MidasDepthPreprocessor):
 
     def __call__(
         self,
-        video: Union[
-            str, List[str], List[Image.Image], List[np.ndarray], List[torch.Tensor]
-        ],
+        video: InputVideo,
     ):
         frames = self._load_video(video)
         depths = []

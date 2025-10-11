@@ -12,7 +12,7 @@ from src.preprocess.base import (
     BaseOutput,
 )
 from tqdm import tqdm
-
+from src.mixins.loader_mixin import InputVideo, InputImage
 
 class CompositionOutput(BaseOutput):
     video: List[Image.Image]
@@ -72,10 +72,10 @@ class CompositionPreprocessor(BasePreprocessor):
         self,
         process_type_1: str,
         process_type_2: str,
-        video_1: Union[List[Union[Image.Image, np.ndarray]], str],
-        video_2: Union[List[Union[Image.Image, np.ndarray]], str],
-        mask_1: Union[List[Union[Image.Image, np.ndarray]], str],
-        mask_2: Union[List[Union[Image.Image, np.ndarray]], str],
+        video_1: InputVideo,
+        video_2: InputVideo,
+        mask_1: InputVideo,
+        mask_2: InputVideo,
         height: Optional[int] = None,
         width: Optional[int] = None,
         resample: Optional[Image.Resampling] = Image.Resampling.BICUBIC,
@@ -241,8 +241,8 @@ class ReferenceAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        images: Union[List[Union[Image.Image, np.ndarray, str]], str],
-        mask: Optional[Union[List[Union[Image.Image, np.ndarray, str]], str]] = None,
+        images: List[InputImage],
+        mask: Optional[InputVideo] = None,
         mode: Optional[subject_mode] = "salient",
         return_mask: Optional[bool] = None,
         mask_cfg: Optional[Dict] = None,
@@ -252,6 +252,8 @@ class ReferenceAnythingPreprocessor(BasePreprocessor):
     ):
 
         images = self._load_video(images)
+        if isinstance(images, list) and isinstance(images[0], Image.Image):
+            images = [image.convert("RGB") for image in images]
         ret_data = defaultdict(list)
         if mask is not None:
             masks = self._load_video(mask, convert_method=lambda x: x.convert("L"))
@@ -337,8 +339,8 @@ class AnimateAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        frames: Optional[Union[List[Image.Image], List[str], str]] = None,
-        images: Optional[List[Union[Image.Image, np.ndarray, str]]] = None,
+        frames: Optional[InputVideo] = None,
+        images: Optional[List[InputImage]] = None,
         ref_mode: Optional[subject_mode] = "salient",
         return_mask: Optional[bool] = None,
         mask_cfg: Optional[Dict] = None,
@@ -409,10 +411,10 @@ class SwapAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        frames: Optional[Union[List[Image.Image], List[str], str]] = None,
-        images: Optional[List[Union[Image.Image, np.ndarray, str]]] = None,
+        frames: Optional[InputVideo] = None,
+        images: Optional[List[InputImage]] = None,
         mode: Optional[str] = None,
-        mask: Optional[Union[Image.Image, np.ndarray, str]] = None,
+        mask: Optional[InputVideo] = None,
         bbox: Optional[List[float]] = None,
         label: Optional[str] = None,
         caption: Optional[str] = None,
@@ -520,7 +522,7 @@ class ExpandAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        images: List[Union[Image.Image, np.ndarray, str]],
+        images: List[InputImage],
         mode: Optional[str] = None,
         return_mask: Optional[bool] = None,
         mask_cfg: Optional[Dict] = None,
@@ -605,7 +607,7 @@ class MoveAnythingPreprocessor(BasePreprocessor):
 
     def __call__(
         self,
-        image: Union[Image.Image, np.ndarray, str],
+        image: InputImage,
         start_bbox: List[float],
         end_bbox: List[float],
         label: Optional[str] = None,

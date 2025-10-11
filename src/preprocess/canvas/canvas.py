@@ -9,7 +9,7 @@ from src.preprocess.base import (
     preprocessor_registry,
     PreprocessorType,
 )
-
+from src.mixins.loader_mixin import InputImage
 
 @preprocessor_registry("canvas")
 class RegionCanvasPreprocessor(BasePreprocessor):
@@ -32,7 +32,7 @@ class RegionCanvasPreprocessor(BasePreprocessor):
 
             self.maskaug_anno = MaskAugAnnotator()
 
-    def __call__(self, image, mask):
+    def __call__(self, image: InputImage, mask: InputImage):
         image = np.array(self._load_image(image))
         mask = np.array(self._load_image(mask, convert_method=lambda x: x.convert("L")))
         image_h, image_w = image.shape[:2]

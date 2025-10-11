@@ -1,4 +1,4 @@
-from src.mixins import DownloadMixin, LoaderMixin, ToMixin
+from src.mixins import LoaderMixin, ToMixin
 from torch import nn
 from PIL import Image
 import importlib

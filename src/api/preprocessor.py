@@ -1,0 +1,412 @@
+"""
+API endpoints for preprocessor operations
+"""
+from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
+from pathlib import Path
+import json
+import ray
+from .ray_tasks import download_preprocessor, run_preprocessor
+from .preprocessor_registry import (
+    PREPROCESSOR_REGISTRY,
+    list_preprocessors,
+    get_preprocessor_details
+)
+from .ray_resources import get_best_gpu, get_ray_resources
+from src.utils.defaults import DEFAULT_CACHE_PATH
+from loguru import logger
+import uuid
+import asyncio
+from .ws_manager import websocket_manager, get_ray_ws_bridge
+
+router = APIRouter(prefix="/preprocessor", tags=["preprocessor"])
+
+# Store job references
+job_store: Dict[str, ray.ObjectRef] = {}
+
+# Background task to poll updates from Ray bridge and send to websockets
+async def poll_ray_updates():
+    """Background task that polls the Ray bridge for updates and forwards to websockets"""
+    bridge = get_ray_ws_bridge()
+    logger.info("Started polling Ray bridge for websocket updates")
+    
+    while True:
+        try:
+            # Get all job IDs that might have updates
+            all_job_ids = set(job_store.keys())
+            
+            # Also check the bridge for any job IDs it knows about
+            try:
+                bridge_job_ids = ray.get(bridge.get_all_job_ids.remote(), timeout=0.05)
+                all_job_ids.update(bridge_job_ids)
+            except:
+                pass
+            
+            # Check each job for updates
+            for job_id in all_job_ids:
+                try:
+                    updates = ray.get(bridge.get_updates.remote(job_id), timeout=0.05)
+                    if updates:
+                        logger.info(f"Got {len(updates)} updates for job {job_id}")
+                        for update in updates:
+                            logger.info(f"Forwarding update: status={update.get('status')}, progress={update.get('progress')}, message={update.get('message')}")
+                            await websocket_manager.send_update(job_id, update)
+                except ray.exceptions.GetTimeoutError:
+                    pass  # No updates available
+                except Exception as e:
+                    logger.error(f"Error getting updates for job {job_id}: {e}")
+            
+            await asyncio.sleep(0.1)  # Poll every 100ms
+        except Exception as e:
+            logger.error(f"Error in poll_ray_updates: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await asyncio.sleep(1)
+
+class DownloadRequest(BaseModel):
+    preprocessor_name: str
+    job_id: Optional[str] = None
+
+
+class RunRequest(BaseModel):
+    preprocessor_name: str
+    input_path: str
+    job_id: Optional[str] = None
+    download_if_needed: bool = True
+    params: Optional[Dict[str, Any]] = None
+    start_frame: Optional[int] = None  # For video only, None means from beginning
+    end_frame: Optional[int] = None    # For video only, None means to end
+
+ 
+class JobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: Optional[str] = None
+
+
+class ResultResponse(BaseModel):
+    job_id: str
+    status: str
+    result_path: Optional[str] = None
+    type: Optional[str] = None
+    preprocessor: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.get("/list")
+def list_all_preprocessors(check_downloaded: bool = True):
+    """
+    List all available preprocessors with detailed parameter information.
+    
+    Args:
+        check_downloaded: If True, include download status for each preprocessor
+    
+    Returns:
+        List of preprocessor metadata including parameters, types, defaults, and download status
+    """
+    try:
+        preprocessors = list_preprocessors(check_downloaded=check_downloaded)
+        return {
+            "count": len(preprocessors),
+            "preprocessors": preprocessors
+        }
+    except Exception as e:
+        logger.error(f"Failed to list preprocessors: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list preprocessors: {str(e)}"
+        )
+
+
+@router.get("/get/{preprocessor_name}")
+def get_preprocessor(preprocessor_name: str):
+    """
+    Get detailed information about a specific preprocessor.
+    
+    Args:
+        preprocessor_name: Name of the preprocessor
+        
+    Returns:
+        Detailed preprocessor information including all parameters
+    """
+    try:
+        details = get_preprocessor_details(preprocessor_name)
+        return details
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to get preprocessor details: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get preprocessor details: {str(e)}"
+        )
+
+
+@router.get("/ray-status")
+def ray_status():
+    """Check if Ray is running and get cluster info"""
+    try:
+        if not ray.is_initialized():
+            return {
+                "ray_connected": False,
+                "message": "Ray is not initialized. Start the API to initialize Ray."
+            }
+        
+        resources = ray.available_resources()
+        cluster_resources = ray.cluster_resources()
+        nodes = ray.nodes()
+        
+        return {
+            "ray_connected": True,
+            "available_resources": resources,
+            "cluster_resources": cluster_resources,
+            "num_nodes": len(nodes),
+            "nodes": [{"NodeID": node["NodeID"], "Alive": node["Alive"], "Resources": node["Resources"]} for node in nodes]
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "ray_connected": False,
+            "message": "Error connecting to Ray cluster"
+        }
+
+
+@router.post("/download", response_model=JobResponse)
+def trigger_download(request: DownloadRequest):
+    """
+    Trigger download of a preprocessor model
+    
+    This creates a Ray job for downloading. Use the job_id with the 
+    websocket endpoint /ws/job/{job_id} to get real-time updates.
+    """
+    if request.preprocessor_name not in PREPROCESSOR_REGISTRY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {list(PREPROCESSOR_REGISTRY.keys())}"
+        )
+    
+    logger.info(f"Submitting download task for preprocessor: {request.preprocessor_name}")
+    
+    # Get best GPU for the task
+    device_index, device_type = get_best_gpu()
+    resources = get_ray_resources(device_index, device_type)
+    
+    # Submit Ray task
+    try:
+        job_id = request.job_id or str(uuid.uuid4())
+        
+        # Get websocket bridge
+        bridge = get_ray_ws_bridge()
+        
+        # Submit task with resource constraints
+        task_ref = download_preprocessor.options(**resources).remote(
+            request.preprocessor_name,
+            job_id,
+            bridge
+        )
+        
+        # Store the task reference
+        job_store[job_id] = task_ref
+        
+        logger.info(f"Download task submitted with job_id: {job_id}, resources: {resources}")
+        
+        return JobResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"Download job created for {request.preprocessor_name}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to submit download task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit Ray task: {str(e)}"
+        )
+
+
+@router.post("/run", response_model=JobResponse)
+def trigger_run(request: RunRequest):
+    """
+    Run a preprocessor on input media
+    
+    This creates a Ray job for processing. Use the job_id with the 
+    websocket endpoint /ws/job/{job_id} to get real-time updates.
+    
+    If download_if_needed is True and the model is not available, 
+    it will be downloaded first.
+    """
+    if request.preprocessor_name not in PREPROCESSOR_REGISTRY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {list(PREPROCESSOR_REGISTRY.keys())}"
+        )
+    
+    # Validate input path exists
+    input_path = Path(request.input_path)
+    if not input_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Input file not found: {request.input_path}"
+        )
+    
+    # Get best GPU for the task
+    device_index, device_type = get_best_gpu()
+    resources = get_ray_resources(device_index, device_type)
+    
+    logger.info(f"Submitting run task for preprocessor: {request.preprocessor_name}, input: {request.input_path}, resources: {resources}")
+    
+    # Prepare kwargs
+    kwargs = request.params or {}
+    
+    # Submit Ray task
+    try:
+        job_id = request.job_id or str(uuid.uuid4())
+        
+        # Get websocket bridge
+        bridge = get_ray_ws_bridge()
+        
+        # Submit task with resource constraints
+        task_ref = run_preprocessor.options(**resources).remote(
+            request.preprocessor_name,
+            request.input_path,
+            job_id,
+            bridge,
+            request.start_frame,
+            request.end_frame,
+            **kwargs
+        )
+        
+        # Store the task reference
+        job_store[job_id] = task_ref
+        
+        logger.info(f"Run task submitted with job_id: {job_id}")
+        
+        return JobResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"Processing job created for {request.preprocessor_name}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to submit run task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit Ray task: {str(e)}"
+        )
+
+
+@router.get("/status/{job_id}")
+def get_job_status(job_id: str):
+    """
+    Get the status of a job
+    
+    Note: For real-time updates, use the websocket endpoint /ws/job/{job_id}
+    """
+    if job_id not in job_store:
+        return {
+            "job_id": job_id,
+            "status": "unknown",
+            "message": "Job not found in active jobs"
+        }
+    
+    task_ref = job_store[job_id]
+    
+    # Check if task is ready
+    ready_refs, remaining_refs = ray.wait([task_ref], timeout=0)
+    
+    if ready_refs:
+        # Task is complete, get result
+        try:
+            result = ray.get(ready_refs[0])
+            return {
+                "job_id": job_id,
+                "status": result.get("status", "complete"),
+                "result": result,
+                "message": result.get("message", "Job completed")
+            }
+        except Exception as e:
+            return {
+                "job_id": job_id,
+                "status": "error",
+                "error": str(e),
+                "message": "Job failed with exception"
+            }
+    else:
+        # Task is still running
+        return {
+            "job_id": job_id,
+            "status": "running",
+            "message": "Job is currently processing"
+        }
+
+
+@router.get("/result/{job_id}", response_model=ResultResponse)
+def get_result(job_id: str):
+    """
+    Get the result file path for a completed job
+    
+    Returns the path to the cached result file.
+    """
+    # Check if job is in store
+    if job_id in job_store:
+        task_ref = job_store[job_id]
+        
+        # Check if task is ready
+        ready_refs, remaining_refs = ray.wait([task_ref], timeout=0)
+        
+        if ready_refs:
+            # Task is complete, get result
+            try:
+                result = ray.get(ready_refs[0])
+                if result and result.get("status") == "complete":
+                    return ResultResponse(
+                        job_id=job_id,
+                        status="complete",
+                        result_path=result.get("result_path"),
+                        type=result.get("type"),
+                        preprocessor=result.get("preprocessor")
+                    )
+                elif result and result.get("status") == "error":
+                    return ResultResponse(
+                        job_id=job_id,
+                        status="error",
+                        error=result.get("error")
+                    )
+            except Exception as e:
+                return ResultResponse(
+                    job_id=job_id,
+                    status="error",
+                    error=str(e)
+                )
+        else:
+            # Still running
+            return ResultResponse(
+                job_id=job_id,
+                status="running",
+                error="Job is still processing"
+            )
+    
+    # Try to load from metadata file
+    cache_path = Path(DEFAULT_CACHE_PATH) / "preprocessor_results" / job_id
+    metadata_path = cache_path / "metadata.json"
+    
+    if metadata_path.exists():
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        return ResultResponse(
+            job_id=job_id,
+            status="complete",
+            result_path=metadata.get("result_path"),
+            type=metadata.get("type"),
+            preprocessor=metadata.get("preprocessor")
+        )
+    
+    # Job not complete or not found
+    return ResultResponse(
+        job_id=job_id,
+        status="unknown",
+        error="Result not found"
+    )

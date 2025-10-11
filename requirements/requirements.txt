@@ -40,3 +40,12 @@ ffmpeg-python
 pip==22.3.1
 setuptools==75.8.2
 gdown
+psutil
+gunicorn==23.0.0
+ray[default,dashboard]==2.40.0
+aiohttp
+aiohttp-cors
+grpcio
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+websockets==14.1
