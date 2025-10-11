@@ -29,6 +29,7 @@ class CannyPreprocessor(BasePreprocessor):
         super().__init__(**kwargs)
         self.threshold1 = threshold1
         self.threshold2 = threshold2
+        self.preprocessor_type = PreprocessorType.IMAGE
 
     def __call__(
         self,
@@ -60,11 +61,11 @@ class CannyVideoPreprocessor(CannyPreprocessor, BasePreprocessor):
         super().__init__(**kwargs)
         self.preprocessor_type = PreprocessorType.VIDEO
 
-    def __call__(self, frames: Union[List[Image.Image], List[str], str]):
+    def __call__(self, frames: Union[List[Image.Image], List[str], str], threshold1: int = None, threshold2: int = None):
         frames = self._load_video(frames)
         ret_frames = []
         for frame in tqdm(frames):
-            anno_frame = super().__call__(frame)
+            anno_frame = super().__call__(frame, threshold1, threshold2)
             ret_frames.append(anno_frame.frame)
         return CannyVideoOutput(frames=ret_frames)
 

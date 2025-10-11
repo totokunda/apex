@@ -1,4 +1,4 @@
-from src.utils.defaults import DEFAULT_HEADERS, DEFAULT_CONFIG_SAVE_PATH
+from src.utils.defaults import DEFAULT_HEADERS
 from urllib.parse import urlparse
 import requests
 from pathlib import Path
@@ -36,9 +36,15 @@ from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
 import mlx.core as mx
 from src.utils.mlx import check_mlx_convolutional_weights
+from src.types import InputImage, InputVideo
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
-
+IMAGE_EXTS = [
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'ico', 'webp',
+]
+VIDEO_EXTS = [
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'mpg', 'mpeg', 'm4v',
+]
 
 class LoaderMixin(DownloadMixin):
     logger: Logger = logger
@@ -393,7 +399,7 @@ class LoaderMixin(DownloadMixin):
 
     def _load_image(
         self,
-        image: Union[Image.Image, str, np.ndarray, torch.Tensor],
+        image: "InputImage",
         convert_method: Callable[[Image.Image], Image.Image] | None = None,
     ) -> Image.Image:
         if isinstance(image, Image.Image):
@@ -423,7 +429,7 @@ class LoaderMixin(DownloadMixin):
 
     def _load_video(
         self,
-        video_input: Union[str, List[str], np.ndarray, torch.Tensor, List[Image.Image]],
+        video_input: "InputVideo",
         fps: int | None = None,
         return_fps: bool = False,
         convert_method: Callable[[Image.Image], Image.Image] | None = None,
@@ -607,3 +613,12 @@ class LoaderMixin(DownloadMixin):
             else:
                 return frames
         raise ValueError(f"Invalid video type: {type(video_input)}")
+
+    @staticmethod
+    def get_media_type(media_path: str) -> str:
+        if media_path.endswith(tuple(VIDEO_EXTS)):
+            return "video"
+        elif media_path.endswith(tuple(IMAGE_EXTS)):
+            return "image"
+        else:
+            raise ValueError(f"Invalid media type: {media_path}")

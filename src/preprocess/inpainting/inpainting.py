@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 from typing import Union, List, Optional, Dict, Tuple
 from PIL import Image
-import warnings
 from collections import defaultdict
 from src.preprocess.sam2 import SAM2VideoOutput
 from src.preprocess.base import (
@@ -13,6 +12,7 @@ from src.preprocess.base import (
     PreprocessorType,
     BaseOutput,
 )
+
 from src.preprocess.canvas.mask_aug import MaskAugAnnotator
 import pycocotools.mask as mask_utils
 
