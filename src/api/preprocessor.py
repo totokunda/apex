@@ -13,6 +13,7 @@ from .preprocessor_registry import (
     list_preprocessors,
     get_preprocessor_details
 )
+from .params import validate_and_convert_params
 from .ray_resources import get_best_gpu, get_ray_resources
 from src.utils.defaults import DEFAULT_CACHE_PATH
 from loguru import logger
@@ -238,6 +239,7 @@ def trigger_run(request: RunRequest):
     If download_if_needed is True and the model is not available, 
     it will be downloaded first.
     """
+
     if request.preprocessor_name not in PREPROCESSOR_REGISTRY:
         raise HTTPException(
             status_code=400,
@@ -258,8 +260,18 @@ def trigger_run(request: RunRequest):
     
     logger.info(f"Submitting run task for preprocessor: {request.preprocessor_name}, input: {request.input_path}, resources: {resources}")
     
-    # Prepare kwargs
-    kwargs = request.params or {}
+    # Validate and convert parameters
+    try:
+        preprocessor_info = PREPROCESSOR_REGISTRY[request.preprocessor_name]
+        parameter_definitions = preprocessor_info.get("parameters", [])
+        kwargs = validate_and_convert_params(request.params or {}, parameter_definitions)
+        logger.info(f"Validated parameters: {kwargs}")
+    except ValueError as e:
+        logger.error(f"Parameter validation failed: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Parameter validation failed: {str(e)}"
+        )
     
     # Submit Ray task
     try:
@@ -268,6 +280,7 @@ def trigger_run(request: RunRequest):
         # Get websocket bridge
         bridge = get_ray_ws_bridge()
         
+
         # Submit task with resource constraints
         task_ref = run_preprocessor.options(**resources).remote(
             request.preprocessor_name,
@@ -410,3 +423,40 @@ def get_result(job_id: str):
         status="unknown",
         error="Result not found"
     )
+
+
+@router.post("/cancel/{job_id}", response_model=JobResponse)
+def cancel_job(job_id: str):
+    """
+    Cancel a running job
+    
+    Stops the execution of a job and removes it from the active job list.
+    """
+    if job_id not in job_store:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job {job_id} not found in active jobs"
+        )
+    
+    try:
+        task_ref = job_store[job_id]
+        
+        # Cancel the Ray task
+        ray.cancel(task_ref, force=True)
+        
+        # Remove from job store
+        del job_store[job_id]
+        
+        logger.info(f"Successfully cancelled job {job_id}")
+        
+        return JobResponse(
+            job_id=job_id,
+            status="cancelled",
+            message="Job has been cancelled"
+        )
+    except Exception as e:
+        logger.error(f"Failed to cancel job {job_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cancel job: {str(e)}"
+        )

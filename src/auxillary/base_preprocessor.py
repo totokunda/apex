@@ -102,26 +102,32 @@ class BasePreprocessor(LoaderMixin, ABC):
         return self.process(input_image, **kwargs)
     
     def process_video(self, input_video:InputVideo, **kwargs) -> OutputVideo:
-        frames = self._load_video(input_video)
-        ret_frames = []
-        # Determine which frames to process
-        total_frames = len(frames)
-        progress_callback = kwargs.get("progress_callback", None)
+        """Process video frames iteratively, yielding results to avoid memory overload"""
+        # Check if input is already an iterator/generator
+        if hasattr(input_video, '__iter__') and not isinstance(input_video, (list, str)):
+            frames = input_video
+            total_frames = kwargs.get("total_frames", None)
+        else:
+            frames = self._load_video(input_video)
+            total_frames = len(frames)
         
-        for (frame_idx, frame) in enumerate(tqdm(frames, desc="Processing frames")):
+        progress_callback = kwargs.get("progress_callback", None)
+        frame_idx = 0
+        
+        for frame in tqdm(frames, desc="Processing frames", total=total_frames):
             if progress_callback is not None:
-                progress_callback(frame_idx + 1, total_frames)
+                progress_callback(frame_idx + 1, total_frames if total_frames else frame_idx + 1)
+            
             anno_frame = self.process(frame, **kwargs)
-            ret_frames.append(anno_frame)
+            yield anno_frame
+            frame_idx += 1
         
         # Send final frame completion
         if progress_callback is not None:
-            progress_callback(total_frames, total_frames)
-        
-        return ret_frames
+            progress_callback(frame_idx, frame_idx)
     
     def __call__(self, input_media: InputMedia, **kwargs) -> OutputMedia:
-        if isinstance(input_media, list) or (isinstance(input_media, str) and self.get_media_type(input_media) == "video"):
+        if isinstance(input_media, list) or hasattr(input_media, '__iter__') or (isinstance(input_media, str) and self.get_media_type(input_media) == "video"):
             return self.process_video(input_media, **kwargs)
         elif isinstance(input_media, Image.Image) or (isinstance(input_media, str) and self.get_media_type(input_media) == "image"):
             return self.process_image(input_media, **kwargs)

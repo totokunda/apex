@@ -326,11 +326,15 @@ def run_preprocessor(
             logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
+            
+        
     
-    cache = AuxillaryCache(input_path, preprocessor_name, start_frame, end_frame, kwargs)
+    preprocessor_info = get_preprocessor_info(preprocessor_name)
+    cache = AuxillaryCache(input_path, preprocessor_name, start_frame, end_frame, kwargs, supports_alpha_channel=preprocessor_info.get("supports_alpha_channel", False))
     media_type = cache.type
     send_progress(0.05, "Checking cache")
     
+    # TODO: re-enable cache for testing purposes
     if cache.is_cached():
         send_progress(1.0, "Cache found and returning")
         send_progress(1.0, "Complete", {"status": "complete"})
@@ -341,7 +345,7 @@ def run_preprocessor(
             "type": media_type,
         }
     
-    preprocessor_info = get_preprocessor_info(preprocessor_name)
+    
     preprocessor_class = getattr(importlib.import_module(preprocessor_info["module"]), preprocessor_info["class"])
     preprocessor = preprocessor_class.from_pretrained()
     send_progress(0.2, "Preprocessor loaded")
@@ -357,8 +361,12 @@ def run_preprocessor(
     
     try:
         if media_type == "video":
-            frames = cache.video
-            result = preprocessor(frames, job_id=job_id, progress_callback=progress_callback, **kwargs)
+            # Get frame generator and total count for progress tracking
+            frame_range = cache._get_video_frame_range()
+            print(f"Frame range: {frame_range}", start_frame, end_frame)
+            total_frames = len([f for f in frame_range if f not in cache.cached_frames])
+            frames = cache.video_frames(batch_size=1)
+            result = preprocessor(frames, job_id=job_id, progress_callback=progress_callback, total_frames=total_frames, **kwargs)
         else:
             result = preprocessor(cache.image, job_id=job_id, **kwargs)
                

@@ -19,7 +19,7 @@ class AuxillaryCache:
     Manages cached frames for video processing to avoid reprocessing
     """
     
-    def __init__(self, path: str, preprocessor_name: str, start_frame: Optional[int] = None, end_frame: Optional[int] = None, params: Dict = None):
+    def __init__(self, path: str, preprocessor_name: str, start_frame: Optional[int] = None, end_frame: Optional[int] = None, params: Dict = None, supports_alpha_channel: bool = False):
         """
         Initialize frame cache
         
@@ -37,7 +37,9 @@ class AuxillaryCache:
         self.cache_key = self._create_cache_key()
         self.cache_path = Path(DEFAULT_CACHE_PATH) / self.cache_key
         self.metadata_path = self.cache_path / "metadata.json"
-        self.result_path = self.cache_path / "result.png" if self.type == "image" else self.cache_path / "result.mp4"
+        self.supports_alpha_channel = supports_alpha_channel
+        self.result_path = self.cache_path / "result.png" if self.type == "image" else self.cache_path / f"result.{'webm' if self.supports_alpha_channel else 'mp4'}"
+        
         # make sure the cache path exists
         self._video = None
         self._video_info = None
@@ -109,6 +111,9 @@ class AuxillaryCache:
     def _get_video_frame_range(self):
         start_frame = self.start_frame if self.start_frame is not None else 0
         end_frame = self.end_frame if self.end_frame is not None else self._video_info["frame_count"]
+        # make sure are valid frames
+        start_frame = max(start_frame, 0)
+        end_frame = min(end_frame, self._video_info["frame_count"])
         return range(start_frame, end_frame)
     
     def _get_video(self):
@@ -136,6 +141,7 @@ class AuxillaryCache:
         return self._media_type
     
     def save_result(self, result: OutputMedia):
+        """Save results iteratively to avoid memory overload"""
         if self.type == "image":
             result.save(self.result_path)
             
@@ -153,25 +159,51 @@ class AuxillaryCache:
                         for idx, frame_idx in enumerate(cached_frame_indices[:len(indices_to_read)]):
                             existing_frames[frame_idx] = frames_batch[idx]
             
-            # Merge existing cached frames with new frames
+            # Create a generator that merges existing cached frames with new frames
             frame_range = self._get_video_frame_range()
-            merged_frames = []
             all_cached_frames = []
             
-            for frame_idx in frame_range:
-                if frame_idx in self.non_cached_frames:
-                    # New frame from result
-                    result_idx = self.non_cached_frames[frame_idx]
-                    merged_frames.append(result[result_idx])
-                    all_cached_frames.append(frame_idx)
-                elif frame_idx in existing_frames:
-                    # Previously cached frame
-                    merged_frames.append(existing_frames[frame_idx])
-                    all_cached_frames.append(frame_idx)
+            # Convert result iterator to dict for easier frame access
+            new_frames_dict = {}
+            if hasattr(result, '__iter__') and not isinstance(result, (list, np.ndarray)):
+                for frame in result:
+                    # Find which frame_idx this corresponds to
+                    for frame_idx, result_idx in self.non_cached_frames.items():
+                        if result_idx == len(new_frames_dict):
+                            new_frames_dict[frame_idx] = frame
+                            break
+            else:
+                # result is a list/array
+                new_frames_dict = {frame_idx: result[result_idx] for frame_idx, result_idx in self.non_cached_frames.items()}
             
-            # Save merged result
-            if merged_frames:
-                imageio.mimsave(self.result_path, merged_frames, fps=self._video_info["fps"])
+            # Use imageio writer for iterative saving
+            if new_frames_dict or existing_frames:
+                if self.supports_alpha_channel:
+                    with imageio.get_writer(
+                        self.result_path,
+                        fps=self._video_info["fps"],
+                        codec="vp9",
+                        output_params=["-pix_fmt", "yuva420p"]
+                    ) as writer:
+                        for frame_idx in frame_range:
+                            if frame_idx in new_frames_dict:
+                                all_cached_frames.append(frame_idx)
+                                writer.append_data(np.asarray(new_frames_dict[frame_idx]))
+                            elif frame_idx in existing_frames:
+                                all_cached_frames.append(frame_idx)
+                                writer.append_data(np.asarray(existing_frames[frame_idx]))
+                else:
+                    with imageio.get_writer(
+                        self.result_path,
+                        fps=self._video_info["fps"]
+                    ) as writer:
+                        for frame_idx in frame_range:
+                            if frame_idx in new_frames_dict:
+                                all_cached_frames.append(frame_idx)
+                                writer.append_data(np.asarray(new_frames_dict[frame_idx]))
+                            elif frame_idx in existing_frames:
+                                all_cached_frames.append(frame_idx)
+                                writer.append_data(np.asarray(existing_frames[frame_idx]))
                 
                 # Update metadata
                 metadata = {
@@ -183,27 +215,37 @@ class AuxillaryCache:
                 with open(self.metadata_path, 'w') as f:
                     json.dump(metadata, f, indent=2)
         return str(self.result_path)
+    
+    
     @property
     def image(self):
         return self._image
     
-    @property
-    def video(self):
+    def video_frames(self, batch_size: int = 1):
+        """Generator that yields frames iteratively to avoid memory overload"""
         frame_range = self._get_video_frame_range()
-        
+
         # Collect all non-cached frame indices
         non_cached_indices = [frame_idx for frame_idx in frame_range if frame_idx not in self.cached_frames]
         
         if not non_cached_indices:
-            return []
+            return
         
-        try:
-            frames_batch = self._video.get_batch(non_cached_indices).asnumpy()
-        except Exception as e:
-            raise ValueError(f"Failed to read frames from video") from e
-        
-        # Map frame indices to output positions
-        for idx, frame_idx in enumerate(non_cached_indices):
-            self.non_cached_frames[frame_idx] = idx
-        
-        return list(frames_batch)
+        # Process frames in batches
+        for i in range(0, len(non_cached_indices), batch_size):
+            batch_indices = non_cached_indices[i:i + batch_size]
+            
+            try:
+                if len(batch_indices) == 1:
+                    frame = self._video[batch_indices[0]].asnumpy()
+                    frames_batch = [frame]
+                else:
+                    frames_batch = self._video.get_batch(batch_indices).asnumpy()
+            except Exception as e:
+                raise ValueError(f"Failed to read frames from video") from e
+            
+            # Map frame indices to output positions and yield frames
+            for idx, frame_idx in enumerate(batch_indices):
+                output_idx = len(self.non_cached_frames)
+                self.non_cached_frames[frame_idx] = output_idx
+                yield frames_batch[idx]
