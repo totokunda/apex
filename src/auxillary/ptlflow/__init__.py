@@ -194,41 +194,52 @@ class PTLFlowDetector(ToMixin, BasePreprocessor):
             **kwargs: Additional processing parameters (including progress_callback)
             
         Returns:
-            List of flow visualization images (or flow arrays if output_type="flow")
+            Generator yielding flow visualization images (or flow arrays if output_type="flow")
         """
         from tqdm import tqdm
         
-        frames = self._load_video(input_video)
-        
-        if len(frames) < 2:
-            raise ValueError(f"Video must have at least 2 frames for optical flow, got {len(frames)}")
-        
-        ret_frames = []
-        
-        # Duplicate last frame to ensure all frames get processed
-        frames_extended = frames + [frames[-1]]
+        # Check if input is a generator/iterator
+        if hasattr(input_video, '__iter__') and not isinstance(input_video, (list, str)):
+            frames_iter = iter(input_video)
+            total_frames = kwargs.get("total_frames", None)
+        else:
+            frames = self._load_video(input_video)
+            frames_iter = iter(frames)
+            total_frames = len(frames)
         
         # Get progress callback if provided
         progress_callback = kwargs.get("progress_callback", None)
-        total_frames = len(frames)
+        frame_idx = 0
         
-        # Process each pair of consecutive frames
-        for frame_idx in tqdm(range(total_frames), desc="Processing optical flow"):
+        # Get first frame
+        try:
+            prev_frame = next(frames_iter)
+            frame_idx += 1
+        except StopIteration:
+            raise ValueError("Video must have at least 2 frames for optical flow")
+        
+        # Process each pair of consecutive frames using a sliding window
+        for current_frame in tqdm(frames_iter, desc="Processing optical flow", total=total_frames - 1 if total_frames else None):
             # Update progress
             if progress_callback is not None:
-                progress_callback(frame_idx + 1, total_frames)
-            
-            # Get consecutive frames
-            frame1 = frames_extended[frame_idx]
-            frame2 = frames_extended[frame_idx + 1]
+                progress_callback(frame_idx, total_frames)
             
             # Process the frame pair
-            result = self.process(frame1, frame2, output_type=output_type, **kwargs)
-            ret_frames.append(result)
+            result = self.process(prev_frame, current_frame, output_type=output_type, **kwargs)
+            yield result
+            
+            # Slide the window
+            prev_frame = current_frame
+            frame_idx += 1
+        
+        # Process the last frame by duplicating it
+        if progress_callback is not None:
+            progress_callback(frame_idx, total_frames if total_frames else frame_idx)
+        
+        result = self.process(prev_frame, prev_frame, output_type=output_type, **kwargs)
+        yield result
         
         # Send final frame completion
         if progress_callback is not None:
-            progress_callback(total_frames, total_frames)
-        
-        return ret_frames
+            progress_callback(frame_idx, frame_idx)
 

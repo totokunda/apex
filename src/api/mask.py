@@ -1,0 +1,384 @@
+"""
+API endpoints for mask generation using SAM2
+"""
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Literal
+from pathlib import Path
+import numpy as np
+import ray
+from loguru import logger
+import cv2
+from datetime import datetime
+
+from src.mask.mask import (
+    get_sam2_actor,
+    ModelType
+)
+
+router = APIRouter(prefix="/mask", tags=["mask"])
+
+class MaskRequest(BaseModel):
+    """Request model for mask generation."""
+    
+    input_path: str = Field(..., description="Path to input image or video file")
+    frame_number: Optional[int] = Field(None, description="Frame number for video input (0-based, required for videos)")
+    tool: Literal['brush', 'touch', 'lasso', 'shape'] = Field(..., description="Masking tool type")
+    
+    # Tool-specific data
+    points: Optional[List[Dict[str, float]]] = Field(None, description="List of points with x, y coordinates (for brush/touch/lasso)")
+    point_labels: Optional[List[int]] = Field(None, description="Labels for points: 1=positive, 0=negative (optional, defaults to all positive)")
+    box: Optional[Dict[str, float]] = Field(None, description="Bounding box with x1, y1, x2, y2 (for shape tool or as additional constraint)")
+    
+    # SAM2 parameters
+    multimask_output: bool = Field(True, description="Whether to generate multiple mask proposals and return the best one")
+    simplify_tolerance: float = Field(1.0, description="Contour simplification tolerance (Douglas-Peucker epsilon)")
+    model_type: str = Field("sam2_base_plus", description="SAM2 model variant: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
+     
+    # Debug parameter
+    debug: bool = Field(True, description="Enable debug visualization - saves input points/bbox and output contours as images")
+    
+
+class MaskResponse(BaseModel):
+    """Response model for mask generation."""
+    
+    status: str = Field(..., description="Status: success or error")
+    contours: Optional[List[List[float]]] = Field(None, description="List of contour polygons, each as flat list [x1, y1, x2, y2, ...]")
+    message: Optional[str] = Field(None, description="Success or error message")
+    input_path: Optional[str] = Field(None, description="Echo of input path")
+    frame_number: Optional[int] = Field(None, description="Echo of frame number (for videos)")
+    tool: Optional[str] = Field(None, description="Echo of tool used")
+
+
+def validate_input_file(input_path: str) -> tuple[Path, bool]:
+    """
+    Validate input file exists and determine if it's a video.
+    
+    Returns:
+        Tuple of (Path object, is_video boolean)
+    """
+    path = Path(input_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Input file not found: {input_path}")
+    
+    # Check if it's a video based on extension
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v'}
+    is_video = path.suffix.lower() in video_extensions
+    
+    return path, is_video
+
+
+def prepare_mask_inputs(request: MaskRequest, image_shape: tuple) -> dict:
+    """
+    Prepare SAM2 inputs based on the masking tool and request parameters.
+    
+    Args:
+        request: The mask request
+        image_shape: Shape of the input image (H, W, C)
+        
+    Returns:
+        Dictionary with point_coords, point_labels, and box arrays
+    """
+    point_coords = None
+    point_labels = None
+    box = None
+    
+    if request.tool in ['brush', 'touch', 'lasso']:
+        # Convert points to numpy array
+        if request.points:
+            coords = np.array([[p['x'], p['y']] for p in request.points], dtype=np.float32)
+            
+            # Handle point labels
+            if request.point_labels:
+                labels = np.array(request.point_labels, dtype=np.int32)
+            else:
+                # Default: all points are positive (include)
+                labels = np.ones(len(coords), dtype=np.int32)
+            
+            point_coords = coords
+            point_labels = labels
+            
+            logger.debug(f"Tool {request.tool}: {len(coords)} points with labels {labels}")
+    
+    if request.tool == 'shape' or request.box:
+        # Convert box to numpy array
+        if request.box:
+            box = np.array([
+                request.box['x1'],
+                request.box['y1'],
+                request.box['x2'],
+                request.box['y2']
+            ], dtype=np.float32)
+            
+            logger.debug(f"Tool {request.tool}: box {box}")
+    
+    if request.tool == 'lasso' and request.points:
+        # For lasso, we can also compute a bounding box from the points
+        # This helps SAM2 focus on the region of interest
+        coords = np.array([[p['x'], p['y']] for p in request.points])
+        x_min, y_min = coords.min(axis=0)
+        x_max, y_max = coords.max(axis=0)
+        box = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+        
+        logger.debug(f"Lasso tool: computed box from {len(coords)} points: {box}")
+    
+    return {
+        'point_coords': point_coords,
+        'point_labels': point_labels,
+        'box': box
+    }
+
+
+def save_debug_visualizations(
+    input_path: Path,
+    frame_number: Optional[int],
+    point_coords: Optional[np.ndarray],
+    point_labels: Optional[np.ndarray],
+    box: Optional[np.ndarray],
+    contours: Optional[List[List[float]]],
+    mask: Optional[np.ndarray]
+):
+    """
+    Save debug visualizations to debug/ folder with a subfolder per API call.
+    
+    Args:
+        input_path: Path to input image/video
+        frame_number: Frame number for videos (None for images)
+        point_coords: Array of point coordinates (N, 2)
+        point_labels: Array of point labels (N,) where 1=positive, 0=negative
+        box: Bounding box array [x1, y1, x2, y2]
+        contours: List of contour polygons
+        mask: Binary mask from SAM2 (H, W)
+    """
+    try:
+        # Create debug folder with timestamp subfolder for this API call
+        debug_base = Path("debug")
+        debug_base.mkdir(exist_ok=True)
+        
+        # Generate timestamp for unique subfolder
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        debug_dir = debug_base / timestamp
+        debug_dir.mkdir(exist_ok=True)
+        
+        # Load the image/frame
+        if frame_number is not None:
+            # Load specific frame from video
+            cap = cv2.VideoCapture(str(input_path))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, image = cap.read()
+            cap.release()
+            if not ret:
+                logger.error(f"Failed to read frame {frame_number} from video")
+                return
+        else:
+            # Load image
+            image = cv2.imread(str(input_path))
+            if image is None:
+                logger.error(f"Failed to load image from {input_path}")
+                return
+        
+        # === 1. Draw input visualization (points + bbox) ===
+        input_vis = image.copy()
+        
+        # Draw bounding box if present
+        if box is not None:
+            x1, y1, x2, y2 = box.astype(int)
+            cv2.rectangle(input_vis, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            cv2.putText(input_vis, "BOX", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 
+                       0.7, (0, 255, 0), 2)
+        
+        # Draw points with labels
+        if point_coords is not None and point_labels is not None:
+            for (x, y), label in zip(point_coords, point_labels):
+                x, y = int(x), int(y)
+                
+                # Color and symbol based on label
+                if label == 1:  # Positive point
+                    color = (0, 255, 0)  # Green
+                    symbol = "+"
+                else:  # Negative point (0)
+                    color = (0, 0, 255)  # Red
+                    symbol = "-"
+                
+                # Draw circle
+                cv2.circle(input_vis, (x, y), 8, color, -1)
+                cv2.circle(input_vis, (x, y), 10, (255, 255, 255), 2)
+                
+                # Draw symbol
+                font_scale = 1.0
+                thickness = 3
+                text_size = cv2.getTextSize(symbol, cv2.FONT_HERSHEY_SIMPLEX, 
+                                           font_scale, thickness)[0]
+                text_x = x - text_size[0] // 2
+                text_y = y + text_size[1] // 2
+                
+                # White background for better visibility
+                cv2.putText(input_vis, symbol, (text_x, text_y), 
+                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 
+                           thickness + 2)
+                cv2.putText(input_vis, symbol, (text_x, text_y), 
+                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        
+        # Save input visualization
+        input_path_debug = debug_dir / "input.png"
+        cv2.imwrite(str(input_path_debug), input_vis)
+        logger.info(f"Saved input visualization to {input_path_debug}")
+        
+        # === 2. Draw output visualization (contours) ===
+        if contours:
+            output_vis = image.copy()
+            
+            # Create an overlay for translucent effect
+            overlay = output_vis.copy()
+            
+            # Draw each contour
+            for contour in contours:
+                # Convert flat list to points array
+                points = np.array(contour).reshape(-1, 2).astype(np.int32)
+                
+                # Fill the contour with blue color
+                cv2.fillPoly(overlay, [points], (255, 0, 0))  # BGR: Blue
+                
+                # Draw contour outline
+                cv2.polylines(output_vis, [points], True, (255, 0, 0), 2)
+            
+            # Blend the overlay with the original for translucency
+            alpha = 0.4  # Transparency factor
+            output_vis = cv2.addWeighted(overlay, alpha, output_vis, 1 - alpha, 0)
+            
+            # Save output visualization
+            output_path_debug = debug_dir / "output.png"
+            cv2.imwrite(str(output_path_debug), output_vis)
+            logger.info(f"Saved output visualization to {output_path_debug}")
+        
+    except Exception as e:
+        logger.error(f"Error saving debug visualizations: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
+@router.post("/create", response_model=MaskResponse)
+async def create_mask(request: MaskRequest):
+    """
+    Generate a mask using SAM2 based on the provided inputs.
+    
+    Supports:
+    - Image or video inputs (for videos, specify frame_number)
+    - Multiple tools: brush (stroke points), touch (single/multiple points), lasso (closed path), shape (bounding box)
+    - Returns contour polygon points for rendering on the frontend
+    - Uses unified SAM2VideoPredictor for both images and videos with lazy frame loading
+    """
+    try:
+        # Validate input file
+        input_path, is_video = validate_input_file(request.input_path)
+        
+        # For videos, frame_number is required
+        if is_video and request.frame_number is None:
+            raise HTTPException(
+                status_code=400,
+                detail="frame_number is required for video inputs"
+            )
+        
+        logger.info(f"Processing {'video' if is_video else 'image'}: {input_path}, "
+                   f"frame: {request.frame_number if is_video else 'N/A'}, tool: {request.tool}")
+        
+        # Prepare SAM2 inputs based on tool (we need to pass dummy image shape for validation)
+        # The actual image dimensions will be determined by the predictor
+        inputs = prepare_mask_inputs(request, (1920, 1080, 3))  # Dummy shape for validation
+        
+        # Validate that we have at least one input
+        if inputs['point_coords'] is None and inputs['box'] is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No valid inputs provided for tool '{request.tool}'. Provide points or box."
+            )
+        
+        # Get SAM2 model actor
+        try:
+            model_type_enum = ModelType[request.model_type.upper()]
+        except KeyError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid model_type: {request.model_type}. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large"
+            )
+        
+        actor = get_sam2_actor(model_type=model_type_enum)
+        
+        # Generate mask (Ray remote call) - now passing input_path instead of image array
+        logger.info(f"Generating mask with unified SAM2 predictor...")
+        contours, mask = ray.get(
+            actor.predict_mask.remote(
+                input_path=str(input_path),
+                frame_number=request.frame_number,
+                point_coords=inputs['point_coords'],
+                point_labels=inputs['point_labels'],
+                box=inputs['box'],
+                obj_id=1,  # Default object ID
+                simplify_tolerance=request.simplify_tolerance
+            )
+        )
+        
+        logger.info(f"Mask generated successfully: {len(contours)} contours")
+        
+        # Save debug visualizations if requested
+        if request.debug:
+            logger.info("Debug mode enabled - saving visualizations...")
+            save_debug_visualizations(
+                input_path=input_path,
+                frame_number=request.frame_number,
+                point_coords=inputs['point_coords'],
+                point_labels=inputs['point_labels'],
+                box=inputs['box'],
+                contours=contours,
+                mask=mask
+            )
+        
+        return MaskResponse(
+            status="success",
+            contours=contours,
+            message=f"Generated mask with {len(contours)} contour(s)",
+            input_path=str(input_path),
+            frame_number=request.frame_number if is_video else None,
+            tool=request.tool
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate mask: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        return MaskResponse(
+            status="error",
+            message=f"Failed to generate mask: {str(e)}",
+            input_path=request.input_path,
+            frame_number=request.frame_number,
+            tool=request.tool
+        )
+
+
+@router.get("/health")
+def mask_health():
+    """Check if the mask service is ready."""
+    try:
+        # Try to get the actor (doesn't create it if it doesn't exist)
+        import ray
+        try:
+            actor = ray.get_actor("sam2_model_actor")
+            return {
+                "status": "ready",
+                "message": "SAM2 model actor is initialized and ready"
+            }
+        except ValueError:
+            return {
+                "status": "not_initialized",
+                "message": "SAM2 model actor not yet initialized. It will be created on first request."
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Error checking mask service: {str(e)}"
+        }
+

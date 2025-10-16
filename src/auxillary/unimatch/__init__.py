@@ -188,27 +188,54 @@ class UnimatchDetector(ToMixin, BasePreprocessor):
     
     def process_video(self, input_video: InputVideo, **kwargs) -> OutputVideo:
         # we must pass two images to unimatch
-        frames = self._load_video(input_video)
-        ret_frames = []
-        # Determine which frames to process
-        total_frames = len(frames)
-        progress_callback = kwargs.get("progress_callback", None)
+        from tqdm import tqdm
         
-        for (frame_idx, frame) in enumerate(tqdm(frames, desc="Processing frames")):
+        # Check if input is a generator/iterator
+        if hasattr(input_video, '__iter__') and not isinstance(input_video, (list, str)):
+            frames_iter = iter(input_video)
+            total_frames = kwargs.get("total_frames", None)
+        else:
+            frames = self._load_video(input_video)
+            frames_iter = iter(frames)
+            total_frames = len(frames)
+        
+        progress_callback = kwargs.get("progress_callback", None)
+        frame_idx = 0
+        
+        # Get first frame
+        try:
+            prev_frame = next(frames_iter)
+            frame_idx += 1
+        except StopIteration:
+            raise ValueError("Video must have at least 2 frames for optical flow")
+        
+        prev_anno_frame = None
+        
+        # Process each pair of consecutive frames using a sliding window
+        for current_frame in tqdm(frames_iter, desc="Processing frames", total=total_frames - 1 if total_frames else None):
+            # Update progress
             if progress_callback is not None:
-                progress_callback(frame_idx + 1, total_frames)
+                progress_callback(frame_idx, total_frames)
             
-            if frame_idx == total_frames - 1:
-                anno_frame = ret_frames[frame_idx - 1]
-            else:
-                anno_frame = self.process(frame, image2=frames[frame_idx + 1], **kwargs)
-            ret_frames.append(anno_frame)
+            # Process the frame pair
+            anno_frame = self.process(prev_frame, image2=current_frame, **kwargs)
+            prev_anno_frame = anno_frame
+            yield anno_frame
+            
+            # Slide the window
+            prev_frame = current_frame
+            frame_idx += 1
+        
+        # For the last frame, duplicate the previous result
+        if progress_callback is not None:
+            progress_callback(frame_idx, total_frames if total_frames else frame_idx)
+        
+        if prev_anno_frame is not None:
+            yield prev_anno_frame
         
         # Send final frame completion
         if progress_callback is not None:
-            progress_callback(total_frames, total_frames)
-        
-        return ret_frames
+            progress_callback(frame_idx, frame_idx)
     
     def process(self, input_image: InputImage, image2=None, detect_resolution=512, upscale_method="INTER_CUBIC", return_flow=False, pred_bwd_flow=False, pred_bidir_flow=False, **kwargs) -> OutputImage:
         # Note: Unimatch needs two images, so we expect image2 to be passed in kwargs or as parameter
