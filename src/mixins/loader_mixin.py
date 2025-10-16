@@ -616,6 +616,7 @@ class LoaderMixin(DownloadMixin):
 
     @staticmethod
     def get_media_type(media_path: str) -> str:
+        media_path = media_path.lower()
         if media_path.endswith(tuple(VIDEO_EXTS)):
             return "video"
         elif media_path.endswith(tuple(IMAGE_EXTS)):

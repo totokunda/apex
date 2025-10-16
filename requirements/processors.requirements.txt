@@ -13,3 +13,4 @@ rtree
 mmengine
 ptlflow
 rembg
+decord
