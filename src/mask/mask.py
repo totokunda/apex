@@ -3,15 +3,13 @@ from sam2.sam2_video_predictor import SAM2VideoPredictor
 from src.mixins import LoaderMixin
 from PIL import Image
 import torch
-import ray
-from ray.actor import ActorHandle
 import cv2
 import numpy as np
 from pathlib import Path
 from typing import List, Tuple, Optional, Union, Iterator
 from collections import OrderedDict
 from loguru import logger
-
+import traceback
 # get the default device
 from src.utils.defaults import get_torch_device, DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -52,7 +50,6 @@ def extract_video_frame(video_path: str, frame_number: int) -> np.ndarray:
         numpy array of shape (H, W, 3) in RGB format
     """
     try:
-        import decord
         from decord import VideoReader, cpu
         
         # Use CPU context for frame extraction
@@ -144,7 +141,7 @@ class LazyFrameLoader:
     IMG_MEAN = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32)[:, None, None]
     IMG_STD = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32)[:, None, None]
     
-    def __init__(self, input_path: str, frame_number: Optional[int] = None, image_size: int = 1024):
+    def __init__(self, input_path: str, frame_number: Optional[int] = None, image_size: int = 512):
         self.input_path = input_path
         self.frame_number = frame_number
         self.image_size = image_size
@@ -182,8 +179,11 @@ class LazyFrameLoader:
             
             # Validate frame number
             total_frames = len(vr)
-            if self.target_frame_idx < 0 or self.target_frame_idx >= total_frames:
-                raise ValueError(f"Frame number {self.target_frame_idx} out of range [0, {total_frames-1}]")
+            if self.target_frame_idx < 0:
+                self.target_frame_idx = 0
+            elif self.target_frame_idx >= total_frames:
+                self.target_frame_idx = total_frames - 1
+                
         else:
             # For images, treat as single frame
             self.num_frames = 1
@@ -235,6 +235,91 @@ class LazyFrameLoader:
         cls._video_reader_cache.clear()
 
 
+class MultiFrameLoader:
+    """
+    Frame loader over a contiguous range of frames in a video.
+    Provides normalized tensors compatible with SAM2 preprocessing.
+    """
+    _video_reader_cache = LazyFrameLoader._video_reader_cache  # share cache
+    _max_cached_readers = LazyFrameLoader._max_cached_readers
+
+    IMG_MEAN = LazyFrameLoader.IMG_MEAN
+    IMG_STD = LazyFrameLoader.IMG_STD
+
+    def __init__(
+        self,
+        input_path: str,
+        frame_start: int,
+        frame_end: int,
+        image_size: int = 512,
+        max_frames: Optional[int] = None,
+    ):
+        self.input_path = input_path
+        self.image_size = image_size
+        self.frame_start = frame_start
+        self.frame_end = frame_end
+        self.max_frames = max_frames
+
+        if input_path not in self._video_reader_cache:
+            try:
+                from decord import VideoReader, cpu
+                if len(self._video_reader_cache) >= self._max_cached_readers:
+                    oldest_key = next(iter(self._video_reader_cache))
+                    del self._video_reader_cache[oldest_key]
+                vr = VideoReader(input_path, ctx=cpu(0))
+                self._video_reader_cache[input_path] = vr
+            except ImportError:
+                raise ImportError("decord is required for video support. Install with: pip install decord")
+
+        self.vr = self._video_reader_cache[input_path]
+
+        total_frames = len(self.vr)
+        anchor = max(0, min(self.frame_start, total_frames - 1))
+        target = max(0, min(self.frame_end, total_frames - 1))
+
+        low = min(anchor, target)
+        high = max(anchor, target)
+
+        if self.max_frames is not None and self.max_frames > 0:
+            if target >= anchor:
+                high = min(high, anchor + self.max_frames)
+            else:
+                low = max(low, anchor - self.max_frames)
+
+        self.frame_indices = list(range(low, high + 1))
+        self.anchor_idx = max(0, anchor - low)
+        self.reverse = target < anchor
+        self.anchor_frame = self.frame_indices[self.anchor_idx]
+        self.target_frame = target
+        self.frame_start = anchor
+        self.frame_end = target
+
+        # Resolve video dimensions from the first materialized frame
+        first_frame = self.vr[self.anchor_frame].asnumpy()
+        self.video_height, self.video_width = first_frame.shape[:2]
+        
+    def __len__(self) -> int:
+        return len(self.frame_indices)
+
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        if idx < 0 or idx >= len(self.frame_indices):
+            raise IndexError(f"Frame index {idx} out of range [0, {len(self.frame_indices)})")
+        frame_idx = self.frame_indices[idx]
+        frame = self.vr[frame_idx].asnumpy()
+
+        img_tensor = torch.from_numpy(frame).permute(2, 0, 1).float()
+        img_resized = torch.nn.functional.interpolate(
+            img_tensor.unsqueeze(0),
+            size=(self.image_size, self.image_size),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(0)
+        
+        img_normalized = (img_resized / 255.0 - self.IMG_MEAN) / self.IMG_STD
+        
+        return img_normalized
+
+
 class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
     """
     Custom SAM2VideoPredictor that supports both images and videos with lazy loading.
@@ -265,6 +350,9 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
         images = LazyFrameLoader(input_path, frame_number, image_size=self.image_size)
         video_height = images.video_height
         video_width = images.video_width
+        
+        if self.device.type == "mps":
+            offload_video_to_cpu = True
         
         # Initialize inference state (same structure as original)
         inference_state = {}
@@ -299,7 +387,6 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
         return inference_state
 
 
-@ray.remote
 class UnifiedSAM2Predictor:
     """
     Unified predictor using custom UnifiedSAM2VideoPredictor for both images and videos.
@@ -334,7 +421,7 @@ class UnifiedSAM2Predictor:
         
         # Get device inside actor
         self.device = get_torch_device()
-        
+
         # Convert dtype string to torch dtype
         dtype_map = {
             "float32": torch.float32,
@@ -417,9 +504,9 @@ class UnifiedSAM2Predictor:
         except Exception as e:
             self.logger.warning(f"Warmup failed: {e}. Model will warm up on first real inference.")
     
-    def _get_cache_key(self, input_path: str, frame_number: Optional[int]) -> Tuple[str, Optional[int]]:
+    def _get_cache_key(self, input_path: str, frame_number: Optional[int], id: Optional[str] = None) -> Tuple[str, Optional[int], Optional[str]]:
         """Generate cache key for inference state."""
-        return (input_path, frame_number)
+        return (input_path, frame_number, id)
     
     def _cleanup_oldest_state(self):
         """Remove the oldest cached inference state to manage memory."""
@@ -429,9 +516,9 @@ class UnifiedSAM2Predictor:
             del self._inference_states[oldest_key]
             self.logger.debug(f"Evicted oldest inference state: {oldest_key}")
     
-    def _get_or_create_inference_state(self, input_path: str, frame_number: Optional[int] = None):
+    def _get_or_create_inference_state(self, input_path: str, frame_number: Optional[int] = None, id: Optional[str] = None):
         """Get cached inference state or create new one."""
-        cache_key = self._get_cache_key(input_path, frame_number)
+        cache_key = self._get_cache_key(input_path, frame_number, id)
         
         if cache_key in self._inference_states:
             self.logger.debug(f"Using cached inference state for {cache_key}")
@@ -443,7 +530,6 @@ class UnifiedSAM2Predictor:
         # Initialize inference state using our custom init_state (no temp dir needed!)
         predictor = self.get_predictor()
         
-        self.logger.info(f"Initializing inference state for {input_path}, frame: {frame_number}")
         inference_state = predictor.init_state(
             input_path=input_path,
             frame_number=frame_number,
@@ -455,6 +541,85 @@ class UnifiedSAM2Predictor:
         self._inference_states[cache_key] = inference_state
         
         return inference_state
+    
+    def _cache_inference_state(
+        self,
+        inference_state: dict,
+        input_path: str,
+        frame_number: Optional[int] = None,
+        id: Optional[str] = None,
+        prompts: Optional[dict] = None,
+    ):
+        """Cache the inference state along with prompt metadata for reuse."""
+        cache_key = self._get_cache_key(input_path, frame_number, id)
+
+        if prompts:
+            state_prompts = inference_state.setdefault("cached_prompts", {})
+            state_prompts[id or "default"] = prompts
+            
+
+        self._inference_states[cache_key] = inference_state
+
+    def _maybe_restore_state(
+        self,
+        input_path: str,
+        frame_start: int,
+        id: Optional[str],
+    ):
+        cache_key = self._get_cache_key(input_path, frame_start, id)
+        if cache_key not in self._inference_states:
+            return self._get_or_create_inference_state(input_path, frame_start, id)
+
+        inference_state = self._inference_states[cache_key]
+        # Prompts are already embedded in cached inference state; nothing additional needed.
+
+        return inference_state
+
+    def _remap_cached_frame_index(self, inference_state: dict, old_idx: int, new_idx: int) -> None:
+        """Remap all per-frame caches from old_idx to new_idx after replacing images loader.
+
+        This aligns the conditioning frame (created at index 0 in single-frame mode)
+        with the anchor index in the multi-frame loader so tracking behaves correctly
+        in both forward and reverse directions.
+        """
+        if old_idx == new_idx:
+            return
+
+        try:
+            obj_indices = list(inference_state["obj_idx_to_id"].keys())
+        except Exception:
+            obj_indices = []
+
+        # Remap per-object inputs and outputs
+        for obj_idx in obj_indices:
+            # point inputs
+            point_map = inference_state["point_inputs_per_obj"].get(obj_idx, {})
+            if old_idx in point_map and new_idx not in point_map:
+                point_map[new_idx] = point_map.pop(old_idx)
+
+            # mask inputs
+            mask_map = inference_state["mask_inputs_per_obj"].get(obj_idx, {})
+            if old_idx in mask_map and new_idx not in mask_map:
+                mask_map[new_idx] = mask_map.pop(old_idx)
+
+            # output dicts (consolidated)
+            out_dict = inference_state["output_dict_per_obj"].get(obj_idx, {})
+            for storage_key in ("cond_frame_outputs", "non_cond_frame_outputs"):
+                frames_map = out_dict.get(storage_key, {})
+                if old_idx in frames_map and new_idx not in frames_map:
+                    frames_map[new_idx] = frames_map.pop(old_idx)
+
+            # temp outputs (most recent)
+            temp_out_dict = inference_state["temp_output_dict_per_obj"].get(obj_idx, {})
+            for storage_key in ("cond_frame_outputs", "non_cond_frame_outputs"):
+                frames_map = temp_out_dict.get(storage_key, {})
+                if old_idx in frames_map and new_idx not in frames_map:
+                    frames_map[new_idx] = frames_map.pop(old_idx)
+
+            # frames tracked metadata
+            tracked_map = inference_state["frames_tracked_per_obj"].get(obj_idx, {})
+            if old_idx in tracked_map and new_idx not in tracked_map:
+                tracked_map[new_idx] = tracked_map.pop(old_idx)
 
     @torch.inference_mode()
     def predict_mask(
@@ -465,7 +630,8 @@ class UnifiedSAM2Predictor:
         point_labels: Optional[np.ndarray] = None,
         box: Optional[np.ndarray] = None,
         obj_id: int = 1,
-        simplify_tolerance: float = 1.0
+        simplify_tolerance: float = 1.0,
+        id: Optional[str] = None
     ) -> Tuple[List[List[float]], np.ndarray]:
         """
         Generate mask using video predictor (works for both images and videos).
@@ -484,8 +650,16 @@ class UnifiedSAM2Predictor:
         """
         predictor = self.get_predictor()
         
+        self.logger.info(f"Predicting mask for {input_path}, frame_number: {frame_number}, id: {id}")
+        
         # Get or create inference state
-        inference_state = self._get_or_create_inference_state(input_path, frame_number)
+        inference_state = self._maybe_restore_state(
+            input_path=input_path,
+            frame_start=frame_number or 0,
+            id=id,
+        )
+        
+        self.logger.info(f"Inference states: {len(inference_state['obj_idx_to_id'])}")
         
         # We always use frame 0 since we load only the specific frame
         target_frame_idx = 0
@@ -521,8 +695,161 @@ class UnifiedSAM2Predictor:
         contours = mask_to_contours(mask_binary, simplify_tolerance=simplify_tolerance)
         
         self.logger.info(f"Generated mask with {len(contours)} contours for object {obj_id}")
+
+        prompt_metadata = {
+            "points": points,
+            "labels": labels,
+            "box": box_list,
+            "obj_id": obj_id,
+        }
+
+        self._cache_inference_state(
+            inference_state,
+            input_path,
+            frame_number,
+            id,
+            prompts=prompt_metadata,
+        )
         return contours, mask_binary
     
+    @torch.inference_mode()
+    def track_masks(
+        self,
+        input_path: str,
+        frame_start: int,
+        frame_end: int,
+        anchor_frame: Optional[int] = None,
+        max_frames: Optional[int] = None,
+        id: Optional[str] = None,
+        simplify_tolerance: float = 1.0,
+    ) -> List[dict]:
+        """
+        Propagate the existing object mask from the cached inference state across a frame range.
+
+        Returns a list of per-frame dicts: {"frame_number": int, "contours": List[List[float]]}
+        """
+        predictor = self.get_predictor()
+
+        inference_state = self._maybe_restore_state(
+            input_path=input_path,
+            frame_start=frame_start,
+            id=id,
+        )
+        
+        # Swap in a multi-frame loader spanning the requested range
+        loader = MultiFrameLoader(
+            input_path=input_path,
+            frame_start=anchor_frame if anchor_frame is not None else frame_start,
+            frame_end=frame_end,
+            image_size=predictor.image_size,
+            max_frames=max_frames,
+        )
+        inference_state["images"] = loader
+        inference_state["num_frames"] = len(loader)
+        inference_state["video_height"] = loader.video_height
+        inference_state["video_width"] = loader.video_width
+        # Remap any cached frame index from previous single-frame session (0) to anchor idx
+        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        # Clear cached features as images changed, warm up on anchor frame
+        inference_state["cached_features"] = {}
+        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+
+        max_frames = len(loader)
+        reverse = loader.reverse
+        results: List[dict] = []
+        
+        
+        
+        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            inference_state,
+            start_frame_idx=loader.anchor_idx,
+            max_frame_num_to_track=max_frames,
+            reverse=reverse,
+        ):
+            abs_frame = loader.frame_indices[out_frame_idx]
+
+            frame_contours: List[List[float]] = []
+            for i, _obj_id in enumerate(out_obj_ids):
+                mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
+                contours = mask_to_contours(mask.astype(np.uint8), simplify_tolerance=simplify_tolerance)
+                if contours:
+                    frame_contours.extend(contours)
+
+            results.append({
+                "frame_number": int(abs_frame),
+                "contours": frame_contours,
+            })
+
+        return results
+
+    @torch.inference_mode()
+    def iter_track_masks(
+        self,
+        input_path: str,
+        frame_start: int,
+        frame_end: int,
+        anchor_frame: Optional[int] = None,
+        max_frames: Optional[int] = None,
+        id: Optional[str] = None,
+        simplify_tolerance: float = 1.0,
+    ) -> Iterator[dict]:
+        """
+        Yield propagated mask contours per frame across a frame range.
+        """
+        predictor = self.get_predictor()
+
+        inference_state = self._maybe_restore_state(
+            input_path=input_path,
+            frame_start=frame_start,
+            id=id,
+        )
+
+        loader = MultiFrameLoader(
+            input_path=input_path,
+            frame_start=anchor_frame if anchor_frame is not None else frame_start,
+            frame_end=frame_end,
+            image_size=predictor.image_size,
+            max_frames=max_frames,
+        )
+        inference_state["images"] = loader
+        inference_state["num_frames"] = len(loader)
+        inference_state["video_height"] = loader.video_height
+        inference_state["video_width"] = loader.video_width
+        # Remap any cached frame index from previous single-frame session (0) to anchor idx
+        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        # Clear cached features as images changed, warm up on anchor frame
+        inference_state["cached_features"] = {}
+        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+
+        total = max(1, len(loader))
+        reverse = loader.reverse
+        
+        logger.info(f"{loader.anchor_idx} {loader.reverse} {max_frames}")
+
+
+        try:
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+                inference_state,
+                start_frame_idx=loader.anchor_idx,
+                max_frame_num_to_track=total,
+                reverse=reverse,
+            ):
+                abs_frame = loader.frame_indices[out_frame_idx]
+                frame_contours: List[List[float]] = []
+                for i, _obj_id in enumerate(out_obj_ids):
+                    mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
+                    contours = mask_to_contours(mask.astype(np.uint8), simplify_tolerance=simplify_tolerance)
+                    if contours:
+                        frame_contours.extend(contours)
+
+                yield {
+                    "frame_number": int(abs_frame),
+                    "contours": frame_contours,
+                }
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            raise e
+
     def cleanup(self):
         """Clean up all cached inference states and VideoReaders."""
         self._inference_states.clear()
@@ -530,81 +857,55 @@ class UnifiedSAM2Predictor:
         self.logger.info("Cleared all cached inference states and VideoReaders")
 
 
-# Singleton actor name
-SAM2_ACTOR_NAME = "sam2_model_actor"
+_PREDICTOR_SINGLETONS: dict = {}
 
 
-def get_sam2_actor(
+def get_sam2_predictor(
     model_type: ModelType = ModelType.SAM2_SMALL,
-    use_half_precision: bool = True,  # 2x speedup with minimal quality loss
-    use_compile: bool = False,  # Torch compile (slower startup, faster inference)
-    use_tf32: bool = True  # TF32 on Ampere+ GPUs
-) -> ActorHandle:
+    use_half_precision: bool = True,
+    use_compile: bool = False,
+    use_tf32: bool = True,
+) -> UnifiedSAM2Predictor:
     """
-    Get or create the singleton UnifiedSAM2Predictor with performance optimizations.
-    
-    Args:
-        model_type: Type of SAM2 model to use
-        use_half_precision: Use FP16/BF16 for 2x speedup (recommended)
-        use_compile: Use torch.compile for optimized execution (slower startup)
-        use_tf32: Enable TF32 tensor cores on Ampere+ GPUs
-        
-    Returns:
-        Ray actor handle for the UnifiedSAM2Predictor
+    Get or create a singleton UnifiedSAM2Predictor in-process.
     """
-    try:
-        # Try to get existing actor
-        actor = ray.get_actor(SAM2_ACTOR_NAME)
-        logger.debug(f"Retrieved existing SAM2 actor: {SAM2_ACTOR_NAME}")
-        return actor
-    except ValueError:
-        # Actor doesn't exist, create it
-        logger.info(f"Creating new unified SAM2 actor: {SAM2_ACTOR_NAME}")
-        logger.info(f"Optimizations: half_precision={use_half_precision}, compile={use_compile}, tf32={use_tf32}")
-        
-        # Download model weights before creating actor (can't pickle LoaderMixin)
-        # Config name is used directly by Hydra from sam2 package
-        from src.mixins import LoaderMixin
-        loader = LoaderMixin()
-        model_path = loader._download(MODEL_WEIGHTS[model_type], save_path=DEFAULT_PREPROCESSOR_SAVE_PATH)
-        config_name = MODEL_CONFIGS[model_type]  # Just the config name, not a download URL
-        
-        # Determine dtype before creating actor (avoid pickling torch.cuda calls)
-        dtype_str = "float32"
-        if use_half_precision:
-            device = get_torch_device()
-            if device.type == "cuda":
-                # Check BF16 support
-                try:
-                    if torch.cuda.is_bf16_supported():
-                        dtype_str = "bfloat16"
-                        logger.info("Will use BFloat16 precision")
-                    else:
-                        dtype_str = "float16"
-                        logger.info("Will use Float16 precision")
-                except:
+    key = (model_type.value, use_half_precision, use_compile, use_tf32)
+    if key in _PREDICTOR_SINGLETONS:
+        return _PREDICTOR_SINGLETONS[key]
+
+    logger.info("Creating new unified SAM2 predictor (in-process)")
+    loader = LoaderMixin()
+    model_path = loader._download(MODEL_WEIGHTS[model_type], save_path=DEFAULT_PREPROCESSOR_SAVE_PATH)
+    config_name = MODEL_CONFIGS[model_type]
+
+    dtype_str = "float32"
+    if use_half_precision:
+        device = get_torch_device()
+        if device.type == "cuda":
+            try:
+                if torch.cuda.is_bf16_supported():
+                    dtype_str = "bfloat16"
+                    logger.info("Will use BFloat16 precision")
+                else:
                     dtype_str = "float16"
                     logger.info("Will use Float16 precision")
-            else:
-                logger.info("Half precision not supported on non-CUDA device, using Float32")
-        
-        logger.info(f"Model path: {model_path}")
-        logger.info(f"Config name: {config_name}")
-        logger.info(f"Dtype: {dtype_str}")
-        
-        actor = UnifiedSAM2Predictor.options(
-            name=SAM2_ACTOR_NAME,
-            lifetime="detached",
-            max_concurrency=4  # Allow multiple concurrent requests
-        ).remote(
-            model_path=model_path,
-            config_name=config_name,
-            model_type=model_type,
-            dtype_str=dtype_str,
-            use_compile=use_compile,
-            use_tf32=use_tf32
-        )
-        return actor
+            except Exception:
+                dtype_str = "float16"
+                logger.info("Will use Float16 precision")
+        else:
+            logger.info("Half precision not supported on non-CUDA device, using Float32")
+
+    predictor = UnifiedSAM2Predictor(
+        model_path=model_path,
+        config_name=config_name,
+        model_type=model_type,
+        dtype_str=dtype_str,
+        use_compile=use_compile,
+        use_tf32=use_tf32,
+    )
+
+    _PREDICTOR_SINGLETONS[key] = predictor
+    return predictor
 
 
         
