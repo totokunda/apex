@@ -2,25 +2,30 @@
 API endpoints for mask generation using SAM2
 """
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+import json
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Literal
 from pathlib import Path
 import numpy as np
-import ray
 from loguru import logger
 import cv2
 from datetime import datetime
 
 from src.mask.mask import (
-    get_sam2_actor,
+    get_sam2_predictor,
     ModelType
 )
 
 router = APIRouter(prefix="/mask", tags=["mask"])
 
+# In-memory registry for cooperative cancellation of tracking streams
+# Keyed by mask id provided by the client
+CANCEL_TRACKING: set[str] = set()
+
 class MaskRequest(BaseModel):
     """Request model for mask generation."""
-    
+    id: Optional[str] = Field(None, description="ID of the mask")
     input_path: str = Field(..., description="Path to input image or video file")
     frame_number: Optional[int] = Field(None, description="Frame number for video input (0-based, required for videos)")
     tool: Literal['brush', 'touch', 'lasso', 'shape'] = Field(..., description="Masking tool type")
@@ -36,7 +41,21 @@ class MaskRequest(BaseModel):
     model_type: str = Field("sam2_base_plus", description="SAM2 model variant: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
      
     # Debug parameter
-    debug: bool = Field(True, description="Enable debug visualization - saves input points/bbox and output contours as images")
+    debug: bool = Field(False, description="Enable debug visualization - saves input points/bbox and output contours as images")
+    
+class MaskTrackingRequest(BaseModel):
+    """Request model for mask tracking."""
+    id: str = Field(..., description="ID of the mask")
+    input_path: str = Field(..., description="Path to input image or video file")
+    frame_start: int = Field(..., description="Start frame number for video input (0-based)")
+    frame_end: int = Field(..., description="End frame number for video input (0-based)")
+    model_type: str = Field("sam2_base_plus", description="SAM2 model variant: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
+    max_frames: Optional[int] = Field(None, description="Optional maximum number of frames to track from the anchor frame")
+    anchor_frame: Optional[int] = Field(None, description="Anchor frame containing the initial mask")
+    direction: Optional[Literal['forward','backward','both']] = Field(
+        None,
+        description="Tracking direction: forward, backward, or both. Defaults inferred from frame range"
+    )
     
 
 class MaskResponse(BaseModel):
@@ -48,6 +67,7 @@ class MaskResponse(BaseModel):
     input_path: Optional[str] = Field(None, description="Echo of input path")
     frame_number: Optional[int] = Field(None, description="Echo of frame number (for videos)")
     tool: Optional[str] = Field(None, description="Echo of tool used")
+    direction: Optional[str] = Field(None, description="Direction of tracking: forward, backward, or both")
 
 
 def validate_input_file(input_path: str) -> tuple[Path, bool]:
@@ -301,21 +321,20 @@ async def create_mask(request: MaskRequest):
                 status_code=400,
                 detail=f"Invalid model_type: {request.model_type}. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large"
             )
-        
-        actor = get_sam2_actor(model_type=model_type_enum)
-        
-        # Generate mask (Ray remote call) - now passing input_path instead of image array
+
+        predictor = get_sam2_predictor(model_type=model_type_enum)
+
+        # Generate mask directly
         logger.info(f"Generating mask with unified SAM2 predictor...")
-        contours, mask = ray.get(
-            actor.predict_mask.remote(
-                input_path=str(input_path),
-                frame_number=request.frame_number,
-                point_coords=inputs['point_coords'],
-                point_labels=inputs['point_labels'],
-                box=inputs['box'],
-                obj_id=1,  # Default object ID
-                simplify_tolerance=request.simplify_tolerance
-            )
+        contours, mask = predictor.predict_mask(
+            id=request.id,
+            input_path=str(input_path),
+            frame_number=request.frame_number,
+            point_coords=inputs['point_coords'],
+            point_labels=inputs['point_labels'],
+            box=inputs['box'],
+            obj_id=1,
+            simplify_tolerance=request.simplify_tolerance
         )
         
         logger.info(f"Mask generated successfully: {len(contours)} contours")
@@ -358,24 +377,147 @@ async def create_mask(request: MaskRequest):
             tool=request.tool
         )
 
+@router.post("/track")
+async def track_mask(request: MaskTrackingRequest):
+    """
+    Stream propagated mask contours for a prior touch-point mask across a frame range.
+    Uses existing SAM2 inference state keyed by id and the first completed frame, and
+    propagates via SAM2's propagate_in_video. Emits NDJSON lines: {frame_number, contours}.
+    """
+    try:
+        # Validate input file
+        input_path, is_video = validate_input_file(request.input_path)
+        if not is_video:
+            raise HTTPException(status_code=400, detail="Mask tracking only supports video inputs")
+        if request.frame_start is None or request.frame_end is None:
+            raise HTTPException(status_code=400, detail="frame_start and frame_end are required")
+
+        # Validate model type
+        try:
+            model_type_enum = ModelType[request.model_type.upper()]
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid model_type: {request.model_type}")
+
+        predictor = get_sam2_predictor(model_type=model_type_enum)
+
+        # Resolve direction
+        direction = request.direction or ("forward" if request.frame_end >= request.frame_start else "backward")
+
+        # Validate ranges for one-way cases
+        if direction == "forward" and request.frame_end < request.frame_start:
+            raise HTTPException(status_code=400, detail="For forward tracking, frame_end must be >= frame_start")
+        if direction == "backward" and request.frame_end > request.frame_start:
+            raise HTTPException(status_code=400, detail="For backward tracking, frame_end must be <= frame_start")
+
+        anchor = request.anchor_frame if request.anchor_frame is not None else request.frame_start
+
+        # Ensure old cancel flags for this id are cleared before starting
+        try:
+            CANCEL_TRACKING.discard(request.id)
+        except Exception:
+            pass
+
+        # Single-direction streaming
+        if direction in ("forward", "backward"):
+            def ndjson_generator_single():
+                try:
+                    for item in predictor.iter_track_masks(
+                        input_path=str(input_path),
+                        frame_start=int(request.frame_start),
+                        frame_end=int(request.frame_end),
+                        anchor_frame=int(anchor),
+                        max_frames=request.max_frames,
+                        id=request.id,
+                        simplify_tolerance=1.0,
+                    ):
+                        # Cooperative cancellation check
+                        if request.id in CANCEL_TRACKING:
+                            # Clear flag and emit a final cancelled status
+                            CANCEL_TRACKING.discard(request.id)
+                            yield json.dumps({"status": "cancelled"}) + "\n"
+                            break
+                        yield json.dumps(item) + "\n"
+                except Exception as e:
+                    logger.error(f"Streaming error in track_mask: {e}")
+                    yield json.dumps({"status": "error", "error": str(e)}) + "\n"
+                finally:
+                    # Best-effort cleanup
+                    try:
+                        CANCEL_TRACKING.discard(request.id)
+                    except Exception:
+                        pass
+
+            return StreamingResponse(ndjson_generator_single(), media_type="application/x-ndjson")
+
+        # direction == both
+        low = min(request.frame_start, anchor)
+        high = max(anchor, request.frame_end)
+        def ndjson_generator_both():
+            try:
+                # backward first if applicable
+                for item in predictor.iter_track_masks(
+                    input_path=str(input_path),
+                    frame_start=int(anchor),
+                    frame_end=low,
+                    anchor_frame=anchor,
+                    max_frames=request.max_frames,
+                    id=request.id,
+                ):
+                    if request.id in CANCEL_TRACKING:
+                        CANCEL_TRACKING.discard(request.id)
+                        yield json.dumps({"status": "cancelled"}) + "\n"
+                        break
+                    yield json.dumps(item) + "\n"
+                # forward next if applicable
+                for item in predictor.iter_track_masks(
+                    input_path=str(input_path),
+                    frame_start=int(anchor),
+                    frame_end=high,
+                    anchor_frame=int(anchor),
+                    max_frames=request.max_frames,
+                    id=request.id,
+                ):
+                    if request.id in CANCEL_TRACKING:
+                        CANCEL_TRACKING.discard(request.id)
+                        yield json.dumps({"status": "cancelled"}) + "\n"
+                        break
+                    yield json.dumps(item) + "\n"
+            except Exception as e:
+                logger.error(f"Streaming error in track_mask (both): {e}")
+                yield json.dumps({"status": "error", "error": str(e)}) + "\n"
+            finally:
+                try:
+                    CANCEL_TRACKING.discard(request.id)
+                except Exception:
+                    pass
+
+        return StreamingResponse(ndjson_generator_both(), media_type="application/x-ndjson")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to track mask: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to track mask: {str(e)}")
+
+@router.post("/track/cancel/{id}")
+def cancel_track_mask(id: str):
+    """Signal the server-side streaming iterator to stop for a given mask id."""
+    try:
+        CANCEL_TRACKING.add(id)
+        return {"status": "ok", "id": id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cancel tracking: {str(e)}")
 
 @router.get("/health")
 def mask_health():
     """Check if the mask service is ready."""
     try:
-        # Try to get the actor (doesn't create it if it doesn't exist)
-        import ray
-        try:
-            actor = ray.get_actor("sam2_model_actor")
-            return {
-                "status": "ready",
-                "message": "SAM2 model actor is initialized and ready"
-            }
-        except ValueError:
-            return {
-                "status": "not_initialized",
-                "message": "SAM2 model actor not yet initialized. It will be created on first request."
-            }
+        # Simple health report; model initializes on first request
+        return {
+            "status": "ready",
+            "message": "Mask service is available; model loads on first use"
+        }
     except Exception as e:
         return {
             "status": "error",
