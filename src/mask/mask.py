@@ -10,6 +10,7 @@ from typing import List, Tuple, Optional, Union, Iterator
 from collections import OrderedDict
 from loguru import logger
 import traceback
+from datetime import datetime
 # get the default device
 from src.utils.defaults import get_torch_device, DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -123,6 +124,596 @@ def mask_to_contours(
     
     logger.debug(f"Extracted {len(result_contours)} contours from mask (filtered {len(contours) - len(result_contours)} tiny contours)")
     return result_contours
+
+
+def polygon_to_mask(points: List[float], height: int, width: int) -> np.ndarray:
+    """
+    Rasterize a polygon (flat list [x1, y1, x2, y2, ...]) into a binary mask (H, W) with values {0,1}.
+    """
+    if points is None or len(points) < 6:
+        return np.zeros((height, width), dtype=np.uint8)
+    pts = np.array(points, dtype=np.float32).reshape(-1, 2).astype(np.int32)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillPoly(mask, [pts], 1)
+    return mask
+
+
+def rect_from_contours(contours: List[List[float]]) -> Optional[dict]:
+    """
+    Compute an oriented rectangle bounds from the largest contour.
+    Returns dict compatible with shape bounds used on the frontend.
+    """
+    if not contours:
+        return None
+    # Choose largest by area
+    def contour_area(flat: List[float]) -> float:
+        pts = np.array(flat, dtype=np.float32).reshape(-1, 2)
+        return cv2.contourArea(pts)
+    largest = max(contours, key=contour_area)
+    pts = np.array(largest, dtype=np.float32).reshape(-1, 2)
+    rect = cv2.minAreaRect(pts)  # ((cx, cy), (w, h), angle)
+    (cx, cy), (w, h), angle = rect
+    x = float(cx - w / 2.0)
+    y = float(cy - h / 2.0)
+    return {
+        "x": float(x),
+        "y": float(y),
+        "width": float(w),
+        "height": float(h),
+        "rotation": float(angle),
+        "shapeType": "rectangle",
+        "scaleX": 1.0,
+        "scaleY": 1.0,
+    }
+
+
+def _min_area_rect_from_contours(contours: List[List[float]]) -> Optional[Tuple[float, float, float, float, float]]:
+    """Return (cx, cy, w, h, angle_deg) for the largest contour's min-area rect."""
+    if not contours:
+        return None
+    def contour_area(flat: List[float]) -> float:
+        pts = np.array(flat, dtype=np.float32).reshape(-1, 2)
+        return cv2.contourArea(pts)
+    largest = max(contours, key=contour_area)
+    pts = np.array(largest, dtype=np.float32).reshape(-1, 2)
+    (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
+    return float(cx), float(cy), float(w), float(h), float(angle)
+
+
+def shape_bounds_from_contours(contours: List[List[float]], shape_type: Optional[str]) -> Optional[dict]:
+    """Compute shape-specific bounds from contours.
+
+    - rectangle: top-left pivot bounds derived from min-area rect
+    - ellipse: center-based bounds (cx, cy, w, h, angle)
+    - star: square center-based bounds with side = min(w, h)
+    - polygon/triangle: center-based bounds with width/height ratio = 1.1543665517482078
+    """
+    st = (shape_type or "rectangle").lower()
+    mar = _min_area_rect_from_contours(contours)
+    if mar is None:
+        return None
+    cx, cy, w, h, angle = mar
+
+    if st == "rectangle":
+        x = float(cx - w / 2.0)
+        y = float(cy - h / 2.0)
+        return {
+            "x": x,
+            "y": y,
+            "width": float(w),
+            "height": float(h),
+            "rotation": float(angle),
+            "shapeType": "rectangle",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
+
+    if st == "ellipse":
+        return {
+            "x": float(cx),
+            "y": float(cy),
+            "width": float(w),
+            "height": float(h),
+            "rotation": float(angle),
+            "shapeType": "ellipse",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
+
+    if st == "star":
+        side = float(max(1.0, min(w, h)))
+        return {
+            "x": float(cx),
+            "y": float(cy),
+            "width": side,
+            "height": side,
+            "rotation": float(angle),
+            "shapeType": "star",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
+
+    if st in ("polygon", "triangle"):
+        ratio = 1.1543665517482078  # width / height
+        # Fit ratio-inscribed rect within (w, h)
+        fit_h = float(max(1.0, min(h, w / ratio)))
+        fit_w = float(max(1.0, ratio * fit_h))
+        return {
+            "x": float(cx),
+            "y": float(cy),
+            "width": fit_w,
+            "height": fit_h,
+            "rotation": float(angle),
+            "shapeType": "polygon",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
+
+    # Default to rectangle behavior
+    x = float(cx - w / 2.0)
+    y = float(cy - h / 2.0)
+    return {
+        "x": x,
+        "y": y,
+        "width": float(w),
+        "height": float(h),
+        "rotation": float(angle),
+        "shapeType": st,
+        "scaleX": 1.0,
+        "scaleY": 1.0,
+    }
+
+
+def _rasterize_shape(bounds: dict, shape_type: str, height: int, width: int) -> np.ndarray:
+    """Rasterize a shape into a binary mask (H, W) based on shape bounds semantics.
+
+    - rectangle: top-left pivot, rotated rectangle
+    - ellipse: center-based, rotated ellipse
+    - polygon/triangle: equilateral triangle inside bounds, rotated
+    - star: 5-point star inside square bounds, rotated
+    """
+    mask = np.zeros((height, width), dtype=np.uint8)
+    st = (shape_type or "rectangle").lower()
+
+    if st == "rectangle":
+        pts = _bounds_to_box_points(bounds)
+        cv2.fillPoly(mask, [pts.astype(np.int32)], 1)
+        return mask
+
+    # Center and size
+    cx = float(bounds.get("x", 0.0))
+    cy = float(bounds.get("y", 0.0))
+    w = float(max(1.0, bounds.get("width", 1.0)))
+    h = float(max(1.0, bounds.get("height", 1.0)))
+    angle = float(bounds.get("rotation", 0.0))
+
+    if st == "ellipse":
+        center = (int(round(cx)), int(round(cy)))
+        axes = (int(round(w / 2.0)), int(round(h / 2.0)))
+        cv2.ellipse(mask, center, axes, angle, 0, 360, 1, thickness=-1)
+        return mask
+
+    def _rotate_points(local_pts: np.ndarray, angle_deg: float) -> np.ndarray:
+        theta = np.deg2rad(angle_deg)
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, -s], [s, c]], dtype=np.float32)
+        return (local_pts @ R.T)
+
+    if st in ("polygon", "triangle"):
+        # Equilateral triangle within bounds; local coords centered at origin
+        local = np.array([
+            [0.0, -h / 2.0],
+            [-w / 2.0, h / 2.0],
+            [w / 2.0, h / 2.0],
+        ], dtype=np.float32)
+        rot = _rotate_points(local, angle)
+        rot[:, 0] += cx
+        rot[:, 1] += cy
+        cv2.fillPoly(mask, [rot.astype(np.int32)], 1)
+        return mask
+
+    if st == "star":
+        # 5-point star, inner radius ratio ~0.5
+        outer = min(w, h) / 2.0
+        inner = outer * 0.5
+        pts = []
+        for i in range(10):
+            r = outer if i % 2 == 0 else inner
+            a = -90 + i * 36  # start at top, 360/10 = 36 deg steps
+            rad = np.deg2rad(a)
+            pts.append([r * np.cos(rad), r * np.sin(rad)])
+        local = np.array(pts, dtype=np.float32)
+        rot = _rotate_points(local, angle)
+        rot[:, 0] += cx
+        rot[:, 1] += cy
+        cv2.fillPoly(mask, [rot.astype(np.int32)], 1)
+        return mask
+
+    # Fallback: treat as rectangle
+    pts = _bounds_to_box_points(bounds)
+    cv2.fillPoly(mask, [pts.astype(np.int32)], 1)
+    return mask
+
+
+def _sample_points_from_mask(mask: np.ndarray, max_points: int = 48, rng: Optional[np.random.Generator] = None) -> Optional[np.ndarray]:
+    """Randomly sample up to max_points (x,y) coordinates from non-zero mask pixels."""
+    ys, xs = np.nonzero(mask)
+    total = xs.size
+    if total == 0:
+        return None
+    if rng is None:
+        rng = np.random.default_rng()
+    if total <= max_points:
+        sel = np.arange(total)
+    else:
+        sel = rng.choice(total, size=max_points, replace=False)
+    pts = np.stack([xs[sel], ys[sel]], axis=1).astype(np.float32)
+    return pts
+
+
+def _bounds_from_box_and_shape(box_xyxy: np.ndarray, shape_type: Optional[str]) -> dict:
+    """Construct shape bounds from an axis-aligned box [x1,y1,x2,y2] for the given shape type."""
+    st = (shape_type or "rectangle").lower()
+    x1, y1, x2, y2 = [float(v) for v in box_xyxy]
+    w = max(1.0, x2 - x1)
+    h = max(1.0, y2 - y1)
+    if st == "rectangle":
+        return {"x": x1, "y": y1, "width": w, "height": h, "rotation": 0.0, "shapeType": "rectangle", "scaleX": 1.0, "scaleY": 1.0}
+    cx = x1 + w / 2.0
+    cy = y1 + h / 2.0
+    if st == "star":
+        side = float(max(1.0, min(w, h)))
+        return {"x": cx, "y": cy, "width": side, "height": side, "rotation": 0.0, "shapeType": "star", "scaleX": 1.0, "scaleY": 1.0}
+    if st in ("polygon", "triangle"):
+        ratio = 1.1543665517482078
+        fit_h = float(max(1.0, min(h, w / ratio)))
+        fit_w = float(max(1.0, ratio * fit_h))
+        return {"x": cx, "y": cy, "width": fit_w, "height": fit_h, "rotation": 0.0, "shapeType": "polygon", "scaleX": 1.0, "scaleY": 1.0}
+    # ellipse or default center-based
+    return {"x": cx, "y": cy, "width": w, "height": h, "rotation": 0.0, "shapeType": "ellipse", "scaleX": 1.0, "scaleY": 1.0}
+
+
+def _inject_focus_points_for_bounds(
+    predictor: "UnifiedSAM2VideoPredictor",
+    inference_state: dict,
+    input_path: str,
+    frame_idx: int,
+    bounds: dict,
+    shape_type: Optional[str],
+    max_points: int = 48,
+    session_name: Optional[str] = None,
+) -> None:
+    try:
+        H = int(inference_state.get("video_height"))
+        W = int(inference_state.get("video_width"))
+        region_mask = _rasterize_shape(bounds, shape_type or "rectangle", height=H, width=W)
+        pts = _sample_points_from_mask(region_mask, max_points=max_points)
+        if pts is None or len(pts) == 0:
+            return
+        points = pts.tolist()
+        labels = [1] * len(points)
+        predictor.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=frame_idx,
+            obj_id=1,
+            points=points,
+            labels=labels,
+            box=None,
+            normalize_coords=True,
+        )
+
+        # Debug: overlay on the source frame
+        try:
+            path = Path(input_path)
+            is_video = path.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+            if is_video:
+                try:
+                    from decord import VideoReader, cpu
+                    vr = VideoReader(str(path), ctx=cpu(0))
+                    frame_rgb = vr[frame_idx].asnumpy()
+                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                except Exception:
+                    cap = cv2.VideoCapture(str(path))
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                    ok, bgr = cap.read()
+                    cap.release()
+                    if not ok:
+                        return
+                    frame_bgr = bgr
+            else:
+                img = Image.open(str(path)).convert("RGB")
+                frame_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+            overlay = frame_bgr.copy()
+            color = (0, 165, 255)
+            overlay[region_mask.astype(bool)] = (
+                0.6 * overlay[region_mask.astype(bool)] + 0.4 * np.array(color, dtype=np.float32)
+            ).astype(np.uint8)
+            vis = overlay
+            for x, y in pts:
+                cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
+                cv2.circle(vis, (int(x), int(y)), 5, (255, 255, 255), 1)
+
+            # Save
+            repo_root = Path(__file__).resolve().parents[2]
+            base_debug = repo_root / "debug"
+            base_debug.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = f"_{session_name}" if session_name else ""
+            out_dir = base_debug / f"{timestamp}_focus_points_create{suffix}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_file = out_dir / f"frame_{frame_idx:06d}_focus.png"
+            cv2.imwrite(str(out_file), vis)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Focus injection failed: {e}")
+
+def _ensure_focus_points_for_shape(
+    predictor: "UnifiedSAM2VideoPredictor",
+    inference_state: dict,
+    loader: "MultiFrameLoader",
+    shape_type: Optional[str],
+    max_points: int = 48,
+    session_name: Optional[str] = None,
+    base_debug_dir: Optional[Union[str, Path]] = None,
+) -> None:
+    """Add random positive points inside the shape region on the anchor frame to stabilize tracking.
+
+    This runs a quick one-frame inference to estimate bounds, rasterizes the shape, samples points,
+    and adds them as positive prompts at the anchor frame.
+    """
+    try:
+        if not shape_type:
+            return
+        constants = inference_state.setdefault("constants", {})
+        if constants.get("focus_points_added", False):
+            return
+
+        # One-frame inference at anchor to get current contours
+        anchor_idx = loader.anchor_idx
+        results = []
+        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            inference_state,
+            start_frame_idx=anchor_idx,
+            max_frame_num_to_track=1,
+            reverse=False,
+        ):
+            frame_contours: List[List[float]] = []
+            for i, _obj_id in enumerate(out_obj_ids):
+                mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
+                contours = mask_to_contours(mask.astype(np.uint8))
+                if contours:
+                    frame_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
+            results.append(frame_contours)
+            break
+
+        if not results or not results[0]:
+            return
+
+        bounds = shape_bounds_from_contours(results[0], shape_type)
+        if not bounds:
+            return
+
+        H = int(inference_state.get("video_height"))
+        W = int(inference_state.get("video_width"))
+        region_mask = _rasterize_shape(bounds, shape_type, height=H, width=W)
+        pts = _sample_points_from_mask(region_mask, max_points=max_points)
+        if pts is None or len(pts) == 0:
+            return
+
+        points = pts.tolist()
+        labels = [1] * len(points)
+        try:
+            predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=anchor_idx,
+                obj_id=1,
+                points=points,
+                labels=labels,
+                box=None,
+                normalize_coords=True,
+            )
+            constants["focus_points_added"] = True
+            logger.info(f"Added {len(points)} focus points for shape '{shape_type}' at anchor frame {loader.anchor_idx}")
+            # Debug visualization: overlay shape region and sampled points on anchor frame
+            try:
+                # Resolve debug dir
+                if base_debug_dir is None:
+                    repo_root = Path(__file__).resolve().parents[2]
+                    base_debug = repo_root / "debug"
+                else:
+                    base_debug = Path(base_debug_dir)
+                base_debug.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                suffix = f"_{session_name}" if session_name else ""
+                out_dir = base_debug / f"{timestamp}_focus_points{suffix}"
+                out_dir.mkdir(parents=True, exist_ok=True)
+
+                # Fetch anchor frame image
+                abs_idx = loader.frame_indices[anchor_idx]
+                frame_rgb = loader.vr[abs_idx].asnumpy()
+                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+                # Overlay shape region mask
+                overlay = frame_bgr.copy()
+                color = (0, 165, 255)  # orange
+                overlay[region_mask.astype(bool)] = (
+                    0.6 * overlay[region_mask.astype(bool)] + 0.4 * np.array(color, dtype=np.float32)
+                ).astype(np.uint8)
+                vis = overlay
+
+                # Draw points
+                for x, y in pts:
+                    cv2.circle(vis, (int(x), int(y)), 3, (0, 255, 0), -1)
+                    cv2.circle(vis, (int(x), int(y)), 5, (255, 255, 255), 1)
+
+                # Optionally outline the shape bounds for clarity
+                if shape_type and shape_type.lower() == "rectangle":
+                    box_pts = _bounds_to_box_points(bounds)
+                    cv2.polylines(vis, [box_pts.astype(np.int32)], True, (0, 255, 255), 2)
+
+                out_file = out_dir / f"anchor_{abs_idx:06d}_focus.png"
+                cv2.imwrite(str(out_file), vis)
+            except Exception as debug_err:
+                logger.warning(f"Failed to save focus points debug: {debug_err}")
+        except Exception as e:
+            logger.warning(f"Failed to add focus points: {e}")
+    except Exception as e:
+        logger.warning(f"Focus points injection skipped due to error: {e}")
+
+def _bounds_to_box_points(bounds: dict) -> np.ndarray:
+    """Return 4x2 int points for the oriented rectangle described by bounds."""
+    cx = bounds["x"] + bounds["width"] / 2.0
+    cy = bounds["y"] + bounds["height"] / 2.0
+    w = max(1.0, float(bounds["width"]))
+    h = max(1.0, float(bounds["height"]))
+    angle = float(bounds.get("rotation", 0.0))
+    rect = ((float(cx), float(cy)), (float(w), float(h)), float(angle))
+    pts = cv2.boxPoints(rect)  # 4x2 float32 in image coords
+    return np.int32(pts)
+
+
+def _draw_bounds(frame_bgr: np.ndarray, bounds: Optional[dict], color: Tuple[int, int, int] = (0, 255, 0), thickness: int = 2) -> np.ndarray:
+    """Draw an oriented rectangle on BGR image inplace and return it."""
+    if bounds is None:
+        return frame_bgr
+    pts = _bounds_to_box_points(bounds)
+    cv2.polylines(frame_bgr, [pts], isClosed=True, color=color, thickness=thickness)
+    return frame_bgr
+
+
+def _overlay_mask(frame_bgr: np.ndarray, mask: np.ndarray, color: Tuple[int, int, int]) -> np.ndarray:
+    """Overlay a binary mask onto a BGR frame with semi-transparency."""
+    overlay = frame_bgr.copy()
+    bool_mask = mask.astype(bool)
+    if bool_mask.any():
+        overlay[bool_mask] = (
+            0.6 * overlay[bool_mask] + 0.4 * np.array(color, dtype=np.float32)
+        ).astype(np.uint8)
+    return overlay
+
+
+def _draw_shape(frame_bgr: np.ndarray, bounds: dict) -> np.ndarray:
+    """Draw the actual shape (rectangle/ellipse/polygon/star) described by bounds onto the frame."""
+    h, w = frame_bgr.shape[:2]
+    st = (bounds.get("shapeType") or "rectangle").lower()
+    if st == "rectangle":
+        return _draw_bounds(frame_bgr, bounds)
+
+    # Use rasterization for center-based shapes
+    mask = _rasterize_shape(bounds, st, height=h, width=w)
+    vis = _overlay_mask(frame_bgr, mask, (0, 255, 255))
+
+    # Draw an outline for clarity by extracting contours from the mask
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        cv2.polylines(vis, contours, isClosed=True, color=(0, 200, 200), thickness=2)
+    return vis
+
+
+def debug_save_rectangles(
+    input_path: str,
+    frame_results: List[dict],
+    session_name: Optional[str] = None,
+    base_debug_dir: Optional[Union[str, Path]] = None,
+) -> str:
+    """
+    Save per-frame debug images with oriented rectangles computed from contours.
+
+    Args:
+        input_path: Path to the source image or video
+        frame_results: List of {"frame_number": int, "contours": List[List[float]]}
+        session_name: Optional suffix for the debug directory name
+        base_debug_dir: Optional base debug directory; defaults to apex-engine/debug
+
+    Returns:
+        The filesystem path to the created debug directory (str)
+    """
+    path = Path(input_path)
+    is_video = path.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+
+    # Resolve debug root under repo's apex-engine/debug by default
+    if base_debug_dir is None:
+        repo_root = Path(__file__).resolve().parents[2]
+        base_debug = repo_root / "debug"
+    else:
+        base_debug = Path(base_debug_dir)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = f"_{session_name}" if session_name else ""
+    out_dir = base_debug / f"{timestamp}_mask_rects{suffix}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if is_video:
+        # Prefer decord for accuracy/perf; fallback to OpenCV if unavailable
+        vr = None
+        try:
+            from decord import VideoReader, cpu
+            vr = VideoReader(str(path), ctx=cpu(0))
+            rgb_reader = True
+        except Exception:
+            cap = cv2.VideoCapture(str(path))
+            vr = cap
+            rgb_reader = False
+
+        try:
+            for item in frame_results:
+                idx = int(item.get("frame_number", 0))
+                # Prefer provided shape bounds; otherwise derive from contours
+                bounds = item.get("shapeBounds")
+                if not bounds:
+                    bounds = rect_from_contours(item.get("contours", []) or [])
+
+                if "VideoReader" in type(vr).__name__:
+                    try:
+                        frame_rgb = vr[idx].asnumpy()
+                    except Exception:
+                        # fallback: read sequentially from OpenCV if random access fails
+                        cap = cv2.VideoCapture(str(path))
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                        ok, bgr = cap.read()
+                        if not ok:
+                            continue
+                        frame_bgr = bgr
+                    else:
+                        frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                else:
+                    # OpenCV VideoCapture path
+                    vr.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                    ok, bgr = vr.read()
+                    if not ok:
+                        continue
+                    frame_bgr = bgr
+
+                # Render correct shape type if provided
+                if bounds and (bounds.get("shapeType") or "rectangle").lower() != "rectangle":
+                    frame_bgr = _draw_shape(frame_bgr, bounds)
+                else:
+                    _draw_bounds(frame_bgr, bounds)
+                out_file = out_dir / f"frame_{idx:06d}.png"
+                cv2.imwrite(str(out_file), frame_bgr)
+        finally:
+            if vr is not None and hasattr(vr, "release"):
+                vr.release()
+    else:
+        # Single image case
+        img = Image.open(str(path)).convert("RGB")
+        frame_bgr = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        # Use the first result if present
+        item = frame_results[0] if frame_results else {"contours": []}
+        bounds = item.get("shapeBounds")
+        if not bounds:
+            bounds = rect_from_contours(item.get("contours", []) or [])
+        if bounds and (bounds.get("shapeType") or "rectangle").lower() != "rectangle":
+            frame_bgr = _draw_shape(frame_bgr, bounds)
+        else:
+            _draw_bounds(frame_bgr, bounds)
+        out_file = out_dir / f"image_rect.png"
+        cv2.imwrite(str(out_file), frame_bgr)
+
+    logger.info(f"Saved rectangle debug images to: {out_dir}")
+    return str(out_dir)
 
 
 class LazyFrameLoader:
@@ -631,7 +1222,9 @@ class UnifiedSAM2Predictor:
         box: Optional[np.ndarray] = None,
         obj_id: int = 1,
         simplify_tolerance: float = 1.0,
-        id: Optional[str] = None
+        id: Optional[str] = None,
+        init_mask: Optional[np.ndarray] = None,
+        lasso_points: Optional[List[float]] = None,
     ) -> Tuple[List[List[float]], np.ndarray]:
         """
         Generate mask using video predictor (works for both images and videos).
@@ -664,26 +1257,46 @@ class UnifiedSAM2Predictor:
         # We always use frame 0 since we load only the specific frame
         target_frame_idx = 0
         
-        # Convert numpy arrays to lists for SAM2's API
-        points = point_coords.tolist() if point_coords is not None else None
-        labels = point_labels.tolist() if point_labels is not None else None
-        box_list = box.tolist() if box is not None else None
-        
-        self.logger.info(f"points: {points}, labels: {labels}, box: {box_list}")
-        
-        # Add prompts and get mask
-        self.logger.debug(f"Adding prompts: points={len(points) if points else 0}, "
-                    f"box={'yes' if box_list else 'no'}")
-        
-        frame_idx, obj_ids, video_res_masks = predictor.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=target_frame_idx,
-            obj_id=obj_id,
-            points=points,
-            labels=labels,
-            box=box_list,
-            normalize_coords=True
-        )
+        # Build seed mask if provided directly or via lasso polygon
+        seed_mask = None
+        if init_mask is not None:
+            seed_mask = (init_mask > 0).astype(np.uint8)
+        elif lasso_points is not None and len(lasso_points) >= 6:
+            h = int(inference_state.get("video_height"))
+            w = int(inference_state.get("video_width"))
+            seed_mask = polygon_to_mask(lasso_points, height=h, width=w)
+
+        if seed_mask is not None:
+            self.logger.info("Seeding SAM2 with initial mask")
+            _, obj_ids, video_res_masks = predictor.add_new_mask(
+                inference_state=inference_state,
+                frame_idx=target_frame_idx,
+                obj_id=obj_id,
+                mask=seed_mask,
+            )
+        else:
+            # Convert numpy arrays to lists for SAM2's API
+            points = point_coords.tolist() if point_coords is not None else None
+            labels = point_labels.tolist() if point_labels is not None else None
+            box_list = box.tolist() if box is not None else None
+            
+            self.logger.info(f"points: {points}, labels: {labels}, box: {box_list}")
+            
+            # Add prompts and get mask
+            self.logger.debug(f"Adding prompts: points={len(points) if points else 0}, "
+                        f"box={'yes' if box_list else 'no'}")
+            
+            
+            
+            _, obj_ids, video_res_masks = predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=target_frame_idx,
+                obj_id=obj_id,
+                points=points,
+                labels=labels,
+                box=box_list,
+                normalize_coords=True
+            )
         
         # Extract mask for our object (first object, first channel)
         mask = video_res_masks[0, 0].cpu().numpy()  # (H, W)
@@ -696,12 +1309,11 @@ class UnifiedSAM2Predictor:
         
         self.logger.info(f"Generated mask with {len(contours)} contours for object {obj_id}")
 
-        prompt_metadata = {
-            "points": points,
-            "labels": labels,
-            "box": box_list,
-            "obj_id": obj_id,
-        }
+        prompt_metadata = {"obj_id": obj_id}
+        if seed_mask is not None:
+            prompt_metadata["seed"] = "mask"
+        else:
+            prompt_metadata["seed"] = "points_or_box"
 
         self._cache_inference_state(
             inference_state,
@@ -845,6 +1457,136 @@ class UnifiedSAM2Predictor:
                 yield {
                     "frame_number": int(abs_frame),
                     "contours": frame_contours,
+                }
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            raise e
+
+    @torch.inference_mode()
+    def track_shapes(
+        self,
+        input_path: str,
+        frame_start: int,
+        frame_end: int,
+        anchor_frame: Optional[int] = None,
+        max_frames: Optional[int] = None,
+        id: Optional[str] = None,
+        shape_type: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Propagate existing object mask and return per-frame oriented rectangle bounds.
+        Returns list of {"frame_number": int, "shapeBounds": dict | None}.
+        """
+        predictor = self.get_predictor()
+
+        inference_state = self._maybe_restore_state(
+            input_path=input_path,
+            frame_start=frame_start,
+            id=id,
+        )
+
+        loader = MultiFrameLoader(
+            input_path=input_path,
+            frame_start=anchor_frame if anchor_frame is not None else frame_start,
+            frame_end=frame_end,
+            image_size=predictor.image_size,
+            max_frames=max_frames,
+        )
+        inference_state["images"] = loader
+        inference_state["num_frames"] = len(loader)
+        inference_state["video_height"] = loader.video_height
+        inference_state["video_width"] = loader.video_width
+        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        inference_state["cached_features"] = {}
+        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+
+        max_frames = len(loader)
+        reverse = loader.reverse
+        results: List[dict] = []
+
+        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            inference_state,
+            start_frame_idx=loader.anchor_idx,
+            max_frame_num_to_track=max_frames,
+            reverse=reverse,
+        ):
+            abs_frame = loader.frame_indices[out_frame_idx]
+
+            # choose largest contour across all objects on the frame
+            largest_contours: List[List[float]] = []
+            for i, _obj_id in enumerate(out_obj_ids):
+                mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
+                contours = mask_to_contours(mask.astype(np.uint8))
+                if contours:
+                    largest_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
+
+            bounds = shape_bounds_from_contours(largest_contours, shape_type) if largest_contours else None
+            results.append({
+                "frame_number": int(abs_frame),
+                "shapeBounds": bounds,
+            })
+
+        return results
+
+    @torch.inference_mode()
+    def iter_track_shapes(
+        self,
+        input_path: str,
+        frame_start: int,
+        frame_end: int,
+        anchor_frame: Optional[int] = None,
+        max_frames: Optional[int] = None,
+        id: Optional[str] = None,
+        shape_type: Optional[str] = None,
+    ) -> Iterator[dict]:
+        """
+        Yield per-frame oriented rectangle bounds while propagating existing mask.
+        Yields {"frame_number": int, "shapeBounds": dict | None}.
+        """
+        predictor = self.get_predictor()
+
+        inference_state = self._maybe_restore_state(
+            input_path=input_path,
+            frame_start=frame_start,
+            id=id,
+        )
+
+        loader = MultiFrameLoader(
+            input_path=input_path,
+            frame_start=anchor_frame if anchor_frame is not None else frame_start,
+            frame_end=frame_end,
+            image_size=predictor.image_size,
+            max_frames=max_frames,
+        )
+        inference_state["images"] = loader
+        inference_state["num_frames"] = len(loader)
+        inference_state["video_height"] = loader.video_height
+        inference_state["video_width"] = loader.video_width
+        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        inference_state["cached_features"] = {}
+        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+
+        total = max(1, len(loader))
+        reverse = loader.reverse
+
+        try:
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+                inference_state,
+                start_frame_idx=loader.anchor_idx,
+                max_frame_num_to_track=total,
+                reverse=reverse,
+            ):
+                abs_frame = loader.frame_indices[out_frame_idx]
+                largest_contours: List[List[float]] = []
+                for i, _obj_id in enumerate(out_obj_ids):
+                    mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
+                    contours = mask_to_contours(mask.astype(np.uint8))
+                    if contours:
+                        largest_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
+                bounds = shape_bounds_from_contours(largest_contours, shape_type) if largest_contours else None
+                yield {
+                    "frame_number": int(abs_frame),
+                    "shapeBounds": bounds,
                 }
         except Exception as e:
             logger.error(traceback.format_exc())

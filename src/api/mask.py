@@ -14,7 +14,8 @@ from datetime import datetime
 
 from src.mask.mask import (
     get_sam2_predictor,
-    ModelType
+    ModelType,
+    debug_save_rectangles
 )
 
 router = APIRouter(prefix="/mask", tags=["mask"])
@@ -42,6 +43,10 @@ class MaskRequest(BaseModel):
      
     # Debug parameter
     debug: bool = Field(False, description="Enable debug visualization - saves input points/bbox and output contours as images")
+    shape_type: Optional[Literal['rectangle','ellipse','polygon','triangle','star']] = Field(
+        None,
+        description="Optional shape type for shape bounds from the provided box/points"
+    )
     
 class MaskTrackingRequest(BaseModel):
     """Request model for mask tracking."""
@@ -56,6 +61,11 @@ class MaskTrackingRequest(BaseModel):
         None,
         description="Tracking direction: forward, backward, or both. Defaults inferred from frame range"
     )
+    shape_type: Optional[Literal['rectangle','ellipse','polygon','triangle','star']] = Field(
+        None,
+        description="Optional shape type for shape bounds normalization"
+    )
+    debug: bool = Field(False, description="Enable debug visualization - saves input points/bbox and output contours as images")
     
 
 class MaskResponse(BaseModel):
@@ -156,7 +166,8 @@ def save_debug_visualizations(
     point_labels: Optional[np.ndarray],
     box: Optional[np.ndarray],
     contours: Optional[List[List[float]]],
-    mask: Optional[np.ndarray]
+    mask: Optional[np.ndarray],
+    seed_mask: Optional[np.ndarray] = None,
 ):
     """
     Save debug visualizations to debug/ folder with a subfolder per API call.
@@ -270,6 +281,23 @@ def save_debug_visualizations(
             output_path_debug = debug_dir / "output.png"
             cv2.imwrite(str(output_path_debug), output_vis)
             logger.info(f"Saved output visualization to {output_path_debug}")
+
+        # === 3. Draw seed mask visualization if provided ===
+        if seed_mask is not None:
+            try:
+                seed_vis = image.copy()
+                overlay = seed_vis.copy()
+                # Assume seed_mask is binary with 1 where shape exists
+                seed_bool = (seed_mask > 0)
+                overlay[seed_bool] = (
+                    0.6 * overlay[seed_bool] + 0.4 * np.array([0, 255, 0], dtype=np.float32)
+                ).astype(np.uint8)
+                seed_vis = overlay
+                seed_path_debug = debug_dir / "seed.png"
+                cv2.imwrite(str(seed_path_debug), seed_vis)
+                logger.info(f"Saved seed mask visualization to {seed_path_debug}")
+            except Exception as e:
+                logger.warning(f"Failed to save seed mask visualization: {e}")
         
     except Exception as e:
         logger.error(f"Error saving debug visualizations: {str(e)}")
@@ -324,17 +352,49 @@ async def create_mask(request: MaskRequest):
 
         predictor = get_sam2_predictor(model_type=model_type_enum)
 
-        # Generate mask directly
+        # Generate mask directly (seed with lasso polygon if tool is lasso)
         logger.info(f"Generating mask with unified SAM2 predictor...")
+        lasso_points_flat = None
+        if request.tool == 'lasso' and request.points:
+            # Flatten to [x1, y1, x2, y2, ...]
+            lasso_points_flat = []
+            for p in request.points:
+                lasso_points_flat.extend([float(p['x']), float(p['y'])])
+
+        # For lasso, prefer seed-mask path; still pass box if present (ignored in mask path)
+        point_coords = None if lasso_points_flat is not None else inputs['point_coords']
+        point_labels = None if lasso_points_flat is not None else inputs['point_labels']
+
+        # If a shape_type is provided and a box is present, build a binary mask for the shape
+        # and seed the predictor with that mask (similar to lasso seeding)
+        init_shape_mask = None
+        try:
+            if request.shape_type and inputs['box'] is not None:
+                _ = predictor.get_predictor()
+                inference_state = predictor._get_or_create_inference_state(
+                    input_path=str(input_path),
+                    frame_number=request.frame_number,
+                    id=request.id,
+                )
+                from src.mask.mask import _bounds_from_box_and_shape, _rasterize_shape
+                bounds = _bounds_from_box_and_shape(inputs['box'], request.shape_type)
+                H = int(inference_state.get("video_height"))
+                W = int(inference_state.get("video_width"))
+                init_shape_mask = _rasterize_shape(bounds, request.shape_type, height=H, width=W)
+        except Exception as e:
+            logger.warning(f"Failed to build shape seed mask: {e}")
+
         contours, mask = predictor.predict_mask(
             id=request.id,
             input_path=str(input_path),
             frame_number=request.frame_number,
-            point_coords=inputs['point_coords'],
-            point_labels=inputs['point_labels'],
-            box=inputs['box'],
+            point_coords=point_coords if init_shape_mask is None else None,
+            point_labels=point_labels if init_shape_mask is None else None,
+            box=inputs['box'] if init_shape_mask is None else None,
             obj_id=1,
-            simplify_tolerance=request.simplify_tolerance
+            simplify_tolerance=request.simplify_tolerance,
+            lasso_points=lasso_points_flat,
+            init_mask=init_shape_mask,
         )
         
         logger.info(f"Mask generated successfully: {len(contours)} contours")
@@ -349,7 +409,8 @@ async def create_mask(request: MaskRequest):
                 point_labels=inputs['point_labels'],
                 box=inputs['box'],
                 contours=contours,
-                mask=mask
+                mask=mask,
+                seed_mask=init_shape_mask,
             )
         
         return MaskResponse(
@@ -499,6 +560,130 @@ async def track_mask(request: MaskTrackingRequest):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to track mask: {str(e)}")
+
+
+@router.post("/track/shapes")
+async def track_shapes(request: MaskTrackingRequest):
+    """
+    Stream per-frame oriented rectangle bounds based on propagated masks for an existing id.
+    Emits NDJSON lines: {frame_number, shapeBounds}.
+    """
+    try:
+        input_path, is_video = validate_input_file(request.input_path)
+        if not is_video:
+            raise HTTPException(status_code=400, detail="Shape tracking only supports video inputs")
+        if request.frame_start is None or request.frame_end is None:
+            raise HTTPException(status_code=400, detail="frame_start and frame_end are required")
+
+        try:
+            model_type_enum = ModelType[request.model_type.upper()]
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid model_type: {request.model_type}")
+
+        predictor = get_sam2_predictor(model_type=model_type_enum)
+        direction = request.direction or ("forward" if request.frame_end >= request.frame_start else "backward")
+        if direction == "forward" and request.frame_end < request.frame_start:
+            raise HTTPException(status_code=400, detail="For forward tracking, frame_end must be >= frame_start")
+        if direction == "backward" and request.frame_end > request.frame_start:
+            raise HTTPException(status_code=400, detail="For backward tracking, frame_end must be <= frame_start")
+
+        anchor = request.anchor_frame if request.anchor_frame is not None else request.frame_start
+
+        try:
+            CANCEL_TRACKING.discard(request.id)
+        except Exception:
+            pass
+        
+        
+        if direction in ("forward", "backward"):
+            def ndjson_generator_single():
+                results = []
+                try:
+                    for item in predictor.iter_track_shapes(
+                        input_path=str(input_path),
+                        frame_start=int(request.frame_start),
+                        frame_end=int(request.frame_end),
+                        anchor_frame=int(anchor),
+                        max_frames=request.max_frames,
+                        id=request.id,
+                        shape_type=request.shape_type,
+                    ):
+                        if request.id in CANCEL_TRACKING:
+                            CANCEL_TRACKING.discard(request.id)
+                            yield json.dumps({"status": "cancelled"}) + "\n"
+                            break
+                        yield json.dumps(item) + "\n"
+                        results.append(item)
+                except Exception as e:
+                    logger.error(f"Streaming error in track_shapes: {e}")
+                    yield json.dumps({"status": "error", "error": str(e)}) + "\n"
+                finally:
+                    try:
+                        CANCEL_TRACKING.discard(request.id)
+                        if request.debug:
+                            debug_save_rectangles(str(input_path), results, request.id) 
+                    except Exception:
+                        pass
+
+            return StreamingResponse(ndjson_generator_single(), media_type="application/x-ndjson")
+
+        low = min(request.frame_start, anchor)
+        high = max(anchor, request.frame_end)
+        
+        
+        def ndjson_generator_both():
+            results =  []
+            try:
+                for item in predictor.iter_track_shapes(
+                    input_path=str(input_path),
+                    frame_start=int(anchor),
+                    frame_end=low,
+                    anchor_frame=anchor,
+                    max_frames=request.max_frames,
+                    id=request.id,
+                    shape_type=request.shape_type,
+                ):
+                    if request.id in CANCEL_TRACKING:
+                        CANCEL_TRACKING.discard(request.id)
+                        yield json.dumps({"status": "cancelled"}) + "\n"
+                        break
+                    yield json.dumps(item) + "\n"
+                    results.append(item)
+                for item in predictor.iter_track_shapes(
+                    input_path=str(input_path),
+                    frame_start=int(anchor),
+                    frame_end=high,
+                    anchor_frame=int(anchor),
+                    max_frames=request.max_frames,
+                    id=request.id,
+                    shape_type=request.shape_type,
+                ):
+                    if request.id in CANCEL_TRACKING:
+                        CANCEL_TRACKING.discard(request.id)
+                        yield json.dumps({"status": "cancelled"}) + "\n"
+                        break
+                    yield json.dumps(item) + "\n"
+                    results.append(item)
+            except Exception as e:
+                logger.error(f"Streaming error in track_shapes (both): {e}")
+                yield json.dumps({"status": "error", "error": str(e)}) + "\n"
+            finally:
+                try:
+                    CANCEL_TRACKING.discard(request.id)
+                except Exception:
+                    pass
+                
+                if request.debug:
+                    debug_save_rectangles(str(input_path), results, request.id) 
+                
+        return StreamingResponse(ndjson_generator_both(), media_type="application/x-ndjson")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to track shapes: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to track shapes: {str(e)}")
 
 @router.post("/track/cancel/{id}")
 def cancel_track_mask(id: str):
