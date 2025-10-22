@@ -15,6 +15,8 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         negative_prompt: List[str] | str = None,
         height: int | None = None,
         width: int | None = None,
+        aspect_ratio: str | None = None,
+        resolution: int | None = None,
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
@@ -40,6 +42,17 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
         loaded_image = self._load_image(image)
         loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(loaded_image, max_area=math.prod(loaded_image.size), mod_value=32)
+
+        # If explicit height/width not provided, allow resolution/aspect_ratio to determine them
+        if height is None and width is None:
+            if aspect_ratio is not None:
+                # Fallback resolution if not provided
+                ar_resolution = resolution if isinstance(resolution, (int, float)) and resolution > 0 else max(calculated_height, calculated_width)
+                h, w = self.main_engine._aspect_ratio_to_height_width(aspect_ratio, int(ar_resolution), mod_value=32)
+                height, width = h, w
+            elif resolution is not None:
+                h, w = self.main_engine._resolution_to_height_width(int(resolution), mod_value=32)
+                height, width = h, w
         preprocessed_image = self.image_processor.preprocess(loaded_image).unsqueeze(2)
         if height is None:
             height = calculated_height

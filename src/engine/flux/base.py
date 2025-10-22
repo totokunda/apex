@@ -1,66 +1,39 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any
+from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING
 from PIL import Image
 
-class FluxBaseEngine:
+# Typing-only linkage to BaseEngine for IDE navigation and autocompletion,
+# while avoiding a runtime dependency/import cycle.
+if TYPE_CHECKING:
+    from src.engine.base_engine import BaseEngine  # noqa: F401
+    BaseClass = BaseEngine  # type: ignore
+else:
+    BaseClass = object
+
+class FluxBaseEngine(BaseClass):
     """Base class for Flux engine implementations containing common functionality"""
 
-    def __init__(self, main_engine):
+    def __init__(self, main_engine: "BaseEngine"):
         self.main_engine = main_engine
         self.device = main_engine.device
         self.logger = main_engine.logger
         self.vae_scale_factor = main_engine.vae_scale_factor
         self.num_channels_latents = main_engine.num_channels_latents
         self.image_processor = main_engine.image_processor
+    
+    # Dynamic delegation: forward unknown attributes/methods to the underlying BaseEngine
+    def __getattr__(self, name: str):  # noqa: D401
+        """Delegate attribute access to the composed BaseEngine when not found here."""
+        try:
+            return getattr(self.main_engine, name)
+        except AttributeError as exc:
+            raise AttributeError(f"{self.__class__.__name__!s} has no attribute '{name}'") from exc
 
-    @property
-    def text_encoder(self):
-        return self.main_engine.text_encoder
-
-    @property
-    def text_encoder_2(self):
-        return getattr(self.main_engine, "text_encoder_2", None)
-
-    @property
-    def transformer(self):
-        return self.main_engine.transformer
-
-    @property
-    def scheduler(self):
-        return self.main_engine.scheduler
-
-    @property
-    def vae(self):
-        return self.main_engine.vae
-
-    @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def load_component_by_name(self, component_name: str):
-        """Load a component by name"""
-        return self.main_engine.load_component_by_name(component_name)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
+    # Improve editor introspection (e.g., autocomplete) by exposing attributes of main_engine
+    def __dir__(self):
+        return sorted(set(list(super().__dir__()) + dir(self.main_engine)))
+        
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
@@ -102,50 +75,6 @@ class FluxBaseEngine:
         b = base_shift - m * base_seq_len
         mu = image_seq_len * m + b
         return mu
-
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
-
-    def _tensor_to_frame(self, *args, **kwargs):
-        """Convert torch.tensor to PIL image"""
-        return self.main_engine._tensor_to_frame(*args, **kwargs)
 
     def encode_image(self, image):
         image_encoder = self.main_engine["helpers"]["image_encoder"]

@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any, Optional, Literal, Union
+from typing import TYPE_CHECKING, overload
 from diffusers.utils.dummy_pt_objects import SchedulerMixin
 import torch
 from loguru import logger
@@ -74,6 +75,54 @@ class AutoLoadingHelperDict(dict):
     def __init__(self, engine_instance):
         super().__init__()
         self._engine = engine_instance
+
+    # ---------------- Static typing for editor IntelliSense ---------------- #
+    if TYPE_CHECKING:
+        # Import helper classes only for typing to avoid runtime deps/cycles
+        from src.helpers.clip import CLIP
+        from src.helpers.wan.ati import WanATI
+        from src.helpers.wan.recam import WanRecam
+        from src.helpers.wan.fun_camera import WanFunCamera
+        from src.helpers.wan.multitalk import WanMultiTalk
+        from src.helpers.hunyuan.llama import HunyuanLlama
+        from src.helpers.hunyuan.avatar import HunyuanAvatar
+        from src.helpers.hidream.llama import HidreamLlama
+        from src.helpers.stepvideo.text_encoder import StepVideoTextEncoder
+        from src.helpers.ltx.patchifier import SymmetricPatchifier
+
+        # Overloads for known helper keys → precise instance types
+        @overload
+        def __getitem__(self, key: Literal["clip"]) -> "CLIP": ...
+
+        @overload
+        def __getitem__(self, key: Literal["wan.ati"]) -> "WanATI": ...
+
+        @overload
+        def __getitem__(self, key: Literal["wan.recam"]) -> "WanRecam": ...
+
+        @overload
+        def __getitem__(self, key: Literal["wan.fun_camera"]) -> "WanFunCamera": ...
+
+        @overload
+        def __getitem__(self, key: Literal["wan.multitalk"]) -> "WanMultiTalk": ...
+
+        @overload
+        def __getitem__(self, key: Literal["hunyuan.llama"]) -> "HunyuanLlama": ...
+
+        @overload
+        def __getitem__(self, key: Literal["hunyuan.avatar"]) -> "HunyuanAvatar": ...
+
+        @overload
+        def __getitem__(self, key: Literal["hidream.llama"]) -> "HidreamLlama": ...
+
+        @overload
+        def __getitem__(self, key: Literal["stepvideo.text_encoder"]) -> "StepVideoTextEncoder": ...
+
+        @overload
+        def __getitem__(self, key: Literal["ltx.patchifier"]) -> "SymmetricPatchifier": ...
+
+        @overload
+        def __getitem__(self, key: str) -> Any: ...
 
     def __getitem__(self, key):
         # If helper exists, return it
@@ -198,6 +247,79 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
         image = image.resize((width, height), resize_mode)
         return image, height, width
+
+    def _aspect_ratio_to_height_width(
+        self,
+        aspect_ratio: str,
+        resolution: int,
+        mod_value: int = 16,
+    ) -> tuple[int, int]:
+        """Convert an aspect ratio string like "16:9" into (height, width) using the given resolution.
+
+        The resolution is treated as the longer side. The returned dimensions are floored
+        to be multiples of mod_value to satisfy common model requirements.
+        """
+        if not isinstance(resolution, (int, float)) or resolution <= 0:
+            resolution = 1024
+
+        if not isinstance(aspect_ratio, str):
+            # Fallback to square
+            target_w = int(resolution)
+            target_h = int(resolution)
+        else:
+            ar = aspect_ratio.strip().lower().replace("x", ":").replace("/", ":")
+            parts = [p for p in ar.split(":") if p]
+            try:
+                if len(parts) == 2:
+                    w_part = float(parts[0])
+                    h_part = float(parts[1])
+                    if w_part <= 0 or h_part <= 0:
+                        raise ValueError
+                    ratio = w_part / h_part
+                else:
+                    # single number implies square
+                    ratio = 1.0
+            except Exception:
+                ratio = 1.0
+
+            # Treat resolution as longer side
+            if ratio >= 1.0:
+                target_w = int(resolution)
+                target_h = int(round(target_w / ratio))
+            else:
+                target_h = int(resolution)
+                target_w = int(round(target_h * ratio))
+
+        # Snap to multiples of mod_value and ensure minimum size
+        target_w = max(mod_value, (target_w // mod_value) * mod_value)
+        target_h = max(mod_value, (target_h // mod_value) * mod_value)
+        return target_h, target_w
+
+    def _resolution_to_height_width(
+        self, resolution: int, mod_value: int = 16
+    ) -> tuple[int, int]:
+        """Return square (height, width) for a given resolution, snapped to mod_value."""
+        if not isinstance(resolution, (int, float)) or resolution <= 0:
+            resolution = 1024
+        r = int(resolution)
+        r = max(mod_value, (r // mod_value) * mod_value)
+        return r, r
+
+    def _image_to_height_width(self, image, mod_value: int = 16) -> tuple[int, int]:
+        """Infer (height, width) from an input image, snapped to mod_value.
+
+        Accepts PIL.Image, numpy array, torch tensor, or path/URL string.
+        """
+        try:
+            pil_image = self._load_image(image)
+            width, height = pil_image.size
+        except Exception:
+            # Fallback to a reasonable default if image cannot be loaded
+            return self._resolution_to_height_width(1024, mod_value)
+
+        width = max(mod_value, (int(width) // mod_value) * mod_value)
+        height = max(mod_value, (int(height) // mod_value) * mod_value)
+        return height, width
 
     def _center_crop_resize(self, image, height, width):
         # Calculate resize ratio to match first frame dimensions
@@ -515,7 +637,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         return None
 
     @property
-    def helpers(self):
+    def helpers(self) -> "AutoLoadingHelperDict":
         return self._helpers
 
     def load_scheduler(self, component: Dict[str, Any]):

@@ -18,7 +18,7 @@ MANIFEST_SCHEMA_V1: dict = {
                 "Pipeline",
             ],
         },
-        "metadata": {
+                "metadata": {
             "type": "object",
             "required": ["name"],
             "properties": {
@@ -33,7 +33,33 @@ MANIFEST_SCHEMA_V1: dict = {
                 "license": {"type": "string"},
                 "homepage": {"type": "string"},
                 "registry": {"type": "string"},
+                "model_type": {
+                    "type": "string",
+                    "enum": [
+                        "text-to-image",
+                        "text-to-video",
+                        "image-to-video",
+                        "video-to-video",
+                        "image-to-image",
+                    ],
+                },
+                "demo_path": {"type": "string"},
                 "annotations": {"type": "object", "additional_properties": True},
+                "examples": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "parameters": {
+                                "type": "object",
+                                "additional_properties": True,
+                            },
+                        },
+                        "additional_properties": True,
+                    },
+                },
             },
             "additional_properties": True,
         },
@@ -70,7 +96,24 @@ MANIFEST_SCHEMA_V1: dict = {
                             },
                             "name": {"type": "string"},
                             "base": {"type": "string"},
-                            "model_path": {"type": "string"},
+                            "model_path": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "required": ["path"],
+                                            "properties": {
+                                                "path": {"type": "string"},
+                                                "variant": {"type": "string"},
+                                                "precision": {"type": "string"},
+                                            },
+                                            "additional_properties": True,
+                                        },
+                                    },
+                                ]
+                            },
                             "config_path": {"type": "string"},
                             "file_pattern": {"type": "string"},
                             "tag": {"type": "string"},
@@ -93,6 +136,31 @@ MANIFEST_SCHEMA_V1: dict = {
                                 "items": {"type": "string"},
                             },
                             "converted_model_path": {"type": "string"},
+                            "scheduler_options": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["name", "value"],
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "value": {"type": "string"},
+                                    },
+                                    "additional_properties": True,
+                                },
+                            },
+                            "gguf_files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["type", "path"],
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "path": {"type": "string"},
+                                    },
+                                    "additional_properties": True,
+                                },
+                            },
+                            "deprecated": {"type": "boolean"},
                         },
                         "additional_properties": True,
                     },
@@ -112,6 +180,7 @@ MANIFEST_SCHEMA_V1: dict = {
                                 "type": "object",
                                 "additional_properties": True,
                             },
+                            "deprecated": {"type": "boolean"},
                         },
                         "additional_properties": True,
                     },
@@ -130,6 +199,7 @@ MANIFEST_SCHEMA_V1: dict = {
                                 "type": "object",
                                 "additional_properties": True,
                             },
+                            "deprecated": {"type": "boolean"},
                         },
                         "additional_properties": True,
                     },
@@ -161,12 +231,126 @@ MANIFEST_SCHEMA_V1: dict = {
                     "type": "object",
                     "additional_properties": True,
                 },
+                "resource_requirements": {
+                    "type": "object",
+                    "properties": {
+                        "min_vram_gb": {"type": "number"},
+                        "recommended_vram_gb": {"type": "number"},
+                        "compute_capability": {"type": "string"},
+                    },
+                    "additional_properties": True,
+                },
                 "ui": {
                     "type": "object",
                     "properties": {
                         "mode": {
                             "type": "string",
                             "enum": ["simple", "advanced", "complex"],
+                        },
+                        "timeline_inputs": {
+                            "type": "object",
+                            "properties": {
+                                "inputs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["id", "type"],
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "label": {"type": "string"},
+                                            "type": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "text",
+                                                    "audio",
+                                                    "video",
+                                                    "image",
+                                                    "video_with_mask",
+                                                    "image_with_mask",
+                                                    "video_with_preprocessor",
+                                                    "image_with_preprocessor",
+                                                ],
+                                            },
+                                            "preprocessor_ref": {"type": "string"},
+                                            "required": {"type": "boolean"},
+                                            "default": {},
+                                            "deprecated": {"type": "boolean"},
+                                        },
+                                        "additional_properties": True,
+                                    },
+                                },
+                                "shortcuts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["key", "label"],
+                                        "properties": {
+                                            "key": {"type": "string"},
+                                            "label": {"type": "string"},
+                                            "type": {
+                                                "type": "string",
+                                                "enum": ["number", "text", "boolean", "select"],
+                                            },
+                                            "default": {},
+                                            "icon": {"type": "string"},
+                                            "options": {
+                                                "type": "array",
+                                                "items": {},
+                                            },
+                                        },
+                                        "additional_properties": True,
+                                    },
+                                },
+                            },
+                            "additional_properties": True,
+                        },
+                        "parameters": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["id", "type"],
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "label": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "number",
+                                            "random",
+                                            "text",
+                                            "textarea",
+                                            "categories",
+                                            "boolean",
+                                            "number_list",
+                                        ],
+                                    },
+                                    "default": {},
+                                    "category": {"type": "string"},
+                                    "required": {"type": "boolean"},
+                                    "min": {"type": "number"},
+                                    "max": {"type": "number"},
+                                    "step": {"type": "number"},
+                                    "value_type": {
+                                        "type": "string",
+                                        "enum": ["integer", "float"],
+                                    },
+                                    "options": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "name": {"type": "string"},
+                                                "value": {},
+                                            },
+                                            "additional_properties": True,
+                                        },
+                                    },
+                                    "order": {"type": "integer"},
+                                    "deprecated": {"type": "boolean"},
+                                },
+                                "additional_properties": True,
+                            },
                         },
                         "simple": {
                             "type": "object",

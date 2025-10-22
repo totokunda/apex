@@ -2,8 +2,7 @@
 Enhanced preprocessor registry with detailed parameter information
 """
 from typing import Dict, Any, List
-import os
-from pathlib import Path
+
 
 detect_resolution_parameter = {
     "name": "detect_resolution",

@@ -1,6 +1,6 @@
 import torch
 import math
-from typing import List, Union, Optional, Tuple
+from typing import List, Union, Optional, Tuple, TYPE_CHECKING
 from diffusers.utils.torch_utils import randn_tensor
 import inspect
 from PIL import Image
@@ -13,6 +13,15 @@ import io
 import av
 import numpy as np
 import torchvision.transforms.functional as TVF
+from src.engine.base_engine import AutoLoadingHelperDict
+
+# Typing-only linkage to BaseEngine for IDE navigation and autocompletion,
+# while avoiding a runtime dependency/import cycle.
+if TYPE_CHECKING:
+    from src.engine.base_engine import BaseEngine  # noqa: F401
+    BaseClass = BaseEngine  # type: ignore
+else:
+    BaseClass = object
 
 
 def _encode_single_frame(output_file, image_array: np.ndarray, crf):
@@ -235,15 +244,24 @@ class LTXVideoCondition(LoaderMixin):
         return num_frames
 
 
-class LTXBaseEngine:
+class LTXBaseEngine(BaseClass):
     """Base class for LTX engine implementations"""
 
-    def __init__(self, main_engine):
+    def __init__(self, main_engine: "BaseEngine"):
         self.main_engine = main_engine
         # Delegate properties to main engine
 
-    def __getattr__(self, name):
-        return getattr(self.main_engine, name)
+    # Dynamic delegation: forward unknown attributes/methods to the underlying BaseEngine
+    def __getattr__(self, name: str):  # noqa: D401
+        """Delegate attribute access to the composed BaseEngine when not found here."""
+        try:
+            return getattr(self.main_engine, name)
+        except AttributeError as exc:
+            raise AttributeError(f"{self.__class__.__name__!s} has no attribute '{name}'") from exc
+
+    # Improve editor introspection (e.g., autocomplete) by exposing attributes of main_engine
+    def __dir__(self):
+        return sorted(set(list(super().__dir__()) + dir(self.main_engine)))
 
     @property
     def text_encoder(self):
@@ -284,30 +302,6 @@ class LTXBaseEngine:
     @vae.setter
     def vae(self, vae):
         self.main_engine.vae = vae
-
-    @property
-    def helpers(self):
-        return self.main_engine.helpers
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def load_config_by_type(self, component_type: str):
-        """Load a component by type and config"""
-        return self.main_engine.load_config_by_type(component_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
 
     def _get_timesteps(
         self,
@@ -377,42 +371,6 @@ class LTXBaseEngine:
             num_inference_steps = len(timesteps)
 
         return timesteps, num_inference_steps
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
 
     def _get_latents(
         self,
@@ -1005,3 +963,8 @@ class LTXBaseEngine:
             )
             media_items = rearrange(media_items, "(b n) c h w -> b c n h w", n=n_frames)
         return media_items
+    
+    
+    
+    
+    
