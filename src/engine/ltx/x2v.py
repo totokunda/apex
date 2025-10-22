@@ -7,7 +7,6 @@ import math
 from src.attention.processors.ltx_processor import SkipLayerStrategy
 from src.scheduler.rf import TimestepShifter
 
-
 class LTXX2VEngine(LTXBaseEngine):
     """LTX Text-to-Video Engine Implementation"""
 

@@ -45,7 +45,6 @@ spec:
       guidance_scale: 5.0
       return_latents: false
       text_encoder_kwargs: 
-        add_special_tokens: false
         clean_text: false
         max_sequence_length: 77
         pad_with_zero: false

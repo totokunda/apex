@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import math
 from torchvision import transforms
 
-
 class WanBaseEngine:
     """Base class for WAN engine implementations containing common functionality"""
 

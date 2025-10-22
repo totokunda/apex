@@ -14,8 +14,10 @@ class FluxControlEngine(FluxBaseEngine):
         prompt_2: List[str] | str = None,
         negative_prompt: List[str] | str = None,
         negative_prompt_2: List[str] | str = None,
-        height: int = 1024,
-        width: int = 1024,
+        height: int | None = None,
+        width: int | None = None,
+        aspect_ratio: str = "1:1",
+        resolution: int = 1024,
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
@@ -33,6 +35,13 @@ class FluxControlEngine(FluxBaseEngine):
         timesteps: List[int] | None = None,
         **kwargs,
     ):
+        
+        if height is None and width is None and aspect_ratio is not None:
+            height, width = self._aspect_ratio_to_height_width(aspect_ratio, resolution)
+        elif height is None and width is None and resolution is not None:
+            height, width = self._resolution_to_height_width(resolution)
+        elif height is None and width is None:
+            height, width = self._image_to_height_width(control_image)
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)

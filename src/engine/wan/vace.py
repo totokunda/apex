@@ -8,7 +8,6 @@ from .base import WanBaseEngine
 
 class WanVaceEngine(WanBaseEngine):
     """WAN VACE (Video Acceleration) Engine Implementation"""
-
     def run(
         self,
         prompt: List[str] | str,
