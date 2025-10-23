@@ -168,16 +168,6 @@ spec:
         max: 100
         step: 5
 
-      - id: fps
-        label: Frame Rate
-        type: number
-        value_type: integer
-        panel: advanced
-        default: 16
-        min: 8
-        max: 60
-        step: 2
-
       - id: seed
         label: Seed
         description: Random seed for reproducibility
