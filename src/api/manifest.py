@@ -96,10 +96,10 @@ def list_model_types() -> List[ModelTypeInfo]:
 
     # Friendly labels and short descriptions per known type
     label_map = {
-        "t2v": "Text to Video (T2V)",
-        "i2v": "Image to Video (I2V)",
-        "v2v": "Video to Video (V2V)",
-        "x2v": "Any to Video (X2V)",
+        "t2v": "Text to Video",
+        "i2v": "Image to Video",
+        "v2v": "Video to Video",
+        "x2v": "Any to Video ",
         "edit": "Edit",
         "control": "Control",
     }
