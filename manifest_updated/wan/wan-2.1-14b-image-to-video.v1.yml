@@ -23,16 +23,22 @@ spec:
   
   components:
     - type: scheduler
+      label: Scheduler
       default: UniPCMultistepScheduler
       scheduler_options:
         - name: UniPCMultistepScheduler
+          label: UniPC Multistep Scheduler
+          description: The UniPC Multistep Scheduler is a scheduler for the Wan 2.1 14B Image to Video model.
           base: diffusers.UniPCMultistepScheduler
           config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/resolve/main/scheduler/scheduler_config.json
         - name: EulerDiscreteScheduler
+          label: Euler Discrete Scheduler
+          description: The Euler Discrete Scheduler is a scheduler for the Wan 2.1 14B Image to Video model.
           base: diffusers.EulerDiscreteScheduler
     
     - type: vae
       name: wan/vae
+      label: Wan VAE
       base: wan
       model_path:
         - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
@@ -46,6 +52,7 @@ spec:
     
     - type: text_encoder
       name: wan/text_encoder
+      label: UMT5 Text Encoder
       base: UMT5EncoderModel
       model_path:
         - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
@@ -58,6 +65,7 @@ spec:
       config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
     
     - type: transformer
+      label: Wan I2V Transformer
       base: wan.base
       model_path: 
         - path: Wan-AI/Wan2.1-I2V-14B-720P-Diffusers/transformer

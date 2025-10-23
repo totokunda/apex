@@ -23,6 +23,7 @@ class ManifestInfo(BaseModel):
     author: str
     license: str
     demo_path: str
+    downloaded: bool = False
 
 class ModelTypeInfo(BaseModel):
     key: str
