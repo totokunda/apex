@@ -21,17 +21,23 @@ spec:
   engine_type: torch
   components:
   - type: scheduler
+    label: Scheduler
     default: UniPCMultistepScheduler
     scheduler_options:
       - name: UniPCMultistepScheduler
+        label: UniPC Multistep Scheduler
+        description: The UniPC Multistep Scheduler is a scheduler for the Wan 2.1 14B VACE model.
         base: diffusers.UniPCMultistepScheduler
         config:
           flow_shift: 5.0
         config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/scheduler/scheduler_config.json
       - name: EulerDiscreteScheduler
+        label: Euler Discrete Scheduler
+        description: The Euler Discrete Scheduler is a scheduler for the Wan 2.1 14B VACE model.
         base: diffusers.EulerDiscreteScheduler
 
   - type: vae
+    label: Wan VAE
     base: wan
     model_path:
       - path: Wan-AI/Wan2.1-VACE-14B-diffusers/vae
@@ -46,6 +52,7 @@ spec:
 
   - type: text_encoder
     name: wan/text_encoder
+    label: UMT5 Text Encoder
     base: UMT5EncoderModel
     model_path:
       - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
@@ -57,6 +64,7 @@ spec:
           recommended_vram_gb: 24
     config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
   - type: transformer
+    label: Wan VACE Transformer
     base: wan.vace
     model_path:
       - path: Wan-AI/Wan2.1-VACE-14B-diffusers/transformer

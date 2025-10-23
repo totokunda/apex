@@ -22,21 +22,29 @@ spec:
   denoise_type: base
   components:
   - type: scheduler
+    label: Scheduler
     default: FlowMatchEulerDiscreteScheduler
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
+      label: FlowMatch Euler Discrete Scheduler
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Flux Dev Control Canny model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
       config_path: black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json
     - name: FlowMatchDiscreteScheduler
+      label: FlowMatch Discrete Scheduler
+      description: The FlowMatch Discrete Scheduler is a scheduler for the Flux Dev Control Canny model.
       base: src.scheduler.FlowMatchDiscreteScheduler
       config:
         shift: 5.0
         reverse: true
         solver: euler
     - name: EulerDiscreteScheduler
+      label: Euler Discrete Scheduler
+      description: The Euler Discrete Scheduler is a scheduler for the Flux Dev Control Canny model.
       base: diffusers.EulerDiscreteScheduler
 
   - type: vae
+    label: Flux VAE
     base: auto
     model_path: 
       - path: black-forest-labs/FLUX.1-dev/vae
@@ -45,6 +53,7 @@ spec:
   
   - type: text_encoder
     name: text_encoder
+    label: CLIP Text Encoder
     base: CLIPTextModel
     model_path: 
       - path: black-forest-labs/FLUX.1-dev/text_encoder
@@ -57,6 +66,7 @@ spec:
     
   - type: text_encoder
     name: text_encoder_2
+    label: T5 Text Encoder
     base: T5EncoderModel
     model_path: 
       - path: black-forest-labs/FLUX.1-dev/text_encoder_2
@@ -68,6 +78,7 @@ spec:
       subfolder: tokenizer_2
 
   - type: transformer
+    label: Flux Canny Transformer
     base: flux.base
     model_path: 
       - path: black-forest-labs/FLUX.1-Canny-dev/transformer

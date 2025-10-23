@@ -18,10 +18,12 @@ MANIFEST_SCHEMA_V1: dict = {
                 "Pipeline",
             ],
         },
-                "metadata": {
+        "metadata": {
             "type": "object",
             "required": ["name"],
             "properties": {
+                "id": {"type": "string"},
+                "model": {"type": "string"},
                 "name": {"type": "string", "min_length": 1},
                 "version": {
                     "type": "string",
@@ -33,16 +35,6 @@ MANIFEST_SCHEMA_V1: dict = {
                 "license": {"type": "string"},
                 "homepage": {"type": "string"},
                 "registry": {"type": "string"},
-                "model_type": {
-                    "type": "string",
-                    "enum": [
-                        "text-to-image",
-                        "text-to-video",
-                        "image-to-video",
-                        "video-to-video",
-                        "image-to-image",
-                    ],
-                },
                 "demo_path": {"type": "string"},
                 "annotations": {"type": "object", "additional_properties": True},
                 "examples": {
@@ -95,6 +87,7 @@ MANIFEST_SCHEMA_V1: dict = {
                                 ],
                             },
                             "name": {"type": "string"},
+                            "label": {"type": "string"},
                             "base": {"type": "string"},
                             "model_path": {
                                 "oneOf": [
@@ -108,6 +101,16 @@ MANIFEST_SCHEMA_V1: dict = {
                                                 "path": {"type": "string"},
                                                 "variant": {"type": "string"},
                                                 "precision": {"type": "string"},
+                                                "type": {"type": "string"},
+                                                "resource_requirements": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "min_vram_gb": {"type": "number"},
+                                                        "recommended_vram_gb": {"type": "number"},
+                                                        "compute_capability": {"type": "string"},
+                                                    },
+                                                    "additional_properties": True,
+                                                },
                                             },
                                             "additional_properties": True,
                                         },
@@ -140,10 +143,13 @@ MANIFEST_SCHEMA_V1: dict = {
                                 "type": "array",
                                 "items": {
                                     "type": "object",
-                                    "required": ["name", "value"],
+                                    "required": ["name"],
                                     "properties": {
                                         "name": {"type": "string"},
-                                        "value": {"type": "string"},
+                                        "label": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "base": {"type": "string"},
+                                        "config_path": {"type": "string"},
                                     },
                                     "additional_properties": True,
                                 },
