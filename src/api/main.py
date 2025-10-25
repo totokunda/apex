@@ -3,7 +3,9 @@ from .ws import router as ws_router
 from .manifest import router as manifest_router
 from .config import router as config_router
 from .preprocessor import router as preprocessor_router
+from .jobs import router as jobs_router
 from .mask import router as mask_router
+from .components import router as components_router
 from fastapi.middleware.cors import CORSMiddleware
 from .ray_app import get_ray_app, shutdown_ray
 from contextlib import asynccontextmanager
@@ -22,16 +24,7 @@ async def lifespan(app: FastAPI):
     # Initialize preprocessor download tracking
     from .preprocessor_registry import initialize_download_tracking
     initialize_download_tracking()
-    
-    # Initialize SAM2 model actor for mask generation
-    try:
-        from src.mask.mask import get_sam2_actor, ModelType
-        logger.info("Initializing SAM2 model actor...")
-        get_sam2_actor(model_type=ModelType.SAM2_SMALL)
-        logger.info("SAM2 model actor initialized successfully")
-    except Exception as e:
-        logger.warning(f"Failed to initialize SAM2 actor at startup: {e}. Will initialize on first request.")
-    
+
     # Start background task for polling Ray updates
     from .preprocessor import poll_ray_updates
     poll_task = asyncio.create_task(poll_ray_updates())
@@ -52,6 +45,8 @@ app.include_router(manifest_router)
 app.include_router(config_router)
 app.include_router(preprocessor_router)
 app.include_router(mask_router)
+app.include_router(components_router)
+app.include_router(jobs_router)
 
 app.add_middleware(
     CORSMiddleware,

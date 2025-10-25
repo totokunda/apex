@@ -36,8 +36,99 @@ class OneformerSegmentor(ToMixin, BasePreprocessor):
             cache_dir.mkdir(parents=True, exist_ok=True)
         
         self.model_name = model_name
-        self.processor = OneFormerProcessor.from_pretrained(model_name, cache_dir=str(cache_dir))
-        self.model = OneFormerForUniversalSegmentation.from_pretrained(model_name, cache_dir=str(cache_dir))
+        # Scoped monkey-patch: route Hugging Face download progress through our callback
+        from src.auxillary.util import DOWNLOAD_PROGRESS_CALLBACK
+        import os as _os
+        import tqdm as _tqdm_mod
+        try:
+            from tqdm import auto as _tqdm_auto
+        except Exception:
+            _tqdm_auto = None
+        try:
+            import huggingface_hub.file_download as _hf_fd
+        except Exception:
+            _hf_fd = None
+        try:
+            import huggingface_hub.utils.tqdm as _hf_utils_tqdm_mod
+        except Exception:
+            _hf_utils_tqdm_mod = None
+
+        _orig_tqdm = getattr(_tqdm_mod, 'tqdm', None)
+        _orig_tqdm_auto = getattr(_tqdm_auto, 'tqdm', None) if _tqdm_auto else None
+        _orig_hf_fd_tqdm = getattr(_hf_fd, 'tqdm', None) if _hf_fd else None
+        _orig_hf_utils_tqdm = getattr(_hf_utils_tqdm_mod, 'tqdm', None) if _hf_utils_tqdm_mod else None
+
+        class _ProgressTqdm(_tqdm_mod.tqdm):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._filename = kwargs.get('desc') or model_name
+            def update(self, n=1):
+                result = super().update(n)
+                try:
+                    cb = DOWNLOAD_PROGRESS_CALLBACK
+                    if cb and self.total:
+                        cb(self._filename, self.n, self.total)
+                except Exception:
+                    pass
+                return result
+
+        try:
+            try:
+                _tqdm_mod.tqdm = _ProgressTqdm
+                if _tqdm_auto:
+                    _tqdm_auto.tqdm = _ProgressTqdm
+                if _hf_fd and _orig_hf_fd_tqdm is not None:
+                    _hf_fd.tqdm = _ProgressTqdm
+                if _hf_utils_tqdm_mod and _orig_hf_utils_tqdm is not None:
+                    _hf_utils_tqdm_mod.tqdm = _ProgressTqdm
+            except Exception:
+                pass
+
+            # Ensure HF progress bars are enabled during download
+            _prev_disable = _os.environ.get('HF_HUB_DISABLE_PROGRESS_BARS')
+            _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '0'
+            # Prefetch model repo with custom tqdm
+            try:
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id=model_name,
+                    cache_dir=str(cache_dir),
+                    tqdm_class=_ProgressTqdm,
+                )
+            except Exception:
+                pass
+            self.processor = OneFormerProcessor.from_pretrained(model_name, cache_dir=str(cache_dir))
+            self.model = OneFormerForUniversalSegmentation.from_pretrained(model_name, cache_dir=str(cache_dir))
+        finally:
+            # Restore env var
+            try:
+                if _prev_disable is None:
+                    _os.environ.pop('HF_HUB_DISABLE_PROGRESS_BARS', None)
+                else:
+                    _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = _prev_disable
+            except Exception:
+                pass
+            # Restore tqdm references
+            try:
+                if _hf_utils_tqdm_mod and _orig_hf_utils_tqdm is not None:
+                    _hf_utils_tqdm_mod.tqdm = _orig_hf_utils_tqdm
+            except Exception:
+                pass
+            try:
+                if _hf_fd and _orig_hf_fd_tqdm is not None:
+                    _hf_fd.tqdm = _orig_hf_fd_tqdm
+            except Exception:
+                pass
+            try:
+                if _tqdm_auto and _orig_tqdm_auto is not None:
+                    _tqdm_auto.tqdm = _orig_tqdm_auto
+            except Exception:
+                pass
+            try:
+                if _orig_tqdm is not None:
+                    _tqdm_mod.tqdm = _orig_tqdm
+            except Exception:
+                pass
         self.device = get_torch_device()
         if torch.cuda.is_available():
             self.to_device(self.model, device=self.device)

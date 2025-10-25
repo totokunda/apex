@@ -4,12 +4,15 @@ API endpoints for preprocessor operations
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
+from typing import Set
 from pathlib import Path
+import os
+import shutil
 import json
 import ray
 from .ray_tasks import download_preprocessor, run_preprocessor
+from .job_store import register_job, job_store
 from .preprocessor_registry import (
-    PREPROCESSOR_REGISTRY,
     list_preprocessors,
     get_preprocessor_details
 )
@@ -23,8 +26,8 @@ from .ws_manager import websocket_manager, get_ray_ws_bridge
 
 router = APIRouter(prefix="/preprocessor", tags=["preprocessor"])
 
-# Store job references
-job_store: Dict[str, ray.ObjectRef] = {}
+# Legacy: kept for compatibility, but new registrations go through unified store
+legacy_job_store: Dict[str, ray.ObjectRef] = {}
 
 # Background task to poll updates from Ray bridge and send to websockets
 async def poll_ray_updates():
@@ -35,7 +38,16 @@ async def poll_ray_updates():
     while True:
         try:
             # Get all job IDs that might have updates
-            all_job_ids = set(job_store.keys())
+            all_job_ids = set()
+            try:
+                all_job_ids.update(job_store.all_job_ids())
+            except Exception:
+                pass
+            # include legacy jobs if any
+            try:
+                all_job_ids.update(legacy_job_store.keys())
+            except Exception:
+                pass
             
             # Also check the bridge for any job IDs it knows about
             try:
@@ -49,9 +61,7 @@ async def poll_ray_updates():
                 try:
                     updates = ray.get(bridge.get_updates.remote(job_id), timeout=0.05)
                     if updates:
-                        logger.info(f"Got {len(updates)} updates for job {job_id}")
                         for update in updates:
-                            logger.info(f"Forwarding update: status={update.get('status')}, progress={update.get('progress')}, message={update.get('message')}")
                             await websocket_manager.send_update(job_id, update)
                 except ray.exceptions.GetTimeoutError:
                     pass  # No updates available
@@ -93,6 +103,12 @@ class ResultResponse(BaseModel):
     type: Optional[str] = None
     preprocessor: Optional[str] = None
     error: Optional[str] = None
+
+class DeleteResponse(BaseModel):
+    preprocessor_name: str
+    status: str
+    deleted_files: Optional[List[str]] = None
+    message: Optional[str] = None
 
 
 @router.get("/list")
@@ -175,7 +191,6 @@ def ray_status():
             "message": "Error connecting to Ray cluster"
         }
 
-
 @router.post("/download", response_model=JobResponse)
 def trigger_download(request: DownloadRequest):
     """
@@ -184,10 +199,14 @@ def trigger_download(request: DownloadRequest):
     This creates a Ray job for downloading. Use the job_id with the 
     websocket endpoint /ws/job/{job_id} to get real-time updates.
     """
-    if request.preprocessor_name not in PREPROCESSOR_REGISTRY:
+    # Validate preprocessor exists via YAML registry
+    try:
+        get_preprocessor_details(request.preprocessor_name)
+    except ValueError:
+        available = [p["id"] for p in list_preprocessors(check_downloaded=False)]
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {list(PREPROCESSOR_REGISTRY.keys())}"
+            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {available}"
         )
     
     logger.info(f"Submitting download task for preprocessor: {request.preprocessor_name}")
@@ -210,8 +229,9 @@ def trigger_download(request: DownloadRequest):
             bridge
         )
         
-        # Store the task reference
-        job_store[job_id] = task_ref
+        # Register with unified job store
+        register_job(job_id, task_ref, 'preprocessor', { 'preprocessor_name': request.preprocessor_name })
+        legacy_job_store[job_id] = task_ref
         
         logger.info(f"Download task submitted with job_id: {job_id}, resources: {resources}")
         
@@ -240,10 +260,14 @@ def trigger_run(request: RunRequest):
     it will be downloaded first.
     """
 
-    if request.preprocessor_name not in PREPROCESSOR_REGISTRY:
+    # Validate preprocessor exists via YAML registry
+    try:
+        details = get_preprocessor_details(request.preprocessor_name)
+    except ValueError:
+        available = [p["id"] for p in list_preprocessors(check_downloaded=False)]
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {list(PREPROCESSOR_REGISTRY.keys())}"
+            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {available}"
         )
     
     # Validate input path exists
@@ -262,8 +286,7 @@ def trigger_run(request: RunRequest):
     
     # Validate and convert parameters
     try:
-        preprocessor_info = PREPROCESSOR_REGISTRY[request.preprocessor_name]
-        parameter_definitions = preprocessor_info.get("parameters", [])
+        parameter_definitions = details.get("parameters", [])
         kwargs = validate_and_convert_params(request.params or {}, parameter_definitions)
         logger.info(f"Validated parameters: {kwargs}")
     except ValueError as e:
@@ -280,7 +303,6 @@ def trigger_run(request: RunRequest):
         # Get websocket bridge
         bridge = get_ray_ws_bridge()
         
-
         # Submit task with resource constraints
         task_ref = run_preprocessor.options(**resources).remote(
             request.preprocessor_name,
@@ -292,8 +314,12 @@ def trigger_run(request: RunRequest):
             **kwargs
         )
         
-        # Store the task reference
-        job_store[job_id] = task_ref
+        # Register with unified job store
+        register_job(job_id, task_ref, 'preprocessor', {
+            'preprocessor_name': request.preprocessor_name,
+            'input_path': request.input_path,
+        })
+        legacy_job_store[job_id] = task_ref
         
         logger.info(f"Run task submitted with job_id: {job_id}")
         
@@ -317,42 +343,96 @@ def get_job_status(job_id: str):
     
     Note: For real-time updates, use the websocket endpoint /ws/job/{job_id}
     """
-    if job_id not in job_store:
-        return {
-            "job_id": job_id,
-            "status": "unknown",
-            "message": "Job not found in active jobs"
-        }
-    
-    task_ref = job_store[job_id]
-    
-    # Check if task is ready
-    ready_refs, remaining_refs = ray.wait([task_ref], timeout=0)
-    
-    if ready_refs:
-        # Task is complete, get result
+    return job_store.status(job_id)
+
+
+@router.delete("/delete/{preprocessor_name}", response_model=DeleteResponse)
+def delete_preprocessor(preprocessor_name: str):
+    """
+    Delete downloaded model files for a preprocessor and unmark it as downloaded.
+    Removes files listed under the manifest's files section if present.
+    """
+    from src.api.preprocessor_registry import _load_preprocessor_yaml
+    from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
+    from src.auxillary.base_preprocessor import BasePreprocessor
+    try:
+        info = _load_preprocessor_yaml(preprocessor_name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    files = info.get("files", [])
+    base = Path(DEFAULT_PREPROCESSOR_SAVE_PATH)
+    deleted: List[str] = []
+    for f in files:
+        rel = f.get("path") if isinstance(f, dict) else None
+        if not rel:
+            continue
+        abs_path = base / rel
         try:
-            result = ray.get(ready_refs[0])
-            return {
-                "job_id": job_id,
-                "status": result.get("status", "complete"),
-                "result": result,
-                "message": result.get("message", "Job completed")
-            }
-        except Exception as e:
-            return {
-                "job_id": job_id,
-                "status": "error",
-                "error": str(e),
-                "message": "Job failed with exception"
-            }
-    else:
-        # Task is still running
-        return {
-            "job_id": job_id,
-            "status": "running",
-            "message": "Job is currently processing"
-        }
+            if abs_path.exists():
+                abs_path.unlink()
+                deleted.append(str(abs_path))
+        except Exception:
+            # Best-effort: skip errors deleting individual files
+            pass
+    # Unmark downloaded
+    BasePreprocessor._unmark_as_downloaded(preprocessor_name)
+
+    # Best-effort: also purge Hugging Face caches commonly used by downloads
+    try:
+        hf_dirs: Set[str] = set()
+
+        # Prefer environment variables when set
+        hf_home = os.environ.get("HF_HOME")
+        hf_hub_cache = os.environ.get("HF_HUB_CACHE") or os.environ.get("HUGGINGFACE_HUB_CACHE")
+        transformers_cache = os.environ.get("TRANSFORMERS_CACHE")
+        datasets_cache = os.environ.get("HF_DATASETS_CACHE")
+
+        # Fall back to huggingface_hub defaults if available
+        try:
+            from huggingface_hub import constants as hf_constants
+            if not hf_home:
+                hf_home = getattr(hf_constants, "HF_HOME", None)
+            if not hf_hub_cache:
+                hf_hub_cache = getattr(hf_constants, "HF_HUB_CACHE", None)
+        except Exception:
+            pass
+
+        # Build likely default paths when envs are not set
+        user_home = os.path.expanduser("~")
+        default_hf_root = os.path.join(user_home, ".cache", "huggingface")
+        if not hf_home:
+            hf_home = default_hf_root
+        if not hf_hub_cache and hf_home:
+            hf_hub_cache = os.path.join(hf_home, "hub")
+        if not transformers_cache and hf_home:
+            transformers_cache = os.path.join(hf_home, "transformers")
+        if not datasets_cache and hf_home:
+            datasets_cache = os.path.join(hf_home, "datasets")
+
+        # Only remove well-known cache directories (not entire HF_HOME to avoid tokens/settings)
+        for path in [hf_hub_cache, transformers_cache, datasets_cache]:
+            if path and os.path.isdir(path):
+                hf_dirs.add(os.path.abspath(path))
+
+        # As a best-effort, also look for standard subdirs under HF_HOME
+        if hf_home and os.path.isdir(hf_home):
+            for sub in ("hub", "transformers", "datasets"):
+                p = os.path.join(hf_home, sub)
+                if os.path.isdir(p):
+                    hf_dirs.add(os.path.abspath(p))
+
+        # Delete collected directories
+        for d in sorted(hf_dirs):
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                deleted.append(d)
+            except Exception:
+                pass
+    except Exception:
+        # Never fail the request due to cache cleanup attempts
+        pass
+
+    return DeleteResponse(preprocessor_name=preprocessor_name, status="deleted", deleted_files=deleted, message=f"Removed {len(deleted)} file(s)/dir(s) including Hugging Face caches")
 
 
 @router.get("/result/{job_id}", response_model=ResultResponse)
@@ -363,8 +443,8 @@ def get_result(job_id: str):
     Returns the path to the cached result file.
     """
     # Check if job is in store
-    if job_id in job_store:
-        task_ref = job_store[job_id]
+    if job_id in legacy_job_store:
+        task_ref = legacy_job_store[job_id]
         
         # Check if task is ready
         ready_refs, remaining_refs = ray.wait([task_ref], timeout=0)
@@ -424,39 +504,13 @@ def get_result(job_id: str):
         error="Result not found"
     )
 
-
 @router.post("/cancel/{job_id}", response_model=JobResponse)
 def cancel_job(job_id: str):
     """
     Cancel a running job
-    
     Stops the execution of a job and removes it from the active job list.
     """
-    if job_id not in job_store:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Job {job_id} not found in active jobs"
-        )
-    
-    try:
-        task_ref = job_store[job_id]
-        
-        # Cancel the Ray task
-        ray.cancel(task_ref, force=True)
-        
-        # Remove from job store
-        del job_store[job_id]
-        
-        logger.info(f"Successfully cancelled job {job_id}")
-        
-        return JobResponse(
-            job_id=job_id,
-            status="cancelled",
-            message="Job has been cancelled"
-        )
-    except Exception as e:
-        logger.error(f"Failed to cancel job {job_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to cancel job: {str(e)}"
-        )
+    result = job_store.cancel(job_id)
+    if result.get('status') in ['cancelled', 'canceled']:
+        return JobResponse(job_id=job_id, status=result['status'], message=result.get('message'))
+    raise HTTPException(status_code=404, detail=result.get('message', 'Job not found'))

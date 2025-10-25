@@ -3,8 +3,10 @@ from functools import lru_cache
 import yaml
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from src.mixins.download_mixin import DownloadMixin
+from src.utils.defaults import get_components_path
 
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
@@ -38,11 +40,9 @@ MODEL_TYPE_MAPPING = {
 }
 
 
-@lru_cache(maxsize=1000)
 def get_all_manifest_files() -> List[ManifestInfo]:
     """Scan manifest directory and return all YAML files with their metadata."""
     manifests = []
-    print(MANIFEST_BASE_PATH)
     
     for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
         for file in files:
@@ -194,4 +194,35 @@ def get_manifest_content(manifest_id: str):
     
     # Load and return YAML content
     file_path = MANIFEST_BASE_PATH / manifest.full_path
-    return load_yaml_content(file_path)
+    content = load_yaml_content(file_path)
+    for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
+        # check config path too
+        is_component_downloaded = True
+        if config_path := component.get("config_path"):
+            is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
+            if is_downloaded is None:
+                is_component_downloaded = False
+
+        for index, model_path in enumerate(component.get("model_path", [])):
+            # we check if model path is downloaded
+            if isinstance(model_path, str):
+                is_downloaded = DownloadMixin.is_downloaded(model_path, get_components_path())
+                model_path = {
+                    "path": model_path,
+                    "is_downloaded": is_downloaded is not None,
+                    "type": "safetensors"
+                }
+            else:
+                is_downloaded = DownloadMixin.is_downloaded(model_path.get("path"), get_components_path())
+
+                if is_downloaded is not None:
+                    model_path["is_downloaded"] = True
+                    model_path["path"] = is_downloaded
+                else:
+                    model_path["is_downloaded"] = False
+                    is_component_downloaded = False
+            component["model_path"][index] = model_path
+        component['is_downloaded'] = is_component_downloaded
+        content["spec"]["components"][component_index] = component
+                
+    return content

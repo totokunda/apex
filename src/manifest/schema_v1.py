@@ -102,6 +102,8 @@ MANIFEST_SCHEMA_V1: dict = {
                                                 "variant": {"type": "string"},
                                                 "precision": {"type": "string"},
                                                 "type": {"type": "string"},
+                                                "file_size": {"type": "number"},
+                                                "is_downloaded": {"type": "boolean"},
                                                 "resource_requirements": {
                                                     "type": "object",
                                                     "properties": {

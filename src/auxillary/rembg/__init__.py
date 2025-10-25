@@ -12,7 +12,6 @@ from src.types import InputImage,  OutputImage
 from src.auxillary.base_preprocessor import BasePreprocessor
 from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
 
-
 class RembgDetector(BasePreprocessor):
     """
     Rembg background removal detector for image and video processing.
@@ -57,12 +56,87 @@ class RembgDetector(BasePreprocessor):
             os.environ['U2NET_HOME'] = rembg_cache
             
             try:
+                # Monkey patch tqdm (and pooch's reference) to forward progress to our callback
+                # This is scoped to the session creation (download window) and then restored.
+                from src.auxillary.util import DOWNLOAD_PROGRESS_CALLBACK
+                import tqdm as _tqdm_mod
+                try:
+                    from tqdm import auto as _tqdm_auto
+                except Exception:
+                    _tqdm_auto = None
+                try:
+                    import pooch.core as _pooch_core
+                except Exception:
+                    _pooch_core = None
+                try:
+                    import pooch.downloaders as _pooch_downloaders
+                except Exception:
+                    _pooch_downloaders = None
+
+                _orig_tqdm = getattr(_tqdm_mod, 'tqdm', None)
+                _orig_tqdm_auto = getattr(_tqdm_auto, 'tqdm', None) if _tqdm_auto else None
+                _orig_pooch_tqdm = getattr(_pooch_core, 'tqdm', None) if _pooch_core else None
+                _orig_pooch_dl_tqdm = getattr(_pooch_downloaders, 'tqdm', None) if _pooch_downloaders else None
+
+                class _ProgressTqdm(_tqdm_mod.tqdm):
+                    def __init__(self, *args, **kwargs):
+                        super().__init__(*args, **kwargs)
+                        # Use provided desc if available; fall back to model name hint
+                        self._filename = kwargs.get('desc') or model_name
+                    def update(self, n=1):
+                        result = super().update(n)
+                        try:
+                            cb = DOWNLOAD_PROGRESS_CALLBACK
+                            if cb and self.total:
+                                cb(self._filename, self.n, self.total)
+                        except Exception as e:
+                            print("error calling callback", e)
+                            pass
+                        return result
+
+                try:
+                    _tqdm_mod.tqdm = _ProgressTqdm
+                    if _tqdm_auto:
+                        _tqdm_auto.tqdm = _ProgressTqdm
+                    if _pooch_core and _orig_pooch_tqdm is not None:
+                        _pooch_core.tqdm = _ProgressTqdm
+                    if _pooch_downloaders and _orig_pooch_dl_tqdm is not None:
+                        _pooch_downloaders.tqdm = _ProgressTqdm
+                except Exception as e:
+                    print("error setting tqdm", e)
+                    pass
+
                 # Create a new rembg session with the specified model
                 # This will download the model if not already cached
                 instance = cls(model_name)
                 instance.session = new_session(model_name)
                 
             finally:
+                # Restore tqdm and related references
+                try:
+                    if _pooch_core and _orig_pooch_tqdm is not None:
+                        _pooch_core.tqdm = _orig_pooch_tqdm
+                except Exception as e:
+                    print("error restoring tqdm", e)
+                    pass
+                try:
+                    if _pooch_downloaders and _orig_pooch_dl_tqdm is not None:
+                        _pooch_downloaders.tqdm = _orig_pooch_dl_tqdm
+                except Exception as e:
+                    print("error restoring pooch downloaders tqdm", e)
+                    pass
+                try:
+                    if _tqdm_auto and _orig_tqdm_auto is not None:
+                        _tqdm_auto.tqdm = _orig_tqdm_auto
+                except Exception as e:
+                    print("error restoring tqdm auto", e)
+                    pass
+                try:
+                    if _orig_tqdm is not None:
+                        _tqdm_mod.tqdm = _orig_tqdm
+                except Exception as e:
+                    print("error restoring tqdm mod", e)
+                    pass
                 # Restore original U2NET_HOME if it was set
                 if original_u2net_home is not None:
                     os.environ['U2NET_HOME'] = original_u2net_home

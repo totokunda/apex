@@ -22,7 +22,7 @@ class AnimeFaceSegmentor(ToMixin, BasePreprocessor):
     def from_pretrained(cls, pretrained_model_or_path=BDS_MODEL_NAME, filename="UNet.pth", seg_filename="isnetis.ckpt"):
         model_path = custom_hf_download(pretrained_model_or_path, filename, subfolder="Annotators")
         seg_model_path = custom_hf_download("skytnt/anime-seg", seg_filename)
-
+        
         # Force CPU loading to avoid MPS issues in Ray workers
         model = UNet()
         ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
@@ -40,7 +40,6 @@ class AnimeFaceSegmentor(ToMixin, BasePreprocessor):
         input_image = self._load_image(input_image)
         input_image, output_type = common_input_validate(input_image, None, **kwargs)
         input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
-        print(self.device)
 
         with torch.no_grad():
             if remove_background:
