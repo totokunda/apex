@@ -3,10 +3,8 @@ Websocket manager for handling job status updates
 """
 from typing import Dict, Set, Optional
 from fastapi.websockets import WebSocket
-import json
 import ray
 from collections import defaultdict
-
 
 class WebSocketManager:
     """Manages websocket connections for job updates"""
@@ -83,16 +81,14 @@ class RayWebSocketBridge:
             "status": status,
             "metadata": metadata
         }
+        
         self.updates[job_id].append(update)
-        print(f"Stored update for job {job_id}: {update}")
         return True
     
     def get_updates(self, job_id: str) -> list:
         """Get all pending updates for a job"""
         updates = self.updates.get(job_id, [])
         self.updates[job_id] = []  # Clear after retrieving
-        if updates:
-            print(f"Retrieved {len(updates)} updates for job {job_id}")
         return updates
     
     def get_all_job_ids(self) -> list:

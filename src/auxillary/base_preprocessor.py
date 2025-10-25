@@ -91,6 +91,24 @@ class BasePreprocessor(LoaderMixin, ABC):
             return downloaded.get(preprocessor_name, {}).get("downloaded", False)
         except Exception:
             return False
+    
+    @classmethod
+    def _unmark_as_downloaded(cls, preprocessor_name: str):
+        """Unmark a preprocessor as downloaded in the tracking file."""
+        with _registry_lock:
+            try:
+                if not DOWNLOADED_PREPROCESSORS_FILE.exists():
+                    return
+                with open(DOWNLOADED_PREPROCESSORS_FILE, 'r') as f:
+                    downloaded = json.load(f)
+                if preprocessor_name in downloaded:
+                    # Either remove or set flag to False
+                    downloaded[preprocessor_name]["downloaded"] = False
+                with open(DOWNLOADED_PREPROCESSORS_FILE, 'w') as f:
+                    json.dump(downloaded, f, indent=2)
+            except Exception:
+                # Best-effort only
+                pass
         
     @classmethod
     @abstractmethod

@@ -67,12 +67,45 @@ class PTLFlowDetector(ToMixin, BasePreprocessor):
             os.environ['TORCH_HOME'] = torch_home
             
             try:
+                # Monkey patch torch.hub's tqdm to forward download progress to our callback
+                from src.auxillary.util import DOWNLOAD_PROGRESS_CALLBACK
+                import tqdm as _tqdm_mod
+                import torch.hub as _torch_hub
+
+                _orig_hub_tqdm = getattr(_torch_hub, 'tqdm', None)
+
+                class _ProgressTqdm(_tqdm_mod.tqdm):
+                    def __init__(self, *args, **kwargs):
+                        super().__init__(*args, **kwargs)
+                        # Use model and checkpoint as the label if desc isn't provided by hub
+                        self._filename = kwargs.get('desc') or f"{model_name}:{ckpt_name}"
+                    def update(self, n=1):
+                        result = super().update(n)
+                        try:
+                            cb = DOWNLOAD_PROGRESS_CALLBACK
+                            if cb and self.total:
+                                cb(self._filename, self.n, self.total)
+                        except Exception:
+                            pass
+                        return result
+
+                try:
+                    _torch_hub.tqdm = _ProgressTqdm
+                except Exception:
+                    pass
+
                 # Load the model with checkpoint name (e.g., 'things', 'sintel', 'kitti')
                 model = ptlflow.get_model(model_name, ckpt_path=ckpt_name)
                 
                 model.eval()
                 model.to('cpu')  # Explicitly move to CPU
             finally:
+                # Restore torch.hub tqdm
+                try:
+                    if _orig_hub_tqdm is not None:
+                        _torch_hub.tqdm = _orig_hub_tqdm
+                except Exception:
+                    pass
                 # Restore original TORCH_HOME if it was set
                 if original_torch_home is not None:
                     os.environ['TORCH_HOME'] = original_torch_home

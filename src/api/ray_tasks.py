@@ -13,187 +13,13 @@ import os
 import torch
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
-    PREPROCESSOR_REGISTRY,
     get_preprocessor_info,
     list_preprocessors,
     get_preprocessor_details
 )
-
-# Legacy registry reference (imported from preprocessor_registry)
-_LEGACY_REGISTRY = {
-    "anime_face_segment": {
-        "module": "src.auxillary.anime_face_segment",
-        "class": "AnimeFaceSegmentor"
-    },
-    "binary": {
-        "module": "src.auxillary.binary",
-        "class": "BinaryDetector",
-    },
-    "canny": {
-        "module": "src.auxillary.canny",
-        "class": "CannyDetector",
-    },
-    "color": {
-        "module": "src.auxillary.color",
-        "class": "ColorDetector",
-    },
-    "densepose": {
-        "module": "src.auxillary.densepose",
-        "class": "DenseposeDetector",
-    },
-    "depth_anything": {
-        "module": "src.auxillary.depth_anything.transformers",
-        "class": "DepthAnythingDetector",
-    },
-    "depth_anything_v2": {
-        "module": "src.auxillary.depth_anything_v2",
-        "class": "DepthAnythingV2Detector",
-    },
-    "diffusion_edge": {
-        "module": "src.auxillary.diffusion_edge",
-        "class": "DiffusionEdgeDetector",
-    },
-    "dsine": {
-        "module": "src.auxillary.dsine",
-        "class": "DsineDetector",
-    },
-    "dwpose": {
-        "module": "src.auxillary.dwpose",
-        "class": "DwposeDetector",
-    },
-    "animalpose": {
-        "module": "src.auxillary.dwpose",
-        "class": "AnimalPoseDetector",
-    },
-    "hed": {
-        "module": "src.auxillary.hed",
-        "class": "HEDdetector",
-    },
-    "leres": {
-        "module": "src.auxillary.leres",
-        "class": "LeresDetector",
-    },
-    "lineart": {
-        "module": "src.auxillary.lineart",
-        "class": "LineartDetector",
-    },
-    "lineart_anime": {
-        "module": "src.auxillary.lineart_anime",
-        "class": "LineartAnimeDetector",
-    },
-    "lineart_standard": {
-        "module": "src.auxillary.lineart_standard",
-        "class": "LineartStandardDetector",
-    },
-    "manga_line": {
-        "module": "src.auxillary.manga_line",
-        "class": "LineartMangaDetector",
-    },
-    "mediapipe_face": {
-        "module": "src.auxillary.mediapipe_face",
-        "class": "MediapipeFaceDetector",
-    },
-    "mesh_graphormer": {
-        "module": "src.auxillary.mesh_graphormer",
-        "class": "MeshGraphormerDetector",
-    },
-    "metric3d": {
-        "module": "src.auxillary.metric3d",
-        "class": "Metric3DDetector",
-    },
-    "midas": {
-        "module": "src.auxillary.midas.transformers",
-        "class": "MidasDetector",
-    },
-    "mlsd": {
-        "module": "src.auxillary.mlsd",
-        "class": "MLSDdetector",
-    },
-    "normalbae": {
-        "module": "src.auxillary.normalbae",
-        "class": "NormalBaeDetector",
-    },
-    "oneformer": {
-        "module": "src.auxillary.oneformer.transformers",
-        "class": "OneformerSegmentor",
-    },
-    "open_pose": {
-        "module": "src.auxillary.open_pose",
-        "class": "OpenposeDetector",
-    },
-    "pidi": {
-        "module": "src.auxillary.pidi",
-        "class": "PidiNetDetector",
-    },
-    "ptlflow": {
-        "module": "src.auxillary.ptlflow",
-        "class": "PTLFlowDetector",
-    },
-    "pyracanny": {
-        "module": "src.auxillary.pyracanny",
-        "class": "PyraCannyDetector",
-    },
-    "rembg": {
-        "module": "src.auxillary.rembg",
-        "class": "RembgDetector",
-    },
-    "recolor": {
-        "module": "src.auxillary.recolor",
-        "class": "Recolorizer",
-    },
-    "scribble": {
-        "module": "src.auxillary.scribble",
-        "class": "ScribbleDetector",
-    },
-    "scribble_xdog": {
-        "module": "src.auxillary.scribble",
-        "class": "ScribbleXDogDetector",
-    },
-    "scribble_anime": {
-        "module": "src.auxillary.scribble_anime",
-        "class": "ScribbleAnimeDetector",
-    },
-    "shuffle": {
-        "module": "src.auxillary.shuffle",
-        "class": "ContentShuffleDetector",
-    },
-    "teed": {
-        "module": "src.auxillary.teed",
-        "class": "TEDDetector",
-    },
-    "tile": {
-        "module": "src.auxillary.tile",
-        "class": "TileDetector",
-    },
-    "tile_gf": {
-        "module": "src.auxillary.tile",
-        "class": "TTPlanet_Tile_Detector_GF",
-    },
-    "tile_simple": {
-        "module": "src.auxillary.tile",
-        "class": "TTPLanet_Tile_Detector_Simple",
-    },
-    "uniformer": {
-        "module": "src.auxillary.uniformer",
-        "class": "UniformerSegmentor",
-    },
-    "unimatch": {
-        "module": "src.auxillary.unimatch",
-        "class": "UnimatchDetector",
-    },
-    "zoe": {
-        "module": "src.auxillary.zoe.transformers",
-        "class": "ZoeDetector",
-    },
-    "zoe_depth_anything": {
-        "module": "src.auxillary.zoe.transformers",
-        "class": "ZoeDepthAnythingDetector",
-    },
-    
-}
-
-# Note: get_preprocessor_info, list_preprocessors, and get_preprocessor_details 
-# are now imported from preprocessor_registry module
+from src.mixins.download_mixin import DownloadMixin
+from src.utils.defaults import get_components_path
+from typing import List
 
 
 @ray.remote
@@ -246,7 +72,6 @@ def download_preprocessor(preprocessor_name: str, job_id: str, ws_bridge) -> Dic
         
         # Download/initialize
         logger.info(f"Downloading model files for {preprocessor_name}")
-        send_progress(0.2, "Downloading model files")
         
         try:
             preprocessor = preprocessor_class.from_pretrained()
@@ -293,6 +118,97 @@ def download_preprocessor(preprocessor_name: str, job_id: str, ws_bridge) -> Dic
             "error": error_msg,
             "traceback": error_traceback
         }
+
+
+@ray.remote
+def download_components(paths: List[str], job_id: str, ws_bridge, save_path: Optional[str] = None) -> Dict[str, Any]:
+    """Download a list of component paths concurrently with aggregated websocket progress."""
+    @ray.remote
+    class ComponentsProgressAggregator:
+        def __init__(self, job: str, bridge, total_items: int):
+            self.job_id = job
+            self.bridge = bridge
+            self.total_items = max(1, total_items)
+            self.per_index_progress: Dict[int, float] = {}
+            self.last_overall: float = 0.0
+
+        def update(self, index: int, frac: float, label: str, downloaded: Optional[int] = None, total: Optional[int] = None, filename: Optional[str] = None, message: Optional[str] = None):
+            frac = max(0.0, min(1.0, float(frac)))
+            self.per_index_progress[index] = frac
+            total_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+            overall = max(self.last_overall, min(1.0, total_progress))
+            self.last_overall = overall
+            meta = {"label": label}
+            if downloaded is not None:
+                meta["downloaded"] = int(downloaded)
+            if total is not None:
+                meta["total"] = int(total)
+            if filename is not None:
+                meta["filename"] = filename
+            if message:
+                msg = message
+            else:
+                msg = f"Downloading {label}"
+            try:
+                return ray.get(self.bridge.send_update.remote(self.job_id, overall, msg, meta))
+            except Exception:
+                return False
+
+        def complete(self, index: int, label: str):
+            return self.update(index, 1.0, label, message=f"Completed {label}")
+
+        def error(self, index: int, label: str, error_msg: str):
+            try:
+                return ray.get(self.bridge.send_update.remote(self.job_id, self.last_overall, error_msg, {"label": label, "status": "error"}))
+            except Exception:
+                return False
+
+    @ray.remote
+    def download_component_single(path: str, save_dir: str, index: int, total_items: int, aggregator) -> Dict[str, Any]:
+        label = os.path.basename(path.rstrip("/")) or path
+        try:
+            def _cb(downloaded: int, total: Optional[int], filename: Optional[str] = None):
+                frac = 0.0
+                if total and total > 0:
+                    frac = max(0.0, min(1.0, downloaded/total))
+                
+                ray.get(aggregator.update.remote(index, frac, label, downloaded, total, filename))
+            mixin = DownloadMixin()
+            mixin.logger.info(f"Downloading component {path} to {save_dir}")
+            mixin.download(path, save_dir, progress_callback=_cb)
+            ray.get(aggregator.complete.remote(index, label))
+            return {"path": path, "status": "complete"}
+        except Exception as e:
+            ray.get(aggregator.error.remote(index, label, str(e)))
+            return {"path": path, "status": "error", "error": str(e)}
+
+    try:
+        save_dir = save_path or get_components_path()
+        os.makedirs(save_dir, exist_ok=True)
+
+        total_items = len(paths)
+        aggregator = ComponentsProgressAggregator.remote(job_id, ws_bridge, total_items)
+        # fire off all downloads in parallel
+        refs = []
+        for idx, path in enumerate(paths, start=1):
+            refs.append(download_component_single.remote(path, save_dir, idx, total_items, aggregator))
+
+        results = ray.get(refs)
+        # mark completion
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, 1.0, "All downloads complete", {"status": "complete"}))
+        except Exception:
+            pass
+        # determine overall status
+        has_error = any(r.get("status") == "error" for r in results)
+        return {"job_id": job_id, "status": "error" if has_error else "complete", "results": results}
+    except Exception as e:
+        err = str(e)
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, 0.0, err, {"status": "error", "error": err}))
+        except Exception:
+            pass
+        return {"job_id": job_id, "status": "error", "error": err}
 
 
 @ray.remote
@@ -346,8 +262,21 @@ def run_preprocessor(
         }
     
     
-    preprocessor_class = getattr(importlib.import_module(preprocessor_info["module"]), preprocessor_info["class"])
-    preprocessor = preprocessor_class.from_pretrained()
+    # Progressive download/init: scale progress from 0.05 -> 0.20
+    send_progress(0.1, "Loading preprocessor module")
+    module = importlib.import_module(preprocessor_info["module"])
+    preprocessor_class = getattr(module, preprocessor_info["class"])
+
+    # Setup download progress tracking similar to download_preprocessor but scaled to 20%
+    from src.auxillary.download_tracker import DownloadProgressTracker
+    from src.auxillary import util as util_module
+    tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(0.05 + (max(0.0, min(1.0, float(p))) * 0.15), m, md))
+    util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
+    try:
+        preprocessor = preprocessor_class.from_pretrained()
+    finally:
+        # Always clear the callback
+        util_module.DOWNLOAD_PROGRESS_CALLBACK = None
     send_progress(0.2, "Preprocessor loaded")
     
     # Mark as downloaded in tracking file (in case it was loaded for the first time here)

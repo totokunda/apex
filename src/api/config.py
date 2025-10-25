@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import torch
-from src.utils.defaults import set_torch_device, get_torch_device, HOME_DIR,  set_cache_path, get_cache_path as get_cache_path_default
+from src.utils.defaults import set_torch_device, get_torch_device, HOME_DIR,  set_cache_path, get_cache_path as get_cache_path_default, set_components_path, get_components_path as get_components_path_default
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -24,6 +24,12 @@ class CachePathRequest(BaseModel):
 
 class CachePathResponse(BaseModel):
     cache_path: str
+
+class ComponentsPathRequest(BaseModel):
+    components_path: str
+
+class ComponentsPathResponse(BaseModel):
+    components_path: str
 
 @router.get("/home-dir", response_model=HomeDirectoryResponse)
 def get_home_directory():
@@ -95,3 +101,19 @@ def set_cache_path(request: CachePathRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set cache path: {str(e)}")
 
+
+@router.get("/components-path", response_model=ComponentsPathResponse)
+def get_components_path():
+    """Get the current components path"""
+    return ComponentsPathResponse(components_path=str(get_components_path_default()))
+
+@router.post("/components-path", response_model=ComponentsPathResponse)
+def set_components_path(request: ComponentsPathRequest):
+    """Set the components path"""
+    try:
+        components_path = Path(request.components_path).expanduser().resolve()
+        components_path.mkdir(parents=True, exist_ok=True)
+        set_components_path(str(components_path))
+        return ComponentsPathResponse(components_path=str(components_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set components path: {str(e)}")

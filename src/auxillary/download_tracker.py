@@ -16,6 +16,7 @@ class DownloadProgressTracker:
     
     def __init__(self, job_id: str, progress_callback: Callable):
         self.job_id = job_id
+        # Expects callback(progress: float, message: str, metadata: Optional[dict])
         self.progress_callback = progress_callback
         self.files = {}  # Track multiple files
         self.last_update = 0
@@ -53,14 +54,19 @@ class DownloadProgressTracker:
             
             message = f"Downloading {filename}: {current_mb:.1f}MB / {total_mb:.1f}MB"
             
+
             self.progress_callback(
-                self.job_id,
                 mapped_progress,
                 message,
-                metadata={
+                {
                     "filename": filename,
                     "current_bytes": current,
                     "total_bytes": total,
+                    # compatibility with frontend extractors
+                    "downloaded": current,
+                    "total": total,
+                    "bytes_downloaded": current,
+                    "bytes_total": total,
                     "current_mb": round(current_mb, 2),
                     "total_mb": round(total_mb, 2),
                     "files": self.files
