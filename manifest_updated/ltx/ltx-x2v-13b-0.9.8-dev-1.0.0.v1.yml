@@ -177,6 +177,18 @@ spec:
         - - skip_final_inference_steps
           - cfg_star_rescale
     inputs:
+    - id: video
+      label: Input Video
+      type: video
+      panel: generation
+      required: false
+      floating_panel: true
+    - id: image
+      label: Input Image
+      type: image
+      panel: generation
+      required: false
+      floating_panel: true
     - id: prompt
       label: Prompt
       type: text
@@ -186,7 +198,7 @@ spec:
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation
-      type: textarea
+      type: text
       panel: generation
       required: false
       default: blurry, low quality, distorted, artifacts

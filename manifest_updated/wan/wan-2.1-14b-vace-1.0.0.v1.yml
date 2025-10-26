@@ -129,6 +129,19 @@ spec:
       panel: generation
       required: false
       floating_panel: true
+    - id: reference_images
+      label: Reference Images
+      type: image_list
+      panel: generation
+      required: false
+      floating_panel: true
+      max_images: 3
+    - id: mask
+      label: Mask
+      type: video+mask
+      panel: generation
+      required: false
+      floating_panel: true
     - id: prompt
       label: Prompt
       type: text
@@ -138,7 +151,7 @@ spec:
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation
-      type: textarea
+      type: text
       panel: generation
       required: false
       default: blurry, low quality, distorted, artifacts
