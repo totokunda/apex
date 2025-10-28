@@ -158,6 +158,7 @@ spec:
     panels:
     - name: generation
       label: Generation
+      collapsible: true
       layout:
         flow: column
         rows:
@@ -168,7 +169,7 @@ spec:
           - aspect_ratio
         - - num_inference_steps
     - name: advanced
-      label: Advanced Generation
+      label: Advanced
       collapsible: true
       layout:
         flow: column
@@ -238,7 +239,7 @@ spec:
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps (higher = better quality but slower).
-      type: number
+      type: number+slider
       value_type: integer
       panel: generation
       default: 30
@@ -296,7 +297,7 @@ spec:
     - id: true_cfg_scale
       label: True CFG Scale
       description: Enter a true CFG scale for the generation.
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -308,7 +309,7 @@ spec:
     - id: guidance_scale
       label: Guidance Scale
       description: Enter a guidance scale for the generation.
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false

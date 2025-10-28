@@ -114,7 +114,9 @@ spec:
           flow: row
     panels:
     - name: generation
+      icon: tb/TbInputAi
       label: Generation
+      collapsible: true
       layout:
         flow: column
         rows:
@@ -122,10 +124,11 @@ spec:
         - - prompt
         - - negative_prompt
         - - resolution
-          - aspect_ratio
+        - - aspect_ratio
         - - num_inference_steps
     - name: advanced
-      label: Advanced Generation
+      icon: tfi/TfiPanel
+      label: Advanced
       collapsible: true
       layout:
         flow: column
@@ -138,19 +141,23 @@ spec:
     inputs:
     - id: image
       label: Image
+      description: The input image to edit.
       type: image
       panel: generation
       required: true
       floating_panel: true
     - id: prompt
       label: Prompt
+      description: The prompt to edit the image.
+      placeholder: A beautiful woman with long brown hair and blue eyes.
       type: text
       panel: generation
       required: true
       floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
-      description: Describe what you want to avoid in the generation
+      description: Describe what you want to avoid in the generation.
+      placeholder: blurry, low quality, distorted, artifacts
       type: text
       panel: generation
       required: false
@@ -163,11 +170,11 @@ spec:
       type: select
       default: 720
       options:
-      - name: HD (720p)
+      - name: HD
         value: 720
-      - name: Full HD (1080p)
+      - name: Full HD
         value: 1080
-      - name: SD (480p)
+      - name: SD
         value: 480
       floating_panel: true
     - id: aspect_ratio
@@ -177,25 +184,25 @@ spec:
       type: select
       default: 969
       options:
-      - name: Wide (16:9)
+      - name: Wide
         value: 969
-      - name: Vertical (9:16)
+      - name: Vertical
         value: 556
-      - name: Square (1:1)
+      - name: Square
         value: 61
-      - name: Classic (3:4)
+      - name: Classic
         value: 184
       floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
-      type: number
+      type: number+slider
       value_type: integer
       panel: generation
       default: 40
       min: 1
       max: 100
-      step: 5
+      step: 1
       floating_panel: false
     - id: height
       label: Height
@@ -206,7 +213,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 1
+      step: 64
     - id: width
       label: Width
       description: Explicit width override
@@ -216,7 +223,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 1
+      step: 64
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -229,7 +236,7 @@ spec:
       required: false
     - id: true_cfg_scale
       label: True CFG Scale
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -239,7 +246,7 @@ spec:
       step: 0.5
     - id: guidance_scale
       label: Guidance Scale
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false

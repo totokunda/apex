@@ -102,17 +102,20 @@ spec:
     panels:
     - name: generation
       label: Generation
+      collapsible: true
       layout:
         flow: column
         rows:
         - - video
+        - - reference_images
+        - - mask
         - - prompt
         - - negative_prompt
         - - height
           - width
         - - num_inference_steps
     - name: advanced
-      label: Advanced Generation
+      label: Advanced
       collapsible: true
       layout:
         flow: column
