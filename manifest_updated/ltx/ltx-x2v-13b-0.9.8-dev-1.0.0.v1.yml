@@ -152,9 +152,12 @@ spec:
     panels:
     - name: generation
       label: Generation
+      collapsible: true
       layout:
         flow: column
         rows:
+        - - video
+        - - image
         - - prompt
         - - negative_prompt
         - - height
@@ -163,7 +166,7 @@ spec:
           - fps
         - - num_inference_steps
     - name: advanced
-      label: Advanced Generation
+      label: Advanced
       collapsible: true
       layout:
         flow: column
@@ -171,11 +174,11 @@ spec:
         - - guidance_scale
         - - seed
         - - stg_scale
-        - - rescaling_scale
+          - rescaling_scale
         - - decode_timestep
           - decode_noise_scale
         - - skip_final_inference_steps
-          - cfg_star_rescale
+        - - cfg_star_rescale
     inputs:
     - id: video
       label: Input Video
@@ -193,11 +196,14 @@ spec:
       label: Prompt
       type: text
       panel: generation
+      placeholder: A beautiful woman with long brown hair and blue eyes.
+      description: Enter the prompt for the generation.
       required: true
       floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
-      description: Describe what you want to avoid in the generation
+      description: Describe what you want to avoid in the generation.
+      placeholder: blurry, low quality, distorted, artifacts.
       type: text
       panel: generation
       required: false
@@ -227,7 +233,7 @@ spec:
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps (higher = better quality but slower).
-      type: number
+      type: number+slider
       value_type: integer
       panel: generation
       default: 30
@@ -248,7 +254,7 @@ spec:
     - id: guidance_scale
       label: Guidance Scale
       description: How strongly to follow the prompt.
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -258,7 +264,7 @@ spec:
       step: 0.5
     - id: stg_scale
       label: STG Scale
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -268,7 +274,7 @@ spec:
       step: 0.5
     - id: rescaling_scale
       label: Rescaling Scale
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -278,7 +284,7 @@ spec:
       step: 0.5
     - id: decode_timestep
       label: Decode Timestep
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -288,7 +294,7 @@ spec:
       step: 0.01
     - id: decode_noise_scale
       label: Decode Noise Scale
-      type: number
+      type: number+slider
       value_type: float
       panel: advanced
       required: false
@@ -298,7 +304,7 @@ spec:
       step: 0.005
     - id: skip_final_inference_steps
       label: Skip Final Inference Steps
-      type: number
+      type: number+slider
       value_type: integer
       panel: advanced
       required: false

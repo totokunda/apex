@@ -118,6 +118,7 @@ spec:
     panels:
     - name: generation
       label: Generation
+      collapsible: true
       layout:
         flow: column
         rows:
@@ -128,7 +129,7 @@ spec:
           - aspect_ratio
         - - num_inference_steps
     - name: advanced
-      label: Advanced Generation
+      label: Advanced
       collapsible: true
       layout:
         flow: column
