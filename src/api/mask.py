@@ -507,6 +507,10 @@ async def track_mask(request: MaskTrackingRequest):
                         CANCEL_TRACKING.discard(request.id)
                     except Exception:
                         pass
+                    try:
+                        predictor.cleanup()
+                    except Exception as e:
+                        logger.warning(f"Predictor cleanup failed after track_mask: {e}")
 
             return StreamingResponse(ndjson_generator_single(), media_type="application/x-ndjson")
 
@@ -551,6 +555,10 @@ async def track_mask(request: MaskTrackingRequest):
                     CANCEL_TRACKING.discard(request.id)
                 except Exception:
                     pass
+                try:
+                    predictor.cleanup()
+                except Exception as e:
+                    logger.warning(f"Predictor cleanup failed after track_mask (both): {e}")
 
         return StreamingResponse(ndjson_generator_both(), media_type="application/x-ndjson")
     except HTTPException:
@@ -624,6 +632,10 @@ async def track_shapes(request: MaskTrackingRequest):
                             debug_save_rectangles(str(input_path), results, request.id) 
                     except Exception:
                         pass
+                    try:
+                        predictor.cleanup()
+                    except Exception as e:
+                        logger.warning(f"Predictor cleanup failed after track_shapes: {e}")
 
             return StreamingResponse(ndjson_generator_single(), media_type="application/x-ndjson")
 
@@ -675,6 +687,10 @@ async def track_shapes(request: MaskTrackingRequest):
                 
                 if request.debug:
                     debug_save_rectangles(str(input_path), results, request.id) 
+                try:
+                    predictor.cleanup()
+                except Exception as e:
+                    logger.warning(f"Predictor cleanup failed after track_shapes (both): {e}")
                 
         return StreamingResponse(ndjson_generator_both(), media_type="application/x-ndjson")
     except HTTPException:

@@ -6,6 +6,7 @@ from .preprocessor import router as preprocessor_router
 from .jobs import router as jobs_router
 from .mask import router as mask_router
 from .components import router as components_router
+from .system import router as system_router
 from fastapi.middleware.cors import CORSMiddleware
 from .ray_app import get_ray_app, shutdown_ray
 from contextlib import asynccontextmanager
@@ -47,6 +48,7 @@ app.include_router(preprocessor_router)
 app.include_router(mask_router)
 app.include_router(components_router)
 app.include_router(jobs_router)
+app.include_router(system_router)
 
 app.add_middleware(
     CORSMiddleware,

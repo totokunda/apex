@@ -150,52 +150,92 @@ spec:
           - num_inference_steps
           flow: row
     panels:
-    - name: generation
-      label: Generation
+    - name: media
+      label: Media
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
         - - video
+        - - audio
         - - image
+    - name: prompting
+      label: Prompting
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
         - - prompt
         - - negative_prompt
+    - name: canvas
+      label: Canvas
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - height
           - width
         - - duration
           - fps
-        - - num_inference_steps
-    - name: advanced
-      label: Advanced
+    - name: sampling
+      label: Sampling
       collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - num_inference_steps
+        - - skip_final_inference_steps
+        - - seed
+    - name: guidance
+      label: Guidance
+      collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
         - - guidance_scale
-        - - seed
+          - cfg_star_rescale
         - - stg_scale
           - rescaling_scale
+    - name: decoding
+      label: Decoding
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - decode_timestep
           - decode_noise_scale
-        - - skip_final_inference_steps
-        - - cfg_star_rescale
     inputs:
     - id: video
       label: Input Video
+      description: Enter the input video for the generation.
       type: video
-      panel: generation
+      panel: media
+      required: false
+      floating_panel: true
+    - id: audio
+      label: Input Audio
+      description: Enter the input audio for the generation.
+      type: audio
+      panel: media
       required: false
       floating_panel: true
     - id: image
       label: Input Image
+      description: Enter the input image for the generation.
       type: image
-      panel: generation
+      panel: media
       required: false
       floating_panel: true
     - id: prompt
       label: Prompt
       type: text
-      panel: generation
+      panel: prompting
       placeholder: A beautiful woman with long brown hair and blue eyes.
       description: Enter the prompt for the generation.
       required: true
@@ -205,15 +245,17 @@ spec:
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts.
       type: text
-      panel: generation
+      panel: prompting
       required: false
       default: blurry, low quality, distorted, artifacts
+   
+
     - id: height
       label: Height
       description: Enter the height of the output video.
       type: number
       value_type: integer
-      panel: generation
+      panel: canvas
       default: 480
       min: 256
       max: 4096
@@ -224,7 +266,7 @@ spec:
       description: Enter the width of the output video.
       type: number
       value_type: integer
-      panel: generation
+      panel: canvas
       default: 832
       min: 256
       max: 8192
@@ -235,7 +277,7 @@ spec:
       description: Number of denoising steps (higher = better quality but slower).
       type: number+slider
       value_type: integer
-      panel: generation
+      panel: sampling
       default: 30
       min: 1
       max: 100
@@ -249,14 +291,14 @@ spec:
       min: 0
       max: 4294967295
       value_type: integer
-      panel: advanced
+      panel: sampling
       required: false
     - id: guidance_scale
       label: Guidance Scale
       description: How strongly to follow the prompt.
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: guidance
       required: false
       default: 3.0
       min: 0.0
@@ -266,7 +308,7 @@ spec:
       label: STG Scale
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: guidance
       required: false
       default: 1.0
       min: 0.0
@@ -276,7 +318,7 @@ spec:
       label: Rescaling Scale
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: guidance
       required: false
       default: 1.0
       min: 0.0
@@ -286,7 +328,7 @@ spec:
       label: Decode Timestep
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: decoding
       required: false
       default: 0.05
       min: 0.0
@@ -296,7 +338,7 @@ spec:
       label: Decode Noise Scale
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: decoding
       required: false
       default: 0.025
       min: 0.0
@@ -306,7 +348,7 @@ spec:
       label: Skip Final Inference Steps
       type: number+slider
       value_type: integer
-      panel: advanced
+      panel: sampling
       required: false
       default: 0
       min: 0
@@ -315,7 +357,7 @@ spec:
     - id: cfg_star_rescale
       label: CFG* Rescale
       type: boolean
-      panel: advanced
+      panel: guidance
       required: false
       default: true
   save:

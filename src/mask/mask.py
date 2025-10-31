@@ -11,6 +11,7 @@ from collections import OrderedDict
 from loguru import logger
 import traceback
 from datetime import datetime
+import gc
 # get the default device
 from src.utils.defaults import get_torch_device, DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -1592,11 +1593,60 @@ class UnifiedSAM2Predictor:
             logger.error(traceback.format_exc())
             raise e
 
-    def cleanup(self):
-        """Clean up all cached inference states and VideoReaders."""
-        self._inference_states.clear()
-        LazyFrameLoader.clear_cache()
-        self.logger.info("Cleared all cached inference states and VideoReaders")
+    def cleanup(self, hard: bool = True):
+        """Clean up cached states/readers and optionally unload model and free GPU memory.
+
+        Args:
+            hard: If True, also unload the model, remove singleton references,
+                  empty CUDA caches, and run GC to aggressively reclaim memory.
+        """
+        try:
+            self._inference_states.clear()
+        except Exception:
+            pass
+        try:
+            LazyFrameLoader.clear_cache()
+        except Exception:
+            pass
+
+        if hard:
+            # Try to move model to CPU and drop reference
+            try:
+                if getattr(self, "_predictor", None) is not None:
+                    try:
+                        self._predictor.to("cpu")
+                    except Exception:
+                        pass
+                    self._predictor = None
+            except Exception:
+                pass
+
+            # Remove self from singleton registry to allow GC
+            try:
+                for k, v in list(_PREDICTOR_SINGLETONS.items()):
+                    if v is self:
+                        _PREDICTOR_SINGLETONS.pop(k, None)
+            except Exception:
+                pass
+
+            # Release CUDA allocator memory if available
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    try:
+                        torch.cuda.ipc_collect()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Encourage Python to free any remaining refs
+            try:
+                gc.collect()
+            except Exception:
+                pass
+
+        self.logger.info("Cleared SAM2 caches; hard=%s" % hard)
 
 
 _PREDICTOR_SINGLETONS: dict = {}
