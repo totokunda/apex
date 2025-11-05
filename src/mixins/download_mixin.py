@@ -699,7 +699,7 @@ class DownloadMixin:
             import requests
             from tqdm import tqdm
             
-            with tempfile.NamedTemporaryFile() as tmp_file:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                 parsed_url = urlparse(url)
                 relative_path_from_url = parsed_url.path.lstrip("/")
                 # Convert to hash of the url

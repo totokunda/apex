@@ -2,7 +2,6 @@ from src.engine.base_engine import BaseEngine
 import torch
 from typing import List
 from src.utils.type import EnumType
-from src.ui.nodes import UINode
 from diffusers.video_processor import VideoProcessor
 from src.denoise import CogVideoDenoise, CogVideoDenoiseType
 
@@ -82,18 +81,6 @@ class CogVideoEngine(BaseEngine, CogVideoDenoise):
             self.implementation_engine = CogVideoInpEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
-
-    @torch.no_grad()
-    def run(
-        self,
-        input_nodes: List[UINode] = None,
-        **kwargs,
-    ):
-        default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
-
-        return self.implementation_engine.run(**final_kwargs)
 
     def __str__(self):
         return f"CogVideoEngine(config={self.config}, device={self.device}, model_type={self.model_type})"

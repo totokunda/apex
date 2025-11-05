@@ -2,6 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 from .base import WanBaseEngine
 
@@ -25,6 +26,7 @@ class WanT2VEngine(WanBaseEngine):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
+        progress_callback: Callable | None = None,
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -38,10 +40,14 @@ class WanT2VEngine(WanBaseEngine):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -49,7 +55,9 @@ class WanT2VEngine(WanBaseEngine):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -62,8 +70,16 @@ class WanT2VEngine(WanBaseEngine):
         else:
             negative_prompt_embeds = None
 
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -87,6 +103,8 @@ class WanT2VEngine(WanBaseEngine):
             num_inference_steps=num_inference_steps,
         )
 
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+
         vae_config = self.load_config_by_type("vae")
         vae_scale_factor_spatial = getattr(
             vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial
@@ -94,6 +112,7 @@ class WanT2VEngine(WanBaseEngine):
         vae_scale_factor_temporal = getattr(
             vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
         )
+        
 
         latents = self._get_latents(
             height,
@@ -109,12 +128,26 @@ class WanT2VEngine(WanBaseEngine):
             generator=generator,
         )
 
+        safe_emit_progress(progress_callback, 0.30, "Initialized latent noise")
+
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
         else:
             boundary_timestep = None
+
+        # Set preview context for per-step rendering on the main engine when available
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            pass
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -140,6 +173,7 @@ class WanT2VEngine(WanBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
@@ -148,9 +182,14 @@ class WanT2VEngine(WanBaseEngine):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed text-to-video pipeline")
             return postprocessed_video

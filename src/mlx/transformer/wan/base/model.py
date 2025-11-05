@@ -404,6 +404,7 @@ class WanTransformer3DModel(nn.Module, ConfigMixin, FromModelMixin):
         encoder_hidden_states_image: Optional[mx.array] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Union[Tuple[mx.array], Transformer2DModelOutput]:
 
         if attention_kwargs is not None:

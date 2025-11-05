@@ -49,7 +49,7 @@ def get_all_manifest_files() -> List[ManifestInfo]:
             if file.endswith('.yml') and not file.startswith('shared'):
                 file_path = Path(root) / file
                 relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
-                
+
                 # Extract model and model_type from path structure
                 file_data = load_yaml_content(file_path)
                 model_type = file_data.get("spec", {}).get("model_type", [])
@@ -59,6 +59,60 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                     model_type = MODEL_TYPE_MAPPING.get(model_type, model_type)
                 model = file_data.get("metadata", {}).get("model", "")
                 manifest_name = file_data.get("metadata", {}).get("name", file.replace('.yml', ''))
+                # Determine if manifest is considered downloaded: at least one model_path per component is present,
+                # and if a config_path exists it must also be present.
+                components = file_data.get("spec", {}).get("components", [])
+                manifest_downloaded = bool(components)
+                for component in components:
+                    comp_type = component.get("type")
+                    component_ok = True
+
+                    if comp_type == "scheduler":
+                        # For schedulers, validate the default option: if it has a config_path, it must be downloadable.
+                        default_name = component.get("default")
+                        options = component.get("scheduler_options", []) or []
+                        selected = None
+                        if isinstance(options, list) and default_name:
+                            for opt in options:
+                                if isinstance(opt, dict) and opt.get("name") == default_name:
+                                    selected = opt
+                                    break
+                        if selected is None and options:
+                            selected = options[0] if isinstance(options[0], dict) else None
+
+                        if selected and isinstance(selected, dict):
+                            sel_config_path = selected.get("config_path")
+                            
+                            if sel_config_path:
+                                component_ok = DownloadMixin.is_downloaded(sel_config_path, get_components_path()) is not None
+                            else:
+                                # Built-in or inline-config schedulers don't require downloads
+                                component_ok = True
+                        else:
+                            # No scheduler options; treat as OK
+                            component_ok = True
+                        
+                    else:
+                        model_paths = component.get("model_path", [])
+                        if isinstance(model_paths, (str, dict)):
+                            model_paths = [model_paths]
+                        model_ok = False
+                        for mp in model_paths:
+                            if isinstance(mp, str):
+                                if DownloadMixin.is_downloaded(mp, get_components_path()) is not None:
+                                    model_ok = True
+                                    break
+                            elif isinstance(mp, dict):
+                                path_val = mp.get("path")
+                                if path_val and DownloadMixin.is_downloaded(path_val, get_components_path()) is not None:
+                                    model_ok = True
+                                    break
+                                
+                        component_ok =  model_ok
+                        
+                    if not component_ok:
+                        manifest_downloaded = False
+                        break
                 manifests.append(ManifestInfo(
                         id=file_data.get("metadata", {}).get("id", ""),
                         name=manifest_name,
@@ -70,9 +124,11 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                         tags=[str(t) for t in file_data.get("metadata", {}).get("tags", [])],
                         author=file_data.get("metadata", {}).get("author", ""),
                         license=file_data.get("metadata", {}).get("license", ""),
-                        demo_path=file_data.get("metadata", {}).get("demo_path", "")
+                        demo_path=file_data.get("metadata", {}).get("demo_path", ""),
+                        downloaded=manifest_downloaded
                     ))
-    
+                
+
     return manifests
 
 def load_yaml_content(file_path: Path) -> Dict[Any, Any]:
@@ -204,6 +260,24 @@ def get_manifest_content(manifest_id: str):
             is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
             if is_downloaded is None:
                 is_component_downloaded = False
+                
+        
+        if component.get("type") == "scheduler":
+            options = component.get("scheduler_options", []) or []
+            is_scheduler_downloaded = False
+            has_downloadable_config = False
+            for option in options:
+                if option.get("config_path"):
+                    has_downloadable_config = True
+                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_components_path())
+                    if is_downloaded is not None:
+                        is_scheduler_downloaded = True
+                        break
+                
+            if not is_scheduler_downloaded and has_downloadable_config:
+                is_component_downloaded = False
+            elif not has_downloadable_config:
+                is_component_downloaded = True
 
         for index, model_path in enumerate(component.get("model_path", [])):
             # we check if model path is downloaded

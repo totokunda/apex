@@ -10,6 +10,7 @@ from src.auxillary.aux_cache import AuxillaryCache
 import importlib
 import os
 import torch
+import inspect
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
     get_preprocessor_info
@@ -17,6 +18,8 @@ from src.api.preprocessor_registry import (
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path
 from typing import List
+from diffusers.utils import export_to_video
+import time
 
 
 @ray.remote
@@ -373,11 +376,11 @@ def run_engine_from_manifest(
         engine = UniversalEngine(engine_type=engine_type, yaml_path=manifest_path, model_type=model_type, selected_components=selected_components)
 
         # Prepare job directory early (needed for previews)
-        job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / job_id
+        job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / (job_id + "_" + str(time.time()))
         job_dir.mkdir(parents=True, exist_ok=True)
 
         # Unified saver usable for previews and final outputs
-        def save_output(output_obj, filename_prefix: str = "result", is_preview: bool = False):
+        def save_output(output_obj, filename_prefix: str = "result", final: bool = False):
             result_path: Optional[str] = None
             media_type: Optional[str] = None
             try:
@@ -387,29 +390,31 @@ def run_engine_from_manifest(
                     media_type = "path"
                 # Single image
                 elif isinstance(output_obj, Image.Image):
-                    ext = "jpg" if is_preview else "png"
+                    ext = f"png" if final else "jpg"
                     result_path = str(job_dir / f"{filename_prefix}.{ext}")
                     output_obj.save(result_path)
                     media_type = "image"
                 # Sequence of frames
                 elif isinstance(output_obj, list) and len(output_obj) > 0:
-                    if is_preview:
-                        # Save the last frame as a quick preview image
-                        frame = output_obj[-1]
-                        if not isinstance(frame, Image.Image):
-                            frame = Image.fromarray(np.asarray(frame))
-                        result_path = str(job_dir / f"{filename_prefix}.jpg")
-                        frame.save(result_path, quality=90)
-                        media_type = "image"
-                    else:
-                        fps = (
-                            ((config or {}).get("defaults", {}) or {}).get("run", {}) or {}
-                        ).get("fps", 16)
-                        result_path = str(job_dir / f"{filename_prefix}.mp4")
-                        with imageio.get_writer(result_path, fps=int(fps)) as writer:
-                            for frame in output_obj:
-                                writer.append_data(np.asarray(frame if not isinstance(frame, Image.Image) else np.asarray(frame)))
-                        media_type = "video"
+                    fps = (
+                        config.get("spec", {}).get("fps")
+                        or (config or {}).get("defaults", {}).get("run", {}).get("fps")
+                    )
+                    if not fps:
+                        try:
+                            impl = getattr(engine.engine, "implementation_engine", None)
+                            if impl is not None:
+                                sig = inspect.signature(impl.run)
+                                param = sig.parameters.get("fps")
+                                if param is not None and param.default is not inspect._empty:
+                                    fps = param.default
+                        except Exception:
+                            pass
+                    fps = fps or 16
+                    result_path = str(job_dir / f"{filename_prefix}.mp4")
+                    export_to_video(output_obj, result_path, fps=int(fps), quality=8.0 if final else 5.0)
+                    media_type = "video"
+                
                 else:
                     # Fallback best-effort serialization
                     try:
@@ -417,12 +422,14 @@ def run_engine_from_manifest(
                         result_path = str(job_dir / f"{filename_prefix}.png")
                         Image.fromarray(arr).save(result_path)
                         media_type = "image"
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"Failed to save output: {e}")
                         result_path = str(job_dir / f"{filename_prefix}.txt")
                         with open(result_path, "w") as f:
                             f.write(str(type(output_obj)))
                         media_type = "unknown"
             except Exception as save_err:
+                traceback.print_exc()
                 logger.error(f"Failed to save output: {save_err}")
                 raise
             return result_path, media_type
@@ -434,7 +441,7 @@ def run_engine_from_manifest(
                 idx = step_counter["i"]
                 step_counter["i"] = idx + 1
                 # Persist preview to cache and notify over websocket with metadata only
-                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}", is_preview=True)
+                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}")
                 logger.info(f"Preview saved to {result_path} with media type {media_type}")
                 try:
                     # Send an update that does not overwrite progress (progress=None)
@@ -461,7 +468,7 @@ def run_engine_from_manifest(
         )
 
         # Persist final result using the unified saver
-        result_path, media_type = save_output(output, filename_prefix="result", is_preview=False)
+        result_path, media_type = save_output(output[0], filename_prefix="result", final=True)
 
         send_progress(1.0, "Complete", {"status": "complete"})
         return {"status": "complete", "result_path": result_path, "type": media_type}

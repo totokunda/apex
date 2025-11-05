@@ -5,6 +5,7 @@ from src.utils.cache import empty_cache
 from src.mlx.denoise import WanDenoise as WanDenoiseMLX, DenoiseType as DenoiseTypeMLX
 import numpy as np
 from PIL import Image
+from src.utils.progress import safe_emit_progress
 
 
 class DenoiseType(EnumType):
@@ -52,6 +53,7 @@ class WanDenoise(WanDenoiseMLX):
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         render_on_step = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
@@ -64,6 +66,7 @@ class WanDenoise(WanDenoiseMLX):
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MOE") as pbar:
+            total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
 
                 if latent_condition is not None:
@@ -132,6 +135,11 @@ class WanDenoise(WanDenoiseMLX):
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
 
             self.logger.info("Denoising completed.")
 
@@ -145,6 +153,7 @@ class WanDenoise(WanDenoiseMLX):
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         render_on_step = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps = kwargs.get("expand_timesteps", False)
@@ -170,6 +179,7 @@ class WanDenoise(WanDenoiseMLX):
         with self._progress_bar(
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
+            total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
                 if expand_timesteps:
                     # seq_len: num_latent_frames * latent_height//2 * latent_width//2
@@ -223,6 +233,11 @@ class WanDenoise(WanDenoiseMLX):
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
 
             if expand_timesteps and first_frame_mask is not None:
                 latents = (
@@ -241,6 +256,7 @@ class WanDenoise(WanDenoiseMLX):
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         render_on_step = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
 
@@ -254,6 +270,7 @@ class WanDenoise(WanDenoiseMLX):
         with self._progress_bar(
             len(timesteps), desc=f"Sampling {model_type_str}"
         ) as pbar:
+            total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
 
                 timestep = t.expand(latents.shape[0])
@@ -291,6 +308,11 @@ class WanDenoise(WanDenoiseMLX):
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
 
             self.logger.info("Denoising completed.")
 
@@ -302,6 +324,7 @@ class WanDenoise(WanDenoiseMLX):
         use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
         render_on_step = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         fps_embeds = kwargs.get("fps_embeds", None)
         prompt_embeds = kwargs.get("prompt_embeds", None)
@@ -319,6 +342,7 @@ class WanDenoise(WanDenoiseMLX):
             total=len(step_matrix),
             desc=f"Sampling {getattr(self, 'model_type', 'WAN')}",
         ) as pbar:
+            total_steps = len(step_matrix)
             for i, timestep_i in enumerate(step_matrix):
                 update_mask_i = step_update_mask[i]
                 valid_interval_i = valid_interval[i]
@@ -393,6 +417,11 @@ class WanDenoise(WanDenoiseMLX):
                     self._render_step(latents, render_on_step_callback)
 
                 pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
 
         return latents
 
@@ -404,6 +433,7 @@ class WanDenoise(WanDenoiseMLX):
         latent_motion_frames = kwargs.get("latent_motion_frames", None)
         render_on_step = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         audio_guidance_scale = kwargs.get("audio_guidance_scale", None)
@@ -420,6 +450,7 @@ class WanDenoise(WanDenoiseMLX):
         latent_motion_frames = kwargs.get("latent_motion_frames", None)
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
+            total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
                 if using_video_input:
                     latents[:, :, :cur_motion_frames_latent_num] = (
@@ -516,6 +547,11 @@ class WanDenoise(WanDenoiseMLX):
                 if render_on_step and render_on_step_callback:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
 
             self.logger.info("Denoising completed.")
 

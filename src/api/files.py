@@ -1,0 +1,118 @@
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pathlib import Path
+from typing import Optional
+import os
+import mimetypes
+
+from src.utils.defaults import get_cache_path, get_components_path
+
+
+router = APIRouter(prefix="/files", tags=["files"])
+
+
+def _base_for_scope(scope: str) -> Path:
+    s = (scope or "").lower().strip()
+    if s == "apex-cache":
+        return Path(get_cache_path()).expanduser().resolve()
+    if s == "components":
+        return Path(get_components_path()).expanduser().resolve()
+    raise HTTPException(status_code=400, detail="Invalid scope; expected 'apex-cache' or 'components'")
+
+
+def _safe_join(base: Path, rel: str) -> Path:
+    rel_norm = (rel or "").lstrip("/\\")
+    target = (base / rel_norm).resolve()
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return target
+
+
+@router.get("")
+def get_file(request: Request, scope: str, path: str):
+    base = _base_for_scope(scope)
+    target = _safe_join(base, path)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    size = target.stat().st_size
+    content_type, _ = mimetypes.guess_type(str(target))
+    if not content_type:
+        content_type = "application/octet-stream"
+
+    range_header: Optional[str] = request.headers.get("range")
+
+    def iter_range(start: int, end: int):
+        with open(target, "rb") as f:
+            f.seek(start)
+            remaining = end - start + 1
+            chunk = 1024 * 1024
+            while remaining > 0:
+                data = f.read(min(chunk, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    if range_header:
+        try:
+            units, rng = range_header.split("=")
+            if units.strip().lower() != "bytes":
+                raise ValueError("Unsupported range unit")
+            start_s, end_s = (rng.split("-") + [""])[:2]
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else size - 1
+            if start < 0 or end < start or end >= size:
+                raise ValueError("Invalid range")
+        except Exception:
+            # Return full content if we can't parse the header
+            start, end = 0, size - 1
+            range_header = None
+
+        if range_header:
+            return StreamingResponse(
+                iter_range(start, end),
+                status_code=206,
+                media_type=content_type,
+                headers={
+                    "Content-Length": str(end - start + 1),
+                    "Content-Range": f"bytes {start}-{end}/{size}",
+                    "Accept-Ranges": "bytes",
+                },
+            )
+
+    # Fallback / full content
+    return StreamingResponse(
+        open(target, "rb"),
+        media_type=content_type,
+        headers={
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
+@router.post("/ingest")
+async def ingest(scope: str, dest: str, file: UploadFile = File(...)):
+    base = _base_for_scope(scope)
+    target = _safe_join(base, dest)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(target, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
+
+    # Return the path relative to base
+    rel = str(target.relative_to(base))
+    return {"path": rel}
+
+

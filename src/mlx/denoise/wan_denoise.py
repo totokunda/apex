@@ -1,12 +1,18 @@
 from __future__ import annotations
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TYPE_CHECKING
 
 import mlx.core as mx
 from loguru import logger
 from tqdm import tqdm
 from src.utils.type import EnumType
 from src.utils.mlx import convert_dtype_to_mlx, torch_to_mlx, to_torch
+from src.utils.progress import safe_emit_progress
 
+if TYPE_CHECKING:
+    from src.engine.base_engine import BaseEngine  # noqa: F401
+    BaseClass = BaseEngine  # type: ignore
+else:
+    BaseClass = object
 
 class DenoiseType(EnumType):
     BASE = "mlx.base"
@@ -15,7 +21,7 @@ class DenoiseType(EnumType):
     MULTITALK = "mlx.multitalk"
 
 
-class WanDenoise:
+class WanDenoise(BaseClass):
     def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.denoise_type = denoise_type
@@ -74,6 +80,7 @@ class WanDenoise:
         use_cfg_guidance: bool = kwargs.get("use_cfg_guidance", True)
         render_on_step: bool = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
@@ -82,7 +89,9 @@ class WanDenoise:
 
         log = self._get_logger()
 
-        for i, t in enumerate(tqdm(timesteps, desc="Sampling MOE (MLX)")):
+        steps_list = list(timesteps) if not isinstance(timesteps, list) else timesteps
+        total_steps = len(steps_list)
+        for i, t in enumerate(tqdm(steps_list, desc="Sampling MOE (MLX)")):
             if latent_condition is not None:
                 latent_model_input = self._concat_if_needed(latents, latent_condition)
                 latent_model_input = self._maybe_to_dtype(
@@ -143,9 +152,15 @@ class WanDenoise:
 
             if render_on_step and render_on_step_callback:
                 try:
-                    render_on_step_callback(latents)
+                    self._render_step(to_torch(latents), render_on_step_callback)
                 except Exception as e:
                     log.warning(f"Render-on-step callback failed: {e}")
+
+            safe_emit_progress(
+                denoise_progress_callback,
+                float(i + 1) / float(max(1, total_steps)),
+                f"Denoising step {i + 1}/{total_steps}",
+            )
 
         log.info("Denoising completed.")
         return to_torch(latents)
@@ -160,6 +175,7 @@ class WanDenoise:
         use_cfg_guidance: bool = kwargs.get("use_cfg_guidance", True)
         render_on_step: bool = kwargs.get("render_on_step", False)
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps: bool = kwargs.get("expand_timesteps", False)
@@ -173,7 +189,9 @@ class WanDenoise:
 
         log = self._get_logger()
 
-        for i, t in enumerate(tqdm(timesteps, desc=f"Sampling WAN (MLX)")):
+        steps_list = list(timesteps) if not isinstance(timesteps, list) else timesteps
+        total_steps = len(steps_list)
+        for i, t in enumerate(tqdm(steps_list, desc=f"Sampling WAN (MLX)")):
             if expand_timesteps and first_frame_mask is not None:
                 mask = mx.ones_like(latents)
             else:
@@ -244,9 +262,16 @@ class WanDenoise:
 
             if render_on_step and render_on_step_callback:
                 try:
-                    render_on_step_callback(latents)
+                    # convert to torch
+                    self._render_step(to_torch(latents), render_on_step_callback)
                 except Exception as e:
                     log.warning(f"Render-on-step callback failed: {e}")
+
+            safe_emit_progress(
+                denoise_progress_callback,
+                float(i + 1) / float(max(1, total_steps)),
+                f"Denoising step {i + 1}/{total_steps}",
+            )
 
         if (
             expand_timesteps

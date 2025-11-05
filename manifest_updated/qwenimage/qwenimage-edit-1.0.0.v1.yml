@@ -125,6 +125,7 @@ spec:
     - name: input
       label: Input
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -132,6 +133,7 @@ spec:
     - name: prompting
       label: Prompting
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -140,6 +142,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -150,6 +153,7 @@ spec:
     - name: sampling
       label: Sampling
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:

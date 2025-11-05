@@ -35,12 +35,14 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/vae
       variant: default
+      file_size: 167667721
   - type: text_encoder
     label: T5 Text Encoder
     base: T5EncoderModel
     model_path:
     - path: lodestones/Chroma1-HD/text_encoder
       variant: default
+      file_size: 9524669246
     tokenizer_class: T5Tokenizer
     tokenizer_name: lodestones/Chroma1-HD
     tokenizer_kwargs:
@@ -51,6 +53,7 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/transformer
       variant: default
+      file_size: 17800194937
   defaults:
     run:
       num_inference_steps: 50
@@ -232,5 +235,3 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-
-

@@ -1,7 +1,6 @@
 from typing import Dict, Type, Any, Optional, List, Literal
 from enum import Enum
 import torch
-from src.ui.nodes import UINode
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
 
@@ -237,9 +236,9 @@ class UniversalEngine:
         self.model_type = model_type
 
     @torch.no_grad()
-    def run(self, input_nodes: List[UINode] | None = None, **kwargs):
+    def run(self, **kwargs):
         """Run the engine with given parameters"""
-        return self.engine.run(input_nodes=input_nodes, **kwargs)
+        return self.engine.run(**kwargs)
 
     def __getattr__(self, name):
         """Delegate any missing attributes to the underlying engine"""

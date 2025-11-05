@@ -248,8 +248,6 @@ spec:
       panel: prompting
       required: false
       default: blurry, low quality, distorted, artifacts
-   
-
     - id: height
       label: Height
       description: Enter the height of the output video.

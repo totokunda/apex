@@ -21,7 +21,6 @@ from src.vae import get_vae
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.video_processor import VideoProcessor
-from src.ui.nodes import UINode
 from src.utils.dtype import select_ideal_dtypes
 from src.attention import attention_register
 from src.utils.cache import empty_cache
@@ -1452,12 +1451,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         except Exception as e:
             self.logger.warning(f"Auto-apply LoRAs failed: {e}")
 
-    def _parse_input_nodes(self, input_nodes: List[UINode]):
-        kwargs = {}
-        for node in input_nodes:
-            kwargs.update(node.as_param())
-        return kwargs
-
     def download(
         self,
         save_path: str | None = None,
@@ -1634,7 +1627,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         video = self.vae_decode(latents)
         rendered_video = self._tensor_to_frames(video)
-        render_on_step_callback(rendered_video)
+        render_on_step_callback(rendered_video[0])
 
     def _tensor_to_frames(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
@@ -1736,7 +1729,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         if isinstance(duration, str):
             if duration.endswith("s"):
-                duration = int(duration[:-1]) * fps + 1
+                duration = int(float(duration[:-1]) * fps) + 1
             elif duration.endswith("f"):
                 duration = int(duration[:-1])
             else:
