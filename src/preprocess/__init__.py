@@ -45,7 +45,6 @@ from .composition import (
 )
 
 from .base import BasePreprocessor, preprocessor_registry
-from .prompt_extend import PromptExtendPreprocessor
 
 
 __all__ = [
@@ -87,7 +86,6 @@ __all__ = [
     "MoveAnythingPreprocessor",
     "BasePreprocessor",
     "preprocessor_registry",
-    "PromptExtendPreprocessor",
     "SAM2GDINOVideoPreprocessor",
     "SAM2SalientVideoPreprocessor",
     "FacePreprocessor",

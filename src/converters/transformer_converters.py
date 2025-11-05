@@ -825,3 +825,13 @@ class FluxTransformerConverter(TransformerConverter):
             new_key = new_key.replace("norm.query_norm.scale", "attn.norm_q.weight")
             new_key = new_key.replace("norm.key_norm.scale", "attn.norm_k.weight")
             state_dict[new_key] = state_dict.pop(key)
+            
+
+
+
+class NoOpTransformerConverter(TransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {}
+        self.pre_special_keys_map = {}
+        self.special_keys_map = {}

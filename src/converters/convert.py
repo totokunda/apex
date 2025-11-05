@@ -23,6 +23,7 @@ from src.converters.transformer_converters import (
     HunyuanAvatarTransformerConverter,
     MagiTransformerConverter,
     FluxTransformerConverter,
+    NoOpTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -63,7 +64,7 @@ def get_transformer_converter(model_base: str):
     elif model_base == "magi.base":
         return MagiTransformerConverter()
     else:
-        raise ValueError(f"Model type {model_base} not supported")
+        return NoOpTransformerConverter()
 
 
 def get_transformer_converter_by_model_name(model_name: str):

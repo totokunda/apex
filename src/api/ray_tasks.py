@@ -1,10 +1,9 @@
 """
 Ray tasks for preprocessor operations
 """
-import asyncio
 from typing import Dict, Any, Optional
+from pathlib import Path
 import ray
-from src.api.ws_manager import websocket_manager
 import traceback
 from loguru import logger
 from src.auxillary.aux_cache import AuxillaryCache
@@ -13,9 +12,7 @@ import os
 import torch
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
-    get_preprocessor_info,
-    list_preprocessors,
-    get_preprocessor_details
+    get_preprocessor_info
 )
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path
@@ -332,3 +329,148 @@ def run_preprocessor(
     finally:
         empty_cache()
 
+
+@ray.remote
+def run_engine_from_manifest(
+    manifest_path: str,
+    job_id: str,
+    ws_bridge,
+    inputs: Dict[str, Any],
+    selected_components: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Execute a manifest YAML with provided inputs and persist result to disk."""
+    def send_progress(progress: float | None, message: str, metadata: Optional[Dict] = None):
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
+            if progress is not None:
+                logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+            else:
+                logger.info(f"[{job_id}] Progress: {message}")
+        except Exception as e:
+            logger.error(f"Failed to send progress update: {e}")
+
+    try:
+        from src.utils.yaml import load_yaml as load_manifest_yaml
+        from src.manifest.loader import validate_and_normalize
+        from src.engine.registry import UniversalEngine
+        from src.utils.defaults import DEFAULT_CACHE_PATH
+        import imageio
+        import numpy as np
+        from PIL import Image
+        
+        logger.info(manifest_path, "manifest_path")
+
+        # Normalize manifest (handles v1 -> engine shape)
+        raw = load_manifest_yaml(manifest_path)
+        config = validate_and_normalize(raw)
+        
+        # Resolve engine settings
+        engine_type = config.get("engine") or (config.get("spec") or {}).get("engine")
+        model_type = config.get("type") or (config.get("spec") or {}).get("model_type")
+        if isinstance(model_type, list):
+            model_type = model_type[0] if model_type else None
+
+        engine = UniversalEngine(engine_type=engine_type, yaml_path=manifest_path, model_type=model_type, selected_components=selected_components)
+
+        # Prepare job directory early (needed for previews)
+        job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        # Unified saver usable for previews and final outputs
+        def save_output(output_obj, filename_prefix: str = "result", is_preview: bool = False):
+            result_path: Optional[str] = None
+            media_type: Optional[str] = None
+            try:
+                # String path passthrough
+                if isinstance(output_obj, str):
+                    result_path = output_obj
+                    media_type = "path"
+                # Single image
+                elif isinstance(output_obj, Image.Image):
+                    ext = "jpg" if is_preview else "png"
+                    result_path = str(job_dir / f"{filename_prefix}.{ext}")
+                    output_obj.save(result_path)
+                    media_type = "image"
+                # Sequence of frames
+                elif isinstance(output_obj, list) and len(output_obj) > 0:
+                    if is_preview:
+                        # Save the last frame as a quick preview image
+                        frame = output_obj[-1]
+                        if not isinstance(frame, Image.Image):
+                            frame = Image.fromarray(np.asarray(frame))
+                        result_path = str(job_dir / f"{filename_prefix}.jpg")
+                        frame.save(result_path, quality=90)
+                        media_type = "image"
+                    else:
+                        fps = (
+                            ((config or {}).get("defaults", {}) or {}).get("run", {}) or {}
+                        ).get("fps", 16)
+                        result_path = str(job_dir / f"{filename_prefix}.mp4")
+                        with imageio.get_writer(result_path, fps=int(fps)) as writer:
+                            for frame in output_obj:
+                                writer.append_data(np.asarray(frame if not isinstance(frame, Image.Image) else np.asarray(frame)))
+                        media_type = "video"
+                else:
+                    # Fallback best-effort serialization
+                    try:
+                        arr = np.asarray(output_obj)  # type: ignore[arg-type]
+                        result_path = str(job_dir / f"{filename_prefix}.png")
+                        Image.fromarray(arr).save(result_path)
+                        media_type = "image"
+                    except Exception:
+                        result_path = str(job_dir / f"{filename_prefix}.txt")
+                        with open(result_path, "w") as f:
+                            f.write(str(type(output_obj)))
+                        media_type = "unknown"
+            except Exception as save_err:
+                logger.error(f"Failed to save output: {save_err}")
+                raise
+            return result_path, media_type
+
+        # Render-on-step callback that writes previews
+        step_counter = {"i": 0}
+        def render_on_step_callback(frames):
+            try:
+                idx = step_counter["i"]
+                step_counter["i"] = idx + 1
+                # Persist preview to cache and notify over websocket with metadata only
+                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}", is_preview=True)
+                logger.info(f"Preview saved to {result_path} with media type {media_type}")
+                try:
+                    # Send an update that does not overwrite progress (progress=None)
+                    send_progress(None, f"Preview frame {idx}", {
+                        "status": "preview",
+                        "preview_path": result_path,
+                        "type": media_type,
+                        "index": idx,
+                    })
+                except Exception as se:
+                    logger.warning(f"Failed sending preview websocket update at step {idx}: {se}")
+            except Exception as e:
+                logger.warning(f"Preview save failed at step {step_counter['i']}: {e}")
+
+        # Progress callback forwarded into the engine
+        def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
+            send_progress(progress, message, metadata)
+
+        output = engine.run(
+            **(inputs or {}),
+            progress_callback=progress_callback,
+            render_on_step=True,
+            render_on_step_callback=render_on_step_callback,
+        )
+
+        # Persist final result using the unified saver
+        result_path, media_type = save_output(output, filename_prefix="result", is_preview=False)
+
+        send_progress(1.0, "Complete", {"status": "complete"})
+        return {"status": "complete", "result_path": result_path, "type": media_type}
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(tb, "traceback")
+        try:
+            send_progress(0.0, str(e), {"status": "error", "error": str(e)})
+        except Exception:
+            pass
+        return {"job_id": job_id, "status": "error", "error": str(e), "traceback": tb}

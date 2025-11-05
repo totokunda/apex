@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List, Optional
 from PIL import Image
 from .base import ChromaBaseEngine
 import numpy as np
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 class ChromaT2IEngine(ChromaBaseEngine):
     """Chroma Text-to-Image Engine Implementation"""
@@ -24,6 +25,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
+        progress_callback: Callable = None,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         sigmas: List[float] | None = None,
@@ -34,12 +36,15 @@ class ChromaT2IEngine(ChromaBaseEngine):
         negative_ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
         **kwargs,
     ):
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
+        
+        
         if isinstance(prompt, str):
             prompt = [prompt]
         if isinstance(negative_prompt, str):
             negative_prompt = [negative_prompt]
 
-        
+        safe_emit_progress(progress_callback, 0.05, "Encoding prompt")
         prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids = self.encode_prompt(
             prompt,
             negative_prompt,
@@ -48,6 +53,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             offload=offload
         )
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
         
         batch_size = prompt_embeds.shape[0]
 
@@ -59,12 +65,14 @@ class ChromaT2IEngine(ChromaBaseEngine):
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.22, "Transformer ready")
 
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
+        safe_emit_progress(progress_callback, 0.24, "Guidance embeddings prepared")
 
         latents, latent_image_ids = self._get_latents(
             batch_size=batch_size,
@@ -76,11 +84,13 @@ class ChromaT2IEngine(ChromaBaseEngine):
             generator=generator,
             seed=seed,
         )
+        safe_emit_progress(progress_callback, 0.30, "Initialized latent noise")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             
         self.to_device(self.scheduler)
+        safe_emit_progress(progress_callback, 0.35, "Scheduler ready")
 
         sigmas = (
             np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
@@ -97,6 +107,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
+        safe_emit_progress(progress_callback, 0.40, "Computed scheduler shift")
         
         attention_mask = self._prepare_attention_mask(
             batch_size=latents.shape[0],
@@ -110,6 +121,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
             dtype=latents.dtype,
             attention_mask=negative_prompt_embeds_mask,
         )
+        safe_emit_progress(progress_callback, 0.45, "Prepared attention masks")
         
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
@@ -118,6 +130,7 @@ class ChromaT2IEngine(ChromaBaseEngine):
             timesteps=timesteps,
             mu=mu,
         )
+        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -127,6 +140,16 @@ class ChromaT2IEngine(ChromaBaseEngine):
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        
+        # Set preview context for per-step rendering on the main engine
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            self._preview_height = height
+            self._preview_width = width
+            self._preview_offload = offload
         
         
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
@@ -164,6 +187,9 @@ class ChromaT2IEngine(ChromaBaseEngine):
         # We set the index here to remove DtoH sync, helpful especially during compilation.
         # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
 
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
@@ -184,12 +210,26 @@ class ChromaT2IEngine(ChromaBaseEngine):
             render_on_step_callback=render_on_step_callback,
             num_warmup_steps=num_warmup_steps,
             true_cfg_scale=true_cfg_scale,
+            denoise_progress_callback=denoise_progress_callback,
         )
+        
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+        
+        if offload:
+            try:
+                self._offload(self.transformer)
+            except Exception:
+                pass
+        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded" if offload else "Preparing decode")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
+        safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
         return [image]
+    
+    

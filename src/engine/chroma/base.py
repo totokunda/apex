@@ -1,8 +1,15 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any
+from typing import Union, List, Optional, Dict, Any, Callable, TYPE_CHECKING
 
-class ChromaBaseEngine:
+if TYPE_CHECKING:
+    from src.engine.base_engine import BaseEngine  # noqa: F401
+    BaseClass = BaseEngine  # type: ignore
+else:
+    BaseClass = object
+    
+
+class ChromaBaseEngine(BaseClass):
     """Base class for Chroma engine implementations containing common functionality"""
 
     def __init__(self, main_engine):
@@ -16,6 +23,17 @@ class ChromaBaseEngine:
         self.prompt_template_encode = "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
         self.prompt_template_encode_start_idx = 34
         self.default_sample_size = 128
+        
+    def __getattr__(self, name: str):  # noqa: D401
+        """Delegate attribute access to the composed BaseEngine when not found here."""
+        try:
+            return getattr(self.main_engine, name)
+        except AttributeError as exc:
+            raise AttributeError(f"{self.__class__.__name__!s} has no attribute '{name}'") from exc
+
+    # Improve editor introspection (e.g., autocomplete) by exposing attributes of main_engine
+    def __dir__(self):
+        return sorted(set[str](list[str](super().__dir__()) + dir(self.main_engine)))
 
     @property
     def text_encoder(self):
@@ -41,21 +59,7 @@ class ChromaBaseEngine:
     def component_dtypes(self):
         return self.main_engine.component_dtypes
 
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
 
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
@@ -158,50 +162,6 @@ class ChromaBaseEngine:
         b = base_shift - m * base_seq_len
         mu = image_seq_len * m + b
         return mu
-
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
-
-    def _tensor_to_frame(self, *args, **kwargs):
-        """Convert torch.tensor to PIL image"""
-        return self.main_engine._tensor_to_frame(*args, **kwargs)
 
     def _prepare_attention_mask(
         self,
@@ -321,3 +281,31 @@ class ChromaBaseEngine:
             self._offload(self.text_encoder)
             
         return prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids
+    
+    
+    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
+        """Override: unpack latents for image decoding and render a preview frame.
+
+        Falls back to base implementation if preview dimensions are unavailable.
+        
+        """
+        self.logger.info(f"Rendering step {latents.shape} OVERRIDDEN")
+        try:
+            preview_height = getattr(self, "_preview_height", None)
+            preview_width = getattr(self, "_preview_width", None)
+            if preview_height is None or preview_width is None:
+                return super()._render_step(latents, render_on_step_callback)
+
+            unpacked = self._unpack_latents(
+                latents, preview_height, preview_width, self.vae_scale_factor
+            )
+            tensor_image = self.vae_decode(
+                unpacked, offload=getattr(self, "_preview_offload", True)
+            )[:, :, 0]
+            image = self._tensor_to_frame(tensor_image)
+            render_on_step_callback(image)
+        except Exception:
+            try:
+                super()._render_step(latents, render_on_step_callback)
+            except Exception:
+                pass

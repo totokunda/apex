@@ -181,7 +181,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     loaded_loras: Dict[str, LoraItem] = {}
     _memory_management_map: Dict[str, MemoryConfig] | None = None
     _component_memory_managers: Dict[str, MemoryManager] = {}
-
+    selected_components: Dict[str, Any] | None = None
+    
     def __init__(
         self,
         yaml_path: str,
@@ -193,11 +194,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self._init_logger()
         self.config = self._load_yaml(yaml_path)
 
-        logger.info(f"Loaded config: {self.config}")
 
         self.save_path = kwargs.get("save_path", None)
-
-        self.download(self.save_path)
 
         for key, value in kwargs.items():
             if key not in [
@@ -211,6 +209,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 "device",
             ]:
                 setattr(self, key, value)
+        
+        self.download(self.save_path)
 
         # Normalize optional memory management mapping
         self._memory_management_map = self._normalize_memory_management(
@@ -379,7 +379,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if self.config_save_path:
             os.makedirs(self.config_save_path, exist_ok=True)
         components = config.get("components", [])
-        self.logger.info(f"Loading {len(components_to_load or components)} components")
+        if components_to_load:
+            self.logger.info(f"Loading {len(components_to_load)} components")
+
         self.load_components(components, components_to_load)
         self.load_preprocessors(
             config.get("preprocessors", []) or [], preprocessors_to_load
@@ -394,11 +396,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         with tqdm(total=total, desc=desc, **kwargs) as pbar:
             yield pbar
 
-    def _preprocess_kwargs(self, input_nodes: List[UINode] | None = None, **kwargs):
-        if input_nodes:
-            kwargs.update(self._parse_input_nodes(input_nodes))
-        return kwargs
-
     def _get_default_kwargs(self, func_name: str):
         default_kwargs = {}
         defaults = self.config.get("defaults", {})
@@ -412,12 +409,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.attention_type = attention_type
 
     @torch.no_grad()
-    def run(self, *args, input_nodes: List[UINode] = None, **kwargs):
+    def run(self, *args, **kwargs):
         default_kwargs = self._get_default_kwargs("run")
-        preprocessed_kwargs = self._preprocess_kwargs(input_nodes, **kwargs)
-        final_kwargs = {**default_kwargs, **preprocessed_kwargs}
+        merged_kwargs = {**default_kwargs, **kwargs}
         if hasattr(self, "implementation_engine"):
-            args, kwargs = self.run_preprocessors(args, final_kwargs)
+            args, kwargs = self.run_preprocessors(args, merged_kwargs)
             out = self.implementation_engine.run(*args, **kwargs)
             return self.run_postprocessors(out)
         else:
@@ -440,7 +436,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         # Start with original kwargs intended for the model
         kwargs_out = dict(kwargs)
-
+        
         for key, preprocessor in self._preprocessors.items():
 
             # Inspect signature and only pass supported kwargs
@@ -876,6 +872,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             else:
                 registry = TRANSFORMERS_REGISTRY_TORCH
                 dtype_converter = convert_dtype_to_torch
+            
+            print(component)
             transformer = self._load_model(
                 component,
                 registry.get,
@@ -1479,18 +1477,39 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             postprocessors_path = DEFAULT_POSTPROCESSOR_SAVE_PATH
 
         os.makedirs(save_path, exist_ok=True)
-        for component in self.config.get("components", []):
+        for i, component in enumerate(self.config.get("components", []) ):
             save_path = component.get("save_path", components_path)
-            if model_path := component.get("model_path"):
-                downloaded_model_path = self._download(model_path, save_path)
-                if downloaded_model_path:
-                    component["model_path"] = downloaded_model_path
-                if config_path := component.get("config_path"):
-                    downloaded_config_path = self.fetch_config(
-                        config_path, return_path=True
-                    )
-                    if downloaded_config_path:
-                        component["config_path"] = downloaded_config_path
+            if config_path := component.get("config_path"):
+                downloaded_config_path = self.fetch_config(
+                    config_path, return_path=True
+                )
+                if downloaded_config_path:
+                    component["config_path"] = downloaded_config_path
+                    
+            component_type = component.get("type")
+            component_name = component.get("name")
+            
+            if component_type == "scheduler":
+                scheduler_options = component.get("scheduler_options")
+                selected_scheduler_option = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
+                for scheduler_option in scheduler_options:
+                    if selected_scheduler_option['name'] == scheduler_option['name']:
+                        component = selected_scheduler_option.copy()
+                        component['type'] = 'scheduler'
+            else:
+                model_path = component.get("model_path")
+                if isinstance(model_path, list):
+                    selected_model_item = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
+                    for model_path_item in model_path:
+                        if selected_model_item.get('variant') == model_path_item.get('variant'):
+                            component['model_path'] = selected_model_item.get('path')
+                            break
+                        
+                else:
+                    downloaded_model_path = self._download(model_path, save_path)
+                    if downloaded_model_path:
+                        component["model_path"] = downloaded_model_path
+                
             if extra_model_paths := component.get("extra_model_paths"):
                 for i, extra_model_path in enumerate(extra_model_paths):
                     downloaded_extra_model_path = self._download(
@@ -1498,6 +1517,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     )
                     if downloaded_extra_model_path:
                         component["extra_model_paths"][i] = downloaded_extra_model_path
+            self.config["components"][i] = component
 
         preprocessors = self.config.get("preprocessors", []) or []
         if preprocessors:
@@ -1736,3 +1756,5 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
     def __repr__(self):
         return self.__str__()
+    
+    

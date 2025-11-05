@@ -32,7 +32,7 @@ class FluxBaseEngine(BaseClass):
 
     # Improve editor introspection (e.g., autocomplete) by exposing attributes of main_engine
     def __dir__(self):
-        return sorted(set(list(super().__dir__()) + dir(self.main_engine)))
+        return sorted(set[str](list[str](super().__dir__()) + dir(self.main_engine)))
         
 
     @staticmethod

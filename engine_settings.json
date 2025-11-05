@@ -1,0 +1,47 @@
+{   
+    "manifest_path": "/Users/tosinkuye/apex-workspace/apex-engine/manifest_updated/qwenimage/qwenimage-edit-1.0.0.v1.yml",
+    "engine_type": "qwenimage",
+    "model_type": "edit",
+    "selected_components": {
+        "scheduler": {
+            "name": "FlowMatchEulerDiscreteScheduler",
+            "base": "diffusers.FlowMatchEulerDiscreteScheduler",
+            "config_path": "https://huggingface.co/Qwen/Qwen-Image-Edit/resolve/main/scheduler/scheduler_config.json"
+        },
+        "vae": {
+            "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/vae",
+            "variant": "default",
+            "precision": "fp16",
+            "type": "safetensors"
+        },
+        "text_encoder": {
+            "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
+            "variant": "default",
+            "precision": "fp16",
+            "type": "safetensors"
+        },
+        "transformer": {
+            "path": "/Users/tosinkuye/apex-diffusion/components/5a8b98fe06bd8d6f489f98dbdc2e4d901ce8e0aac640b7250d0f942d8d90bf9c_Qwen_Image_Edit-Q2_K.gguf",
+            "variant": "GGUF_Q2_K",
+            "precision": "q2_k",
+            "type": "gguf"
+        },
+        "helper": {
+            "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image-Edit/processor",
+            "type": "safetensors"
+        }
+    },
+    "inputs": {
+        "image": "/Users/tosinkuye/Library/Application Support/apex-studio/media/previews/7e8efb02-5548-47b6-ad5c-36704a3ac2f4_image_0.png",
+        "prompt": "Please make the man into a black person, with a green hat. ",
+        "negative_prompt": "blurry, low quality, distorted, artifacts",
+        "resolution": 1080,
+        "aspect_ratio": 556,
+        "num_inference_steps": 50,
+        "height": 1088,
+        "width": 640,
+        "seed": 2869681332,
+        "true_cfg_scale": 4,
+        "guidance_scale": 5
+    }
+}

@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from .ws import router as ws_router
 from .manifest import router as manifest_router
 from .config import router as config_router
+from .engine import router as engine_router
 from .preprocessor import router as preprocessor_router
 from .jobs import router as jobs_router
 from .mask import router as mask_router
@@ -11,7 +12,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from .ray_app import get_ray_app, shutdown_ray
 from contextlib import asynccontextmanager
 import asyncio
-from loguru import logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,6 +49,7 @@ app.include_router(mask_router)
 app.include_router(components_router)
 app.include_router(jobs_router)
 app.include_router(system_router)
+app.include_router(engine_router)
 
 app.add_middleware(
     CORSMiddleware,

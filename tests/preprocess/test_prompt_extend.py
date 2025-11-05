@@ -1,6 +1,6 @@
 import os
 import torch
-from src.preprocess.prompt_extend import PromptExtendPreprocessor
+from src.prompt_extension.prompt_extend import PromptExtendPreprocessor
 
 os.environ["APEX_PROMPT_EXTEND_SMALL"] = "HuggingFaceTB/SmolLM2-360M-Instruct"
 os.environ["APEX_LLAMA_8B_MODEL"] = "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2"

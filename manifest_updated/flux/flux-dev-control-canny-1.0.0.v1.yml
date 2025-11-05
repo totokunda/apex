@@ -156,58 +156,70 @@ spec:
           - aspect_ratio
           flow: row
     panels:
-    - name: generation
-      label: Generation
+    - name: input
+      label: Input
       collapsible: true
       layout:
         flow: column
         rows:
         - - control_image
-        - - prompt
-        - - negative_prompt
-        - - resolution
-          - aspect_ratio
-        - - num_inference_steps
-    - name: advanced
-      label: Advanced
+    - name: prompting
+      label: Prompting
       collapsible: true
       layout:
         flow: column
         rows:
-        - - height
-          - width
+        - - prompt
+        - - negative_prompt
         - - prompt_2
         - - negative_prompt_2
-        - - seed
-        - - true_cfg_scale
+    - name: size
+      label: Size
+      collapsible: true
+      layout:
+        flow: column
+        rows:
+        - - resolution
+          - aspect_ratio
+        - - height
+          - width
+    - name: sampling
+      label: Sampling
+      collapsible: true
+      layout:
+        flow: column
+        rows:
+        - - num_inference_steps
         - - guidance_scale
+        - - true_cfg_scale
+        - - seed
     inputs:
     - id: control_image
       label: Control Image
       description: A canny edge image to guide the generation.
       type: image+preprocessor
-      panel: generation
+      panel: input
       preprocessor_ref: canny
       required: true
       floating_panel: true
     - id: prompt
       label: Prompt
       type: text
-      panel: generation
+      panel: prompting
       required: true
       floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation
       type: text
-      panel: generation
+      panel: prompting
       required: false
       default: blurry, low quality, distorted, artifacts
       floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
-      panel: generation
+      panel: size
       type: select
       default: 720
       icon: md/MdMonitor
@@ -222,7 +234,7 @@ spec:
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image.
-      panel: generation
+      panel: size
       type: select
       default: 969
       icon: md/MdAspectRatio
@@ -241,7 +253,7 @@ spec:
       description: Number of denoising steps (higher = better quality but slower).
       type: number+slider
       value_type: integer
-      panel: generation
+      panel: sampling
       default: 30
       min: 1
       max: 100
@@ -252,7 +264,7 @@ spec:
       description: Enter the height of the output image.
       type: number
       value_type: integer
-      panel: advanced
+      panel: size
       default: 1024
       min: 256
       max: 8192
@@ -263,7 +275,7 @@ spec:
       description: Enter the width of the output image.
       type: number
       value_type: integer
-      panel: advanced
+      panel: size
       default: 1024
       min: 256
       max: 8192
@@ -273,14 +285,14 @@ spec:
       label: Prompt 2
       description: Enter a second prompt for the generation
       type: text
-      panel: generation
+      panel: prompting
       required: false
       floating_panel: false
     - id: negative_prompt_2
       label: Negative Prompt 2
       description: Enter a second negative prompt for the generation
       type: textarea
-      panel: advanced
+      panel: prompting
       required: false
       floating_panel: false
     - id: seed
@@ -291,7 +303,7 @@ spec:
       min: 0
       max: 4294967295
       value_type: integer
-      panel: advanced
+      panel: sampling
       required: false
       floating_panel: false
     - id: true_cfg_scale
@@ -299,7 +311,7 @@ spec:
       description: Enter a true CFG scale for the generation.
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: sampling
       required: false
       floating_panel: false
       default: 1.0
@@ -311,7 +323,7 @@ spec:
       description: Enter a guidance scale for the generation.
       type: number+slider
       value_type: float
-      panel: advanced
+      panel: sampling
       required: false
       floating_panel: false
       default: 5.0

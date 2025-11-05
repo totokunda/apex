@@ -8,7 +8,6 @@ from src.manifest.resolver import resolve_manifest_reference
 
 class EngineType(Enum):
     """Supported engine types"""
-
     WAN = "wan"
     HUNYUAN = "hunyuan"
     LTX = "ltx"

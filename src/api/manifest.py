@@ -103,10 +103,12 @@ def list_model_types() -> List[ModelTypeInfo]:
         "x2v": "Any to Video ",
         "edit": "Edit",
         "control": "Control",
+        "t2i": "Text to Image",
     }
     description_map = {
         "t2v": "Generate videos from text prompts.",
         "i2v": "Animate a single image into a video.",
+        "t2i": "Generate images from text prompts.",
         "v2v": "Transform an input video with a new style or prompt.",
         "x2v": "Flexible any-to-video generation.",
         "edit": "Edit or modify images using prompts and tools.",
