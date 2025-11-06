@@ -141,6 +141,77 @@ def load_yaml_content(file_path: Path) -> Dict[Any, Any]:
     except yaml.YAMLError as e:
         raise HTTPException(status_code=500, detail=f"Error parsing YAML file: {str(e)}")
 
+
+# ----------------------------- Attention Helpers ----------------------------- #
+def _attention_label_description_maps() -> tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Centralised mapping for attention backend labels and short descriptions.
+    """
+    label_map = {
+        "sdpa": "PyTorch SDPA",
+        "sdpa_varlen": "PyTorch SDPA (VarLen)",
+        "sdpa_streaming": "SDPA Streaming",
+        "flash": "FlashAttention-2",
+        "flash3": "FlashAttention-3",
+        "sage": "SageAttention",
+        "xformers": "xFormers",
+        "flex": "Flex Attention",
+        "xla_flash": "XLA Flash Attention",
+    }
+
+    description_map = {
+        "sdpa": "Built-in torch scaled_dot_product_attention backend.",
+        "sdpa_varlen": "VarLen wrapper using SDPA compatible with flash-attn varlen APIs.",
+        "sdpa_streaming": "Streaming softmax SDPA variant for long sequences.",
+        "flash": "NVIDIA FlashAttention-2 kernel (fast, memory-efficient).",
+        "flash3": "FlashAttention-3 kernel via flash_attn_interface.",
+        "sage": "SageAttention kernel backend.",
+        "xformers": "xFormers memory-efficient attention implementation.",
+        "flex": "PyTorch Flex Attention (experimental flexible masks).",
+        "xla_flash": "XLA/TPU Flash Attention kernel.",
+    }
+
+    return label_map, description_map
+
+
+def _build_attention_options(allowed: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    """
+    Build a list of attention backend options from the attention registry, each
+    containing name, label and description. If `allowed` is provided, the list is
+    filtered to those names; otherwise all installed/available backends are used.
+    """
+    # Local import to avoid import cycles at startup
+    try:
+        from src.attention.functions import attention_register
+    except Exception as e:
+        # If attention stack cannot be imported, return an empty list gracefully
+        return []
+
+    label_map, description_map = _attention_label_description_maps()
+
+    # "Installed" or runtime-available attention backends
+    available_keys = set(attention_register.all_available().keys())
+
+    if allowed is not None:
+        allowed_set = {a for a in allowed if isinstance(a, str)}
+        final_keys = sorted(available_keys.intersection(allowed_set))
+    else:
+        # If the manifest does not specify support/attention types, expose all
+        # available implementations.
+        final_keys = sorted(available_keys)
+
+    results: List[Dict[str, str]] = []
+    for key in final_keys:
+        label = label_map.get(key, key.replace('_', ' ').title())
+        desc = description_map.get(key, f"{key} attention backend.")
+        results.append({
+            "name": key,
+            "label": label,
+            "description": desc,
+        })
+
+    return results
+
 @router.get("/types", response_model=List[ModelTypeInfo])
 def list_model_types() -> List[ModelTypeInfo]:
     """List distinct spec.model_type values across manifests with label and description.
@@ -253,6 +324,23 @@ def get_manifest_content(manifest_id: str):
     # Load and return YAML content
     file_path = MANIFEST_BASE_PATH / manifest.full_path
     content = load_yaml_content(file_path)
+
+    # ----------------- Attention backends enrichment (name/label/desc) ----------------- #
+    spec = content.get("spec", {}) if isinstance(content, dict) else {}
+    # Support both historical and current field names
+    configured_attention = spec.get("support_attention")
+    if configured_attention is None:
+        configured_attention = spec.get("attention_types")
+    if isinstance(configured_attention, list):
+        attention_allowed: Optional[List[str]] = [x for x in configured_attention if isinstance(x, str)]
+    else:
+        attention_allowed = None  # fall back to all available backends
+
+    attention_options = _build_attention_options(attention_allowed)
+    # Keep the original field as-is; add a parallel enriched field for the UI/API
+    if "spec" not in content:
+        content["spec"] = {}
+    content["spec"]["attention_types_detail"] = attention_options
     for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
         # check config path too
         is_component_downloaded = True
