@@ -372,8 +372,9 @@ def run_engine_from_manifest(
         model_type = config.get("type") or (config.get("spec") or {}).get("model_type")
         if isinstance(model_type, list):
             model_type = model_type[0] if model_type else None
-
-        engine = UniversalEngine(engine_type=engine_type, yaml_path=manifest_path, model_type=model_type, selected_components=selected_components)
+            
+        attention_type = selected_components.get("attention", {}).get("name", None)
+        engine = UniversalEngine(engine_type=engine_type, yaml_path=manifest_path, model_type=model_type, selected_components=selected_components, attention_type=attention_type)
 
         # Prepare job directory early (needed for previews)
         job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / (job_id + "_" + str(time.time()))
