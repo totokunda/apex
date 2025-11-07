@@ -1,13 +1,13 @@
 {
-    "image": "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/e28ab505-63d8-4946-9f57-03eb2fcf2192-561e1ac3-11aa-4ec2-8c9e-8642c58b2555_image_0.png",
-    "prompt": "Convert this into a real image of a hippo sitting by the water with the sun in the top left corner of the sky. ",
-    "negative_prompt": " ",
+    "prompt": "A woman sucking a large white dick",
+    "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
     "resolution": 720,
     "aspect_ratio": 969,
-    "num_inference_steps": 40,
+    "num_inference_steps": 50,
     "height": 704,
     "width": 1280,
-    "seed": 382165029,
+    "seed": 469084346,
     "true_cfg_scale": 4,
+    "guidance_scale": 5,
     "duration": "5s"
 }

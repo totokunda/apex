@@ -9,10 +9,10 @@ import torch
 from typing import Union, Dict, Any, List
 from src.helpers.helpers import helpers
 import torch.nn as nn
-from src.preprocess.base import BasePreprocessor
+from src.helpers.base import BaseHelper
 
 @helpers("clip")
-class CLIP(BasePreprocessor):
+class CLIP(BaseHelper):
 
     def __init__(
         self,

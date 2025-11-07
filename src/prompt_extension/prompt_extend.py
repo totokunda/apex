@@ -9,9 +9,7 @@ from src.utils.defaults import (
     DEFAULT_CONFIG_SAVE_PATH,
     DEFAULT_DEVICE,
 )
-from src.preprocess.base import (
-    BasePreprocessor,
-    preprocessor_registry,
+from src.helpers.base import (
     PreprocessorType,
     BaseOutput,
 )
@@ -36,8 +34,7 @@ ONLY output the extended prompt—no preface, no headings, no quotes, no JSON. K
 Do not include commentary or instructions—return ONLY the final extended prompt."""
 
 
-@preprocessor_registry("prompt_extend")
-class PromptExtendPreprocessor(BasePreprocessor):
+class PromptExtendHelper(BaseHelper):
     """
     Generic prompt extension preprocessor backed by Hugging Face Transformers models.
 
