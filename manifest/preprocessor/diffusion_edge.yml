@@ -4,7 +4,7 @@ description: Advanced edge detection powered by diffusion models for high-qualit
   semantically-aware edge extraction. Produces cleaner, more perceptually meaningful
   edges compared to traditional methods. Excellent for artistic applications and complex
   scene understanding.
-module: src.auxillary.diffusion_edge
+module: src.preprocess.diffusion_edge
 name: Diffusion Edge
 parameters:
 - default: 512

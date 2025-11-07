@@ -4,7 +4,7 @@ description: Tiny and Efficient Edge Detector designed for speed without sacrifi
   quality. Lightweight neural network optimized for real-time edge detection. Iterative
   refinement with safe steps produces progressively cleaner edges. Excellent for mobile
   devices, video processing, and applications requiring fast edge detection.
-module: src.auxillary.teed
+module: src.preprocess.teed
 name: TEED Edge Detection
 parameters:
 - default: 512

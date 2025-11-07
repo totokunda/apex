@@ -4,7 +4,7 @@ description: Universal image segmentation framework that handles semantic, insta
   and panoptic segmentation in one model. Identifies and separates different objects
   and regions with per-class labeling. Excellent for scene understanding, object isolation,
   and creating detailed masks for complex scenes.
-module: src.auxillary.oneformer.transformers
+module: src.preprocess.oneformer.transformers
 name: OneFormer Segmentation
 parameters:
 - default: 512

@@ -4,7 +4,7 @@ description: Converts images to grayscale while preserving brightness structure 
   luminance or intensity calculation. Offers gamma correction for brightness adjustment.
   Useful for preparing images for colorization, creating base layers for artistic
   effects, or analyzing tonal distribution without color distraction.
-module: src.auxillary.recolor
+module: src.preprocess.recolor
 name: Recolor
 parameters:
 - default: luminance

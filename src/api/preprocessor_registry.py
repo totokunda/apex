@@ -76,7 +76,7 @@ upscale_method_parameter = {
 # Enhanced registry with parameter definitions for all preprocessors
 PREPROCESSOR_REGISTRY = {
     "anime_face_segment": {
-        "module": "src.auxillary.anime_face_segment",
+        "module": "src.preprocess.anime_face_segment",
         "class": "AnimeFaceSegmentor",
         "name": "Anime Face Segmentation",
         "description": "Detects and segments anime-style faces from images using specialized neural networks trained on anime artwork. Accurately isolates facial regions from anime characters and can optionally remove the background to extract just the face.",
@@ -90,7 +90,7 @@ PREPROCESSOR_REGISTRY = {
         ]
     },
     "binary": {
-        "module": "src.auxillary.binary",
+        "module": "src.preprocess.binary",
         "class": "BinaryDetector",
         "name": "Binary Threshold",
         "description": "Converts images to pure black and white using threshold-based segmentation. Pixels above the threshold become white, below become black. Useful for creating high-contrast masks, extracting silhouettes, or preparing images for stylized effects.",
@@ -104,7 +104,7 @@ PREPROCESSOR_REGISTRY = {
         ]
     },
     "canny": {
-        "module": "src.auxillary.canny",
+        "module": "src.preprocess.canny",
         "class": "CannyDetector",
         "name": "Canny Edge Detection",
         "description": "Classic multi-stage edge detection algorithm developed by John Canny. Uses gradient analysis to identify edges with precise localization and minimal false positives. Ideal for detecting clear, well-defined edges in photos and architectural images.",
@@ -120,7 +120,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "color": {
         "category": "Color",
-        "module": "src.auxillary.color",
+        "module": "src.preprocess.color",
         "class": "ColorDetector",
         "name": "Color Palette",
         "description": "Extracts and visualizes the dominant color palette from an image. Analyzes the image to identify the main colors present and creates a simplified color-block representation. Useful for color analysis, style transfer preparation, and creating color reference guides.",
@@ -132,7 +132,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "densepose": {
         "category": "Face and Pose",
-        "module": "src.auxillary.densepose",
+        "module": "src.preprocess.densepose",
         "class": "DenseposeDetector",
         "name": "DensePose",
         "description": "Maps all human pixels in an image to a 3D surface model of the body. Provides dense correspondence between 2D image pixels and 3D body surface, enabling detailed body shape understanding. Excellent for human body analysis, pose transfer, and avatar creation.",
@@ -159,7 +159,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "depth_anything": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.depth_anything.transformers",
+        "module": "src.preprocess.depth_anything.transformers",
         "class": "DepthAnythingDetector",
         "name": "Depth Anything",
         "description": "State-of-the-art monocular depth estimation that works reliably across diverse scenes and conditions. Trained on massive datasets to handle any image type from indoor scenes to outdoor landscapes. Produces accurate relative depth maps showing distance from camera.",
@@ -172,7 +172,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "depth_anything_v2": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.depth_anything_v2",
+        "module": "src.preprocess.depth_anything_v2",
         "class": "DepthAnythingV2Detector",
         "name": "Depth Anything V2",
         "description": "Enhanced version of Depth Anything with improved accuracy and finer detail preservation. Offers multiple model sizes to balance between speed and quality. Better at handling challenging scenes with transparent objects, reflections, and complex depth variations.",
@@ -192,7 +192,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "diffusion_edge": {
         "category": "Line",
-        "module": "src.auxillary.diffusion_edge",
+        "module": "src.preprocess.diffusion_edge",
         "class": "DiffusionEdgeDetector",
         "name": "Diffusion Edge",
         "description": "Advanced edge detection powered by diffusion models for high-quality, semantically-aware edge extraction. Produces cleaner, more perceptually meaningful edges compared to traditional methods. Excellent for artistic applications and complex scene understanding.",
@@ -205,7 +205,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "dsine": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.dsine",
+        "module": "src.preprocess.dsine",
         "class": "DsineDetector",
         "name": "DSINE Normal Estimation",
         "description": "Estimates surface normal vectors for every pixel, showing the orientation of surfaces in 3D space. Uses deep learning to predict accurate normals even for complex geometries. Essential for relighting, 3D reconstruction, and understanding surface structure.",
@@ -218,7 +218,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "dwpose": {
         "category": "Face and Pose",
-        "module": "src.auxillary.dwpose",
+        "module": "src.preprocess.dwpose",
         "class": "DwposeDetector",
         "name": "DWPose",
         "description": "Comprehensive whole-body pose estimation capturing body, hands, and facial keypoints in a single unified model. Fast and accurate for real-time applications. Ideal for animation reference, motion analysis, and character pose extraction with granular control over which components to detect.",
@@ -235,7 +235,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "animalpose": {
         "category": "Face and Pose",
-        "module": "src.auxillary.dwpose",
+        "module": "src.preprocess.dwpose",
         "class": "AnimalPoseDetector",
         "name": "Animal Pose",
         "description": "Specialized pose estimation for animals using the RTMPose AP10k model trained on diverse animal species. Detects skeletal keypoints for quadrupeds and other animals. Perfect for wildlife photography analysis, pet videos, and animal animation reference.",
@@ -248,7 +248,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "hed": {
         "category": "Line",
-        "module": "src.auxillary.hed",
+        "module": "src.preprocess.hed",
         "class": "HEDdetector",
         "name": "HED Edge Detection",
         "description": "Holistically-Nested Edge Detection using deep learning to identify object boundaries and meaningful edges. Produces thicker, more object-aware edges than traditional methods. Great for converting photos to sketch-like representations and understanding scene structure.",
@@ -263,7 +263,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "leres": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.leres",
+        "module": "src.preprocess.leres",
         "class": "LeresDetector",
         "name": "LeReS Depth",
         "description": "Learning to Recover Shape (LeReS) for monocular depth estimation with optional boost mode for higher accuracy. Excels at recovering fine geometric details and sharp depth boundaries. Particularly effective for architectural scenes and objects with complex geometry.",
@@ -279,7 +279,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "lineart": {
         "category": "Line",
-        "module": "src.auxillary.lineart",
+        "module": "src.preprocess.lineart",
         "class": "LineartDetector",
         "name": "Line Art",
         "description": "Extracts clean line art from photographs and images using neural networks. Converts photos into black and white line drawings suitable for coloring, tracing, or artistic stylization. Offers coarse and fine line extraction modes for different artistic styles.",
@@ -293,7 +293,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "lineart_anime": {
         "category": "Line",
-        "module": "src.auxillary.lineart_anime",
+        "module": "src.preprocess.lineart_anime",
         "class": "LineartAnimeDetector",
         "name": "Line Art Anime",
         "description": "Specialized line art extraction optimized for anime and manga-style images. Trained specifically on anime artwork to produce clean, consistent lines that match anime aesthetic. Perfect for extracting linework from anime screenshots or converting photos to anime-style line art.",
@@ -306,7 +306,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "lineart_standard": {
         "category": "Line",
-        "module": "src.auxillary.lineart_standard",
+        "module": "src.preprocess.lineart_standard",
         "class": "LineartStandardDetector",
         "name": "Line Art Standard",
         "description": "General-purpose line art extraction with Gaussian smoothing for balanced results across different image types. Adjustable sigma parameter allows fine control over line smoothness. Versatile option for realistic photos, illustrations, and mixed content.",
@@ -320,7 +320,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "manga_line": {
         "category": "Line",
-        "module": "src.auxillary.manga_line",
+        "module": "src.preprocess.manga_line",
         "class": "LineartMangaDetector",
         "name": "Manga Line Art",
         "description": "Specialized for manga-style line extraction with emphasis on the bold, dynamic linework characteristic of manga art. Produces high-contrast black and white lines matching traditional manga inking. Ideal for manga panels, comic art, and graphic novel preparation.",
@@ -333,7 +333,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "mediapipe_face": {
         "category": "Face and Pose",
-        "module": "src.auxillary.mediapipe_face",
+        "module": "src.preprocess.mediapipe_face",
         "class": "MediapipeFaceDetector",
         "name": "MediaPipe Face",
         "description": "Real-time 3D face mesh detection with 468 facial landmarks using Google's MediaPipe framework. Tracks detailed facial features including eyes, eyebrows, nose, lips, and face contour. Optimized for speed and works well even on mobile devices. Perfect for AR filters, facial animation, and expression analysis.",
@@ -348,7 +348,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "mesh_graphormer": {
         "category": "Face and Pose",
-        "module": "src.auxillary.mesh_graphormer",
+        "module": "src.preprocess.mesh_graphormer",
         "class": "MeshGraphormerDetector",
         "name": "Mesh Graphormer",
         "description": "Advanced 3D hand mesh reconstruction from single images using graph convolutional networks. Recovers detailed 3D hand geometry including finger positions and joints. Excellent for hand tracking, gesture recognition, sign language analysis, and creating hand animations.",
@@ -362,7 +362,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "metric3d": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.metric3d",
+        "module": "src.preprocess.metric3d",
         "class": "Metric3DDetector",
         "name": "Metric3D",
         "description": "Produces metric (absolute scale) depth maps and surface normals from single images. Unlike relative depth, provides real-world distance measurements when camera parameters are known. Can output both depth and normal maps or normals only. Ideal for robotics, AR applications, and precise 3D reconstruction.",
@@ -378,7 +378,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "midas": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.midas.transformers",
+        "module": "src.preprocess.midas.transformers",
         "class": "MidasDetector",
         "name": "MiDaS Depth",
         "description": "Robust monocular depth estimation trained on diverse datasets for generalization across scene types. One of the most widely-used depth estimators with proven reliability. Produces smooth, consistent depth maps for indoor and outdoor scenes. Great general-purpose choice for depth-based effects and 3D scene understanding.",
@@ -391,7 +391,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "mlsd": {
         "category": "Line",
-        "module": "src.auxillary.mlsd",
+        "module": "src.preprocess.mlsd",
         "class": "MLSDdetector",
         "name": "M-LSD Line Detection",
         "description": "Mobile Line Segment Detection optimized for detecting straight lines and architectural features. Lightweight and fast while maintaining accuracy. Excels at finding structural lines in buildings, rooms, and geometric objects. Ideal for architectural visualization, perspective correction, and wireframe extraction.",
@@ -406,7 +406,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "normalbae": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.normalbae",
+        "module": "src.preprocess.normalbae",
         "class": "NormalBaeDetector",
         "name": "Normal BAE",
         "description": "Boundary-Aware Estimator for accurate surface normal prediction from single images. Produces high-quality normal maps with precise boundaries and fine geometric details. Particularly effective for objects with complex surface variations. Useful for relighting, material editing, and 3D reconstruction pipelines.",
@@ -419,7 +419,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "oneformer": {
         "category": "Segmentation",
-        "module": "src.auxillary.oneformer.transformers",
+        "module": "src.preprocess.oneformer.transformers",
         "class": "OneformerSegmentor",
         "name": "OneFormer Segmentation",
         "description": "Universal image segmentation framework that handles semantic, instance, and panoptic segmentation in one model. Identifies and separates different objects and regions with per-class labeling. Excellent for scene understanding, object isolation, and creating detailed masks for complex scenes.",
@@ -432,7 +432,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "open_pose": {
         "category": "Face and Pose",
-        "module": "src.auxillary.open_pose",
+        "module": "src.preprocess.open_pose",
         "class": "OpenposeDetector",
         "name": "OpenPose",
         "description": "Industry-standard multi-person pose estimation detecting body, hands, and face keypoints simultaneously. The original and most widely-used pose detection system. Robust multi-person tracking even in crowded scenes. Essential for motion capture, fitness analysis, dance videos, and character animation reference.",
@@ -449,7 +449,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "pidi": {
         "category": "Line",
-        "module": "src.auxillary.pidi",
+        "module": "src.preprocess.pidi",
         "class": "PidiNetDetector",
         "name": "PiDiNet Edge Detection",
         "description": "Pixel Difference Network for high-quality edge detection with minimal parameters. Efficient and accurate edge detector that works well across various image types. Offers safe mode and scribble output options. Good balance between quality and computational efficiency for edge-based applications.",
@@ -465,7 +465,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "ptlflow": {
         "category": "Optical Flow",
-        "module": "src.auxillary.ptlflow",
+        "module": "src.preprocess.ptlflow",
         "class": "PTLFlowDetector",
         "name": "PTLFlow Optical Flow",
         "description": "PyTorch Lightning-based optical flow estimation for analyzing motion between video frames. Computes pixel-level motion vectors showing how content moves across frames. Essential for video stabilization, motion analysis, frame interpolation, and understanding dynamic scenes. Outputs visualization or raw flow data.",
@@ -478,7 +478,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "pyracanny": {
         "category": "Line",
-        "module": "src.auxillary.pyracanny",
+        "module": "src.preprocess.pyracanny",
         "class": "PyraCannyDetector",
         "name": "Pyramid Canny",
         "description": "Multi-scale Canny edge detection using image pyramids to capture edges at different scales. Detects both fine details and large-scale structures in a single pass. More comprehensive than standard Canny for images with features at multiple scales. Great for complex scenes with varied detail levels.",
@@ -493,7 +493,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "rembg": {
         "category": "Background Removal",
-        "module": "src.auxillary.rembg",
+        "module": "src.preprocess.rembg",
         "class": "RembgDetector",
         "name": "Background Removal",
         "description": "Automatically removes backgrounds from images and videos using advanced segmentation. Accurately separates subjects from backgrounds with optional alpha matting for fine details like hair and fur. Supports post-processing for cleaner masks. Perfect for product photography, portraits, green screen replacement, and compositing.",
@@ -512,7 +512,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "recolor": {
         "category": "Color",
-        "module": "src.auxillary.recolor",
+        "module": "src.preprocess.recolor",
         "class": "Recolorizer",
         "name": "Recolor",
         "supports_alpha_channel": True,
@@ -528,7 +528,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "scribble": {
         "category": "Line",
-        "module": "src.auxillary.scribble",
+        "module": "src.preprocess.scribble",
         "class": "ScribbleDetector",
         "name": "Scribble",
         "description": "Generates simplified scribble-style edge representations from images. Converts photographs into loose, sketch-like drawings with casual, hand-drawn appearance. Perfect for creating artistic references, coloring book pages, and stylized visual effects that mimic quick sketch drawings.",
@@ -541,7 +541,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "scribble_xdog": {
         "category": "Line",
-        "module": "src.auxillary.scribble",
+        "module": "src.preprocess.scribble",
         "class": "ScribbleXDogDetector",
         "name": "Scribble XDoG",
         "description": "Extended Difference of Gaussians algorithm for creating artistic scribble effects with adjustable density. Uses advanced edge detection to produce variable-width sketch lines. Threshold control allows balancing between detailed, dense scribbles and sparse, clean lines. Great for non-photorealistic rendering and artistic stylization.",
@@ -555,7 +555,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "scribble_anime": {
         "category": "Line",
-        "module": "src.auxillary.scribble_anime",
+        "module": "src.preprocess.scribble_anime",
         "class": "ScribbleAnimeDetector",
         "name": "Scribble Anime",
         "description": "Neural network-based scribble generation optimized for anime and manga aesthetics. Produces loose, sketchy lines that match anime rough draft style. Trained on anime artwork to understand character features and composition. Ideal for anime sketch effects, animation pre-production references, and manga thumbnails.",
@@ -568,7 +568,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "shuffle": {
         "category": "Color",
-        "module": "src.auxillary.shuffle",
+        "module": "src.preprocess.shuffle",
         "class": "ContentShuffleDetector",
         "name": "Content Shuffle",
         "description": "Spatially shuffles image content using frequency-based noise patterns. Rearranges colors and textures while maintaining overall composition structure. Creates abstract, glitch-art effects. Useful for data augmentation, creative distortion effects, and generating variations while preserving color distribution. Controllable with seed for reproducibility.",
@@ -585,7 +585,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "teed": {
         "category": "Line",
-        "module": "src.auxillary.teed",
+        "module": "src.preprocess.teed",
         "class": "TEDDetector",
         "name": "TEED Edge Detection",
         "description": "Tiny and Efficient Edge Detector designed for speed without sacrificing quality. Lightweight neural network optimized for real-time edge detection. Iterative refinement with safe steps produces progressively cleaner edges. Excellent for mobile devices, video processing, and applications requiring fast edge detection.",
@@ -599,7 +599,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "tile": {
         "category": "Color",
-        "module": "src.auxillary.tile",
+        "module": "src.preprocess.tile",
         "class": "TileDetector",
         "name": "Tile Resample",
         "description": "Creates smooth color transitions using pyramid downsampling and upsampling. Repeatedly reduces then enlarges the image to blur fine details while preserving major color regions. Produces painterly, posterized effects with soft color gradients. Great for simplifying images, creating base layers, and stylized color blocking.",
@@ -612,7 +612,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "tile_gf": {
         "category": "Color",
-        "module": "src.auxillary.tile",
+        "module": "src.preprocess.tile",
         "class": "TTPlanet_Tile_Detector_GF",
         "name": "Tile Guided Filter",
         "description": "Advanced tile processing using guided filter for edge-preserving smoothing. Combines downsampling with intelligent filtering that maintains important edges while blurring textures. Better edge preservation than simple tile methods. Ideal for stylization that needs to keep subject boundaries sharp while simplifying detail.",
@@ -627,7 +627,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "tile_simple": {
         "category": "Color",
-        "module": "src.auxillary.tile",
+        "module": "src.preprocess.tile",
         "class": "TTPLanet_Tile_Detector_Simple",
         "name": "Tile Simple",
         "description": "Straightforward tile effect using downscaling and Gaussian blur. Simple approach for creating blocky, posterized color effects. Fast processing with basic color simplification. Good for quick stylization, reducing image complexity, and creating retro pixel-art inspired looks.",
@@ -640,7 +640,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "uniformer": {
         "category": "Segmentation",
-        "module": "src.auxillary.uniformer",
+        "module": "src.preprocess.uniformer",
         "class": "UniformerSegmentor",
         "name": "Uniformer Segmentation",
         "description": "Unified transformer architecture for semantic segmentation with both local and global attention. Accurately segments scenes into semantic categories like sky, road, buildings, vegetation, etc. Excellent balance of accuracy and efficiency. Ideal for scene parsing, autonomous driving visualization, and understanding spatial layout.",
@@ -653,7 +653,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "unimatch": {
         "category": "Optical Flow",
-        "module": "src.auxillary.unimatch",
+        "module": "src.preprocess.unimatch",
         "class": "UnimatchDetector",
         "name": "UniMatch Optical Flow",
         "description": "Unified correspondence matching framework for accurate optical flow with forward, backward, and bidirectional options. State-of-the-art flow estimation handling occlusions and large motions. Supports multiple flow directions for comprehensive motion analysis. Perfect for advanced video effects, motion compensation, and temporal consistency.",
@@ -668,7 +668,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "zoe": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.zoe.transformers",
+        "module": "src.preprocess.zoe.transformers",
         "class": "ZoeDetector",
         "name": "ZoeDepth",
         "description": "Zero-shot metric depth estimation combining relative depth prediction with metric scale recovery. Provides metric depth without requiring camera calibration in many cases. Works across indoor and outdoor scenes with good generalization. Excellent for applications needing real-world depth measurements like robotics and AR.",
@@ -681,7 +681,7 @@ PREPROCESSOR_REGISTRY = {
     },
     "zoe_depth_anything": {
         "category": "Depth and Normal",
-        "module": "src.auxillary.zoe.transformers",
+        "module": "src.preprocess.zoe.transformers",
         "class": "ZoeDepthAnythingDetector",
         "name": "ZoeDepth Anything",
         "description": "Combines ZoeDepth's metric depth capabilities with Depth Anything's robust feature extraction. Best of both worlds: metric scale accuracy with superior generalization across diverse scenes. Handles challenging conditions better than standard ZoeDepth. Ideal when you need both metric accuracy and reliability across varied content.",
@@ -757,7 +757,7 @@ def initialize_download_tracking():
     Initialize the download tracking file with preprocessors that don't require downloads.
     This should be called on app startup.
     """
-    from src.auxillary.base_preprocessor import BasePreprocessor
+    from src.preprocess.base_preprocessor import BasePreprocessor
     
     # Preprocessors that don't require downloads
     NO_DOWNLOAD_REQUIRED = [
@@ -791,7 +791,7 @@ def check_preprocessor_downloaded(preprocessor_name: str) -> bool:
         return True
     
     # Check the downloaded preprocessors tracking file
-    from src.auxillary.base_preprocessor import BasePreprocessor
+    from src.preprocess.base_preprocessor import BasePreprocessor
     return BasePreprocessor._is_downloaded(preprocessor_name)
 
 

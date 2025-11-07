@@ -5,7 +5,7 @@ description: Unified transformer architecture for semantic segmentation with bot
   like sky, road, buildings, vegetation, etc. Excellent balance of accuracy and efficiency.
   Ideal for scene parsing, autonomous driving visualization, and understanding spatial
   layout.
-module: src.auxillary.uniformer
+module: src.preprocess.uniformer
 name: Uniformer Segmentation
 parameters:
 - default: 512

@@ -4,7 +4,7 @@ description: Classic multi-stage edge detection algorithm developed by John Cann
   Uses gradient analysis to identify edges with precise localization and minimal false
   positives. Ideal for detecting clear, well-defined edges in photos and architectural
   images.
-module: src.auxillary.canny
+module: src.preprocess.canny
 name: Canny Edge Detection
 parameters:
 - default: 100

@@ -4,7 +4,7 @@ description: Estimates surface normal vectors for every pixel, showing the orien
   of surfaces in 3D space. Uses deep learning to predict accurate normals even for
   complex geometries. Essential for relighting, 3D reconstruction, and understanding
   surface structure.
-module: src.auxillary.dsine
+module: src.preprocess.dsine
 name: DSINE Normal Estimation
 parameters:
 - default: 512

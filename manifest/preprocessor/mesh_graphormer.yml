@@ -4,7 +4,7 @@ description: Advanced 3D hand mesh reconstruction from single images using graph
   networks. Recovers detailed 3D hand geometry including finger positions and joints.
   Excellent for hand tracking, gesture recognition, sign language analysis, and creating
   hand animations.
-module: src.auxillary.mesh_graphormer
+module: src.preprocess.mesh_graphormer
 name: Mesh Graphormer
 parameters:
 - default: 512

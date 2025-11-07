@@ -4,7 +4,7 @@ description: Extended Difference of Gaussians algorithm for creating artistic sc
   effects with adjustable density. Uses advanced edge detection to produce variable-width
   sketch lines. Threshold control allows balancing between detailed, dense scribbles
   and sparse, clean lines. Great for non-photorealistic rendering and artistic stylization.
-module: src.auxillary.scribble
+module: src.preprocess.scribble
 name: Scribble XDoG
 parameters:
 - default: 512

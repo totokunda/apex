@@ -4,7 +4,7 @@ description: Straightforward tile effect using downscaling and Gaussian blur. Si
   approach for creating blocky, posterized color effects. Fast processing with basic
   color simplification. Good for quick stylization, reducing image complexity, and
   creating retro pixel-art inspired looks.
-module: src.auxillary.tile
+module: src.preprocess.tile
 name: Tile Simple
 parameters:
 - default: 2.0

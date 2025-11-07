@@ -4,7 +4,7 @@ description: State-of-the-art monocular depth estimation that works reliably acr
   diverse scenes and conditions. Trained on massive datasets to handle any image type
   from indoor scenes to outdoor landscapes. Produces accurate relative depth maps
   showing distance from camera.
-module: src.auxillary.depth_anything.transformers
+module: src.preprocess.depth_anything.transformers
 name: Depth Anything
 parameters:
 - default: 512

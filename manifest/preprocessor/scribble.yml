@@ -4,7 +4,7 @@ description: Generates simplified scribble-style edge representations from image
   Converts photographs into loose, sketch-like drawings with casual, hand-drawn appearance.
   Perfect for creating artistic references, coloring book pages, and stylized visual
   effects that mimic quick sketch drawings.
-module: src.auxillary.scribble
+module: src.preprocess.scribble
 name: Scribble
 parameters:
 - default: 512

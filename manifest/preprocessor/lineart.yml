@@ -4,7 +4,7 @@ description: Extracts clean line art from photographs and images using neural ne
   Converts photos into black and white line drawings suitable for coloring, tracing,
   or artistic stylization. Offers coarse and fine line extraction modes for different
   artistic styles.
-module: src.auxillary.lineart
+module: src.preprocess.lineart
 name: Line Art
 parameters:
 - default: 512

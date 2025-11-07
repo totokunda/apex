@@ -4,7 +4,7 @@ description: Specialized line art extraction optimized for anime and manga-style
   Trained specifically on anime artwork to produce clean, consistent lines that match
   anime aesthetic. Perfect for extracting linework from anime screenshots or converting
   photos to anime-style line art.
-module: src.auxillary.lineart_anime
+module: src.preprocess.lineart_anime
 name: Line Art Anime
 parameters:
 - default: 512

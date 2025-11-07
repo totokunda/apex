@@ -4,7 +4,7 @@ description: Comprehensive whole-body pose estimation capturing body, hands, and
   keypoints in a single unified model. Fast and accurate for real-time applications.
   Ideal for animation reference, motion analysis, and character pose extraction with
   granular control over which components to detect.
-module: src.auxillary.dwpose
+module: src.preprocess.dwpose
 name: DWPose
 parameters:
 - default: 512

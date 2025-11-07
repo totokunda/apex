@@ -4,7 +4,7 @@ description: Real-time 3D face mesh detection with 468 facial landmarks using Go
   MediaPipe framework. Tracks detailed facial features including eyes, eyebrows, nose,
   lips, and face contour. Optimized for speed and works well even on mobile devices.
   Perfect for AR filters, facial animation, and expression analysis.
-module: src.auxillary.mediapipe_face
+module: src.preprocess.mediapipe_face
 name: MediaPipe Face
 parameters:
 - default: 1

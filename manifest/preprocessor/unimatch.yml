@@ -5,7 +5,7 @@ description: Unified correspondence matching framework for accurate optical flow
   occlusions and large motions. Supports multiple flow directions for comprehensive
   motion analysis. Perfect for advanced video effects, motion compensation, and temporal
   consistency.
-module: src.auxillary.unimatch
+module: src.preprocess.unimatch
 name: UniMatch Optical Flow
 parameters:
 - default: 512

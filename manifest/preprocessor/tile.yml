@@ -4,7 +4,7 @@ description: Creates smooth color transitions using pyramid downsampling and ups
   Repeatedly reduces then enlarges the image to blur fine details while preserving
   major color regions. Produces painterly, posterized effects with soft color gradients.
   Great for simplifying images, creating base layers, and stylized color blocking.
-module: src.auxillary.tile
+module: src.preprocess.tile
 name: Tile Resample
 parameters:
 - default: 3

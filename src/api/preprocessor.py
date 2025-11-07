@@ -354,7 +354,7 @@ def delete_preprocessor(preprocessor_name: str):
     """
     from src.api.preprocessor_registry import _load_preprocessor_yaml
     from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH
-    from src.auxillary.base_preprocessor import BasePreprocessor
+    from src.preprocess.base_preprocessor import BasePreprocessor
     try:
         info = _load_preprocessor_yaml(preprocessor_name)
     except ValueError as e:

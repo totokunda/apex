@@ -4,7 +4,7 @@ description: Learning to Recover Shape (LeReS) for monocular depth estimation wi
   optional boost mode for higher accuracy. Excels at recovering fine geometric details
   and sharp depth boundaries. Particularly effective for architectural scenes and
   objects with complex geometry.
-module: src.auxillary.leres
+module: src.preprocess.leres
 name: LeReS Depth
 parameters:
 - default: 512

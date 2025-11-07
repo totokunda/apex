@@ -4,7 +4,7 @@ description: Multi-scale Canny edge detection using image pyramids to capture ed
   at different scales. Detects both fine details and large-scale structures in a single
   pass. More comprehensive than standard Canny for images with features at multiple
   scales. Great for complex scenes with varied detail levels.
-module: src.auxillary.pyracanny
+module: src.preprocess.pyracanny
 name: Pyramid Canny
 parameters:
 - default: 100

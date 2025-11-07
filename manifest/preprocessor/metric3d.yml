@@ -4,7 +4,7 @@ description: Produces metric (absolute scale) depth maps and surface normals fro
   single images. Unlike relative depth, provides real-world distance measurements
   when camera parameters are known. Can output both depth and normal maps or normals
   only. Ideal for robotics, AR applications, and precise 3D reconstruction.
-module: src.auxillary.metric3d
+module: src.preprocess.metric3d
 name: Metric3D
 parameters:
 - default: 512

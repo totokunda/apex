@@ -3,7 +3,7 @@ class: BinaryDetector
 description: Converts images to pure black and white using threshold-based segmentation.
   Pixels above the threshold become white, below become black. Useful for creating
   high-contrast masks, extracting silhouettes, or preparing images for stylized effects.
-module: src.auxillary.binary
+module: src.preprocess.binary
 name: Binary Threshold
 parameters:
 - default: 0

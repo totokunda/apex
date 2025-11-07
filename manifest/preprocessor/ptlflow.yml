@@ -4,7 +4,7 @@ description: PyTorch Lightning-based optical flow estimation for analyzing motio
   between video frames. Computes pixel-level motion vectors showing how content moves
   across frames. Essential for video stabilization, motion analysis, frame interpolation,
   and understanding dynamic scenes. Outputs visualization or raw flow data.
-module: src.auxillary.ptlflow
+module: src.preprocess.ptlflow
 name: PTLFlow Optical Flow
 parameters:
 - default: 512

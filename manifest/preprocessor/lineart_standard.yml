@@ -4,7 +4,7 @@ description: General-purpose line art extraction with Gaussian smoothing for bal
   results across different image types. Adjustable sigma parameter allows fine control
   over line smoothness. Versatile option for realistic photos, illustrations, and
   mixed content.
-module: src.auxillary.lineart_standard
+module: src.preprocess.lineart_standard
 name: Line Art Standard
 parameters:
 - default: 512

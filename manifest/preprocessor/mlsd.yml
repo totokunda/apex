@@ -4,7 +4,7 @@ description: Mobile Line Segment Detection optimized for detecting straight line
   and architectural features. Lightweight and fast while maintaining accuracy. Excels
   at finding structural lines in buildings, rooms, and geometric objects. Ideal for
   architectural visualization, perspective correction, and wireframe extraction.
-module: src.auxillary.mlsd
+module: src.preprocess.mlsd
 name: M-LSD Line Detection
 parameters:
 - default: 512

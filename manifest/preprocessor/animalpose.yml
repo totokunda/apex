@@ -4,7 +4,7 @@ description: Specialized pose estimation for animals using the RTMPose AP10k mod
   trained on diverse animal species. Detects skeletal keypoints for quadrupeds and
   other animals. Perfect for wildlife photography analysis, pet videos, and animal
   animation reference.
-module: src.auxillary.dwpose
+module: src.preprocess.dwpose
 name: Animal Pose
 parameters:
 - default: 512

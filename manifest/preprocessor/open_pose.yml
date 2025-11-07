@@ -4,7 +4,7 @@ description: Industry-standard multi-person pose estimation detecting body, hand
   and face keypoints simultaneously. The original and most widely-used pose detection
   system. Robust multi-person tracking even in crowded scenes. Essential for motion
   capture, fitness analysis, dance videos, and character animation reference.
-module: src.auxillary.open_pose
+module: src.preprocess.open_pose
 name: OpenPose
 parameters:
 - default: 512

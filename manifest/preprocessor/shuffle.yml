@@ -5,7 +5,7 @@ description: Spatially shuffles image content using frequency-based noise patter
   Creates abstract, glitch-art effects. Useful for data augmentation, creative distortion
   effects, and generating variations while preserving color distribution. Controllable
   with seed for reproducibility.
-module: src.auxillary.shuffle
+module: src.preprocess.shuffle
 name: Content Shuffle
 parameters:
 - default: null

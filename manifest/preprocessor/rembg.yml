@@ -5,7 +5,7 @@ description: Automatically removes backgrounds from images and videos using adva
   matting for fine details like hair and fur. Supports post-processing for cleaner
   masks. Perfect for product photography, portraits, green screen replacement, and
   compositing.
-module: src.auxillary.rembg
+module: src.preprocess.rembg
 name: Background Removal
 parameters:
 - default: 512

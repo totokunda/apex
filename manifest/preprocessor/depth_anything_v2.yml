@@ -4,7 +4,7 @@ description: Enhanced version of Depth Anything with improved accuracy and finer
   preservation. Offers multiple model sizes to balance between speed and quality.
   Better at handling challenging scenes with transparent objects, reflections, and
   complex depth variations.
-module: src.auxillary.depth_anything_v2
+module: src.preprocess.depth_anything_v2
 name: Depth Anything V2
 parameters:
 - default: 512

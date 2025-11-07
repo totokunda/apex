@@ -4,7 +4,7 @@ description: Holistically-Nested Edge Detection using deep learning to identify 
   boundaries and meaningful edges. Produces thicker, more object-aware edges than
   traditional methods. Great for converting photos to sketch-like representations
   and understanding scene structure.
-module: src.auxillary.hed
+module: src.preprocess.hed
 name: HED Edge Detection
 parameters:
 - default: 512

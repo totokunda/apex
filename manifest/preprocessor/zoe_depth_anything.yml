@@ -5,7 +5,7 @@ description: 'Combines ZoeDepth''s metric depth capabilities with Depth Anything
   generalization across diverse scenes. Handles challenging conditions better than
   standard ZoeDepth. Ideal when you need both metric accuracy and reliability across
   varied content.'
-module: src.auxillary.zoe.transformers
+module: src.preprocess.zoe.transformers
 name: ZoeDepth Anything
 parameters:
 - default: 512

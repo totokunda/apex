@@ -4,7 +4,7 @@ description: Robust monocular depth estimation trained on diverse datasets for g
   across scene types. One of the most widely-used depth estimators with proven reliability.
   Produces smooth, consistent depth maps for indoor and outdoor scenes. Great general-purpose
   choice for depth-based effects and 3D scene understanding.
-module: src.auxillary.midas.transformers
+module: src.preprocess.midas.transformers
 name: MiDaS Depth
 parameters:
 - default: 512

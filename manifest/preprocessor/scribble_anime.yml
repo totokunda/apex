@@ -4,7 +4,7 @@ description: Neural network-based scribble generation optimized for anime and ma
   aesthetics. Produces loose, sketchy lines that match anime rough draft style. Trained
   on anime artwork to understand character features and composition. Ideal for anime
   sketch effects, animation pre-production references, and manga thumbnails.
-module: src.auxillary.scribble_anime
+module: src.preprocess.scribble_anime
 name: Scribble Anime
 parameters:
 - default: 512

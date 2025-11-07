@@ -4,7 +4,7 @@ description: Specialized for manga-style line extraction with emphasis on the bo
   dynamic linework characteristic of manga art. Produces high-contrast black and white
   lines matching traditional manga inking. Ideal for manga panels, comic art, and
   graphic novel preparation.
-module: src.auxillary.manga_line
+module: src.preprocess.manga_line
 name: Manga Line Art
 parameters:
 - default: 512

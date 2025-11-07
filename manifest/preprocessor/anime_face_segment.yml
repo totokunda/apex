@@ -3,7 +3,7 @@ class: AnimeFaceSegmentor
 description: Detects and segments anime-style faces from images using specialized
   neural networks trained on anime artwork. Accurately isolates facial regions from
   anime characters and can optionally remove the background to extract just the face.
-module: src.auxillary.anime_face_segment
+module: src.preprocess.anime_face_segment
 name: Anime Face Segmentation
 parameters:
 - default: 512

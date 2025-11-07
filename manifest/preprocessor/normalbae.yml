@@ -4,7 +4,7 @@ description: Boundary-Aware Estimator for accurate surface normal prediction fro
   single images. Produces high-quality normal maps with precise boundaries and fine
   geometric details. Particularly effective for objects with complex surface variations.
   Useful for relighting, material editing, and 3D reconstruction pipelines.
-module: src.auxillary.normalbae
+module: src.preprocess.normalbae
 name: Normal BAE
 parameters:
 - default: 512

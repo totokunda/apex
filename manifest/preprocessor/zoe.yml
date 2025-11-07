@@ -5,7 +5,7 @@ description: Zero-shot metric depth estimation combining relative depth predicti
   in many cases. Works across indoor and outdoor scenes with good generalization.
   Excellent for applications needing real-world depth measurements like robotics and
   AR.
-module: src.auxillary.zoe.transformers
+module: src.preprocess.zoe.transformers
 name: ZoeDepth
 parameters:
 - default: 512

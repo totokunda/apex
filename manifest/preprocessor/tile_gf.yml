@@ -4,7 +4,7 @@ description: Advanced tile processing using guided filter for edge-preserving sm
   Combines downsampling with intelligent filtering that maintains important edges
   while blurring textures. Better edge preservation than simple tile methods. Ideal
   for stylization that needs to keep subject boundaries sharp while simplifying detail.
-module: src.auxillary.tile
+module: src.preprocess.tile
 name: Tile Guided Filter
 parameters:
 - default: 2.0

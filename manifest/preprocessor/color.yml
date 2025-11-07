@@ -4,7 +4,7 @@ description: Extracts and visualizes the dominant color palette from an image. A
   the image to identify the main colors present and creates a simplified color-block
   representation. Useful for color analysis, style transfer preparation, and creating
   color reference guides.
-module: src.auxillary.color
+module: src.preprocess.color
 name: Color Palette
 parameters:
 - default: 512

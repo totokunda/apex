@@ -6,7 +6,7 @@ from pathlib import Path
 import ray
 import traceback
 from loguru import logger
-from src.auxillary.aux_cache import AuxillaryCache
+from src.preprocess.aux_cache import AuxillaryCache
 import importlib
 import os
 import torch
@@ -63,11 +63,11 @@ def download_preprocessor(preprocessor_name: str, job_id: str, ws_bridge) -> Dic
         preprocessor_class = getattr(module, preprocessor_info["class"])
         
         # Setup download progress tracking
-        from src.auxillary.download_tracker import DownloadProgressTracker
+        from src.preprocess.download_tracker import DownloadProgressTracker
         tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(p, m, md))
         
         # Monkey patch the download tracker into the module
-        from src.auxillary import util as util_module
+        from src.preprocess import util as util_module
         util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
         
         # Download/initialize
@@ -78,7 +78,7 @@ def download_preprocessor(preprocessor_name: str, job_id: str, ws_bridge) -> Dic
             logger.info(f"Preprocessor loaded successfully: {preprocessor_name}")
             
             # Mark as downloaded in tracking file
-            from src.auxillary.base_preprocessor import BasePreprocessor
+            from src.preprocess.base_preprocessor import BasePreprocessor
             BasePreprocessor._mark_as_downloaded(preprocessor_name)
             
         except Exception as load_error:
@@ -268,8 +268,8 @@ def run_preprocessor(
     preprocessor_class = getattr(module, preprocessor_info["class"])
 
     # Setup download progress tracking similar to download_preprocessor but scaled to 20%
-    from src.auxillary.download_tracker import DownloadProgressTracker
-    from src.auxillary import util as util_module
+    from src.preprocess.download_tracker import DownloadProgressTracker
+    from src.preprocess import util as util_module
     tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(0.05 + (max(0.0, min(1.0, float(p))) * 0.15), m, md))
     util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
     try:
@@ -280,7 +280,7 @@ def run_preprocessor(
     send_progress(0.2, "Preprocessor loaded")
     
     # Mark as downloaded in tracking file (in case it was loaded for the first time here)
-    from src.auxillary.base_preprocessor import BasePreprocessor
+    from src.preprocess.base_preprocessor import BasePreprocessor
     BasePreprocessor._mark_as_downloaded(preprocessor_name)
     
     def progress_callback(idx: int, total: int, message: str = None):

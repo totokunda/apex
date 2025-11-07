@@ -4,7 +4,7 @@ description: Pixel Difference Network for high-quality edge detection with minim
   parameters. Efficient and accurate edge detector that works well across various
   image types. Offers safe mode and scribble output options. Good balance between
   quality and computational efficiency for edge-based applications.
-module: src.auxillary.pidi
+module: src.preprocess.pidi
 name: PiDiNet Edge Detection
 parameters:
 - default: 512

@@ -4,7 +4,7 @@ description: Maps all human pixels in an image to a 3D surface model of the body
   Provides dense correspondence between 2D image pixels and 3D body surface, enabling
   detailed body shape understanding. Excellent for human body analysis, pose transfer,
   and avatar creation.
-module: src.auxillary.densepose
+module: src.preprocess.densepose
 name: DensePose
 parameters:
 - default: 512
