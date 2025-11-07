@@ -1,7 +1,21 @@
 import torch
 import torch.nn as nn
+try:
+    from src.utils.defaults import get_torch_device
+except ModuleNotFoundError:
+    import os
+    import sys
+    # Try to add the project root (parent of 'src') to sys.path
+    current_dir = os.path.dirname(__file__)
+    for i in range(6):
+        candidate = os.path.abspath(os.path.join(current_dir, *(['..'] * i)))
+        if os.path.isdir(os.path.join(candidate, 'src')):
+            if candidate not in sys.path:
+                sys.path.insert(0, candidate)
+            break
+    from src.utils.defaults import get_torch_device
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = get_torch_device()
 backwarp_tenGrid = {}
 
 
@@ -19,4 +33,5 @@ def warp(tenInput, tenFlow):
                          tenFlow[:, 1:2, :, :] / ((tenInput.shape[2] - 1.0) / 2.0)], 1)
 
     g = (backwarp_tenGrid[k] + tenFlow).permute(0, 2, 3, 1)
-    return torch.nn.functional.grid_sample(input=tenInput, grid=g, mode='bilinear', padding_mode='border', align_corners=True)
+    padding_mode = 'zeros' if tenInput.device.type == 'mps' else 'border'
+    return torch.nn.functional.grid_sample(input=tenInput, grid=g, mode='bilinear', padding_mode=padding_mode, align_corners=True)

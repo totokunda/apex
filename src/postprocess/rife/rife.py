@@ -113,6 +113,13 @@ class RifePostprocessor(BasePostprocessor):
                         shutil.copytree(src_model_dir, dst_model_dir)
                 except Exception:
                     pass
+                # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
+                try:
+                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    if engine_root not in sys.path:
+                        sys.path.insert(0, engine_root)
+                except Exception:
+                    pass
                 return os.path.join(save_rife_path, "train_log")
             os.makedirs(save_rife_path, exist_ok=True)
             path = self._download_from_url(model_dir, save_path=save_path)
@@ -136,6 +143,13 @@ class RifePostprocessor(BasePostprocessor):
             # Ensure import path points to directory that contains train_log/
             if save_rife_path not in sys.path:
                 sys.path.insert(0, save_rife_path)
+            # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
+            try:
+                engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                if engine_root not in sys.path:
+                    sys.path.insert(0, engine_root)
+            except Exception:
+                pass
             return os.path.join(save_rife_path, "train_log")
         else:
             # Local path: if it is the train_log directory, add its parent to sys.path
@@ -148,16 +162,37 @@ class RifePostprocessor(BasePostprocessor):
                 rife_dir = os.path.dirname(__file__)
                 if rife_dir not in sys.path:
                     sys.path.insert(0, rife_dir)
+                # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
+                try:
+                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    if engine_root not in sys.path:
+                        sys.path.insert(0, engine_root)
+                except Exception:
+                    pass
             else:
                 # If a parent contains train_log, prefer adding that parent
                 tl_candidate = os.path.join(abs_path, "train_log")
                 if os.path.isdir(tl_candidate) and abs_path not in sys.path:
                     sys.path.insert(0, abs_path)
+                    # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
+                    try:
+                        engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                        if engine_root not in sys.path:
+                            sys.path.insert(0, engine_root)
+                    except Exception:
+                        pass
                     return tl_candidate
                 # Fallback: expose local 'model' folder parent to sys.path
                 rife_dir = os.path.dirname(__file__)
                 if rife_dir not in sys.path:
                     sys.path.insert(0, rife_dir)
+                # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
+                try:
+                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    if engine_root not in sys.path:
+                        sys.path.insert(0, engine_root)
+                except Exception:
+                    pass
             return model_dir
 
     @torch.no_grad()
@@ -208,11 +243,8 @@ class RifePostprocessor(BasePostprocessor):
 
         # ---- 3) Prepare numpy frames like inference script ----
         # Ensure we use the model's actual device for all tensors
-        try:
-            model_device = next(self.model.parameters()).device
-        except StopIteration:
-            model_device = get_torch_device()
-        dev = model_device
+       
+        dev = get_torch_device()
         frames_np: List[np.ndarray] = []
         for im in frames:
             arr = np.asarray(im)
