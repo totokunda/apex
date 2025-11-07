@@ -12,7 +12,6 @@ import shutil
 import accelerate
 from src.utils.defaults import DEFAULT_CACHE_PATH
 from src.utils.module import find_class_recursive
-
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
 from src.mlx.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_MLX
@@ -55,12 +54,10 @@ from src.converters import (
     convert_transformer,
     convert_vae,
 )
-
 import numpy as np
 from PIL import Image
 from torchvision import transforms as TF
 import inspect
-from src.preprocess import preprocessor_registry
 from src.postprocess import postprocessor_registry
 from src.lora import LoraManager, LoraItem
 from src.helpers.helpers import helpers
@@ -384,13 +381,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self.logger.info(f"Loading {len(components_to_load)} components")
 
         self.load_components(components, components_to_load)
-        self.load_preprocessors(
-            config.get("preprocessors", []) or [], preprocessors_to_load
-        )
-
-        self.load_postprocessors(
-            config.get("postprocessors", []) or [], postprocessors_to_load
-        )
 
     @contextmanager
     def _progress_bar(self, total: int, desc: str | None = None, **kwargs):
@@ -414,103 +404,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         default_kwargs = self._get_default_kwargs("run")
         merged_kwargs = {**default_kwargs, **kwargs}
         if hasattr(self, "implementation_engine"):
-            args, kwargs = self.run_preprocessors(args, merged_kwargs)
-            out = self.implementation_engine.run(*args, **kwargs)
-            return self.run_postprocessors(out)
+            out = self.implementation_engine.run(*args, **merged_kwargs)
         else:
             raise NotImplementedError("Subclasses must implement this method")
-
-    def run_postprocessors(self, out):
-        self.load_postprocessors(self.config.get("postprocessors", []))
-        for postprocessor in self._postprocessors.values():
-            out = postprocessor["postprocessor"](out, **postprocessor["kwargs"])
-        return out
-
-    def run_preprocessors(self, args, kwargs):
-        # If no preprocessors configured, passthrough
-        preprocessors_cfg = self.config.get("preprocessors", []) or []
-        if len(preprocessors_cfg) == 0:
-            return args, kwargs
-
-        # Ensure preprocessors are loaded
-        self.load_preprocessors(preprocessors_cfg)
-
-        # Start with original kwargs intended for the model
-        kwargs_out = dict(kwargs)
-        
-        for key, preprocessor in self._preprocessors.items():
-
-            # Inspect signature and only pass supported kwargs
-            try:
-                call_sig = inspect.signature(preprocessor.__call__)
-                accepted_params = {
-                    name
-                    for name, p in call_sig.parameters.items()
-                    if name != "self"
-                    and p.kind
-                    in (
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        inspect.Parameter.KEYWORD_ONLY,
-                    )
-                }
-                has_var_kw = any(
-                    p.kind == inspect.Parameter.VAR_KEYWORD
-                    for p in call_sig.parameters.values()
-                )
-            except (TypeError, ValueError):
-                accepted_params = set()
-                has_var_kw = False
-
-            if has_var_kw:
-                call_kwargs = dict(kwargs_out)
-            else:
-                call_kwargs = {
-                    k: v for k, v in kwargs_out.items() if k in accepted_params
-                }
-
-            call_kwargs.update(preprocessor["kwargs"])
-            # Execute preprocessor
-            try:
-                result = preprocessor["preprocessor"](**call_kwargs)
-            except TypeError:
-                # As a last resort, try calling without kwargs if signature is unusual
-                result = preprocessor["preprocessor"](**preprocessor["kwargs"])
-
-            if result is None:
-                continue
-
-            # Read optional mapped_names from preprocessor config (if provided)
-            mapped_names = {}
-            try:
-                if hasattr(preprocessor, "name_map") and isinstance(
-                    getattr(preprocessor, "name_map"), dict
-                ):
-                    mapped_names = getattr(preprocessor, "name_map") or {}
-                elif hasattr(preprocessor, "kwargs") and isinstance(
-                    preprocessor.kwargs, dict
-                ):
-                    maybe_map = preprocessor.kwargs.get("name_map", {})
-                    if isinstance(maybe_map, dict):
-                        mapped_names = maybe_map
-            except Exception:
-                mapped_names = {}
-
-            # Merge outputs into kwargs_out with key remapping
-            try:
-                items_iter = (
-                    result.items() if hasattr(result, "items") else dict(result).items()
-                )
-            except Exception:
-                # If not dict-like, skip
-                items_iter = []
-
-            for out_key, out_val in items_iter:
-                target_key = mapped_names.get(out_key, out_key)
-                if out_val is not None:
-                    kwargs_out[target_key] = out_val
-
-        # Do not alter positional args
-        return args, kwargs_out
 
     def load_component(
         self,
@@ -1310,65 +1206,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 setattr(self, component.get("name"), component_module)
                 break
 
-    def load_preprocessor(self, config: Dict[str, Any]):
-        preprocessor_type = config.get("type")
-        preprocessor_class = preprocessor_registry.get(preprocessor_type)
-        if preprocessor_class is None:
-            raise ValueError(f"Preprocessor type {preprocessor_type} not supported")
-        kwargs = config.get("kwargs", {})
-        preprocessor = preprocessor_class(**config)
-        self._preprocessors[preprocessor_type] = {
-            "preprocessor": preprocessor,
-            "kwargs": kwargs,
-        }
-        return preprocessor
-
-    def load_preprocessors(
-        self,
-        preprocessors: List[Dict[str, Any]],
-        preprocessors_to_load: List[str] | None = None,
-    ):
-        for preprocessor in preprocessors:
-            if (
-                preprocessors_to_load is None
-                or (preprocessor.get("type") in preprocessors_to_load)
-                or (preprocessor.get("name") in preprocessors_to_load)
-            ):
-                self.load_preprocessor(preprocessor)
-
-    def load_postprocessor(self, config: Dict[str, Any]):
-        postprocessor_type = config.get("type")
-        if postprocessor_type in self._postprocessors:
-            return self._postprocessors[postprocessor_type]
-        postprocessor_class = postprocessor_registry.get(postprocessor_type)
-        if postprocessor_class is None:
-            raise ValueError(f"Postprocessor type {postprocessor_type} not supported")
-        # check if engine is part of signature of postprocessor_class
-        if "engine" in inspect.signature(postprocessor_class).parameters:
-            config["engine"] = self
-
-        kwargs = config.get("kwargs", {})
-        postprocessor = postprocessor_class(**config)
-        self._postprocessors[postprocessor_type] = {
-            "postprocessor": postprocessor,
-            "kwargs": kwargs,
-        }
-        return postprocessor
-
-    def load_postprocessors(
-        self,
-        postprocessors: List[Dict[str, Any]],
-        postprocessors_to_load: List[str] | None = None,
-    ):
-
-        for postprocessor in postprocessors:
-            if (
-                postprocessors_to_load is None
-                or (postprocessor.get("type") in postprocessors_to_load)
-                or (postprocessor.get("name") in postprocessors_to_load)
-            ):
-                self.load_postprocessor(postprocessor)
-
+   
     def apply_lora(self, lora_path: str):
         # Backward-compat shim: allow direct single-path call
         if self.transformer is None:
