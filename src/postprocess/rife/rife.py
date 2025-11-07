@@ -207,7 +207,12 @@ class RifePostprocessor(BasePostprocessor):
         progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = kwargs.get("progress_callback")
 
         # ---- 3) Prepare numpy frames like inference script ----
-        dev = get_torch_device()
+        # Ensure we use the model's actual device for all tensors
+        try:
+            model_device = next(self.model.parameters()).device
+        except StopIteration:
+            model_device = get_torch_device()
+        dev = model_device
         frames_np: List[np.ndarray] = []
         for im in frames:
             arr = np.asarray(im)
@@ -256,7 +261,16 @@ class RifePostprocessor(BasePostprocessor):
         # ---- 6) Main while loop replicated from inference_video.py ----
         from src.postprocess.rife.ssim import ssim_matlab as _ssim
 
-        pbar = tqdm(total=tot_frame)
+        # progress setup
+        total_steps = max(0, tot_frame - 1)
+        processed_steps = 0
+        if progress_callback and total_steps > 0:
+            try:
+                progress_callback(0, total_steps, "Starting interpolation")
+            except Exception:
+                pass
+
+        pbar = tqdm(total=tot_frame, desc="RIFE Interpolation")
         lastframe = frames_np[0]
         videogen = frames_np[1:]
         write_out: List[np.ndarray] = []
@@ -280,7 +294,7 @@ class RifePostprocessor(BasePostprocessor):
             I1 = pad_image(I1)
             I0_small = F.interpolate(I0, (32, 32), mode='bilinear', align_corners=False)
             I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
-            ssim = _ssim(I0_small[:, :3], I1_small[:, :3])
+            ssim = float(_ssim(I0_small[:, :3], I1_small[:, :3]))
 
             break_flag = False
             if ssim > 0.996:
@@ -296,7 +310,7 @@ class RifePostprocessor(BasePostprocessor):
                 I1 = pad_image(I1)
                 I1 = self.model.inference(I0, I1, scale=self.scale)
                 I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
-                ssim = _ssim(I0_small[:, :3], I1_small[:, :3])
+                ssim = float(_ssim(I0_small[:, :3], I1_small[:, :3]))
                 frame = (I1[0] * 255).byte().cpu().numpy().transpose(1, 2, 0)[:h, :w]
 
             if ssim < 0.2:
@@ -307,12 +321,17 @@ class RifePostprocessor(BasePostprocessor):
                 output = make_inference(I0, I1, multi - 1)
 
             # write frames (non-montage path)
-            write_out.put if False else None  # placeholder to mirror script structure
             write_out.append(lastframe)
             for mid in output:
                 mid_np = (((mid[0] * 255.0).byte().cpu().numpy().transpose(1, 2, 0)))
                 write_out.append(mid_np[:h, :w])
             pbar.update(1)
+            processed_steps += 1
+            if progress_callback and total_steps > 0:
+                try:
+                    progress_callback(processed_steps, total_steps, "Interpolating")
+                except Exception:
+                    pass
             lastframe = frame
             if break_flag:
                 break
@@ -320,6 +339,11 @@ class RifePostprocessor(BasePostprocessor):
         # finalize
         write_out.append(lastframe)
         pbar.close()
+        if progress_callback and total_steps > 0:
+            try:
+                progress_callback(total_steps, total_steps, "Finalizing")
+            except Exception:
+                pass
 
         # Convert to PIL Images
         out_images = [Image.fromarray(f.astype(np.uint8)) for f in write_out]
