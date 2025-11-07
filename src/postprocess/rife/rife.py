@@ -52,7 +52,7 @@ def _load_rife_model(model_dir: str, device: torch.device, logger=None):
         # Older implementations may not accept the second argument
         model.load_model(model_dir)
     model.eval()
-    model.device()
+    model.flownet.to(device)
     if logger:
         logger.info(f"Loaded RIFE model from: {model_dir}")
     return model
