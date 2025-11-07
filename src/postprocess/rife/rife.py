@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import sys
 import math
 import zipfile
+import shutil
 from typing import Any, List, Optional, Tuple, Union, Callable
 
 import numpy as np
@@ -13,8 +15,7 @@ import torch
 from torch.nn import functional as F
 from loguru import logger
 from src.utils.defaults import DEFAULT_POSTPROCESSOR_SAVE_PATH, DEFAULT_DEVICE
-from src.postprocess.rife.module import Model
-from src.postprocess.rife.ssim import ssim_matlab
+
 from src.postprocess.base import (
     BasePostprocessor,
     PostprocessorCategory,
@@ -30,8 +31,26 @@ def _load_rife_model(model_dir: str, device: torch.device, logger=None):
     """
     Import and load the RIFE model dynamically, matching the fallback chain used in the RIFE scripts.
     """
+    # Ensure the parent directory of train_log is on sys.path so we can import like inference script
+    try:
+        train_log_dir = os.path.abspath(model_dir)
+        parent_dir = os.path.dirname(train_log_dir)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        # Import Model exactly as in Practical-RIFE inference script
+        from train_log.RIFE_HDv3 import Model  # type: ignore
+    except Exception as e:
+        raise ImportError(f"Failed to import RIFE Model from {model_dir}: {e}")
+
     model = Model()
-    model.load_model(model_dir)
+    if not hasattr(model, "version"):
+        model.version = 0
+    # Mirror inference script load behavior (use -1 to select latest)
+    try:
+        model.load_model(model_dir, -1)
+    except TypeError:
+        # Older implementations may not accept the second argument
+        model.load_model(model_dir)
     model.eval()
     model.device()
     if logger:
@@ -62,7 +81,7 @@ class RifePostprocessor(BasePostprocessor):
         # Weights / code locations
         device: torch.device = DEFAULT_DEVICE,
         save_path: str = DEFAULT_POSTPROCESSOR_SAVE_PATH,
-        model_dir: str = "https://drive.google.com/uc?id=1gViYvvQrtETBgU1w8axZSsr7YUuw31uy",
+        model_dir: str = "https://drive.google.com/uc?id=1zlKblGuKNatulJNFf5jdB-emp9AqGK05",
         **kwargs: Any,
     ):
         super().__init__(engine, PostprocessorCategory.FRAME_INTERPOLATION, **kwargs)
@@ -83,16 +102,62 @@ class RifePostprocessor(BasePostprocessor):
             # check if the save_path exists
             save_rife_path = os.path.join(save_path, "rife")
             if os.path.exists(os.path.join(save_rife_path, "train_log")):
+                # Ensure import path for train_log
+                if save_rife_path not in sys.path:
+                    sys.path.insert(0, save_rife_path)
+                # Ensure Practical-RIFE 'model' folder is available alongside train_log
+                try:
+                    src_model_dir = os.path.join(os.path.dirname(__file__), "model")
+                    dst_model_dir = os.path.join(save_rife_path, "model")
+                    if os.path.isdir(src_model_dir) and not os.path.exists(dst_model_dir):
+                        shutil.copytree(src_model_dir, dst_model_dir)
+                except Exception:
+                    pass
                 return os.path.join(save_rife_path, "train_log")
             os.makedirs(save_rife_path, exist_ok=True)
             path = self._download_from_url(model_dir, save_path=save_path)
-            # extract from train_log directory and only extract the flownet.pkl file
-
+            # Extract full contents so Python modules under train_log are available
             with zipfile.ZipFile(path, "r") as zip_ref:
-                zip_ref.extract("train_log/flownet.pkl", save_rife_path)
-            os.remove(path)
+                zip_ref.extractall(save_rife_path)
+            # Remove the downloaded archive to save space
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+            except Exception:
+                pass
+            # Copy bundled 'model' folder next to extracted train_log to satisfy imports
+            try:
+                src_model_dir = os.path.join(os.path.dirname(__file__), "model")
+                dst_model_dir = os.path.join(save_rife_path, "model")
+                if os.path.isdir(src_model_dir) and not os.path.exists(dst_model_dir):
+                    shutil.copytree(src_model_dir, dst_model_dir)
+            except Exception:
+                pass
+            # Ensure import path points to directory that contains train_log/
+            if save_rife_path not in sys.path:
+                sys.path.insert(0, save_rife_path)
             return os.path.join(save_rife_path, "train_log")
         else:
+            # Local path: if it is the train_log directory, add its parent to sys.path
+            abs_path = os.path.abspath(model_dir)
+            parent_dir = os.path.dirname(abs_path)
+            if os.path.basename(abs_path) == "train_log":
+                if parent_dir not in sys.path:
+                    sys.path.insert(0, parent_dir)
+                # Also ensure our local 'model' folder parent is on sys.path for 'model.*' imports
+                rife_dir = os.path.dirname(__file__)
+                if rife_dir not in sys.path:
+                    sys.path.insert(0, rife_dir)
+            else:
+                # If a parent contains train_log, prefer adding that parent
+                tl_candidate = os.path.join(abs_path, "train_log")
+                if os.path.isdir(tl_candidate) and abs_path not in sys.path:
+                    sys.path.insert(0, abs_path)
+                    return tl_candidate
+                # Fallback: expose local 'model' folder parent to sys.path
+                rife_dir = os.path.dirname(__file__)
+                if rife_dir not in sys.path:
+                    sys.path.insert(0, rife_dir)
             return model_dir
 
     @torch.no_grad()
@@ -141,188 +206,121 @@ class RifePostprocessor(BasePostprocessor):
         # Optional progress callback (idx, total, message)
         progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = kwargs.get("progress_callback")
 
-        # ---- 3) Tensorify frames to device in [0,1], RGB, (F, C, H, W) ----
+        # ---- 3) Prepare numpy frames like inference script ----
         dev = get_torch_device()
-        t_list = []
+        frames_np: List[np.ndarray] = []
         for im in frames:
-            arr = np.asarray(im)  # HWC
+            arr = np.asarray(im)
             if arr.ndim == 2:
                 arr = np.expand_dims(arr, 2)
             if arr.shape[2] == 1:
-                arr = np.repeat(arr, 3, axis=2)  # grayscale → RGB
-            t = (
-                torch.tensor(arr.transpose(2, 0, 1), device=dev, dtype=torch.float32)
-                / 255.0
-            )  # C,H,W
-            t_list.append(t.unsqueeze(0))
-        seq = torch.cat(t_list, dim=0)  # (F, C, H, W)
+                arr = np.repeat(arr, 3, axis=2)
+            frames_np.append(arr)
 
-        F_total, C, H, W = seq.shape
-        total_steps = max(0, F_total - 1)
-        processed_steps = 0
-        if progress_callback and total_steps > 0:
-            try:
-                progress_callback(0, total_steps, "Starting interpolation")
-            except Exception:
-                pass
+        tot_frame = len(frames_np)
+        h, w, _ = frames_np[0].shape
 
-        # ---- 4) Padding logic (like script: multiples of 128/scale) ----
+        # ---- 4) Padding logic (like script) ----
         tmp = max(128, int(128 / self.scale))
-        ph = ((H - 1) // tmp + 1) * tmp
-        pw = ((W - 1) // tmp + 1) * tmp
-        padding = (0, pw - W, 0, ph - H)
+        ph = ((h - 1) // tmp + 1) * tmp
+        pw = ((w - 1) // tmp + 1) * tmp
+        padding = (0, pw - w, 0, ph - h)
 
-        def pad_image(x: torch.Tensor) -> torch.Tensor:
-            x = F.pad(x, padding)
-            return x
+        def pad_image(img: torch.Tensor) -> torch.Tensor:
+            return F.pad(img, padding)
 
-        def unpad_image(x: torch.Tensor) -> torch.Tensor:
-            return x[..., :H, :W]
-
-        # ---- 5) Version-aware make_inference (script parity) ----
+        # ---- 5) Version-aware make_inference (exact to script) ----
         version = float(getattr(self.model, "version", 0))
         if not hasattr(self.model, "version"):
-            # Mirror the script's behavior
             setattr(self.model, "version", version)
 
         def make_inference(I0: torch.Tensor, I1: torch.Tensor, n: int):
             if n <= 0:
                 return []
             if version >= 3.9:
-                # Evenly spaced t in (0,1) with n samples
-                return [
-                    self.model.inference(I0, I1, (i + 1) * 1.0 / (n + 1), self.scale)
-                    for i in range(n)
-                ]
+                res = []
+                for i in range(n):
+                    res.append(self.model.inference(I0, I1, (i + 1) * 1.0 / (n + 1), self.scale))
+                return res
             else:
-                # Classic recursive midpoint
-                mid = self.model.inference(I0, I1, self.scale)
+                middle = self.model.inference(I0, I1, self.scale)
                 if n == 1:
-                    return [mid]
-                left = make_inference(I0, mid, n // 2)
-                right = make_inference(mid, I1, n // 2)
-                return [*left, mid, *right] if (n % 2) else [*left, *right]
+                    return [middle]
+                first_half = make_inference(I0, middle, n // 2)
+                second_half = make_inference(middle, I1, n // 2)
+                if n % 2:
+                    return [*first_half, middle, *second_half]
+                else:
+                    return [*first_half, *second_half]
 
-        # ---- 6) SSIM helper (32x32 like script) ----
-        def to_small(x: torch.Tensor) -> torch.Tensor:
-            # x is 1,C,H,W in [0,1]
-            return F.interpolate(x, (32, 32), mode="bilinear", align_corners=False)
+        # ---- 6) Main while loop replicated from inference_video.py ----
+        from src.postprocess.rife.ssim import ssim_matlab as _ssim
 
-        # Prefer the RIFE SSIM if available; otherwise fallback already set in module
-        def ssim_val(a: torch.Tensor, b: torch.Tensor) -> float:
-            a32 = to_small(a)
-            b32 = to_small(b)
-            try:
-                from src.postprocess.rife.ssim import ssim_matlab as _ssim
+        pbar = tqdm(total=tot_frame)
+        lastframe = frames_np[0]
+        videogen = frames_np[1:]
+        write_out: List[np.ndarray] = []
 
-                return float(_ssim(a32[:, :3], b32[:, :3]))
-            except Exception:
-                # Lightweight proxy if module not importable
-                return max(0.0, 1.0 - (a32 - b32).abs().mean().item() * 4.0)
-
-        # ---- 7) Main loop (mirrors script ordering & gates) ----
-        # Use a deque so we can "push back" the real next frame when we insert a synthesized mid-frame on static scenes.
-        remaining = deque(
-            [seq[i : i + 1, ...] for i in range(1, F_total)]
-        )  # list of 1,C,H,W
-        cur = seq[0:1, ...]  # 1,C,H,W
-        cur_pad = pad_image(cur)
-
-        out_frames: List[torch.Tensor] = []
-        # The script writes the first original frame before any inserts of the first pair.
-        out_frames.append(unpad_image(cur_pad))  # write first frame
-
-        pbar = tqdm(total=F_total, desc="RIFE Interpolation")
+        I1 = torch.from_numpy(np.transpose(lastframe, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+        I1 = pad_image(I1)
+        temp = None
+        idx = 0
 
         while True:
-            if not remaining:
-                break
-            nxt = remaining.popleft()  # 1,C,H,W
-            nxt_pad = pad_image(nxt)
-
-            # SSIM gate between padded smalls (script computes on padded tensors downscaled to 32x32)
-            ssim = ssim_val(cur_pad, nxt_pad)
-
-            # Branching like the script
-            if ssim > 0.996:
-                # Read a new frame: here we synthesize the MID and push the real nxt back for the next iteration
-                mid_pad = (
-                    self.model.inference(cur_pad, nxt_pad, self.scale)
-                    if version < 3.9
-                    else self.model.inference(cur_pad, nxt_pad, 0.5, self.scale)
-                )
-                # Recompute ssim as in script (not used for branching beyond parity, but we keep it)
-                _ = ssim_val(cur_pad, mid_pad)
-
-                # Inserts between cur and mid
-                inserts = make_inference(cur_pad, mid_pad, n_inserts)
-                for m in inserts:
-                    out_frames.append(unpad_image(m))
-                # Then write the mid (this becomes the next "original" frame)
-                out_frames.append(unpad_image(mid_pad))
-
-                # Push the real next back for the following loop
-                remaining.appendleft(nxt)
-                # Advance cur to mid
-                cur_pad = pad_image(unpad_image(mid_pad))  # keep padding fresh
-                pbar.update(1)
-                processed_steps += 1
-                if progress_callback and total_steps > 0:
-                    try:
-                        progress_callback(processed_steps, total_steps, "Interpolating")
-                    except Exception:
-                        pass
-                continue
-
-            elif ssim < 0.2:
-                # Hard cut: duplicate previous frame (I0) n_inserts times
-                inserts = [cur_pad for _ in range(n_inserts)]
-                for m in inserts:
-                    out_frames.append(unpad_image(m))
-                # Write the real next frame
-                out_frames.append(unpad_image(nxt_pad))
-                # Advance
-                cur_pad = nxt_pad
-                pbar.update(1)
-                processed_steps += 1
-                if progress_callback and total_steps > 0:
-                    try:
-                        progress_callback(processed_steps, total_steps, "Interpolating")
-                    except Exception:
-                        pass
-                continue
-
+            if temp is not None:
+                frame = temp
+                temp = None
             else:
-                # Normal case: interpolate between cur and nxt
-                inserts = make_inference(cur_pad, nxt_pad, n_inserts)
-                for m in inserts:
-                    out_frames.append(unpad_image(m))
-                out_frames.append(unpad_image(nxt_pad))
-                cur_pad = nxt_pad
-                pbar.update(1)
-                processed_steps += 1
-                if progress_callback and total_steps > 0:
-                    try:
-                        progress_callback(processed_steps, total_steps, "Interpolating")
-                    except Exception:
-                        pass
-                continue
+                frame = videogen[idx] if idx < len(videogen) else None
+                idx += 1 if frame is not None else 0
+            if frame is None:
+                break
+            I0 = I1
+            I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+            I1 = pad_image(I1)
+            I0_small = F.interpolate(I0, (32, 32), mode='bilinear', align_corners=False)
+            I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
+            ssim = _ssim(I0_small[:, :3], I1_small[:, :3])
 
-        # ---- 8) Stack & normalize to [-1,1], (1, C, F_out, H, W) ----
-        torch_frames = torch.stack(out_frames, dim=0)  # (F_out, 1, C, H, W)
-        torch_frames = torch_frames.squeeze(1)  # (F_out, C, H, W)
+            break_flag = False
+            if ssim > 0.996:
+                # read a new frame
+                next_frame = videogen[idx] if idx < len(videogen) else None
+                idx += 1 if next_frame is not None else 0
+                if next_frame is None:
+                    break_flag = True
+                    frame = lastframe
+                else:
+                    temp = next_frame
+                I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+                I1 = pad_image(I1)
+                I1 = self.model.inference(I0, I1, scale=self.scale)
+                I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
+                ssim = _ssim(I0_small[:, :3], I1_small[:, :3])
+                frame = (I1[0] * 255).byte().cpu().numpy().transpose(1, 2, 0)[:h, :w]
+
+            if ssim < 0.2:
+                output = []
+                for _ in range(multi - 1):
+                    output.append(I0)
+            else:
+                output = make_inference(I0, I1, multi - 1)
+
+            # write frames (non-montage path)
+            write_out.put if False else None  # placeholder to mirror script structure
+            write_out.append(lastframe)
+            for mid in output:
+                mid_np = (((mid[0] * 255.0).byte().cpu().numpy().transpose(1, 2, 0)))
+                write_out.append(mid_np[:h, :w])
+            pbar.update(1)
+            lastframe = frame
+            if break_flag:
+                break
+
+        # finalize
+        write_out.append(lastframe)
         pbar.close()
-        frames = torch_frames.clamp(0, 1)
-        # convert to PIL Images
-        frames = [
-            Image.fromarray(
-                (frame.cpu().numpy().transpose(1, 2, 0) * 255.0).astype(np.uint8)
-            )
-            for frame in frames
-        ]
-        if progress_callback and total_steps > 0:
-            try:
-                progress_callback(total_steps, total_steps, "Finalizing")
-            except Exception:
-                pass
-        return frames
+
+        # Convert to PIL Images
+        out_images = [Image.fromarray(f.astype(np.uint8)) for f in write_out]
+        return out_images
