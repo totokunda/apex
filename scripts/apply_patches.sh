@@ -13,6 +13,7 @@ Options:
   --reverse | -R   Reverse-apply patches (unapply)
   --3way           Use 3-way merge when applying with git (default)
   --no-3way        Disable 3-way merge for git apply
+  --python-cmd CMD Python command to resolve site-packages (e.g. "conda run -n ENV python")
   -h | --help      Show this help and exit
 
 Environment:
@@ -30,6 +31,7 @@ PATCHES_DIR=${PATCHES_DIR:-patches}
 DRY_RUN=false
 REVERSE=false
 THREE_WAY=true
+PYTHON_CMD=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +46,9 @@ while [[ $# -gt 0 ]]; do
       THREE_WAY=true; shift ;;
     --no-3way)
       THREE_WAY=false; shift ;;
+    --python-cmd)
+      [[ $# -ge 2 ]] || { echo "Missing value for --python-cmd" >&2; exit 1; }
+      PYTHON_CMD="$2"; shift 2 ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -76,6 +81,20 @@ else
   IN_GIT=false
 fi
 
+# Choose a python command if not provided, used to locate site-packages for third-party packages
+if [[ -z "$PYTHON_CMD" ]]; then
+  # Prefer current conda environment python if available
+  if [[ -n "${CONDA_PREFIX:-}" && -x "$CONDA_PREFIX/bin/python" ]]; then
+    PYTHON_CMD="$CONDA_PREFIX/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_CMD="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_CMD="python"
+  else
+    PYTHON_CMD=""
+  fi
+fi
+
 apply_with_git() {
   local patch_file="$1"
   local args=()
@@ -104,33 +123,92 @@ failure_count=0
 
 echo "Using patches directory: $PATCHES_DIR"
 echo "Mode: ${DRY_RUN:+dry-run }${REVERSE:+reverse }${THREE_WAY:+3-way }apply"
+[[ -n "$PYTHON_CMD" ]] && echo "Python resolver: $PYTHON_CMD"
+
+# Determine the base directory to apply a patch from its first file path
+determine_base_dir() {
+  local patch_file="$1"
+  # Extract first path from 'diff --git a/xxx b/xxx'
+  local first_line
+  first_line=$(grep -m1 '^diff --git ' "$patch_file" || true)
+  if [[ -z "$first_line" ]]; then
+    echo "$ROOT_DIR"; return 0
+  fi
+  # Get the 'a/xxx' token and strip leading 'a/'
+  local a_path
+  a_path=$(echo "$first_line" | awk '{print $3}')
+  a_path=${a_path#a/}
+  # Top-level segment before '/'
+  local top_level="${a_path%%/*}"
+
+  # If path already starts with 'thirdparty/', stay at repo root
+  if [[ "$a_path" == thirdparty/* ]]; then
+    echo "$ROOT_DIR"; return 0
+  fi
+
+  # Try to resolve as a Python package (e.g., huggingface_hub, sam2)
+  if [[ -n "$PYTHON_CMD" && -n "$top_level" ]]; then
+    local site_parent
+    # The parent of the package directory contains the top-level path (e.g., site-packages)
+    site_parent=$($PYTHON_CMD - <<PYCODE 2>/dev/null || true
+import importlib, pathlib, sys
+name = "$top_level"
+try:
+    m = importlib.import_module(name)
+    p = pathlib.Path(m.__file__).resolve()
+    # Return the directory containing the top-level package directory
+    print(str(p.parent.parent if p.is_file() else p.parent))
+except Exception:
+    pass
+PYCODE
+)
+    if [[ -n "$site_parent" && -d "$site_parent/$top_level" ]]; then
+      echo "$site_parent"; return 0
+    fi
+  fi
+
+  # Default to repo root
+  echo "$ROOT_DIR"
+}
+
+apply_in_dir() {
+  local base_dir="$1"
+  local patch_file="$2"
+  # Ensure patch file path is absolute so we can read it after changing directories
+  local abs_patch_file
+  if [[ "$patch_file" = /* ]]; then
+    abs_patch_file="$patch_file"
+  else
+    abs_patch_file="$ROOT_DIR/$patch_file"
+  fi
+  pushd "$base_dir" >/dev/null
+  # Prefer git apply only if base_dir is inside a git work tree
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if apply_with_git "$abs_patch_file"; then
+      popd >/dev/null
+      return 0
+    fi
+    echo "git apply failed in $base_dir, attempting 'patch' fallback..."
+  fi
+  if apply_with_patch_cmd "$abs_patch_file"; then
+    popd >/dev/null
+    return 0
+  fi
+  popd >/dev/null
+  return 1
+}
 
 for patch_path in "${PATCH_FILES[@]}"; do
   patch_name=$(basename "$patch_path")
   echo "Applying $patch_name ..."
-
-  if $IN_GIT; then
-    if apply_with_git "$patch_path"; then
-      ((success_count++))
-      echo "✔ Applied $patch_name via git"
-    else
-      echo "git apply failed for $patch_name, attempting 'patch' fallback..."
-      if apply_with_patch_cmd "$patch_path"; then
-        ((success_count++))
-        echo "✔ Applied $patch_name via patch"
-      else
-        ((failure_count++))
-        echo "✖ Failed to apply $patch_name" >&2
-      fi
-    fi
+  base_dir=$(determine_base_dir "$patch_path")
+  echo " → Base directory resolved to: $base_dir"
+  if apply_in_dir "$base_dir" "$patch_path"; then
+    ((success_count++))
+    echo "✔ Applied $patch_name in $base_dir"
   else
-    if apply_with_patch_cmd "$patch_path"; then
-      ((success_count++))
-      echo "✔ Applied $patch_name via patch"
-    else
-      ((failure_count++))
-      echo "✖ Failed to apply $patch_name" >&2
-    fi
+    ((failure_count++))
+    echo "✖ Failed to apply $patch_name in $base_dir" >&2
   fi
 done
 

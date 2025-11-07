@@ -997,7 +997,6 @@ class UnifiedSAM2Predictor:
         model_path: str, 
         config_name: str, 
         model_type: ModelType = ModelType.SAM2_BASE_PLUS,
-        dtype_str: str = "float32",  # Pass as string to avoid torch pickling issues
         use_compile: bool = False,
         use_tf32: bool = True,
     ):
@@ -1014,14 +1013,6 @@ class UnifiedSAM2Predictor:
         # Get device inside actor
         self.device = get_torch_device()
 
-        # Convert dtype string to torch dtype
-        dtype_map = {
-            "float32": torch.float32,
-            "float16": torch.float16,
-            "bfloat16": torch.bfloat16,
-        }
-        self.dtype = dtype_map.get(dtype_str, torch.float32)
-        
         # Single video predictor for everything
         self._predictor = None
         
@@ -1031,7 +1022,7 @@ class UnifiedSAM2Predictor:
         self._max_cached_states = 5  # Increased from 3 for better caching
         
         self.logger.info(f"UnifiedSAM2Predictor initialized with config: {config_name}, "
-                   f"device: {self.device}, dtype: {self.dtype}, compile: {use_compile}")
+                   f"device: {self.device}, compile: {use_compile}")
     
     def get_predictor(self) -> UnifiedSAM2VideoPredictor:
         """Get or create the custom video predictor with optimizations."""
@@ -1055,11 +1046,6 @@ class UnifiedSAM2Predictor:
                 self.model_path, 
                 device=self.device
             )
-            
-            # Apply half precision if enabled
-            if self.dtype != torch.float32:
-                predictor = predictor.to(dtype=self.dtype)
-                self.logger.info(f"Converted model to {self.dtype}")
             
             # Apply torch.compile if enabled (PyTorch 2.0+)
             if self.use_compile:
@@ -1089,7 +1075,7 @@ class UnifiedSAM2Predictor:
         """Pre-warm the model to compile CUDA kernels."""
         try:
             self.logger.info("Warming up model...")
-            dummy_img = torch.rand(1, 3, 1024, 1024, device=self.device, dtype=self.dtype)
+            dummy_img = torch.rand(1, 3, 1024, 1024, device=self.device)
             with torch.inference_mode():
                 _ = self._predictor.forward_image(dummy_img)
             self.logger.info("Model warmup complete")
@@ -1654,14 +1640,13 @@ _PREDICTOR_SINGLETONS: dict = {}
 
 def get_sam2_predictor(
     model_type: ModelType = ModelType.SAM2_SMALL,
-    use_half_precision: bool = True,
     use_compile: bool = False,
     use_tf32: bool = True,
 ) -> UnifiedSAM2Predictor:
     """
     Get or create a singleton UnifiedSAM2Predictor in-process.
     """
-    key = (model_type.value, use_half_precision, use_compile, use_tf32)
+    key = (model_type.value, use_compile, use_tf32)
     if key in _PREDICTOR_SINGLETONS:
         return _PREDICTOR_SINGLETONS[key]
 
@@ -1670,28 +1655,11 @@ def get_sam2_predictor(
     model_path = loader._download(MODEL_WEIGHTS[model_type], save_path=DEFAULT_PREPROCESSOR_SAVE_PATH)
     config_name = MODEL_CONFIGS[model_type]
 
-    dtype_str = "float32"
-    if use_half_precision:
-        device = get_torch_device()
-        if device.type == "cuda":
-            try:
-                if torch.cuda.is_bf16_supported():
-                    dtype_str = "bfloat16"
-                    logger.info("Will use BFloat16 precision")
-                else:
-                    dtype_str = "float16"
-                    logger.info("Will use Float16 precision")
-            except Exception:
-                dtype_str = "float16"
-                logger.info("Will use Float16 precision")
-        else:
-            logger.info("Half precision not supported on non-CUDA device, using Float32")
 
     predictor = UnifiedSAM2Predictor(
         model_path=model_path,
         config_name=config_name,
         model_type=model_type,
-        dtype_str=dtype_str,
         use_compile=use_compile,
         use_tf32=use_tf32,
     )

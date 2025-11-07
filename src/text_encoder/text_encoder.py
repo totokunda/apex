@@ -69,9 +69,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self.model = None
         self.model_loaded = False
 
-    def load_model(self, no_weights: bool = False):
-        model = self._load_model(
-            {
+    def load_model(self, no_weights: bool = False, override_kwargs: Dict[str, Any] = None):
+        input_kwargs = dict(
+            component={
                 "config": self.model_config,
                 "config_path": self.config_path,
                 "model_path": self.model_path,
@@ -85,6 +85,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             key_map=self.config.get("key_map", {}),
             extra_kwargs=self.config.get("extra_kwargs", {}),
         )
+        if override_kwargs is not None:
+            input_kwargs.update(override_kwargs)
+        model = self._load_model(**input_kwargs)
         
         self.to_device(model, device=self.device)
 

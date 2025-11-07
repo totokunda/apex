@@ -357,7 +357,6 @@ def run_engine_from_manifest(
         from src.manifest.loader import validate_and_normalize
         from src.engine.registry import UniversalEngine
         from src.utils.defaults import DEFAULT_CACHE_PATH
-        import imageio
         import numpy as np
         from PIL import Image
         
@@ -373,11 +372,22 @@ def run_engine_from_manifest(
         if isinstance(model_type, list):
             model_type = model_type[0] if model_type else None
             
-        attention_type = selected_components.get("attention", {}).get("name", None)
-        engine = UniversalEngine(engine_type=engine_type, yaml_path=manifest_path, model_type=model_type, selected_components=selected_components, attention_type=attention_type)
+        attention_type = selected_components.pop("attention", {}).get("name", None)
+        input_kwargs = {
+            "engine_type": engine_type,
+            "yaml_path": manifest_path,
+            "model_type": model_type,
+            "selected_components": selected_components,
+        }
+        
+        if attention_type:
+            input_kwargs["attention_type"] = attention_type
+            
+        
+        engine = UniversalEngine(**input_kwargs)
 
         # Prepare job directory early (needed for previews)
-        job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / (job_id + "_" + str(time.time()))
+        job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / (job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 
         # Unified saver usable for previews and final outputs
@@ -446,6 +456,7 @@ def run_engine_from_manifest(
                 logger.info(f"Preview saved to {result_path} with media type {media_type}")
                 try:
                     # Send an update that does not overwrite progress (progress=None)
+                    logger.info(f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}")
                     send_progress(None, f"Preview frame {idx}", {
                         "status": "preview",
                         "preview_path": result_path,
@@ -460,7 +471,10 @@ def run_engine_from_manifest(
         # Progress callback forwarded into the engine
         def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
             send_progress(progress, message, metadata)
-
+        
+        import json 
+        json.dump(inputs, indent=4, fp=open("inputs.json", "w"))
+        
         output = engine.run(
             **(inputs or {}),
             progress_callback=progress_callback,

@@ -241,6 +241,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         mod_value=16,
         resize_mode=Image.Resampling.LANCZOS,
     ):
+        if max_area is None:
+            max_area = 720 * 1280
         aspect_ratio = image.height / image.width
         height = round(np.sqrt(max_area * aspect_ratio)) // mod_value * mod_value
         width = round(np.sqrt(max_area / aspect_ratio)) // mod_value * mod_value
@@ -1484,6 +1486,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             
             if component_type == "scheduler":
                 scheduler_options = component.get("scheduler_options")
+                if not scheduler_options:
+                    continue
                 selected_scheduler_option = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
                 for scheduler_option in scheduler_options:
                     if selected_scheduler_option['name'] == scheduler_option['name']:

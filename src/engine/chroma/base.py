@@ -289,7 +289,6 @@ class ChromaBaseEngine(BaseClass):
         Falls back to base implementation if preview dimensions are unavailable.
         
         """
-        self.logger.info(f"Rendering step {latents.shape} OVERRIDDEN")
         try:
             preview_height = getattr(self, "_preview_height", None)
             preview_width = getattr(self, "_preview_width", None)
@@ -301,10 +300,10 @@ class ChromaBaseEngine(BaseClass):
             )
             tensor_image = self.vae_decode(
                 unpacked, offload=getattr(self, "_preview_offload", True)
-            )[:, :, 0]
+            )
             image = self._tensor_to_frame(tensor_image)
-            render_on_step_callback(image)
-        except Exception:
+            render_on_step_callback(image[0])
+        except Exception as e:
             try:
                 super()._render_step(latents, render_on_step_callback)
             except Exception:

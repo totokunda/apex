@@ -96,7 +96,7 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                         model_paths = component.get("model_path", [])
                         if isinstance(model_paths, (str, dict)):
                             model_paths = [model_paths]
-                        model_ok = False
+                        model_ok = len(model_paths) == 0
                         for mp in model_paths:
                             if isinstance(mp, str):
                                 if DownloadMixin.is_downloaded(mp, get_components_path()) is not None:

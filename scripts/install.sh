@@ -420,7 +420,7 @@ fi
 
 # Install requirements from requirements.txt
 print_status "Installing requirements from requirements.txt..."
-$CONDA_RUN pip install -r requirements.txt
+#$CONDA_RUN pip install -r requirements.txt
 
 # Create thirdparty directory if it doesn't exist
 mkdir -p thirdparty
@@ -557,6 +557,11 @@ fi
 
 # Return to main directory
 cd ..
+
+# Apply patches 
+print_status "Applying patches..."
+bash scripts/apply_patches.sh --python-cmd "$CONDA_RUN python"
+print_success "Patches applied successfully."
 
 source ~/.bashrc
 

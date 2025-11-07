@@ -618,6 +618,18 @@ class DownloadMixin:
             repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:2])
 
             dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
+            # check if dest_path exists and is not empty
+            
+            if os.path.exists(dest_path) and os.listdir(dest_path):
+                if not subfolder:
+                    self.logger.info(f"Directory {dest_path} already exists and is not empty, skipping download.")
+                    return dest_path
+                else:
+                    # check if subfolder exists and is not empty
+                    subfolder_path = os.path.join(dest_path, *subfolder[0].split("/")[:-1])
+                    if os.path.exists(subfolder_path) and os.listdir(subfolder_path):
+                        self.logger.info(f"Directory {subfolder_path} already exists and is not empty, skipping download.")
+                        return subfolder_path
             # pass custom tqdm if supported by version
             # We use a temp directory to download the repository
             with tempfile.TemporaryDirectory() as tmp_dir:

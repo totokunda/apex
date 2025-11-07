@@ -7,9 +7,7 @@ import mimetypes
 
 from src.utils.defaults import get_cache_path, get_components_path
 
-
 router = APIRouter(prefix="/files", tags=["files"])
-
 
 def _base_for_scope(scope: str) -> Path:
     s = (scope or "").lower().strip()
@@ -21,9 +19,30 @@ def _base_for_scope(scope: str) -> Path:
 
 
 def _safe_join(base: Path, rel: str) -> Path:
-    rel_norm = (rel or "").lstrip("/\\")
-    target = (base / rel_norm).resolve()
-    if not str(target).startswith(str(base)):
+    base = base.resolve()
+    rel_input = (rel or "").strip()
+    if not rel_input.startswith("/"):
+        rel_input = "/" + rel_input
+
+    # If rel already includes the base at its start, strip it to avoid duplication
+    base_str = str(base)
+    if rel_input.startswith(base_str):
+        rel_stripped = rel_input[len(base_str):].lstrip("/\\")
+        rel_path = Path(rel_stripped)
+    else:
+        # Normalize leading separators for regular relative joins
+        rel_path = Path(rel_input.lstrip("/\\"))
+        # If an absolute path was provided, only allow it if it's under base
+        if rel_path.is_absolute():
+            try:
+                rel_path = rel_path.resolve().relative_to(base)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid path")
+
+    target = (base / rel_path).resolve()
+    try:
+        target.relative_to(base)
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
     return target
 

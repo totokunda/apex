@@ -21,9 +21,9 @@ spec:
     model_path: Qwen/Qwen-Image/vae
   - type: text_encoder
     base: Qwen2_5_VLForConditionalGeneration
-    model_path: Qwen/Qwen-Image/text_encoder
+    model_path: Qwen/Qwen-Image-Edit/text_encoder
     tokenizer_class: Qwen2Tokenizer
-    tokenizer_name: Qwen/Qwen-Image
+    tokenizer_name: Qwen/Qwen-Image-Edit
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: transformer
@@ -38,7 +38,6 @@ spec:
   defaults:
     run:
       num_inference_steps: 40
-      guidance_scale: 5.0
       return_latents: false
       text_encoder_kwargs: 
         add_special_tokens: false

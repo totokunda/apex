@@ -1,22 +1,20 @@
 import os
-os.environ["APEX_HOME_DIR"] = "/mnt/localssd"
 from src.engine import create_engine
+import json  
 import torch
-from diffusers.utils import export_to_video
 
+inputs = json.load(open("inputs.json", "r"))
 engine = create_engine("qwenimage", "qwenimage-edit-1-0-0-v1", "edit", attention_type="sdpa")
 
-prompt = "Give the guy a black fedora"
-negative_prompt=" "
-image = "assets/image/couple.jpg"
-video = engine.run(
-    image=image,
-    prompt=prompt,
-    negative_prompt=negative_prompt,
-    num_images=1,
-    num_inference_steps=50,
-    true_cfg_scale=4.0,
-    generator=torch.Generator(device="cuda").manual_seed(42)
+images = engine.run(
+    image=inputs["image"],
+    prompt=inputs["prompt"],
+    generator=torch.manual_seed(inputs["seed"]),
+    true_cfg_scale=inputs["true_cfg_scale"],
+    height=1024, 
+    width=1024,
+    negative_prompt=inputs["negative_prompt"],
+    num_inference_steps=inputs["num_inference_steps"],
 )
-video[0][0].save("test_qwenimage_edit_1_0_0_couple.png")   
-#export_to_video(video[0], "test_qwenimage_edit_1_0_0_dog.mp4", fps=16, quality=8)
+
+images[0].save("test_qwenimage_edit_1_0_0_couple+seed.png")   

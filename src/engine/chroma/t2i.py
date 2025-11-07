@@ -230,6 +230,6 @@ class ChromaT2IEngine(ChromaBaseEngine):
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
-        return [image]
+        return image
     
     

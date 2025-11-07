@@ -30,7 +30,7 @@ DEFAULT_LORA_SAVE_PATH = os.getenv(
     "APEX_LORA_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "loras")
 )
 
-# make sure all paths exist
+
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_COMPONENTS_PATH, exist_ok=True)

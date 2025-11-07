@@ -5,6 +5,7 @@ from .base import QwenImageBaseEngine
 import numpy as np
 from PIL import Image   
 from src.utils.progress import safe_emit_progress, make_mapped_progress
+from loguru import logger
 
 class QwenImageEditEngine(QwenImageBaseEngine):
     """QwenImage Edit Engine Implementation"""
@@ -19,7 +20,7 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
-        guidance_scale: float = 1.0,
+        guidance_scale: float | None = None,
         true_cfg_scale: float = 4.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
@@ -32,7 +33,7 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         timesteps: List[int] | None = None,
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
-    ):
+    ):  
 
         safe_emit_progress(progress_callback, 0.0, "Starting edit pipeline")
         safe_emit_progress(progress_callback, 0.05, "Loading image and resizing")
@@ -47,9 +48,10 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         
         batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
         loaded_image = self._load_image(image)
-        loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(loaded_image, max_area=height * width, mod_value=32)
+        max_area = height * width if height is not None and width is not None else None
+        loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(loaded_image, max_area=max_area, mod_value=32)
         safe_emit_progress(progress_callback, 0.10, "Image loaded and resized")
-        
+
         preprocessed_image = self.image_processor.preprocess(loaded_image).unsqueeze(2)
         if height is None:
             height = calculated_height
@@ -57,13 +59,18 @@ class QwenImageEditEngine(QwenImageBaseEngine):
             width = calculated_width
         safe_emit_progress(progress_callback, 0.15, "Resolved target dimensions and preprocessed image")
         
+        # get dtype 
+        dtype = self.component_dtypes["text_encoder"]
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
             image=loaded_image,
             device=self.device,
             num_images_per_prompt=num_images,
             text_encoder_kwargs=text_encoder_kwargs,
+            dtype=dtype,
         )
+        
+
         safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
         
         if negative_prompt is not None and use_cfg_guidance:
@@ -73,6 +80,7 @@ class QwenImageEditEngine(QwenImageBaseEngine):
                 device=self.device,
                 num_images_per_prompt=num_images,
                 text_encoder_kwargs=text_encoder_kwargs,
+                dtype=dtype,
             )
         else:
             negative_prompt_embeds = None
@@ -165,7 +173,7 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         )
 
         # handle guidance
-        if self.transformer.config.guidance_embeds:
+        if self.transformer.config.guidance_embeds and guidance_scale is not None:
             guidance = torch.full(
                 [1], guidance_scale, device=self.device, dtype=torch.float32
             )
@@ -235,6 +243,6 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
         image = self._tensor_to_frame(tensor_image)
         safe_emit_progress(progress_callback, 1.0, "Completed edit pipeline")
-        return [image]
+        return image
 
     

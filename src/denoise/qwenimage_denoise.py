@@ -65,16 +65,7 @@ class QwenImageDenoise(BaseClass):
             for i, t in enumerate(timesteps):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-                
-                if denoise_progress_callback is not None and total_steps > 0:
-                    try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
-                    except Exception:
-                        pass
-                
-                if render_on_step and render_on_step_callback:
-                    self._render_step(latents, render_on_step_callback)
-                continue
+
                 
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1)

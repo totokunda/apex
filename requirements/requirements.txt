@@ -3,7 +3,7 @@ einops==0.8.1
 ftfy==6.3.1
 gguf==0.17.1
 hf-transfer==0.1.9
-huggingface-hub==0.33.1
+huggingface-hub==0.35.3
 imageio==2.37.0
 loguru==0.7.3
 numpy==1.26.4
@@ -19,7 +19,7 @@ requests==2.32.4
 safetensors==0.5.3
 tokenizers==0.21.2
 tqdm==4.67.1
-transformers==4.51.3
+transformers==4.57.1
 urllib3==2.5.0
 google-cloud-storage
 azure-storage-blob
@@ -46,6 +46,9 @@ ray[default,dashboard]==2.40.0
 aiohttp
 aiohttp-cors
 grpcio
+honcho==2.0.0
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 websockets==14.1
+python-multipart==0.0.20
+av==16.0.1

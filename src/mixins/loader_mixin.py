@@ -97,9 +97,9 @@ class LoaderMixin(DownloadMixin):
                 hasattr(self, "engine_type")
                 and self.engine_type == "mlx"
                 and component.get("type") == "transformer"
-            ):
+            ) and load_dtype is not None:
                 extra_kwargs["dtype"] = load_dtype
-            else:
+            elif load_dtype is not None:
                 extra_kwargs["torch_dtype"] = load_dtype
                 
 
