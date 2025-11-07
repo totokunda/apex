@@ -496,3 +496,114 @@ def run_engine_from_manifest(
         except Exception:
             pass
         return {"job_id": job_id, "status": "error", "error": str(e), "traceback": tb}
+
+
+@ray.remote
+def run_frame_interpolation(
+    input_path: str,
+    target_fps: float,
+    job_id: str,
+    ws_bridge,
+    exp: Optional[int] = None,
+    scale: float = 1.0,
+) -> Dict[str, Any]:
+    """Run RIFE frame interpolation on a video and save an output video.
+
+    Args:
+        input_path: Path to input video file
+        target_fps: Desired output frames per second
+        job_id: Job id for websocket/job tracking
+        ws_bridge: Ray actor bridge for websocket updates
+        exp: Optional exponent for 2**exp interpolation (overrides target_fps if provided)
+        scale: RIFE scale (for UHD set 0.5)
+
+    Returns:
+        Dict with status, result_path and type
+    """
+    def send_update(progress: float | None, message: str, metadata: Optional[Dict[str, Any]] = None):
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
+        except Exception:
+            pass
+
+    from pathlib import Path
+    from src.utils.defaults import DEFAULT_CACHE_PATH
+    try:
+        from src.postprocess.rife.rife import RifePostprocessor
+        send_update(0.05, "Initializing RIFE")
+        pp = RifePostprocessor(target_fps=target_fps, exp=exp, scale=scale)
+
+        send_update(0.15, "Running frame interpolation")
+
+        # Wire progress from postprocessor (scale 0.2 -> 0.95)
+        def frame_progress(idx: int, total: int, message: Optional[str] = None):
+            try:
+                total = max(1, int(total))
+                frac = max(0.0, min(1.0, float(idx) / float(total)))
+                scaled = 0.20 + frac * 0.75
+                send_update(scaled, message or f"Interpolating {idx}/{total}")
+            except Exception:
+                pass
+
+        frames = pp(
+            input_path,
+            target_fps=target_fps,
+            exp=exp,
+            scale=scale,
+            progress_callback=frame_progress,
+        )
+
+        # Save output video (video-only first), then mux original audio if present
+        import subprocess
+        import shutil
+
+        job_dir = Path(DEFAULT_CACHE_PATH) / "postprocessor_results" / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        video_only_path = str(job_dir / "result_video.mp4")
+        final_out_path = str(job_dir / "result.mp4")
+
+        fps_to_write = int(max(1, round(target_fps)))
+        export_to_video(frames, video_only_path, fps=fps_to_write, quality=8.0)
+
+        # Try to mux audio from input_path into the final output without changing rate/tempo
+        # If no audio is present, fall back to the video-only file
+        try:
+            # Use ffmpeg with stream copy to preserve original audio rate/tempo
+            # -map 0:v:0 takes video from the first input (our generated video)
+            # -map 1:a:0? takes the first audio track from the second input if it exists
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", video_only_path,
+                "-i", input_path,
+                "-map", "0:v:0",
+                "-map", "1:a:0?",
+                "-c:v", "copy",
+                "-c:a", "copy",
+                "-shortest",
+                "-movflags", "+faststart",
+                final_out_path,
+            ]
+            proc = subprocess.run(ffmpeg_cmd, capture_output=True)
+            if proc.returncode != 0:
+                # If muxing failed (e.g., no audio stream), just use the video-only output
+                shutil.move(video_only_path, final_out_path)
+        except Exception:
+            # On any unexpected error, fall back to video-only output
+            try:
+                shutil.move(video_only_path, final_out_path)
+            except Exception:
+                # If move also fails, keep path consistent
+                final_out_path = video_only_path
+
+        send_update(1.0, "Complete", {"status": "complete", "result_path": final_out_path, "type": "video"})
+        return {"status": "complete", "result_path": final_out_path, "type": "video"}
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(tb)
+        try:
+            send_update(0.0, str(e), {"status": "error", "error": str(e)})
+        except Exception:
+            pass
+        return {"job_id": job_id, "status": "error", "error": str(e), "traceback": tb}

@@ -30,10 +30,16 @@ def warp(tenInput, tenFlow):
     )
 
     g = (backwarp_tenGrid[k] + tenFlow).permute(0, 2, 3, 1)
+    padding_mode = "border"
+    if tenInput.device.type == "mps":
+        # Emulate 'border' padding on MPS by clamping grid to valid range
+        eps = 1e-6
+        g = g.clamp(-1.0 + eps, 1.0 - eps)
+        padding_mode = "zeros"
     return torch.nn.functional.grid_sample(
         input=tenInput,
         grid=g,
         mode="bilinear",
-        padding_mode="border",
+        padding_mode=padding_mode,
         align_corners=True,
     )

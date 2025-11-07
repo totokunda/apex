@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import math
 import zipfile
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, Callable
 
 import numpy as np
+from src.types import InputVideo
 import torch
 from torch.nn import functional as F
 from loguru import logger
@@ -22,6 +23,7 @@ from src.postprocess.base import (
 from PIL import Image
 from collections import deque
 from tqdm import tqdm
+from src.utils.defaults import get_torch_device
 
 
 def _load_rife_model(model_dir: str, device: torch.device, logger=None):
@@ -94,7 +96,7 @@ class RifePostprocessor(BasePostprocessor):
             return model_dir
 
     @torch.no_grad()
-    def __call__(self, video, **kwargs) -> List[Image.Image]:
+    def __call__(self, video:InputVideo, **kwargs) -> List[Image.Image]:
         """
         RIFE interpolation that mirrors the provided reference script:
           - multi expansion (default 2, or 2**exp when exp != 1)
@@ -136,8 +138,11 @@ class RifePostprocessor(BasePostprocessor):
                 multi = 2
         n_inserts = multi - 1
 
+        # Optional progress callback (idx, total, message)
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = kwargs.get("progress_callback")
+
         # ---- 3) Tensorify frames to device in [0,1], RGB, (F, C, H, W) ----
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        dev = get_torch_device()
         t_list = []
         for im in frames:
             arr = np.asarray(im)  # HWC
@@ -146,12 +151,20 @@ class RifePostprocessor(BasePostprocessor):
             if arr.shape[2] == 1:
                 arr = np.repeat(arr, 3, axis=2)  # grayscale → RGB
             t = (
-                torch.from_numpy(arr.transpose(2, 0, 1)).to(dev).float() / 255.0
+                torch.tensor(arr.transpose(2, 0, 1), device=dev, dtype=torch.float32)
+                / 255.0
             )  # C,H,W
             t_list.append(t.unsqueeze(0))
         seq = torch.cat(t_list, dim=0)  # (F, C, H, W)
 
         F_total, C, H, W = seq.shape
+        total_steps = max(0, F_total - 1)
+        processed_steps = 0
+        if progress_callback and total_steps > 0:
+            try:
+                progress_callback(0, total_steps, "Starting interpolation")
+            except Exception:
+                pass
 
         # ---- 4) Padding logic (like script: multiples of 128/scale) ----
         tmp = max(128, int(128 / self.scale))
@@ -253,6 +266,12 @@ class RifePostprocessor(BasePostprocessor):
                 # Advance cur to mid
                 cur_pad = pad_image(unpad_image(mid_pad))  # keep padding fresh
                 pbar.update(1)
+                processed_steps += 1
+                if progress_callback and total_steps > 0:
+                    try:
+                        progress_callback(processed_steps, total_steps, "Interpolating")
+                    except Exception:
+                        pass
                 continue
 
             elif ssim < 0.2:
@@ -265,6 +284,12 @@ class RifePostprocessor(BasePostprocessor):
                 # Advance
                 cur_pad = nxt_pad
                 pbar.update(1)
+                processed_steps += 1
+                if progress_callback and total_steps > 0:
+                    try:
+                        progress_callback(processed_steps, total_steps, "Interpolating")
+                    except Exception:
+                        pass
                 continue
 
             else:
@@ -275,6 +300,12 @@ class RifePostprocessor(BasePostprocessor):
                 out_frames.append(unpad_image(nxt_pad))
                 cur_pad = nxt_pad
                 pbar.update(1)
+                processed_steps += 1
+                if progress_callback and total_steps > 0:
+                    try:
+                        progress_callback(processed_steps, total_steps, "Interpolating")
+                    except Exception:
+                        pass
                 continue
 
         # ---- 8) Stack & normalize to [-1,1], (1, C, F_out, H, W) ----
@@ -289,4 +320,9 @@ class RifePostprocessor(BasePostprocessor):
             )
             for frame in frames
         ]
+        if progress_callback and total_steps > 0:
+            try:
+                progress_callback(total_steps, total_steps, "Finalizing")
+            except Exception:
+                pass
         return frames

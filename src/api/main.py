@@ -4,6 +4,7 @@ from .manifest import router as manifest_router
 from .config import router as config_router
 from .engine import router as engine_router
 from .preprocessor import router as preprocessor_router
+from .postprocessor import router as postprocessor_router
 from .jobs import router as jobs_router
 from .mask import router as mask_router
 from .components import router as components_router
@@ -46,6 +47,7 @@ app.include_router(ws_router)
 app.include_router(manifest_router)
 app.include_router(config_router)
 app.include_router(preprocessor_router)
+app.include_router(postprocessor_router)
 app.include_router(mask_router)
 app.include_router(components_router)
 app.include_router(jobs_router)
