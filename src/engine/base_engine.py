@@ -190,7 +190,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self._init_logger()
         self.config = self._load_yaml(yaml_path)
 
-
         self.save_path = kwargs.get("save_path", None)
 
         for key, value in kwargs.items():
@@ -1321,7 +1320,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     
             component_type = component.get("type")
             component_name = component.get("name")
-            
+
             if component_type == "scheduler":
                 scheduler_options = component.get("scheduler_options")
                 if not scheduler_options:
@@ -1388,6 +1387,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 )
                 if downloaded_config_path:
                     postprocessor["config_path"] = downloaded_config_path
+                    
 
     def _get_latents(
         self,

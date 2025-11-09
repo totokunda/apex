@@ -1,0 +1,55 @@
+23:49:28 system | api.1 started (pid=318662)
+23:49:28 api.1  | INFO:     Will watch for changes in these directories: ['/home/tosin_coverquick_co/apex']
+23:49:28 api.1  | INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
+23:49:28 api.1  | INFO:     Started reloader process [318664] using WatchFiles
+23:49:33 api.1  | /home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/timm/models/layers/__init__.py:48: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+23:49:33 api.1  |   warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+23:49:35 api.1  | 2025-11-08 23:49:35,081	INFO worker.py:1812 -- Started a local Ray instance. View the dashboard at [1m[32m10.128.0.11:8265 [39m[22m
+23:49:35 api.1  | 2025-11-08 23:49:35.665 | INFO     | src.api.ray_app:<module>:31 - Ray initialized with {'node:__internal_head__': 1.0, 'node:10.128.0.11': 1.0, 'CPU': 26.0, 'object_store_memory': 71341758873.0, 'memory': 156464104039.0, 'GPU': 1.0, 'accelerator_type:H100': 1.0}
+23:49:35 api.1  | 2025-11-08 23:49:35.665 | INFO     | src.api.ray_app:<module>:32 - Ray dashboard available at http://localhost:8265
+23:49:35 api.1  | INFO:     Started server process [318681]
+23:49:35 api.1  | INFO:     Waiting for application startup.
+23:49:35 api.1  | 2025-11-08 23:49:35.704 | INFO     | src.api.preprocessor:poll_ray_updates:36 - Started polling Ray bridge for websocket updates
+23:49:35 api.1  | INFO:     Application startup complete.
+23:49:57 system | SIGINT received
+23:49:57 system | sending SIGTERM to api.1 (pid 318662)
+23:49:57 api.1  | *** SIGTERM received at time=1762645797 on cpu 22 ***
+23:49:57 api.1  | PC: @     0x77e25d129f10  (unknown)  epoll_pwait
+23:49:57 api.1  |     @     0x77e25d045330  1698217648  (unknown)
+23:49:57 api.1  |     @     0x77e25b937a63  (unknown)  uv__io_poll
+23:49:57 api.1  | [2025-11-08 23:49:57,029 E 318681 318681] logging.cc:447: *** SIGTERM received at time=1762645797 on cpu 22 ***
+23:49:57 api.1  | [2025-11-08 23:49:57,029 E 318681 318681] logging.cc:447: PC: @     0x77e25d129f10  (unknown)  epoll_pwait
+23:49:57 api.1  | [2025-11-08 23:49:57,029 E 318681 318681] logging.cc:447:     @     0x77e25d045330  1698217648  (unknown)
+23:49:57 api.1  | [2025-11-08 23:49:57,029 E 318681 318681] logging.cc:447:     @     0x77e25b937a63  (unknown)  uv__io_poll
+23:49:57 api.1  | ERROR:    Traceback (most recent call last):
+23:49:57 api.1  |   File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/asyncio/runners.py", line 44, in run
+23:49:57 api.1  |     return loop.run_until_complete(main)
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 1512, in uvloop.loop.Loop.run_until_complete
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 1505, in uvloop.loop.Loop.run_until_complete
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 1379, in uvloop.loop.Loop.run_forever
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 557, in uvloop.loop.Loop._run
+23:49:57 api.1  |   File "uvloop/handles/poll.pyx", line 216, in uvloop.loop.__on_uvpoll_event
+23:49:57 api.1  |   File "uvloop/cbhandles.pyx", line 83, in uvloop.loop.Handle._run
+23:49:57 api.1  |   File "uvloop/cbhandles.pyx", line 66, in uvloop.loop.Handle._run
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 399, in uvloop.loop.Loop._read_from_self
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 404, in uvloop.loop.Loop._invoke_signals
+23:49:57 api.1  |   File "uvloop/loop.pyx", line 379, in uvloop.loop.Loop._ceval_process_signals
+23:49:57 api.1  |   File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/ray/_private/worker.py", line 1481, in sigterm_handler
+23:49:57 api.1  |     sys.exit(signum)
+23:49:57 api.1  | SystemExit: 15
+23:49:57 api.1  | 
+23:49:57 api.1  | During handling of the above exception, another exception occurred:
+23:49:57 api.1  | 
+23:49:57 api.1  | Traceback (most recent call last):
+23:49:57 api.1  |   File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/starlette/routing.py", line 700, in lifespan
+23:49:57 api.1  |     await receive()
+23:49:57 api.1  |   File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/uvicorn/lifespan/on.py", line 137, in receive
+23:49:57 api.1  |     return await self.receive_queue.get()
+23:49:57 api.1  |   File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/asyncio/queues.py", line 159, in get
+23:49:57 api.1  |     await getter
+23:49:57 api.1  | asyncio.exceptions.CancelledError
+23:49:57 api.1  | 
+23:49:57 api.1  | [36m(RayWebSocketBridge pid=319117)[0m RayWebSocketBridge initialized
+23:49:57 api.1  | INFO:     Stopping reloader process [318664]
+23:49:57 system | api.1 stopped (rc=-15)
+23:49:57 system | SIGTERM received

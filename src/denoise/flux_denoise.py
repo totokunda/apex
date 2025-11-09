@@ -1,5 +1,6 @@
 import torch
 from src.utils.type import EnumType
+from src.utils.progress import safe_emit_progress
 
 
 class FluxDenoiseType(EnumType):
@@ -41,7 +42,9 @@ class FluxDenoise:
         render_on_step_callback = kwargs.get("render_on_step_callback")
         image_latents = kwargs.get("image_latents")
         concat_latents = kwargs.get("concat_latents")
+        denoise_progress_callback = kwargs.get("denoise_progress_callback")
 
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
 
@@ -117,5 +120,13 @@ class FluxDenoise:
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
                 ):
                     progress_bar.update()
+                
+                # external progress callback
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(len(timesteps)) if len(timesteps) > 0 else 1.0,
+                    f"Denoise {i + 1}/{len(timesteps)}",
+                )
 
+        safe_emit_progress(denoise_progress_callback, 1.0, "Denoise finished")
         return latents

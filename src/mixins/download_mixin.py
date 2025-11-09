@@ -598,6 +598,8 @@ class DownloadMixin:
                             tqdm_class=callback_tqdm,
                         )
                         shutil.move(curr_save_path, file_path)
+                        self.logger.info(f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}")
+                        return file_path
                 except TypeError as e:
                     self.logger.error(f"Failed to download from Hugging Face Hub: {repo_id}. Error: {e}")
                     curr_save_path = huggingface_hub.hf_hub_download(

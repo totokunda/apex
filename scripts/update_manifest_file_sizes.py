@@ -23,7 +23,7 @@ except Exception:
     RepoFolder = None  # type: ignore
 
 
-MANIFEST_ROOT = Path(__file__).resolve().parents[1] / "manifest_updated"
+MANIFEST_ROOT = Path(__file__).resolve().parents[1] / "manifest/engine"
 
 
 def is_url(path: str) -> bool:

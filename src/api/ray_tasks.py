@@ -552,6 +552,7 @@ def run_frame_interpolation(
             scale=scale,
             progress_callback=frame_progress,
         )
+        
 
         # Save output video (video-only first), then mux original audio if present
         import subprocess
@@ -589,7 +590,8 @@ def run_frame_interpolation(
             if proc.returncode != 0:
                 # If muxing failed (e.g., no audio stream), just use the video-only output
                 shutil.move(video_only_path, final_out_path)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to mux audio: {e}")
             # On any unexpected error, fall back to video-only output
             try:
                 shutil.move(video_only_path, final_out_path)

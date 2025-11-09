@@ -11,7 +11,7 @@ from src.utils.defaults import get_components_path
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
 # Base path to manifest directory
-MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest_updated/"
+MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "engine"
 
 class ManifestInfo(BaseModel):
     id: str

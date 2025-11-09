@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 import torch
 from src.utils.defaults import set_torch_device, get_torch_device, HOME_DIR,  set_cache_path, get_cache_path as get_cache_path_default, set_components_path, get_components_path as get_components_path_default
 
@@ -30,6 +31,13 @@ class ComponentsPathRequest(BaseModel):
 
 class ComponentsPathResponse(BaseModel):
     components_path: str
+
+class HuggingFaceTokenRequest(BaseModel):
+    token: str
+
+class HuggingFaceTokenResponse(BaseModel):
+    is_set: bool
+    masked_token: Optional[str] = None
 
 @router.get("/home-dir", response_model=HomeDirectoryResponse)
 def get_home_directory():
@@ -117,3 +125,27 @@ def set_components_path(request: ComponentsPathRequest):
         return ComponentsPathResponse(components_path=str(components_path))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set components path: {str(e)}")
+
+@router.get("/hf-token", response_model=HuggingFaceTokenResponse)
+def get_huggingface_token():
+    """Check if HUGGING_FACE_HUB_TOKEN is set; returns masked token if available"""
+    token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
+        return HuggingFaceTokenResponse(is_set=True, masked_token=masked)
+    return HuggingFaceTokenResponse(is_set=False, masked_token=None)
+
+@router.post("/hf-token", response_model=HuggingFaceTokenResponse)
+def set_huggingface_token(request: HuggingFaceTokenRequest):
+    """Set HUGGING_FACE_HUB_TOKEN for the running process"""
+    try:
+        token = (request.token or "").strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="Token cannot be empty")
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = token
+        masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
+        return HuggingFaceTokenResponse(is_set=True, masked_token=masked)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set HUGGING_FACE_HUB_TOKEN: {str(e)}")

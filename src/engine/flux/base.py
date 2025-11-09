@@ -1,6 +1,6 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING
+from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 from PIL import Image
 
 # Typing-only linkage to BaseEngine for IDE navigation and autocompletion,
@@ -262,7 +262,9 @@ class FluxBaseEngine(BaseClass):
 
         if not negative_prompt_2:
             negative_prompt_2 = negative_prompt
-
+            
+        
+        
         prompt_embeds = self.text_encoder_2.encode(
             prompt_2,
             device=self.device,
@@ -270,6 +272,9 @@ class FluxBaseEngine(BaseClass):
             output_type="hidden_states",
             **text_encoder_2_kwargs,
         )
+        
+        self.logger.info(f"Prompt embeds shape: {prompt_embeds.shape}")
+        self.logger.info(f"{self.text_encoder_2.model.config}")
 
         text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(
             device=self.device, dtype=prompt_embeds.dtype
@@ -411,3 +416,29 @@ class FluxBaseEngine(BaseClass):
         mask = mask.to(device=device, dtype=dtype)
 
         return mask, masked_image_latents
+
+    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
+        """Override: unpack latents for image decoding and render a preview frame.
+        
+        Falls back to base implementation if preview dimensions are unavailable.
+        """
+        self.logger.info(f"Rendering step {latents.shape} OVERRIDDEN")
+        try:
+            preview_height = getattr(self, "_preview_height", None)
+            preview_width = getattr(self, "_preview_width", None)
+            if preview_height is None or preview_width is None:
+                return super()._render_step(latents, render_on_step_callback)
+
+            unpacked = self._unpack_latents(
+                latents, preview_height, preview_width, self.vae_scale_factor
+            )
+            tensor_image = self.vae_decode(
+                unpacked, offload=getattr(self, "_preview_offload", True)
+            )
+            image = self._tensor_to_frame(tensor_image)
+            render_on_step_callback(image[0])
+        except Exception:
+            try:
+                super()._render_step(latents, render_on_step_callback)
+            except Exception:
+                pass
