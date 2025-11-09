@@ -4,6 +4,8 @@ from pathlib import Path
 import typer
 import torch 
 import multiprocessing
+from dotenv import load_dotenv
+load_dotenv()
 
 def _num_gpus():
     if torch.cuda.is_available():

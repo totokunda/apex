@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
-from src.utils.defaults import get_components_path
+from src.utils.defaults import get_components_path, get_config_path
 
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
@@ -68,23 +68,25 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                     component_ok = True
 
                     if comp_type == "scheduler":
-                        # For schedulers, validate the default option: if it has a config_path, it must be downloadable.
-                        default_name = component.get("default")
+                        # For schedulers, iterate all options: OK if any option with a config_path is downloaded.
                         options = component.get("scheduler_options", []) or []
-                        selected = None
-                        if isinstance(options, list) and default_name:
+                        if isinstance(options, list) and options:
+                            any_downloaded = False
+                            has_downloadable_config = False
                             for opt in options:
-                                if isinstance(opt, dict) and opt.get("name") == default_name:
-                                    selected = opt
-                                    break
-                        if selected is None and options:
-                            selected = options[0] if isinstance(options[0], dict) else None
-
-                        if selected and isinstance(selected, dict):
-                            sel_config_path = selected.get("config_path")
-                            
-                            if sel_config_path:
-                                component_ok = DownloadMixin.is_downloaded(sel_config_path, get_components_path()) is not None
+                                if not isinstance(opt, dict):
+                                    continue
+                                config_path = opt.get("config_path")
+                                if config_path:
+                                    has_downloadable_config = True
+                                    if DownloadMixin.is_downloaded(config_path, get_config_path()) is not None:
+                                        any_downloaded = True
+                                        break
+                                    if DownloadMixin.is_downloaded(config_path, get_components_path()) is not None:
+                                        any_downloaded = True
+                                        break
+                            if has_downloadable_config:
+                                component_ok = any_downloaded
                             else:
                                 # Built-in or inline-config schedulers don't require downloads
                                 component_ok = True
@@ -111,8 +113,10 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                         component_ok =  model_ok
                         
                     if not component_ok:
+                        print(f"Component {component.get('name') or component.get('type')} not ok for manifest {manifest_name}")
                         manifest_downloaded = False
                         break
+                
                 manifests.append(ManifestInfo(
                         id=file_data.get("metadata", {}).get("id", ""),
                         name=manifest_name,
@@ -357,16 +361,21 @@ def get_manifest_content(manifest_id: str):
             for option in options:
                 if option.get("config_path"):
                     has_downloadable_config = True
+                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_config_path())
+                    if is_downloaded is not None:
+                        is_scheduler_downloaded = True
+                        break
                     is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_components_path())
                     if is_downloaded is not None:
                         is_scheduler_downloaded = True
                         break
-                
+
             if not is_scheduler_downloaded and has_downloadable_config:
                 is_component_downloaded = False
             elif not has_downloadable_config:
                 is_component_downloaded = True
 
+        any_path_downloaded = False
         for index, model_path in enumerate(component.get("model_path", [])):
             # we check if model path is downloaded
             if isinstance(model_path, str):
@@ -384,9 +393,14 @@ def get_manifest_content(manifest_id: str):
                     model_path["path"] = is_downloaded
                 else:
                     model_path["is_downloaded"] = False
-                    is_component_downloaded = False
+                    any_path_downloaded = True
+        
             component["model_path"][index] = model_path
+        
+        if not any_path_downloaded and component.get("model_path", []):
+            is_component_downloaded = False
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
+        
                 
     return content

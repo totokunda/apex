@@ -96,6 +96,9 @@ def set_cache_path(path: str) -> None:
 def get_components_path() -> str:
     return DEFAULT_COMPONENTS_PATH
 
+def get_config_path() -> str:
+    return DEFAULT_CONFIG_SAVE_PATH
+
 def set_components_path(path: str) -> None:
     global DEFAULT_COMPONENTS_PATH
     DEFAULT_COMPONENTS_PATH = path

@@ -58,8 +58,7 @@ class FluxT2IEngine(FluxBaseEngine):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        
-        
+
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
 
         if offload:
@@ -128,7 +127,7 @@ class FluxT2IEngine(FluxBaseEngine):
             guidance = guidance.expand(latents.shape[0])
         else:
             guidance = None
-
+            
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
             negative_ip_adapter_image is None
             and negative_ip_adapter_image_embeds is None
@@ -147,6 +146,8 @@ class FluxT2IEngine(FluxBaseEngine):
                 ip_adapter_image
             ] * self.transformer.encoder_hid_proj.num_ip_adapters
 
+        joint_attention_kwargs = joint_attention_kwargs or {}
+
         image_embeds = None
         negative_image_embeds = None
         if ip_adapter_image is not None or ip_adapter_image_embeds is not None:
@@ -154,7 +155,7 @@ class FluxT2IEngine(FluxBaseEngine):
                 ip_adapter_image,
                 ip_adapter_image_embeds,
                 self.device,
-                num_images,
+                batch_size,
             )
         if (
             negative_ip_adapter_image is not None
@@ -164,7 +165,7 @@ class FluxT2IEngine(FluxBaseEngine):
                 negative_ip_adapter_image,
                 negative_ip_adapter_image_embeds,
                 self.device,
-                num_images,
+                batch_size,
             )
 
         # 6. Denoising loop
@@ -218,4 +219,4 @@ class FluxT2IEngine(FluxBaseEngine):
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed t2i pipeline")
-        return [image]
+        return image

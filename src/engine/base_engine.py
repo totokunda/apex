@@ -404,6 +404,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         merged_kwargs = {**default_kwargs, **kwargs}
         if hasattr(self, "implementation_engine"):
             out = self.implementation_engine.run(*args, **merged_kwargs)
+            return out
         else:
             raise NotImplementedError("Subclasses must implement this method")
 
@@ -769,7 +770,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 registry = TRANSFORMERS_REGISTRY_TORCH
                 dtype_converter = convert_dtype_to_torch
             
-            print(component)
+
             transformer = self._load_model(
                 component,
                 registry.get,
@@ -1326,18 +1327,27 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if not scheduler_options:
                     continue
                 selected_scheduler_option = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
-                for scheduler_option in scheduler_options:
-                    if selected_scheduler_option['name'] == scheduler_option['name']:
-                        component = selected_scheduler_option.copy()
-                        component['type'] = 'scheduler'
+                if not selected_scheduler_option:
+                    # take the first scheduler option
+                    selected_scheduler_option = scheduler_options[0]
+                else:
+                    for scheduler_option in scheduler_options:
+                        if selected_scheduler_option['name'] == scheduler_option['name']:
+                            component = selected_scheduler_option.copy()
+                            component['type'] = 'scheduler'
+                            break
             else:
                 model_path = component.get("model_path")
                 if isinstance(model_path, list):
                     selected_model_item = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
-                    for model_path_item in model_path:
-                        if selected_model_item.get('variant') == model_path_item.get('variant'):
-                            component['model_path'] = selected_model_item.get('path')
-                            break
+                    if not selected_model_item:
+                        # take the first model path item
+                        selected_model_item = model_path[0]
+                    else:
+                        for model_path_item in model_path:
+                            if selected_model_item.get('variant') == model_path_item.get('variant'):
+                                component['model_path'] = selected_model_item.get('path')
+                                break
                         
                 else:
                     downloaded_model_path = self._download(model_path, save_path)
@@ -1351,6 +1361,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     )
                     if downloaded_extra_model_path:
                         component["extra_model_paths"][i] = downloaded_extra_model_path
+
             self.config["components"][i] = component
 
         preprocessors = self.config.get("preprocessors", []) or []
@@ -1388,7 +1399,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if downloaded_config_path:
                     postprocessor["config_path"] = downloaded_config_path
                     
-
     def _get_latents(
         self,
         height: int,

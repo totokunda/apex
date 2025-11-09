@@ -473,7 +473,10 @@ def run_engine_from_manifest(
             send_progress(progress, message, metadata)
         
         import json 
-        json.dump(inputs, indent=4, fp=open("inputs.json", "w"))
+        json.dump({
+                "engine_kwargs": input_kwargs,
+                "inputs": inputs,
+            }, indent=4, fp=open("inputs.json", "w"))
         
         output = engine.run(
             **(inputs or {}),
@@ -481,7 +484,7 @@ def run_engine_from_manifest(
             render_on_step=True,
             render_on_step_callback=render_on_step_callback,
         )
-
+        
         # Persist final result using the unified saver
         result_path, media_type = save_output(output[0], filename_prefix="result", final=True)
 
