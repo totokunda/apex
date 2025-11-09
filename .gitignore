@@ -131,3 +131,4 @@ thirdparty/SageAttention
 InfiniteTalk/
 **/debug/*
 taming
+.env
