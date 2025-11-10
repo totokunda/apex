@@ -113,7 +113,6 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                         component_ok =  model_ok
                         
                     if not component_ok:
-                        print(f"Component {component.get('name') or component.get('type')} not ok for manifest {manifest_name}")
                         manifest_downloaded = False
                         break
                 
@@ -387,20 +386,23 @@ def get_manifest_content(manifest_id: str):
                 }
             else:
                 is_downloaded = DownloadMixin.is_downloaded(model_path.get("path"), get_components_path())
+                
 
                 if is_downloaded is not None:
                     model_path["is_downloaded"] = True
                     model_path["path"] = is_downloaded
+                    any_path_downloaded = True
                 else:
                     model_path["is_downloaded"] = False
-                    any_path_downloaded = True
+                    
         
             component["model_path"][index] = model_path
         
-        if not any_path_downloaded and component.get("model_path", []):
+        if not any_path_downloaded and len(component.get("model_path", [])) > 0:
             is_component_downloaded = False
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
+        
         
                 
     return content

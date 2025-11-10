@@ -521,6 +521,9 @@ def run_engine_from_manifest(
             return result_path, media_type
 
         total_steps = max(1, len(preprocessor_jobs) + 1)
+        
+        logger.info(f"Total steps: {total_steps}")
+        logger.info(f"Preprocessor jobs: {preprocessor_jobs}")
 
         for idx, job in enumerate(preprocessor_jobs):
             stage_start = idx / total_steps
