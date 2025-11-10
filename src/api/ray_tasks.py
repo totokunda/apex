@@ -530,6 +530,8 @@ def run_engine_from_manifest(
                 merged_meta = dict(metadata or {})
                 merged_meta.setdefault("stage", "preprocessor")
                 merged_meta.setdefault("input_id", job["input_id"])
+                if merged_meta.get("status") == "complete":
+                    merged_meta["status"] = "processing"
                 if local_progress is None:
                     send_progress(None, message, merged_meta)
                     return
