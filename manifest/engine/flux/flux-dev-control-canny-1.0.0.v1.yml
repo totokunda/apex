@@ -312,7 +312,7 @@ spec:
       panel: sampling
       required: false
       floating_panel: false
-      default: 3.5
+      default: 30
       min: 1.0
-      max: 15.0
+      max: 50.0
       step: 0.5
