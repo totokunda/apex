@@ -91,6 +91,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         
         self.to_device(model, device=self.device)
 
+
         return model
 
     def basic_clean(self, text):

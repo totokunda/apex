@@ -404,6 +404,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         merged_kwargs = {**default_kwargs, **kwargs}
         if hasattr(self, "implementation_engine"):
             out = self.implementation_engine.run(*args, **merged_kwargs)
+            return out
         else:
             raise NotImplementedError("Subclasses must implement this method")
 

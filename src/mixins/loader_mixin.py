@@ -134,20 +134,33 @@ class LoaderMixin(DownloadMixin):
                 # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
                 config_class = getattr(model_class, "config_class", PretrainedConfig)
                 conf = config_class(**config)
-                model = model_class.from_config(conf, **extra_kwargs)
+                model = model_class._from_config(conf, **extra_kwargs)
             else:
-                model = model_class.from_config(config, **extra_kwargs)
+                model = model_class._from_config(config, **extra_kwargs)
 
         if no_weights:
             return model
 
+
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")
-            and self.engine_type == "torch"
+            and self.engine_type == "mlx"
         ):
+
             self.logger.info(f"Loading GGUF model from {model_path}")
+            # Can load gguf directly into mlx model no need to convert
+            gguf_weights = mx.load(model_path)
+            check_mlx_convolutional_weights(gguf_weights, model)
+            model.load_weights(gguf_weights)
+            
+
+        elif (
+            model_path.endswith(".gguf")
+        ):
+            logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
+            logger.info(f"\n\n gguf_kwargs: {gguf_kwargs}\n\n")
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
@@ -159,17 +172,6 @@ class LoaderMixin(DownloadMixin):
             # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model(model)
             model.load_state_dict(state_dict, assign=True)
-
-        elif (
-            model_path.endswith(".gguf")
-            and hasattr(self, "engine_type")
-            and self.engine_type == "mlx"
-        ):
-            self.logger.info(f"Loading GGUF model from {model_path}")
-            # Can load gguf directly into mlx model no need to convert
-            gguf_weights = mx.load(model_path)
-            check_mlx_convolutional_weights(gguf_weights, model)
-            model.load_weights(gguf_weights)
         else:
             if os.path.isdir(model_path):
                 extensions = component.get(

@@ -7,6 +7,7 @@ from typing import Dict
 from src.quantize.ggml_tensor import GGMLTensor
 from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.utils.dtype import convert_str_dtype
+from loguru import logger
 
 T5_SD_MAP = {
     "enc.": "encoder.",

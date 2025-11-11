@@ -108,7 +108,7 @@ class DownloadMixin:
                         return True
                     allowed_extensions = {
                         "json","yaml","yml","toml","ini","cfg","conf",
-                        "bin","pt","pth","ckpt","safetensors","onnx","tflite","h5","hdf5","npz","pb","params","mar",
+                        "bin","pt","pth","ckpt","safetensors","gguf","onnx","tflite","h5","hdf5","npz","pb","params","mar",
                         "model","spm","vocab","merges",
                         "zip","tgz","gz","bz2","xz",
                     }
@@ -526,6 +526,7 @@ class DownloadMixin:
                 "pb",
                 "params",
                 "mar",
+                "gguf",
                 # Tokenizer/vocab related (often shipped with models)
                 "model",
                 "spm",
@@ -565,7 +566,6 @@ class DownloadMixin:
 
             if self._has_file_ending(repo_id):
                 # fetch the specific file
-
                 self.logger.info(
                     f"Downloading specific file from Hugging Face Hub: {repo_id}"
                 )
@@ -740,7 +740,7 @@ class DownloadMixin:
                     unit_scale=True,
                     unit_divisor=1024,
                 ) as bar:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=10000000):
                         if chunk:
                             tmp_file.write(chunk)
                             chunk_len = len(chunk)
