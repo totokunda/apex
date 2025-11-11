@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 
 from .base import WanBaseEngine
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class WanT2IEngine(WanBaseEngine):
@@ -33,8 +34,12 @@ class WanT2IEngine(WanBaseEngine):
         expand_timesteps: bool = False,
         ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
         enhance_kwargs: Dict[str, Any] = {},
+        progress_callback: Callable = None,
+        denoise_progress_callback: Callable = None,
         **kwargs,
     ):
+
+        safe_emit_progress(progress_callback, 0.0, "Starting t2i pipeline")
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -47,6 +52,7 @@ class WanT2IEngine(WanBaseEngine):
             num_videos_per_prompt=num_images,
             **text_encoder_kwargs,
         )
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
         
         batch_size = prompt_embeds.shape[0]
 
@@ -59,9 +65,15 @@ class WanT2IEngine(WanBaseEngine):
             )
         else:
             negative_prompt_embeds = None
+        safe_emit_progress(
+            progress_callback,
+            0.14,
+            "Prepared negative prompt" if negative_prompt_embeds is not None else "Skipped negative prompt",
+        )
 
         if offload:
             self._offload(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.16, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -69,6 +81,7 @@ class WanT2IEngine(WanBaseEngine):
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
+        safe_emit_progress(progress_callback, 0.20, "Prepared embeddings for transformer")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -84,6 +97,7 @@ class WanT2IEngine(WanBaseEngine):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
+        safe_emit_progress(progress_callback, 0.28, "Scheduler and timesteps prepared")
 
         vae_config = self.load_config_by_type("vae")
         vae_scale_factor_spatial = getattr(
@@ -106,6 +120,7 @@ class WanT2IEngine(WanBaseEngine):
             dtype=torch.float32,
             generator=generator,
         )
+        safe_emit_progress(progress_callback, 0.36, "Initialized latent noise")
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
@@ -113,6 +128,21 @@ class WanT2IEngine(WanBaseEngine):
             )
         else:
             boundary_timestep = None
+
+        # Reserve denoising progress range
+        mapped_denoise_progress = make_mapped_progress(progress_callback, 0.40, 0.92)
+        denoise_progress_callback = denoise_progress_callback or mapped_denoise_progress
+        safe_emit_progress(progress_callback, 0.40, "Starting denoising")
+
+        # Set preview context for step-wise rendering
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            self._preview_height = height
+            self._preview_width = width
+            self._preview_offload = offload
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -141,14 +171,21 @@ class WanT2IEngine(WanBaseEngine):
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
+            denoise_progress_callback=denoise_progress_callback,
         )
+        safe_emit_progress(progress_callback, 0.94, "Denoising complete")
 
         if offload:
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.96, "Transformer offloaded")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
             image = self._tensor_to_frame(tensor_image)
-            return [image]
+            safe_emit_progress(progress_callback, 1.0, "Completed t2i pipeline")
+            return image
+    
+    

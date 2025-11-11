@@ -1,12 +1,55 @@
 {
-    "prompt": "A lone astronomer on a quiet rooftop observatory at dusk, surrounded by antique brass telescopes and scattered handwritten star charts, warm amber lantern light glowing softly, a gigantic swirling nebula visible in the sky just beyond the atmosphere, ethereal colors rippling like watercolor, gentle breeze lifting pages, tone of wonder and discovery, cinematic composition, painterly textures, high detail, soft volumetric lighting, twilight palette of indigo and amber.",
-    "resolution": 720,
-    "aspect_ratio": 969,
-    "num_inference_steps": 50,
-    "height": 704,
-    "width": 1280,
-    "seed": 2610541731,
-    "true_cfg_scale": 1,
-    "guidance_scale": 3.5,
-    "duration": "5s"
+    "engine_kwargs": {
+        "engine_type": "wan",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/wan/wan-2.2-a14b-text-to-image-1.0.0.v1.yml",
+        "model_type": "t2i",
+        "selected_components": {
+            "scheduler": {
+                "name": "UniPCMultistepScheduler",
+                "base": "diffusers.UniPCMultistepScheduler",
+                "config_path": "Wan-AI/Wan2.2-T2V-A14B-Diffusers/scheduler/scheduler_config.json"
+            },
+            "wan/vae_2.2": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-T2V-A14B-Diffusers/transformer",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer_2": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-T2V-A14B-Diffusers/transformer_2",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            }
+        },
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "prompt": "A husky with a purple hat.",
+        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
+        "resolution": 1024,
+        "aspect_ratio": 61,
+        "num_inference_steps": 50,
+        "height": 1024,
+        "width": 1024,
+        "seed": 1871423827,
+        "guidance_scale": [
+            4,
+            3
+        ],
+        "boundary_ratio": 0.875,
+        "duration": "5s"
+    }
 }

@@ -35,6 +35,14 @@ class HidreamDenoise:
         render_on_step = kwargs.get("render_on_step")
         render_on_step_callback = kwargs.get("render_on_step_callback")
         guidance_scale = kwargs.get("guidance_scale")
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
+
+        total_steps = len(timesteps) if timesteps is not None else 0
+        if denoise_progress_callback is not None:
+            try:
+                denoise_progress_callback(0.0, "Starting denoise")
+            except Exception:
+                pass
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -83,6 +91,12 @@ class HidreamDenoise:
                 ):
                     progress_bar.update()
 
+                if denoise_progress_callback is not None and total_steps > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                    except Exception:
+                        pass
+
         return latents
 
     def edit_denoise(self, *args, **kwargs):
@@ -105,13 +119,21 @@ class HidreamDenoise:
         refine_strength = kwargs.get("refine_strength", 0.0)
         guidance_scale = kwargs.get("guidance_scale")
         image_guidance_scale = kwargs.get("image_guidance_scale")
+        denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
+
+        total_steps = len(timesteps) if timesteps is not None else 0
+        if denoise_progress_callback is not None:
+            try:
+                denoise_progress_callback(0.0, "Starting denoise")
+            except Exception:
+                pass
         
         if not self.transformer:
             self.load_component_by_type("transformer")
-            self.transformer.max_seq = 8192
             self.to_device(self.transformer)
+        
+        self.transformer.max_seq = 8192
             
-
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # === STAGE DETERMINATION ===
@@ -139,6 +161,7 @@ class HidreamDenoise:
                 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input_with_condition.shape[0])
+
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input_with_condition,
                     timesteps=timestep,
@@ -181,5 +204,11 @@ class HidreamDenoise:
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                
+                if denoise_progress_callback is not None and total_steps > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                    except Exception:
+                        pass
                     
         return latents

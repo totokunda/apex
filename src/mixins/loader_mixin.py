@@ -157,7 +157,6 @@ class LoaderMixin(DownloadMixin):
             check_mlx_convolutional_weights(gguf_weights, model)
             model.load_weights(gguf_weights)
             
-
         elif (
             model_path.endswith(".gguf")
         ):

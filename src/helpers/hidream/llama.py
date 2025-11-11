@@ -22,6 +22,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         enable_cache: bool = True,
         cache_file: str = None,
         max_cache_size: int = 100,
+        **kwargs,
     ):
         super().__init__()
         self.model_path = self._download(model_path, save_path)

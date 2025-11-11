@@ -65,6 +65,9 @@ class WanDenoise(WanDenoiseMLX):
         mask = mask_kwargs.get("mask", None)
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
 
+        total_steps = len(timesteps) if timesteps is not None else 0
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+
         with self._progress_bar(len(timesteps), desc=f"Sampling MOE") as pbar:
             total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
@@ -78,32 +81,59 @@ class WanDenoise(WanDenoiseMLX):
 
                 timestep = t.expand(latents.shape[0])
 
-                # Match pipeline behavior: use high-noise model (transformer_2) for early/high timesteps,
-                # and low-noise model (transformer) for later/low timesteps.
                 if boundary_timestep is not None and t >= boundary_timestep:
-                    # Early/high-noise region → transformer_2
+                   
                     if hasattr(self, "transformer_2") and self.transformer_2:
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "Offloading previous transformer",
+                        )
                         self._offload(self.transformer)
                         setattr(self, "transformer", None)
                         empty_cache()
 
                     if not self.transformer:
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "Loading new transformer",
+                        )
                         self.load_component_by_name("transformer")
                         self.to_device(self.transformer)
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "New transformer ready",
+                        )
 
                     transformer = self.transformer
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[0]
                 else:
-                    # Later/low-noise region → transformer
                     if self.transformer:
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "Switching model boundary, offloading previous transformer",
+                        )
                         self._offload(self.transformer)
                         setattr(self, "transformer", None)
                         empty_cache()
 
                     if not hasattr(self, "transformer_2") or not self.transformer_2:
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "Loading alternate transformer",
+                        )
                         self.load_component_by_name("transformer_2")
                         self.to_device(self.transformer_2)
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i) / float(total_steps) if total_steps else 0.0,
+                            "Alternate transformer ready",
+                        )
 
                     transformer = self.transformer_2
                     if isinstance(guidance_scale, list):
@@ -159,6 +189,9 @@ class WanDenoise(WanDenoiseMLX):
         expand_timesteps = kwargs.get("expand_timesteps", False)
         first_frame_mask = kwargs.get("first_frame_mask", None)
         ip_image = kwargs.get("ip_image", None)
+
+        total_steps = len(timesteps) if timesteps is not None else 0
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
         if ip_image is not None:
             ip_image_latent = self._encode_ip_image(ip_image, dtype=transformer_dtype)
@@ -260,6 +293,9 @@ class WanDenoise(WanDenoiseMLX):
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
 
+        total_steps = len(timesteps) if timesteps is not None else 0
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
@@ -337,6 +373,9 @@ class WanDenoise(WanDenoiseMLX):
         valid_interval = kwargs.get("valid_interval", None)
         schedulers_counter = kwargs.get("schedulers_counter", None)
         schedulers = kwargs.get("schedulers", None)
+
+        total_steps = len(step_matrix) if step_matrix is not None else 0
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
         with self._progress_bar(
             total=len(step_matrix),
@@ -448,6 +487,9 @@ class WanDenoise(WanDenoiseMLX):
         using_video_input = kwargs.get("using_video_input", False)
         cur_motion_frames_latent_num = kwargs.get("cur_motion_frames_latent_num", None)
         latent_motion_frames = kwargs.get("latent_motion_frames", None)
+
+        total_steps = len(timesteps) if timesteps is not None else 0
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
             total_steps = len(timesteps)

@@ -154,6 +154,9 @@ spec:
       preprocessor_ref: depth_anything_v2
       required: true
       floating_panel: true
+      map_h: "height"
+      map_w: "width"
+      scale_by: "resolution"
     - id: prompt
       description: Describe what you want to generate in the image.
       placeholder: A beautiful landscape at golden hour.

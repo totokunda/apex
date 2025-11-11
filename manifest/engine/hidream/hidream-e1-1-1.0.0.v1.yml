@@ -1,140 +1,122 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: flux-dev-control-canny
-  model: flux
-  name: Flux Dev Control Canny
+  id: hidream-e1-1
+  model: hidream
+  name: Hidream E1-1
   version: 1.0.0
-  description: Flux control canny is a 12B parameter model for image control.
+  description: Hidream is a 17B parameter model for image generation with
+    edit capabilities.
   tags:
-  - flux
-  - dev
-  - control
-  - canny
+  - hidream
+  - edit
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://cdn.prod.website-files.com/650c3b59079d92475f37b68f/673f828bcc8490e83dc7791c_673f8284e07dee522e1c92f5_Canny%2520image%2520example%2520transparent%2520-%2520Canny%2520(3).png
+  demo_path: https://miro.medium.com/v2/resize:fit:1400/0*E8anr2J8q4wbfdd0
 spec:
-  engine: flux
-  model_type: control
+  engine: hidream
+  model_type: edit
   engine_type: torch
-  denoise_type: base
-  attention_types: [sdpa]
+  denoise_type: edit
+  attention_types:
+  - sdpa
   components:
   - type: scheduler
     label: Scheduler
-    default: FlowMatchEulerDiscreteScheduler
+    default: UniPCMultistepScheduler
     scheduler_options:
-    - name: FlowMatchEulerDiscreteScheduler
-      label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Flux
-        Dev Control Canny model.
-      base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json
+    - name: UniPCMultistepScheduler
+      label: UniPC Multistep Scheduler
+      description: Multi-step predictor-corrector scheduler for HiDream generation.
+      base: diffusers.UniPCMultistepScheduler
+      config_path: HiDream-ai/HiDream-E1-1/scheduler/scheduler_config.json
   - type: vae
-    label: Flux VAE
+    label: HiDream VAE
     base: auto
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/vae
+    - path: HiDream-ai/HiDream-I1-Full/vae
       variant: default
-      precision: fp16
       file_size: 167667722
   - type: text_encoder
     name: text_encoder
     label: CLIP Text Encoder
-    base: CLIPTextModel
+    base: CLIPTextModelWithProjection
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder
+    - path: HiDream-ai/HiDream-I1-Full/text_encoder
       variant: default
-      precision: fp16
-      file_size: 246144965
+      file_size: 495150452
     tokenizer_class: CLIPTokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
+    tokenizer_name: HiDream-ai/HiDream-I1-Full
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: text_encoder
     name: text_encoder_2
+    label: CLIP Text Encoder 2
+    base: CLIPTextModelWithProjection
+    model_path:
+    - path: HiDream-ai/HiDream-I1-Full/text_encoder_2
+      variant: default
+      file_size: 2779424760
+    tokenizer_class: CLIPTokenizer
+    tokenizer_name: HiDream-ai/HiDream-I1-Full
+    tokenizer_kwargs:
+      subfolder: tokenizer_2
+  - type: text_encoder
+    name: text_encoder_3
     label: T5 Text Encoder
     base: T5EncoderModel
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder_2
+    - path: HiDream-ai/HiDream-I1-Full/text_encoder_3
       variant: default
-      precision: fp16
-      file_size: 9524669251
+      file_size: 9524669210
     tokenizer_class: T5Tokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
+    tokenizer_name: HiDream-ai/HiDream-I1-Full
     tokenizer_kwargs:
-      subfolder: tokenizer_2
-  - type: transformer
-    label: Flux Canny Transformer
-    base: flux.base
+      subfolder: tokenizer_3
+  - type: helper
+    name: llama
+    label: Llama 3.1 Instruct Helper
+    base: hidream.llama
     model_path:
-    - path: black-forest-labs/FLUX.1-Canny-dev/transformer
+    - path: meta-llama/Llama-3.1-8B-Instruct
       variant: default
-      precision: fp16
-      type: safetensors
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 23803468971
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-F16-GGUF.gguf
-      variant: GGUF_F16
-      precision: fp16
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 23809434912
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q8_0-GGUF.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 12714845472
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q5_0-GGUF.gguf
-      variant: GGUF_Q5_0
-      precision: q5_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      recommended_vram_gb: 12
-      file_size: 8277009696
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q4_0-GGUF.gguf
-      variant: GGUF_Q4_0
-      precision: q4_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 6797731104
+      file_size: 32132582323
+  - type: transformer
+    label: HiDream Transformer
+    base: hidream.base
+    model_path:
+    - path: HiDream-ai/HiDream-E1-1/transformer
+      variant: default
+      file_size: 34211855409
   defaults:
     run:
       num_inference_steps: 40
       guidance_scale: 5.0
-      true_cfg_scale: 4.0
       return_latents: false
       text_encoder_kwargs:
+        add_special_tokens: false
         clean_text: false
-        max_sequence_length: 77
-        pad_with_zero: false
+        max_sequence_length: 128
       text_encoder_2_kwargs:
+        add_special_tokens: false
         clean_text: false
+        max_sequence_length: 128
+      text_encoder_3_kwargs:
+        add_special_tokens: true
+        clean_text: false
+        use_attention_mask: true
         pad_with_zero: false
-        max_sequence_length: 512
-      joint_attention_kwargs: {}
+        max_sequence_length: 128
+      attention_kwargs: {}
   ui:
     floating_panel:
       regions:
         top:
           inputs:
-          - control_image
+          - prompt
           flow: column
         middle:
           inputs:
-          - prompt
           - negative_prompt
           flow: column
         bottom:
@@ -146,10 +128,11 @@ spec:
     - name: input
       label: Input
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
-        - - control_image
+        - - image
     - name: prompting
       label: Prompting
       collapsible: true
@@ -165,7 +148,7 @@ spec:
         flow: column
         rows:
         - - resolution
-          - aspect_ratio
+        - - aspect_ratio
         - - height
           - width
     - name: sampling
@@ -176,24 +159,22 @@ spec:
         rows:
         - - num_inference_steps
         - - guidance_scale
-        - - true_cfg_scale
         - - seed
     inputs:
-    - id: control_image
-      label: Control Image
-      description: A canny edge image to guide the generation.
-      type: image+preprocessor
+    - id: image
+      label: Image
+      description: The image to edit.
+      type: image
       panel: input
-      preprocessor_ref: canny
       required: true
+      floating_panel: true
       map_h: "height"
       map_w: "width"
       scale_by: "resolution"
-      floating_panel: true
     - id: prompt
-      description: Describe what you want to generate in the image.
-      placeholder: A beautiful landscape at golden hour.
       label: Prompt
+      description: Describe the image you want to generate.
+      placeholder: A cinematic portrait lighting a subject with rim light, 85mm lens.
       type: text
       panel: prompting
       required: true
@@ -201,10 +182,11 @@ spec:
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
+      placeholder: blurry, low quality, distorted, artifacts
+      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature
       type: text
       panel: prompting
       required: false
-      placeholder: blurry, low quality, distorted, artifacts
       floating_panel: false
     - id: resolution
       label: Resolution
@@ -253,15 +235,14 @@ spec:
       floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
-      description: Number of denoising steps (higher = better quality but slower).
+      description: Number of denoising steps
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1
-      floating_panel: false
     - id: height
       label: Height
       description: Explicit height override
@@ -272,7 +253,6 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: width
       label: Width
       description: Explicit width override
@@ -283,10 +263,9 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: seed
       label: Seed
-      description: Enter a random seed for controllably random generation.
+      description: Random seed for reproducibility
       type: random
       default: -1
       min: 0
@@ -294,28 +273,34 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-      floating_panel: false
-    - id: true_cfg_scale
-      label: True CFG Scale
-      description: Enter a true CFG scale for the generation.
+    - id: guidance_scale
+      label: Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
-      default: 1.0
+      default: 3.0
       min: 1.0
       max: 15.0
       step: 0.5
-    - id: guidance_scale
-      label: Guidance Scale
-      description: Enter a guidance scale for the generation.
+    - id: image_guidance_scale
+      label: Image Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
-      default: 30
-      min: 1.0
-      max: 50.0
-      step: 0.5
+      default: 1.5
+      min: 0.0
+      max: 5.0
+      step: 0.1
+    - id: refine_strength
+      label: Refine Strength
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 0.3
+      min: 0.0
+      max: 1.0
+      step: 0.01
+      

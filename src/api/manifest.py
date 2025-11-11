@@ -37,6 +37,7 @@ class ModelTypeInfo(BaseModel):
 
 MODEL_TYPE_MAPPING = {
     "vace": "control",
+    "fill": "inpaint",
     "kontext": "edit"
 }
 
@@ -235,6 +236,7 @@ def list_model_types() -> List[ModelTypeInfo]:
         "edit": "Edit",
         "control": "Control",
         "t2i": "Text to Image",
+        "inpaint": "Inpaint",
     }
     description_map = {
         "t2v": "Generate videos from text prompts.",
@@ -243,7 +245,8 @@ def list_model_types() -> List[ModelTypeInfo]:
         "v2v": "Transform an input video with a new style or prompt.",
         "x2v": "Flexible any-to-video generation.",
         "edit": "Edit or modify images using prompts and tools.",
-        "control": "Guide generation with control signals (e.g., canny, pose)."
+        "control": "Guide generation with control signals (e.g., canny, pose).",
+        "inpaint": "Inpaint images using prompts and masks.",
     }
 
     discovered_types = set()

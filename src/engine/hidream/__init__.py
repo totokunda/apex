@@ -42,3 +42,13 @@ class HidreamEngine(BaseEngine, HidreamDenoise):
 
     def __repr__(self):
         return self.__str__()
+
+    def _render_step(self, latents, render_on_step_callback):
+        impl = getattr(self, "implementation_engine", None)
+        if impl is not None and hasattr(impl, "_render_step"):
+            try:
+                return impl._render_step(latents, render_on_step_callback)
+            except Exception:
+                pass
+        # Fallback to BaseEngine behavior
+        return super()._render_step(latents, render_on_step_callback)

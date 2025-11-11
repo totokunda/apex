@@ -4,6 +4,7 @@ import numpy as np
 from diffusers.schedulers import UniPCMultistepScheduler
 from .base import HidreamBaseEngine
 import math
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class HidreamT2IEngine(HidreamBaseEngine):
@@ -31,6 +32,7 @@ class HidreamT2IEngine(HidreamBaseEngine):
         text_encoder_3_kwargs: Dict[str, Any] = {},
         joint_attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -39,6 +41,7 @@ class HidreamT2IEngine(HidreamBaseEngine):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
         if not hasattr(self, "text_encoder") or not self.text_encoder:
             self.load_component_by_name("text_encoder")
 
@@ -46,6 +49,7 @@ class HidreamT2IEngine(HidreamBaseEngine):
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
         
         batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images   
 
@@ -59,6 +63,7 @@ class HidreamT2IEngine(HidreamBaseEngine):
             height * scale // division * division
         )
 
+        safe_emit_progress(progress_callback, 0.10, "Encoding prompts")
         (
             prompt_embeds,
             negative_prompt_embeds,
@@ -91,6 +96,7 @@ class HidreamT2IEngine(HidreamBaseEngine):
             prompt_embeds = torch.cat([negative_prompt_embeds.to(self.device), prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds.to(self.device), pooled_prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
     
+        safe_emit_progress(progress_callback, 0.20, "Preparing latents")
         latents = self._get_latents(
             batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
@@ -104,11 +110,13 @@ class HidreamT2IEngine(HidreamBaseEngine):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
+        safe_emit_progress(progress_callback, 0.30, "Scheduler ready")
 
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.40, "Transformer ready")
 
         if not isinstance(self.scheduler, UniPCMultistepScheduler):
             sigmas = (
@@ -139,6 +147,22 @@ class HidreamT2IEngine(HidreamBaseEngine):
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
 
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Preparing denoise")
+
+        # Set preview context for per-step rendering on the main engine (denoise runs there)
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            # Fallback for safety
+            self._preview_height = height
+            self._preview_width = width
+            self._preview_offload = offload
+
+        safe_emit_progress(progress_callback, 0.50, "Starting denoise")
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
@@ -152,11 +176,16 @@ class HidreamT2IEngine(HidreamBaseEngine):
             render_on_step_callback=render_on_step_callback,
             num_warmup_steps=num_warmup_steps,
             guidance_scale=guidance_scale,
+            denoise_progress_callback=denoise_progress_callback,
         )
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.94, "Decoding image")
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
-        return [image]
+        safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
+        return image
