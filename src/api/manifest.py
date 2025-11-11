@@ -36,7 +36,8 @@ class ModelTypeInfo(BaseModel):
 
 
 MODEL_TYPE_MAPPING = {
-    "vace": "control"
+    "vace": "control",
+    "kontext": "edit"
 }
 
 
