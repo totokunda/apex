@@ -1,13 +1,13 @@
 {
     "engine_kwargs": {
         "engine_type": "flux",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/flux/flux-dev-control-canny-1.0.0.v1.yml",
-        "model_type": "control",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/flux/flux-dev-fill-1.0.0.v1.yml",
+        "model_type": "fill",
         "selected_components": {
             "scheduler": {
                 "name": "FlowMatchEulerDiscreteScheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json"
+                "config_path": "black-forest-labs/FLUX.1-Fill-dev/scheduler/scheduler_config.json"
             },
             "vae": {
                 "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/vae",
@@ -25,7 +25,7 @@
                 "precision": "fp16"
             },
             "transformer": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-Canny-dev/transformer",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-Fill-dev/transformer",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
@@ -34,16 +34,18 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "control_image": "/home/tosin_coverquick_co/apex-diffusion/cache/567e40f1-50b7-467b-8d76-951592cc_canny_a7bec9e6a675d274/result.png",
-        "prompt": "A beautiful sunset, as waves lap against a beach with a beautiful castle in the background. ",
-        "resolution": 720,
-        "aspect_ratio": 969,
+        "image": "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/110198a1-ee63-47be-8d9e-245ee59ea123-93d7f5e7-1f88-458f-ad15-8e7511e5f3ba_image_0_4.png",
+        "mask_image": "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/54481f7c-8c02-4c2b-8518-7a555a95cf1e-93d7f5e7-1f88-458f-ad15-8e7511e5f3ba_mask_image_0_4.png",
+        "prompt": "A woman with no shirt on with perky breasts ",
+        "resolution": "custom",
+        "aspect_ratio": "custom",
+        "height": 1024,
+        "width": 1024,
         "num_inference_steps": 50,
-        "height": 704,
-        "width": 1280,
-        "seed": 2123392838,
-        "true_cfg_scale": 1,
         "guidance_scale": 30,
+        "true_cfg_scale": 1,
+        "strength": 1,
+        "seed": 3942869077,
         "duration": "5s"
     }
 }

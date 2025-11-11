@@ -4,8 +4,7 @@ from PIL import Image
 import numpy as np
 from .base import FluxBaseEngine
 from diffusers.image_processor import VaeImageProcessor
-
-
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class FluxFillEngine(FluxBaseEngine):
@@ -31,6 +30,7 @@ class FluxFillEngine(FluxBaseEngine):
         text_encoder_2_kwargs: Dict[str, Any] = {},
         joint_attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -40,6 +40,8 @@ class FluxFillEngine(FluxBaseEngine):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting fill pipeline")
+        safe_emit_progress(progress_callback, 0.05, "Preparing inputs and RNG")
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
             
@@ -52,7 +54,8 @@ class FluxFillEngine(FluxBaseEngine):
         )
             
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-            
+        
+        safe_emit_progress(progress_callback, 0.10, "Encoding prompts")
         pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
             prompt,
             negative_prompt,
@@ -71,6 +74,7 @@ class FluxFillEngine(FluxBaseEngine):
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
         
+        safe_emit_progress(progress_callback, 0.15, "Loading and preprocessing images")
         image = self._load_image(image)
         init_image = self.image_processor.preprocess(image, height=height, width=width)
         init_image = init_image.to(dtype=torch.float32)
@@ -93,6 +97,7 @@ class FluxFillEngine(FluxBaseEngine):
             self.scheduler.config.get("max_shift", 1.15),
         )
         
+        safe_emit_progress(progress_callback, 0.25, "Preparing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -105,6 +110,7 @@ class FluxFillEngine(FluxBaseEngine):
         latent_timestep = timesteps[:1].repeat(prompt_embeds.shape[0])
         batch_size = prompt_embeds.shape[0]
 
+        safe_emit_progress(progress_callback, 0.30, "Initializing latents")
         latents, latent_ids = self._get_latents(
             image=init_image,
             batch_size=batch_size,
@@ -134,6 +140,7 @@ class FluxFillEngine(FluxBaseEngine):
         else:
             guidance = None
         
+        safe_emit_progress(progress_callback, 0.35, "Preparing mask and masked image")
         mask_image = self._load_image(mask_image)
         
         mask_image = mask_processor.preprocess(mask_image, height=height, width=width)
@@ -159,7 +166,19 @@ class FluxFillEngine(FluxBaseEngine):
         
         masked_image_latents = torch.cat((masked_image_latents, mask), dim=-1)
 
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        # Set preview context for per-step rendering on the main engine (denoise runs there)
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            self._preview_height = height
+            self._preview_width = width
+            self._preview_offload = offload
 
+        safe_emit_progress(progress_callback, 0.50, "Starting denoise")
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
@@ -179,12 +198,15 @@ class FluxFillEngine(FluxBaseEngine):
             render_on_step_callback=render_on_step_callback,
             num_warmup_steps=num_warmup_steps,
             true_cfg_scale=true_cfg_scale,
+            denoise_progress_callback=denoise_progress_callback,
         )
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
-        return [image]
+        safe_emit_progress(progress_callback, 1.0, "Completed fill pipeline")
+        return image

@@ -1,21 +1,22 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: flux-krea-text-to-image
+  id: flux-dev-kontext
   model: flux
-  name: Flux Krea Text to Image
+  name: Flux Dev Kontext
   version: 1.0.0
-  description: Flux Krea is a 12B parameter model for text-to-image generation.
+  description: Flux Kontext is a 12B parameter model for image + text conditioned
+    generation.
   tags:
   - flux
-  - krea
-  - t2i
+  - kontext
+  - dev
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://i.redd.it/flux-krea-is-quite-good-for-photographic-gens-relative-to-v0-ipkhisrye9gf1.png?width=1040&format=png&auto=webp&s=8382540768722e585b43195ea2ba868967a87f3d
+  demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
 spec:
   engine: flux
-  model_type: t2i
+  model_type: kontext
   engine_type: torch
   denoise_type: base
   attention_types:
@@ -27,26 +28,30 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is used for Flux Krea.
+      description: Scheduler for Flux Kontext dev.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-Krea-dev/scheduler/scheduler_config.json
+      config_path: black-forest-labs/FLUX.1-Kontext-dev/scheduler/scheduler_config.json
   - type: vae
     label: Flux VAE
     base: auto
     model_path:
-    - path: black-forest-labs/FLUX.1-Krea-dev/vae
+    - path: black-forest-labs/FLUX.1-dev/vae
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 167667722
   - type: text_encoder
     name: text_encoder
     label: CLIP Text Encoder
     base: CLIPTextModel
     model_path:
-    - path: black-forest-labs/FLUX.1-Krea-dev/text_encoder
+    - path: black-forest-labs/FLUX.1-dev/text_encoder
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 246144965
     tokenizer_class: CLIPTokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-Krea-dev
+    tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: text_encoder
@@ -54,30 +59,36 @@ spec:
     label: T5 Text Encoder
     base: T5EncoderModel
     model_path:
-    - path: black-forest-labs/FLUX.1-Krea-dev/text_encoder_2
+    - path: black-forest-labs/FLUX.1-dev/text_encoder_2
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 9524669251
-    tokenizer_name: black-forest-labs/FLUX.1-Krea-dev
+    tokenizer_class: T5Tokenizer
+    tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: transformer
     label: Flux Transformer
     base: flux.base
     model_path:
-    - path: black-forest-labs/FLUX.1-Krea-dev/transformer
+    - path: black-forest-labs/FLUX.1-Kontext-dev/transformer
       variant: default
-      file_size: 23803075696
+      precision: fp16
+      type: safetensors
+      file_size: 23803075754
   defaults:
     run:
       num_inference_steps: 40
       guidance_scale: 5.0
-      true_cfg_scale: 4.0
       return_latents: false
       text_encoder_kwargs:
         clean_text: false
         max_sequence_length: 77
         pad_with_zero: false
+        add_special_tokens: true
       text_encoder_2_kwargs:
+        add_special_tokens: true
         clean_text: false
         pad_with_zero: false
         max_sequence_length: 512
@@ -87,10 +98,11 @@ spec:
       regions:
         top:
           inputs:
-          - prompt
+          - image
           flow: column
         middle:
           inputs:
+          - prompt
           - negative_prompt
           flow: column
         bottom:
@@ -99,9 +111,18 @@ spec:
           - aspect_ratio
           flow: row
     panels:
+    - name: input
+      label: Input
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - image
     - name: prompting
       label: Prompting
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -110,6 +131,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -120,18 +142,25 @@ spec:
     - name: sampling
       label: Sampling
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
         - - num_inference_steps
-        - - guidance_scale
         - - true_cfg_scale
         - - seed
     inputs:
+    - id: image
+      label: Image
+      description: The input image to condition on.
+      type: image
+      panel: input
+      required: true
+      floating_panel: true
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
-      placeholder: A beautiful landscape at golden hour.
+      description: The text prompt describing desired output.
+      placeholder: A cinematic portrait in soft lighting.
       type: text
       panel: prompting
       required: true
@@ -149,17 +178,17 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 1024
       options:
-      - name: HD
+      - name: 720p
         value: 720
         height: 720
-      - name: Full HD
+      - name: 1024
+        value: 1024
+        height: 1024
+      - name: 1080p
         value: 1080
         height: 1080
-      - name: SD
-        value: 480
-        height: 480
       - name: Custom
         value: custom
       floating_panel: true
@@ -168,8 +197,12 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 969
+      default: 61
       options:
+      - name: Square
+        value: 61
+        ratio_w: 1
+        ratio_h: 1
       - name: Wide
         value: 969
         ratio_w: 16
@@ -178,10 +211,6 @@ spec:
         value: 556
         ratio_w: 9
         ratio_h: 16
-      - name: Square
-        value: 61
-        ratio_w: 1
-        ratio_h: 1
       - name: Classic
         value: 184
         ratio_w: 4
@@ -195,10 +224,11 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1
+      floating_panel: false
     - id: height
       label: Height
       description: Explicit height override
@@ -236,16 +266,6 @@ spec:
       panel: sampling
       required: false
       default: 1.0
-      min: 1.0
-      max: 15.0
-      step: 0.5
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 3.5
       min: 1.0
       max: 15.0
       step: 0.5

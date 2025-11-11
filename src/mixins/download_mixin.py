@@ -740,7 +740,7 @@ class DownloadMixin:
                     unit_scale=True,
                     unit_divisor=1024,
                 ) as bar:
-                    for chunk in response.iter_content(chunk_size=8192):
+                    for chunk in response.iter_content(chunk_size=1024*1024*10):
                         if chunk:
                             tmp_file.write(chunk)
                             chunk_len = len(chunk)
