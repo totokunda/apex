@@ -1,25 +1,25 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: flux-dev-control-canny
+  id: srpo-text-to-image
   model: flux
-  name: Flux Dev Control Canny
+  name: SRPO Text to Image
   version: 1.0.0
-  description: Flux control canny is a 12B parameter model for image control.
+  description: SRPO is a 12B parameter model for text-to-image generation.
   tags:
   - flux
-  - dev
-  - control
-  - canny
+  - srpo
+  - t2i
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://cdn.prod.website-files.com/650c3b59079d92475f37b68f/673f828bcc8490e83dc7791c_673f8284e07dee522e1c92f5_Canny%2520image%2520example%2520transparent%2520-%2520Canny%2520(3).png
+  demo_path: https://storage.googleapis.com/falserverless/example_outputs/flux-srpo-output.jpeg
 spec:
   engine: flux
-  model_type: control
+  model_type: t2i
   engine_type: torch
   denoise_type: base
-  attention_types: [sdpa]
+  attention_types:
+  - sdpa
   components:
   - type: scheduler
     label: Scheduler
@@ -27,17 +27,15 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Flux
-        Dev Control Canny model.
+      description: The FlowMatch Euler Discrete Scheduler is used for Flux Dev.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json
+      config_path: black-forest-labs/FLUX.1-dev/scheduler/scheduler_config.json
   - type: vae
     label: Flux VAE
     base: auto
     model_path:
     - path: black-forest-labs/FLUX.1-dev/vae
       variant: default
-      precision: fp16
       file_size: 167667722
   - type: text_encoder
     name: text_encoder
@@ -46,7 +44,6 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/text_encoder
       variant: default
-      precision: fp16
       file_size: 246144965
     tokenizer_class: CLIPTokenizer
     tokenizer_name: black-forest-labs/FLUX.1-dev
@@ -59,57 +56,21 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/text_encoder_2
       variant: default
-      precision: fp16
       file_size: 9524669251
     tokenizer_class: T5Tokenizer
     tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: transformer
-    label: Flux Canny Transformer
+    label: Flux Transformer
     base: flux.base
+    config_path: black-forest-labs/FLUX.1-dev/transformer/config.json
     model_path:
-    - path: black-forest-labs/FLUX.1-Canny-dev/transformer
+    - path: tencent/SRPO
       variant: default
       precision: fp16
       type: safetensors
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 23803468971
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-F16-GGUF.gguf
-      variant: GGUF_F16
-      precision: fp16
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 23809434912
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q8_0-GGUF.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 12714845472
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q5_0-GGUF.gguf
-      variant: GGUF_Q5_0
-      precision: q5_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      recommended_vram_gb: 12
-      file_size: 8277009696
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q4_0-GGUF.gguf
-      variant: GGUF_Q4_0
-      precision: q4_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 6797731104
+      file_size: 47610221804
   defaults:
     run:
       num_inference_steps: 40
@@ -127,13 +88,6 @@ spec:
       joint_attention_kwargs: {}
   ui:
     panels:
-    - name: input
-      label: Input
-      collapsible: true
-      layout:
-        flow: column
-        rows:
-        - - control_image
     - name: prompting
       label: Prompting
       collapsible: true
@@ -141,20 +95,29 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
         - - resolution
-          - aspect_ratio
+        - - aspect_ratio
         - - height
           - width
     - name: sampling
       label: Sampling
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -163,31 +126,20 @@ spec:
         - - true_cfg_scale
         - - seed
     inputs:
-    - id: control_image
-      label: Control Image
-      description: A canny edge image to guide the generation.
-      type: image+preprocessor
-      panel: input
-      preprocessor_ref: canny
-      required: true
-      map_h: "height"
-      map_w: "width"
-      scale_by: "resolution"
-      floating_panel: true
     - id: prompt
-      description: Describe what you want to generate in the image.
-      placeholder: A beautiful landscape at golden hour.
       label: Prompt
+      description: Describe the image you want to generate.
+      placeholder: A beautiful landscape at golden hour.
       type: text
       panel: prompting
       required: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
+      placeholder: blurry, low quality, distorted, artifacts
       type: text
       panel: advanced_prompting
       required: false
-      placeholder: blurry, low quality, distorted, artifacts
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -199,8 +151,8 @@ spec:
         value: 720
         height: 720
       - name: Full HD
-        value: 1080
-        height: 1080
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480
@@ -233,7 +185,7 @@ spec:
         value: custom
     - id: num_inference_steps
       label: Inference Steps
-      description: Number of denoising steps (higher = better quality but slower).
+      description: Number of denoising steps
       type: number+slider
       value_type: integer
       panel: sampling
@@ -263,7 +215,7 @@ spec:
       step: 64
     - id: seed
       label: Seed
-      description: Enter a random seed for controllably random generation.
+      description: Random seed for reproducibility
       type: random
       default: -1
       min: 0
@@ -273,7 +225,6 @@ spec:
       required: false
     - id: true_cfg_scale
       label: True CFG Scale
-      description: Enter a true CFG scale for the generation.
       type: number+slider
       value_type: float
       panel: sampling
@@ -284,12 +235,11 @@ spec:
       step: 0.5
     - id: guidance_scale
       label: Guidance Scale
-      description: Enter a guidance scale for the generation.
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 30
+      default: 3.5
       min: 1.0
-      max: 50.0
+      max: 15.0
       step: 0.5

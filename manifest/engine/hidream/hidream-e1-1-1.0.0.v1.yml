@@ -109,21 +109,6 @@ spec:
         max_sequence_length: 128
       attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - prompt
-          flow: column
-        middle:
-          inputs:
-          - negative_prompt
-          flow: column
-        bottom:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
     panels:
     - name: input
       label: Input
@@ -140,6 +125,13 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
@@ -166,8 +158,7 @@ spec:
       description: The image to edit.
       type: image
       panel: input
-      required: true
-      floating_panel: true
+      required: true  
       map_h: "height"
       map_w: "width"
       scale_by: "resolution"
@@ -178,16 +169,14 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
       default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
-      floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -206,7 +195,6 @@ spec:
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -232,7 +220,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps

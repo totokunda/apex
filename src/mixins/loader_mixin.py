@@ -137,9 +137,15 @@ class LoaderMixin(DownloadMixin):
                 # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
                 config_class = getattr(model_class, "config_class", PretrainedConfig)
                 conf = config_class(**config)
-                model = model_class._from_config(conf, **extra_kwargs)
+                if hasattr(model_class, "_from_config"):
+                    model = model_class._from_config(conf, **extra_kwargs)
+                else:
+                    model = model_class.from_config(conf, **extra_kwargs)
             else:
-                model = model_class._from_config(config, **extra_kwargs)
+                if hasattr(model_class, "_from_config"):
+                    model = model_class._from_config(config, **extra_kwargs)
+                else:
+                    model = model_class.from_config(config, **extra_kwargs)
 
         if no_weights:
             return model

@@ -93,23 +93,6 @@ spec:
         max_sequence_length: 512
       joint_attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - image
-          - mask_image
-          flow: column
-        middle:
-          inputs:
-          - prompt
-          - negative_prompt
-          flow: column
-        bottom:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
     panels:
     - name: input
       label: Input
@@ -126,6 +109,13 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
@@ -156,7 +146,6 @@ spec:
       map_to: image
       panel: input
       required: true
-      floating_panel: true
       map_h: "height"
       map_w: "width"
     - id: image
@@ -165,7 +154,6 @@ spec:
       type: image
       panel: input
       required: true
-      floating_panel: true
     - id: prompt
       description: Describe what you want to generate in the masked regions.
       placeholder: A vase of flowers on the table.
@@ -173,15 +161,13 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
       placeholder: blurry, low quality, distorted, artifacts
-      floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the target resolution (longer side).
@@ -200,7 +186,6 @@ spec:
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -226,7 +211,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: height
       label: Height
       description: Explicit height override
@@ -237,7 +221,6 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: width
       label: Width
       description: Explicit width override
@@ -248,7 +231,6 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps (higher = better quality but slower).
@@ -259,7 +241,6 @@ spec:
       min: 1
       max: 100
       step: 1
-      floating_panel: false
     - id: guidance_scale
       label: Guidance Scale
       description: Classifier-free guidance scale.
@@ -267,7 +248,6 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
       default: 30.0
       min: 1.0
       max: 50.0
@@ -279,7 +259,6 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
       default: 1.0
       min: 1.0
       max: 15.0
@@ -291,7 +270,6 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
       default: 1.0
       min: 0.1
       max: 1.0
@@ -306,4 +284,3 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-      floating_panel: false

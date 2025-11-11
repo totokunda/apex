@@ -89,22 +89,6 @@ spec:
         clean_text: false
       attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - prompt
-          flow: column
-        middle:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
-        bottom:
-          inputs:
-          - num_inference_steps
-          - seed
-          flow: row
     panels:
     - name: prompting
       label: Prompting
@@ -114,6 +98,13 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
@@ -145,16 +136,14 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
       default: ' '
-      floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -173,7 +162,6 @@ spec:
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -199,7 +187,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
@@ -210,7 +197,6 @@ spec:
       min: 1
       max: 100
       step: 1
-      floating_panel: false
     - id: height
       label: Height
       description: Explicit height override
