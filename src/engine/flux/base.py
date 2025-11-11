@@ -2,7 +2,7 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 from PIL import Image
-
+from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 # Typing-only linkage to BaseEngine for IDE navigation and autocompletion,
 # while avoiding a runtime dependency/import cycle.
 if TYPE_CHECKING:
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 else:
     BaseClass = object
 
-class FluxBaseEngine(BaseClass):
+class FluxBaseEngine(TextualInversionLoaderMixin, BaseClass):
     """Base class for Flux engine implementations containing common functionality"""
 
     def __init__(self, main_engine: "BaseEngine"):
@@ -228,10 +228,20 @@ class FluxBaseEngine(BaseClass):
         if not hasattr(self, "text_encoder") or not self.text_encoder:
             self.load_component_by_name("text_encoder")
 
-        self.to_device(self.text_encoder)
-
+        self.to_device(self.text_encoder)   
+        
+        
+        if isinstance(prompt, str):
+            prompt = [prompt]
+        prompt = self.maybe_convert_prompt(prompt, self.text_encoder.tokenizer)
+        if negative_prompt is not None:
+            if isinstance(negative_prompt, str):
+                negative_prompt = [negative_prompt]
+            negative_prompt = self.maybe_convert_prompt(negative_prompt, self.text_encoder.tokenizer)
+        
+        
         pooled_prompt_embeds = self.text_encoder.encode(
-            f"{prompt}",
+            prompt,
             device=self.device,
             num_videos_per_prompt=num_images,
             output_type="pooler_output",
@@ -264,7 +274,14 @@ class FluxBaseEngine(BaseClass):
             negative_prompt_2 = negative_prompt
             
         
-        
+        if isinstance(prompt_2, str):
+            prompt_2 = [prompt_2]
+        prompt_2 = self.maybe_convert_prompt(prompt_2, self.text_encoder_2.tokenizer)
+        if negative_prompt_2 is not None:
+            if isinstance(negative_prompt_2, str):
+                negative_prompt_2 = [negative_prompt_2]
+            negative_prompt_2 = self.maybe_convert_prompt(negative_prompt_2, self.text_encoder_2.tokenizer)
+ 
         prompt_embeds = self.text_encoder_2.encode(
             prompt_2,
             device=self.device,
@@ -273,8 +290,6 @@ class FluxBaseEngine(BaseClass):
             **text_encoder_2_kwargs,
         )
         
-        self.logger.info(f"Prompt embeds shape: {prompt_embeds.shape}")
-        self.logger.info(f"{self.text_encoder_2.model.config}")
 
         text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(
             device=self.device, dtype=prompt_embeds.dtype
@@ -422,7 +437,6 @@ class FluxBaseEngine(BaseClass):
         
         Falls back to base implementation if preview dimensions are unavailable.
         """
-        self.logger.info(f"Rendering step {latents.shape} OVERRIDDEN")
         try:
             preview_height = getattr(self, "_preview_height", None)
             preview_width = getattr(self, "_preview_width", None)

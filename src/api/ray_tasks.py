@@ -1,7 +1,7 @@
 """
 Ray tasks for preprocessor operations
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable, List
 from pathlib import Path
 import ray
 import traceback
@@ -17,7 +17,6 @@ from src.api.preprocessor_registry import (
 )
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path
-from typing import List
 from diffusers.utils import export_to_video
 import time
 
@@ -211,6 +210,114 @@ def download_components(paths: List[str], job_id: str, ws_bridge, save_path: Opt
         return {"job_id": job_id, "status": "error", "error": err}
 
 
+def _execute_preprocessor(
+    preprocessor_name: str,
+    input_path: str,
+    job_id: str,
+    send_progress: Callable[[Optional[float], str, Optional[Dict[str, Any]]], None],
+    start_frame: Optional[int] = None,
+    end_frame: Optional[int] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    preprocessor_info = get_preprocessor_info(preprocessor_name)
+    cache = AuxillaryCache(
+        input_path,
+        preprocessor_name,
+        start_frame,
+        end_frame,
+        kwargs,
+        supports_alpha_channel=preprocessor_info.get("supports_alpha_channel", False),
+    )
+    media_type = cache.type
+    send_progress(0.05, "Checking cache")
+
+    if cache.is_cached():
+        send_progress(1.0, "Cache found and returning")
+        send_progress(1.0, "Complete", {"status": "complete"})
+        return {
+            "job_id": job_id,
+            "status": "complete",
+            "result_path": cache.get_result_path(),
+            "type": media_type,
+        }
+
+    send_progress(0.1, "Loading preprocessor module")
+    module = importlib.import_module(preprocessor_info["module"])
+    preprocessor_class = getattr(module, preprocessor_info["class"])
+
+    from src.preprocess.download_tracker import DownloadProgressTracker
+    from src.preprocess import util as util_module
+
+    tracker = DownloadProgressTracker(
+        job_id,
+        lambda p, m, md=None: send_progress(
+            0.05 + (max(0.0, min(1.0, float(p))) * 0.15), m, md
+        ),
+    )
+    util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
+    try:
+        preprocessor = preprocessor_class.from_pretrained()
+    finally:
+        util_module.DOWNLOAD_PROGRESS_CALLBACK = None
+
+    send_progress(0.2, "Preprocessor loaded")
+
+    from src.preprocess.base_preprocessor import BasePreprocessor
+
+    BasePreprocessor._mark_as_downloaded(preprocessor_name)
+
+    def progress_callback(idx: int, total: int, message: str = None):
+        total = max(1, int(total))
+        frac = idx / float(total)
+        scaled_progress = 0.2 + (max(0.0, min(1.0, frac)) * 0.6)
+        send_progress(scaled_progress, message or f"Processing frame {idx} of {total}")
+
+    try:
+        if media_type == "video":
+            frame_range = cache._get_video_frame_range()
+            total_frames = len([f for f in frame_range if f not in cache.cached_frames])
+            frames = cache.video_frames(batch_size=1)
+            result = preprocessor(
+                frames,
+                job_id=job_id,
+                progress_callback=progress_callback,
+                total_frames=total_frames,
+                **kwargs,
+            )
+        else:
+            result = preprocessor(cache.image, job_id=job_id, **kwargs)
+
+        result_path = cache.save_result(result)
+        send_progress(1.0, "Result saved")
+        send_progress(1.0, "Complete", {"status": "complete"})
+
+        return {
+            "status": "complete",
+            "result_path": result_path,
+            "type": cache.type,
+        }
+
+    except Exception as e:
+        error_msg = f"Error processing {preprocessor_name}: {str(e)}"
+        error_traceback = traceback.format_exc()
+        logger.error(f"[{job_id}] Processing failed: {error_traceback}")
+        try:
+            send_progress(0.0, error_msg, {"status": "error", "error": error_msg})
+        except Exception as ws_error:
+            logger.error(
+                f"[{job_id}] Processing failed AND websocket notification failed: {error_msg}, WS Error: {ws_error}"
+            )
+        return {
+            "job_id": job_id,
+            "status": "error",
+            "error": error_msg,
+            "traceback": error_traceback,
+        }
+
+    finally:
+        empty_cache()
+
+
 @ray.remote
 def run_preprocessor(
     preprocessor_name: str,
@@ -223,18 +330,8 @@ def run_preprocessor(
 ) -> Dict[str, Any]:
     """
     Run a preprocessor on input media
-    
-    Args:
-        preprocessor_name: Name of the preprocessor
-        input_path: Path to input image or video
-        job_id: Job ID for tracking
-        start_frame: Start frame index for video (None = from beginning)
-        end_frame: End frame index for video (None = to end)
-        **kwargs: Additional preprocessing parameters
-        
-    Returns:
-        Dictionary with processing results
     """
+
     def send_progress(progress: float, message: str, metadata: Optional[Dict] = None):
         """Local send_progress that uses the passed ws_bridge"""
         try:
@@ -242,95 +339,16 @@ def run_preprocessor(
             logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
-            
-        
-    
-    preprocessor_info = get_preprocessor_info(preprocessor_name)
-    cache = AuxillaryCache(input_path, preprocessor_name, start_frame, end_frame, kwargs, supports_alpha_channel=preprocessor_info.get("supports_alpha_channel", False))
-    media_type = cache.type
-    send_progress(0.05, "Checking cache")
-    
-    # TODO: re-enable cache for testing purposes
-    if cache.is_cached():
-        send_progress(1.0, "Cache found and returning")
-        send_progress(1.0, "Complete", {"status": "complete"})
-        return {
-            "job_id": job_id,
-            "status": "complete",
-            "result_path": cache.get_result_path(),
-            "type": media_type,
-        }
-    
-    
-    # Progressive download/init: scale progress from 0.05 -> 0.20
-    send_progress(0.1, "Loading preprocessor module")
-    module = importlib.import_module(preprocessor_info["module"])
-    preprocessor_class = getattr(module, preprocessor_info["class"])
 
-    # Setup download progress tracking similar to download_preprocessor but scaled to 20%
-    from src.preprocess.download_tracker import DownloadProgressTracker
-    from src.preprocess import util as util_module
-    tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(0.05 + (max(0.0, min(1.0, float(p))) * 0.15), m, md))
-    util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
-    try:
-        preprocessor = preprocessor_class.from_pretrained()
-    finally:
-        # Always clear the callback
-        util_module.DOWNLOAD_PROGRESS_CALLBACK = None
-    send_progress(0.2, "Preprocessor loaded")
-    
-    # Mark as downloaded in tracking file (in case it was loaded for the first time here)
-    from src.preprocess.base_preprocessor import BasePreprocessor
-    BasePreprocessor._mark_as_downloaded(preprocessor_name)
-    
-    def progress_callback(idx: int, total: int, message: str = None):
-        progress = idx / total
-        scaled_progress = 0.2 + (progress * 0.6)
-        send_progress(scaled_progress, message or f"Processing frame {idx} of {total}")
-    
-    try:
-        if media_type == "video":
-            # Get frame generator and total count for progress tracking
-            frame_range = cache._get_video_frame_range()
-            print(f"Frame range: {frame_range}", start_frame, end_frame)
-            total_frames = len([f for f in frame_range if f not in cache.cached_frames])
-            frames = cache.video_frames(batch_size=1)
-            result = preprocessor(frames, job_id=job_id, progress_callback=progress_callback, total_frames=total_frames, **kwargs)
-        else:
-            result = preprocessor(cache.image, job_id=job_id, **kwargs)
-               
-        result_path = cache.save_result(result)
-        send_progress(1.0, "Result saved")
-        
-        # Send final completion status
-        send_progress(1.0, "Complete", {"status": "complete"})
-        
-        return {
-            "status": "complete",
-            "result_path": result_path,
-            "type": cache.type,
-        }
-        
-    except Exception as e:
-        error_msg = f"Error processing {preprocessor_name}: {str(e)}"
-        error_traceback = traceback.format_exc()
-        logger.error(f"[{job_id}] Processing failed: {error_traceback}")
-        
-        # Try to send error status to websocket - ensure client knows job failed
-        try:
-            send_progress(0.0, error_msg, {"status": "error", "error": error_msg})
-        except Exception as ws_error:
-            logger.error(f"[{job_id}] Processing failed AND websocket notification failed: {error_msg}, WS Error: {ws_error}")
-        
-        return {
-            "job_id": job_id,
-            "status": "error",
-            "error": error_msg,
-            "traceback": error_traceback
-        }
-    
-    finally:
-        empty_cache()
+    return _execute_preprocessor(
+        preprocessor_name,
+        input_path,
+        job_id,
+        send_progress,
+        start_frame=start_frame,
+        end_frame=end_frame,
+        **kwargs,
+    )
 
 
 @ray.remote
@@ -365,6 +383,27 @@ def run_engine_from_manifest(
         # Normalize manifest (handles v1 -> engine shape)
         raw = load_manifest_yaml(manifest_path)
         config = validate_and_normalize(raw)
+        inputs = inputs or {}
+        selected_components = selected_components or {}
+        
+        def _extract_ui_inputs() -> List[Dict[str, Any]]:
+            spec_ui = ((raw.get("spec") or {}).get("ui") or {})
+            raw_inputs = spec_ui.get("inputs")
+            if isinstance(raw_inputs, list):
+                return raw_inputs
+            normalized_ui = (config.get("ui") or {}).get("inputs")
+            if isinstance(normalized_ui, list):
+                return normalized_ui
+            return []
+
+        preprocessor_map: Dict[str, str] = {}
+        for item in _extract_ui_inputs():
+            if not isinstance(item, dict):
+                continue
+            input_id = item.get("id")
+            preproc_ref = item.get("preprocessor_ref")
+            if input_id and preproc_ref:
+                preprocessor_map[input_id] = preproc_ref
         
         # Resolve engine settings
         engine_type = config.get("engine") or (config.get("spec") or {}).get("engine")
@@ -385,6 +424,42 @@ def run_engine_from_manifest(
             
         
         engine = UniversalEngine(**input_kwargs)
+
+        def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:
+            if isinstance(value, dict):
+                path_candidate = (
+                    value.get("input_path")
+                    or value.get("src")
+                    or value.get("path")
+                )
+                apply_flag = value.get("apply_preprocessor")
+                path_str = path_candidate if isinstance(path_candidate, str) else None
+                apply_bool = apply_flag if isinstance(apply_flag, bool) else None
+                return path_str, apply_bool
+            if isinstance(value, str):
+                return value, None
+            return None, None
+
+        prepared_inputs: Dict[str, Any] = {}
+        preprocessor_jobs: List[Dict[str, Any]] = []
+        for input_key, raw_value in inputs.items():
+            if input_key in preprocessor_map:
+                media_path, apply_flag = _coerce_media_input(raw_value)
+                if media_path:
+                    prepared_inputs[input_key] = media_path
+                    should_apply = apply_flag if isinstance(apply_flag, bool) else True
+                    if should_apply:
+                        preprocessor_jobs.append(
+                            {
+                                "input_id": input_key,
+                                "preprocessor_name": preprocessor_map[input_key],
+                                "input_path": media_path,
+                            }
+                        )
+                else:
+                    prepared_inputs[input_key] = raw_value
+            else:
+                prepared_inputs[input_key] = raw_value
 
         # Prepare job directory early (needed for previews)
         job_dir = Path(DEFAULT_CACHE_PATH) / "engine_results" / (job_id)
@@ -445,6 +520,47 @@ def run_engine_from_manifest(
                 raise
             return result_path, media_type
 
+        total_steps = max(1, len(preprocessor_jobs) + 1)
+        
+        logger.info(f"Total steps: {total_steps}")
+        logger.info(f"Preprocessor jobs: {preprocessor_jobs}")
+
+        for idx, job in enumerate(preprocessor_jobs):
+            stage_start = idx / total_steps
+            stage_span = 1.0 / total_steps
+
+            def stage_send_progress(local_progress: Optional[float], message: str, metadata: Optional[Dict] = None):
+                merged_meta = dict(metadata or {})
+                merged_meta.setdefault("stage", "preprocessor")
+                merged_meta.setdefault("input_id", job["input_id"])
+                if merged_meta.get("status") == "complete":
+                    merged_meta["status"] = "processing"
+                if local_progress is None:
+                    send_progress(None, message, merged_meta)
+                    return
+                bounded = max(0.0, min(1.0, float(local_progress)))
+                send_progress(stage_start + bounded * stage_span, message, merged_meta)
+
+            stage_send_progress(
+                0.0,
+                f"Running {job['preprocessor_name']} preprocessor for {job['input_id']}",
+            )
+            result = _execute_preprocessor(
+                job["preprocessor_name"],
+                job["input_path"],
+                f"{job_id}:{job['input_id']}",
+                stage_send_progress,
+            )
+            if result.get("status") != "complete":
+                raise RuntimeError(
+                    result.get("error")
+                    or f"Preprocessor {job['preprocessor_name']} failed"
+                )
+            prepared_inputs[job["input_id"]] = result.get("result_path")
+
+        engine_stage_start = len(preprocessor_jobs) / total_steps
+        engine_stage_span = 1.0 / total_steps
+
         # Render-on-step callback that writes previews
         step_counter = {"i": 0}
         def render_on_step_callback(frames):
@@ -470,18 +586,25 @@ def run_engine_from_manifest(
 
         # Progress callback forwarded into the engine
         def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
-            send_progress(progress, message, metadata)
+            if progress is None:
+                send_progress(None, message, metadata)
+                return
+            bounded = max(0.0, min(1.0, progress))
+            send_progress(engine_stage_start + bounded * engine_stage_span, message, metadata)
         
         import json 
-        json.dump(inputs, indent=4, fp=open("inputs.json", "w"))
+        json.dump({
+                "engine_kwargs": input_kwargs,
+                "inputs": prepared_inputs,
+            }, indent=4, fp=open("inputs.json", "w"))
         
         output = engine.run(
-            **(inputs or {}),
+            **(prepared_inputs or {}),
             progress_callback=progress_callback,
             render_on_step=True,
             render_on_step_callback=render_on_step_callback,
         )
-
+        
         # Persist final result using the unified saver
         result_path, media_type = save_output(output[0], filename_prefix="result", final=True)
 

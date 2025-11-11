@@ -73,9 +73,7 @@ spec:
         clean_text: false
         max_sequence_length: 77
         pad_with_zero: false
-        add_special_tokens: true
       text_encoder_2_kwargs:
-        add_special_tokens: true
         clean_text: false
         pad_with_zero: false
         max_sequence_length: 512

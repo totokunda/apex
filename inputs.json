@@ -1,13 +1,12 @@
 {
-    "image": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/1194388a-6724-4b74-8c37-0086c29f4991-b625afef-063a-4479-b6ef-179dda0fe4b2_image_0_29.png",
-    "prompt": "Turn this woman into a darkskin princess ",
-    "negative_prompt": " ",
+    "prompt": "A lone astronomer on a quiet rooftop observatory at dusk, surrounded by antique brass telescopes and scattered handwritten star charts, warm amber lantern light glowing softly, a gigantic swirling nebula visible in the sky just beyond the atmosphere, ethereal colors rippling like watercolor, gentle breeze lifting pages, tone of wonder and discovery, cinematic composition, painterly textures, high detail, soft volumetric lighting, twilight palette of indigo and amber.",
     "resolution": 720,
     "aspect_ratio": 969,
-    "num_inference_steps": 40,
+    "num_inference_steps": 50,
     "height": 704,
     "width": 1280,
-    "seed": 1406892173,
-    "true_cfg_scale": 4,
+    "seed": 2610541731,
+    "true_cfg_scale": 1,
+    "guidance_scale": 3.5,
     "duration": "5s"
 }

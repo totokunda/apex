@@ -56,6 +56,7 @@ from src.attention.processors.flux_processor import (
 from src.transformer import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+from loguru import logger as loguru_logger
 
 
 class FluxAttention(torch.nn.Module, AttentionModuleMixin):
@@ -532,6 +533,7 @@ class FluxTransformer2DModel(
         timestep = timestep.to(hidden_states.dtype) * 1000
         if guidance is not None:
             guidance = guidance.to(hidden_states.dtype) * 1000
+        
 
         temb = (
             self.time_text_embed(timestep, pooled_projections)
