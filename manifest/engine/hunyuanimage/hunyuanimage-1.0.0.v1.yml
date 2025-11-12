@@ -1,20 +1,19 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: flux-dev-text-to-image
-  model: flux
-  name: Flux Dev Text to Image
+  id: hunyuanimage-t2i
+  model: hunyuanimage
+  name: HunyuanImage Text-to-Image
   version: 1.0.0
-  description: Flux is a 12B parameter model for text-to-image generation.
+  description: HunyuanImage is a 17B parameter model for text-to-image generation.
   tags:
-  - flux
-  - dev
+  - hunyuanimage
   - t2i
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://www.mlexpert.io/_next/image?url=%2Fimages%2Fblog%2Fflux-1-dev%2Fwoman.png&w=2048&q=75
+  demo_path: https://i.ytimg.com/vi/dNeA5mJ36hA/maxresdefault.jpg
 spec:
-  engine: flux
+  engine: hunyuanimage
   model_type: t2i
   engine_type: torch
   denoise_type: base
@@ -27,67 +26,88 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is used for Flux Dev.
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
+        T2I model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-dev/scheduler/scheduler_config.json
+      config_path: https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/scheduler/scheduler_config.json
   - type: vae
-    label: Flux VAE
-    base: auto
+    label: HunyuanImage VAE
+    base: hunyuanimage
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/vae
+    - path: hunyuanvideo-community/HunyuanImage-2.1-Diffusers/vae
       variant: default
-      file_size: 167667722
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 811185947
   - type: text_encoder
+    label: Qwen2.5 VL Text Encoder
+    base: Qwen2_5_VLForConditionalGeneration
     name: text_encoder
-    label: CLIP Text Encoder
-    base: CLIPTextModel
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder
+    - path: hunyuanvideo-community/HunyuanImage-2.1-Diffusers/text_encoder
       variant: default
-      file_size: 246144965
-    tokenizer_class: CLIPTokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 24
+      file_size: 16584475644
+    tokenizer_class: Qwen2Tokenizer
+    tokenizer_name: hunyuanvideo-community/HunyuanImage-2.1-Diffusers
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: text_encoder
-    name: text_encoder_2
-    label: T5 Text Encoder
+    label: HunyuanImage Text Encoder 2
     base: T5EncoderModel
+    name: text_encoder_2
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder_2
+    - path: hunyuanvideo-community/HunyuanImage-2.1-Diffusers/text_encoder_2
       variant: default
-      file_size: 9524669251
-    tokenizer_class: T5Tokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 24
+      file_size: 877273910
+    tokenizer_class: ByT5Tokenizer
+    tokenizer_name: hunyuanvideo-community/HunyuanImage-2.1-Diffusers
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: transformer
-    label: Flux Transformer
-    base: flux.base
+    label: HunyuanImage Transformer
+    base: hunyuanimage.base
     model_path:
-    - path: black-forest-labs/FLUX.1-dev/transformer
+    - path: hunyuanvideo-community/HunyuanImage-2.1-Diffusers/transformer
       variant: default
-      file_size: 23803075680
+      precision: fp16
+      type: safetensors
+      file_size: 34851875299
+  - type: helper
+    label: Guider
+    name: guider
+    module: diffusers
+    base: AdaptiveProjectedMixGuidance
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/guider/guider_config.json
+  - type: helper
+    module: diffusers
+    label: OCR Guider
+    name: ocr_guider
+    base: AdaptiveProjectedMixGuidance
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/ocr_guider/guider_config.json
   defaults:
     run:
       num_inference_steps: 40
-      guidance_scale: 5.0
-      true_cfg_scale: 4.0
       return_latents: false
-      text_encoder_kwargs:
-        clean_text: false
-        max_sequence_length: 77
-        pad_with_zero: false
-      text_encoder_2_kwargs:
-        clean_text: false
-        pad_with_zero: false
-        max_sequence_length: 512
-      joint_attention_kwargs: {}
+      attention_kwargs: {}
   ui:
     panels:
     - name: prompting
       label: Prompting
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -103,6 +123,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -113,18 +134,18 @@ spec:
     - name: sampling
       label: Sampling
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
         - - num_inference_steps
-        - - guidance_scale
-        - - true_cfg_scale
+        - - distilled_guidance_scale
         - - seed
     inputs:
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
-      placeholder: A beautiful landscape at golden hour.
+      description: The prompt for text-to-image generation.
+      placeholder: A serene lake surrounded by pine trees at sunrise, ultra realistic.
       type: text
       panel: prompting
       required: true
@@ -140,14 +161,17 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 2048
       options:
+      - name: 2K Ultra HD
+        value: 2048
+        height: 2048
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: HD
         value: 720
         height: 720
-      - name: Ultra HD 
-        value: 1024
-        height: 1024
       - name: SD
         value: 480
         height: 480
@@ -158,7 +182,7 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 969
+      default: 61
       options:
       - name: Wide
         value: 969
@@ -184,7 +208,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1
@@ -194,7 +218,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -204,7 +228,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -218,23 +242,13 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: true_cfg_scale
-      label: True CFG Scale
+    - id: distilled_guidance_scale
+      label: Distilled Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 1.0
-      min: 1.0
-      max: 15.0
-      step: 0.5
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 3.5
-      min: 1.0
-      max: 15.0
-      step: 0.5
+      default: 3.25
+      min: 0.0
+      max: 10.0
+      step: 0.1

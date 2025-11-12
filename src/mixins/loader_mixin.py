@@ -105,7 +105,6 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["torch_dtype"] = load_dtype
                 
             self.logger.info(f"Loading {model_class} from {model_path}")
-            self.logger.info(f"Extra kwargs: {extra_kwargs}")
             model = model_class.from_pretrained(model_path, **extra_kwargs)
             return model
 

@@ -118,7 +118,8 @@ spec:
         flow: column
         rows:
         - - num_inference_steps
-        - - guidance_scale
+        - - high_noise_guidance_scale
+        - - low_noise_guidance_scale
         - - seed
         - - boundary_ratio
     inputs:
@@ -149,12 +150,12 @@ spec:
       type: select
       default: 1024
       options:
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
-        value: 1024
-        height: 1024
       - name: SD
         value: 480
         height: 480
@@ -225,17 +226,26 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number_list
+    - id: high_noise_guidance_scale
+      label: High Noise Guidance Scale
+      type: number
       value_type: float
       panel: sampling
       required: false
-      max_items: 2
-      default: [4.0, 3.0]
+      default: 4.0
       min: 1.0
       max: 15.0
-      step: 0.5
+      step: 0.1
+    - id: low_noise_guidance_scale
+      label: Low Noise Guidance Scale
+      type: number
+      value_type: float
+      panel: sampling
+      required: false
+      default: 3.0
+      min: 1.0
+      max: 15.0
+      step: 0.1
     - id: boundary_ratio
       label: Boundary Ratio
       description: The ratio of the boundary of the image

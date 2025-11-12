@@ -1,28 +1,34 @@
 {
     "engine_kwargs": {
-        "engine_type": "flux",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/flux/srpo-text-to-image-1.0.0.v1.yml",
+        "engine_type": "hunyuanimage",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/hunyuanimage/hunyuanimage-1.0.0.v1.yml",
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
                 "name": "FlowMatchEulerDiscreteScheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "black-forest-labs/FLUX.1-dev/scheduler/scheduler_config.json"
+                "config_path": "https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/scheduler/scheduler_config.json"
             },
             "vae": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/vae",
-                "variant": "default"
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/hunyuanvideo-community_HunyuanImage-2.1-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/text_encoder",
-                "variant": "default"
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/hunyuanvideo-community_HunyuanImage-2.1-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "text_encoder_2": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/text_encoder_2",
-                "variant": "default"
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/hunyuanvideo-community_HunyuanImage-2.1-Diffusers/text_encoder_2",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/tencent_SRPO",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/hunyuanvideo-community_HunyuanImage-2.1-Diffusers/transformer",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
@@ -31,15 +37,15 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "The Crucifixion of Jesus by Matthias Gr\u00fcnewald, Renaissance altarpiece painting, Christ on the cross at Golgotha, dramatic lighting with darkened sky, mourning figures including Mary and John at the foot of the cross, detailed anatomical suffering, somber and reverent atmosphere, rich colors with deep reds and shadowy blues",
-        "resolution": "custom",
-        "aspect_ratio": "custom",
-        "num_inference_steps": 50,
-        "height": 1024,
-        "width": 1024,
-        "seed": 16166746,
-        "true_cfg_scale": 1,
-        "guidance_scale": 3.5,
+        "prompt": "A lone astronomer on a quiet rooftop observatory at dusk, surrounded by antique brass telescopes and scattered handwritten star charts, warm amber lantern light glowing softly, a gigantic swirling nebula visible in the sky just beyond the atmosphere, ethereal colors rippling like watercolor, gentle breeze lifting pages, tone of wonder and discovery, cinematic composition, painterly textures, high detail, soft volumetric lighting, twilight palette of indigo and amber.",
+        "negative_prompt": "",
+        "resolution": 2048,
+        "aspect_ratio": 61,
+        "num_inference_steps": 40,
+        "height": 2048,
+        "width": 2048,
+        "seed": 334644815,
+        "distilled_guidance_scale": 3.25,
         "duration": "5s"
     }
 }

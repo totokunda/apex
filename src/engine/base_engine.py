@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import shutil
 import accelerate
-from src.utils.defaults import DEFAULT_CACHE_PATH
+from src.utils.defaults import DEFAULT_CACHE_PATH, get_components_path
 from src.utils.module import find_class_recursive
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
@@ -126,14 +126,14 @@ class AutoLoadingHelperDict(dict):
             return super().__getitem__(key)
 
         # Try to load helper automatically
+
         helper = self._engine._auto_load_helper(key)
         if helper is not None:
             self[key] = helper
             return helper
-
-        # If couldn't load, raise KeyError
-        raise KeyError(f"Helper '{key}' not found and could not be auto-loaded")
-
+        else:
+            return None
+    
     def get(self, key, default=None):
         try:
             return self[key]
@@ -455,6 +455,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if hasattr(helper_class, "from_pretrained") and "model_path" in config:
             helper = helper_class.from_pretrained(config["model_path"])
         else:
+            # check for config_path
+            if "config_path" in config:
+                config_path = config.pop("config_path")
+                # try download the config file
+                try:
+                    config_path = self._download(config_path, get_components_path())
+                except Exception as e:
+                    pass
+                config = self._load_config_file(config_path)
             helper = helper_class(**config)
 
         # Store helper with multiple keys for easier access
@@ -487,7 +496,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if component.get("type") == "helper":
                 component_name = component.get("name", "")
                 component_base = component.get("base", "")
-
                 # Match by name or base (with or without namespace prefixes)
                 
                 if (
@@ -650,9 +658,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         
     def load_config_by_name(self, component_name: str):
         with accelerate.init_empty_weights():
-            # check if the component is already loaded
-            if getattr(self, component_name, None) is not None:
-                return getattr(self, component_name).config
             for component in self.config.get("components", []):
                 if component.get("name") == component_name:
                     component = self.load_component(
@@ -664,7 +669,21 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         ),
                         no_weights=True,
                     )
-                    config = getattr(component, "config", {})
+                    config = {}
+                    if isinstance(component, TextEncoder):
+                        if hasattr(component, "model"):
+                            if hasattr(component.model.config, "to_dict"):
+                                model_config = component.model.config.to_dict()
+                            else:
+                                model_config = dict(component.model.config)
+                            config.update(model_config)
+                    
+                    component_config = getattr(component, "config", {})
+                    if hasattr(component_config, "to_dict"):
+                        component_config = component_config.to_dict()
+                    else:
+                        component_config = dict(component_config)
+                    config.update(component_config)
 
                     if config:
                         return config
@@ -696,6 +715,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
             text_encoder.load_model = _patched_load_model  # type: ignore
 
+        if no_weights:
+            model = text_encoder.load_model(no_weights=True)
+            text_encoder.model = model
+        
         return text_encoder
 
     def load_transformer(
@@ -1349,7 +1372,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                                 component['model_path'] = selected_model_item.get('path')
                                 break
                         
-                else:
+                elif isinstance(model_path, str):
                     downloaded_model_path = self._download(model_path, save_path)
                     if downloaded_model_path:
                         component["model_path"] = downloaded_model_path

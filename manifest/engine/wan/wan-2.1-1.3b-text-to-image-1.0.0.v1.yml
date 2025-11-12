@@ -139,7 +139,7 @@ spec:
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
+      - name: Ultra HD
         value: 1024
         height: 1024
       - name: SD

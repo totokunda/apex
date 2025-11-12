@@ -11,15 +11,13 @@ from src.mixins.to_mixin import ToMixin
 from src.mixins.cache_mixin import CacheMixin
 from src.utils.module import find_class_recursive
 import transformers
-from transformers import T5EncoderModel
-
 
 class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
         self,
         config: Dict[str, Any],
         no_weights: bool = True,
-        enable_cache: bool = True,
+        enable_cache: bool = False,
         cache_file: str = None,
         max_cache_size: int = 100,
         device: torch.device | None = None,
@@ -89,8 +87,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             input_kwargs.update(override_kwargs)
         model = self._load_model(**input_kwargs)
         
-        self.to_device(model, device=self.device)
-
+        if not no_weights:
+            self.to_device(model, device=self.device)
 
         return model
 
@@ -109,8 +107,6 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if lower_case:
             text = text.lower()
         return text
-    
-
 
     @torch.no_grad()
     def encode(

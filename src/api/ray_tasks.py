@@ -423,6 +423,9 @@ def run_engine_from_manifest(
             input_kwargs["attention_type"] = attention_type
             
         
+        print(input_kwargs, "input_kwargs")
+            
+        
         engine = UniversalEngine(**input_kwargs)
 
         def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:

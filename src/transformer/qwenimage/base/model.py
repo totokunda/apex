@@ -521,7 +521,6 @@ class QwenImageTransformer2DModel(
                 )
 
         hidden_states = self.img_in(hidden_states)
-
         timestep = timestep.to(hidden_states.dtype)
         encoder_hidden_states = self.txt_norm(encoder_hidden_states)
         encoder_hidden_states = self.txt_in(encoder_hidden_states)
@@ -538,6 +537,7 @@ class QwenImageTransformer2DModel(
         image_rotary_emb = self.pos_embed(
             img_shapes, txt_seq_lens, device=hidden_states.device
         )
+        
 
         for index_block, block in enumerate(self.transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:

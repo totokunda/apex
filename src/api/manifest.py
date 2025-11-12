@@ -38,7 +38,9 @@ class ModelTypeInfo(BaseModel):
 MODEL_TYPE_MAPPING = {
     "vace": "control",
     "fill": "inpaint",
-    "kontext": "edit"
+    "kontext": "edit",
+    "edit_plus": "edit",
+    "dreamomni2": "edit",
 }
 
 
@@ -355,6 +357,8 @@ def get_manifest_content(manifest_id: str):
             is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
             if is_downloaded is None:
                 is_component_downloaded = False
+            else:
+                component["config_path"] = is_downloaded
                 
         
         if component.get("type") == "scheduler":
@@ -404,6 +408,7 @@ def get_manifest_content(manifest_id: str):
         
         if not any_path_downloaded and len(component.get("model_path", [])) > 0:
             is_component_downloaded = False
+        
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
         
