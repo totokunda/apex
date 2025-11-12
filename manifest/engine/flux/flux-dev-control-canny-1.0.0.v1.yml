@@ -126,22 +126,6 @@ spec:
         max_sequence_length: 512
       joint_attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - control_image
-          flow: column
-        middle:
-          inputs:
-          - prompt
-          - negative_prompt
-          flow: column
-        bottom:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
     panels:
     - name: input
       label: Input
@@ -186,6 +170,9 @@ spec:
       panel: input
       preprocessor_ref: canny
       required: true
+      map_h: "height"
+      map_w: "width"
+      scale_by: "resolution"
       floating_panel: true
     - id: prompt
       description: Describe what you want to generate in the image.
@@ -194,15 +181,13 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
       placeholder: blurry, low quality, distorted, artifacts
-      floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -213,15 +198,14 @@ spec:
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
-        value: 1080
-        height: 1080
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: SD
-        value: 480
+        value: 480  
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -247,7 +231,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps (higher = better quality but slower).
@@ -258,7 +241,6 @@ spec:
       min: 1
       max: 100
       step: 1
-      floating_panel: false
     - id: height
       label: Height
       description: Explicit height override
@@ -269,7 +251,6 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: width
       label: Width
       description: Explicit width override
@@ -280,7 +261,6 @@ spec:
       min: 256
       max: 8192
       step: 64
-      floating_panel: false
     - id: seed
       label: Seed
       description: Enter a random seed for controllably random generation.
@@ -291,7 +271,6 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-      floating_panel: false
     - id: true_cfg_scale
       label: True CFG Scale
       description: Enter a true CFG scale for the generation.
@@ -299,7 +278,6 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
       default: 1.0
       min: 1.0
       max: 15.0
@@ -311,7 +289,6 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      floating_panel: false
       default: 30
       min: 1.0
       max: 50.0

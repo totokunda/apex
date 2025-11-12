@@ -5,7 +5,7 @@ import torchvision.transforms.functional as F
 import torch.nn.functional as F
 import math
 from torchvision import transforms
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from src.engine.base_engine import BaseEngine  # noqa: F401
     BaseClass = BaseEngine  # type: ignore
@@ -187,3 +187,12 @@ class WanBaseEngine(BaseClass):
                 align_corners=False
             )
         return resized_mask
+
+    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
+        self.logger.info(f"Rendering step for model type: {self.main_engine.model_type}")
+        if self.main_engine.model_type == 't2i':
+            tensor_image = self.vae_decode(latents)[:, :, 0]
+            image = self._tensor_to_frame(tensor_image)
+            render_on_step_callback(image[0])
+        else:
+            super()._render_step(latents, render_on_step_callback)

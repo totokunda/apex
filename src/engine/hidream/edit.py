@@ -3,8 +3,7 @@ from typing import Dict, Any, Callable, List
 import numpy as np
 from diffusers.schedulers import UniPCMultistepScheduler
 from .base import HidreamBaseEngine
-from src.utils.cache import empty_cache
-import math
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 class HidreamEditEngine(HidreamBaseEngine):
     """Hidream Edit Engine Implementation"""
@@ -31,6 +30,7 @@ class HidreamEditEngine(HidreamBaseEngine):
         text_encoder_3_kwargs: Dict[str, Any] = {},
         joint_attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -42,9 +42,12 @@ class HidreamEditEngine(HidreamBaseEngine):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting edit pipeline")
+
         if not hasattr(self, "text_encoder") or not self.text_encoder:
             self.load_component_by_name("text_encoder")
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -76,6 +79,7 @@ class HidreamEditEngine(HidreamBaseEngine):
             use_cfg_guidance=use_cfg_guidance,
             offload=offload,
         )
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
         
         if "Target Image Description:" in prompt:
             target_prompt = prompt.split("Target Image Description:")[1].strip()
@@ -109,6 +113,7 @@ class HidreamEditEngine(HidreamBaseEngine):
             target_negative_prompt_embeds_llama3 = negative_prompt_embeds_llama3
             target_pooled_prompt_embeds = pooled_prompt_embeds
             target_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds 
+        safe_emit_progress(progress_callback, 0.25, "Prepared target prompt embeddings")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 
@@ -126,9 +131,12 @@ class HidreamEditEngine(HidreamBaseEngine):
             target_prompt_embeds_llama3 = torch.cat([target_negative_prompt_embeds_llama3, target_prompt_embeds_llama3], dim=1)
             target_pooled_prompt_embeds = torch.cat([target_negative_pooled_prompt_embeds, target_pooled_prompt_embeds], dim=0)
         
+        safe_emit_progress(progress_callback, 0.28, "Applied guidance packing")
+
         image = self._load_image(image)
         image = self.resize_image(image, image_size=resize_to)
         image = self.image_processor.preprocess(image)
+        safe_emit_progress(progress_callback, 0.30, "Loaded and preprocessed image")
         
         image_latents = self.vae_encode(image, offload=offload)
         latent_height, latent_width = image_latents.shape[2:]
@@ -145,6 +153,7 @@ class HidreamEditEngine(HidreamBaseEngine):
         if use_cfg_guidance:
             uncond_image_latents = torch.zeros_like(image_latents)
             image_latents = torch.cat([uncond_image_latents, image_latents, image_latents], dim=0)
+        safe_emit_progress(progress_callback, 0.35, "Prepared image latents")
         
         latents = self._get_latents(
             batch_size=batch_size,
@@ -155,6 +164,7 @@ class HidreamEditEngine(HidreamBaseEngine):
             device=self.device,
             generator=generator,
         )
+        safe_emit_progress(progress_callback, 0.40, "Initialized latent noise")
         
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -185,13 +195,31 @@ class HidreamEditEngine(HidreamBaseEngine):
             timesteps=timesteps,
             mu=mu,
         )
+        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
         
+        if not hasattr(self, "transformer") or not self.transformer:
+            self.load_component_by_type("transformer")
+        self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.52, "Transformer ready")
 
         refine_stage = False
+
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+
+        # Provide preview decode context for per-step rendering
+        try:
+            self.main_engine._preview_height = height
+            self.main_engine._preview_width = width
+            self.main_engine._preview_offload = offload
+        except Exception:
+            self._preview_height = height
+            self._preview_width = width
+            self._preview_offload = offload
 
         latents = self.denoise(
             latents=latents,
@@ -210,18 +238,23 @@ class HidreamEditEngine(HidreamBaseEngine):
             joint_attention_kwargs=joint_attention_kwargs,            
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             num_warmup_steps=num_warmup_steps,
             clip_cfg_norm=clip_cfg_norm,
             refine_strength=refine_strength,
             image_guidance_scale=image_guidance_scale,
         )
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
         if offload:
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
-        return [image]
+        safe_emit_progress(progress_callback, 1.0, "Completed edit pipeline")
+        return image

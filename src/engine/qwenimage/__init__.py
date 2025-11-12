@@ -5,12 +5,13 @@ from .edit import QwenImageEditEngine
 from .controlnet import QwenImageControlNetEngine
 from diffusers.image_processor import VaeImageProcessor
 from src.denoise.qwenimage_denoise import QwenImageDenoise
-
+from .edit_plus import QwenImageEditPlusEngine
 
 class ModelType(EnumType):
     T2I = "t2i"  # text to image
     EDIT = "edit"  # edit
     CONTROLNET = "controlnet"  # controlnet
+    EDIT_PLUS = "edit_plus"  # edit plus
 
 class QwenImageEngine(BaseEngine, QwenImageDenoise):
     def __init__(self, yaml_path: str, model_type: ModelType = ModelType.T2I, **kwargs):
@@ -37,6 +38,8 @@ class QwenImageEngine(BaseEngine, QwenImageDenoise):
             self.implementation_engine = QwenImageEditEngine(self)
         elif self.model_type == ModelType.CONTROLNET:
             self.implementation_engine = QwenImageControlNetEngine(self)
+        elif self.model_type == ModelType.EDIT_PLUS:
+            self.implementation_engine = QwenImageEditPlusEngine(self)
         else:
             raise ValueError(f"Invalid model type: {self.model_type}")
 

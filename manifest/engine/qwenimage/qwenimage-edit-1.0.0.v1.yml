@@ -17,7 +17,8 @@ spec:
   model_type: edit
   engine_type: torch
   denoise_type: base
-  attention_types: ["sdpa"]
+  attention_types:
+  - sdpa
   components:
   - type: scheduler
     label: Scheduler
@@ -53,7 +54,10 @@ spec:
       file_size: 253807696
   - type: text_encoder
     label: Qwen2.5 VL Text Encoder
+    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit/resolve/main/text_encoder/config.json
     base: Qwen2_5_VLForConditionalGeneration
+    gguf_kwargs:
+      key_map: llama
     model_path:
     - path: Qwen/Qwen-Image/text_encoder
       variant: default
@@ -63,6 +67,22 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 16584475660
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 8098524096
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 6254197696
     tokenizer_class: Qwen2Tokenizer
     tokenizer_name: Qwen/Qwen-Image-Edit
     tokenizer_kwargs:
@@ -88,6 +108,30 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 7062518304
+    - path: QuantStack/Qwen-Image-Edit-GGUF/Qwen_Image_Edit-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 14
+        recommended_vram_gb: 20
+      file_size: 12105441280
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/Qwen_Image_Edit-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 18
+        recommended_vram_gb: 28
+      file_size: 16824990240
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/Qwen_Image_Edit-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 36
+      file_size: 21761817120
   - type: helper
     name: image.processor
     label: Image Processor
@@ -106,21 +150,6 @@ spec:
         clean_text: false
       attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - image
-          flow: column
-        middle:
-          inputs:
-          - prompt
-          flow: column
-        bottom:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
     panels:
     - name: input
       label: Input
@@ -138,6 +167,13 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
@@ -167,7 +203,9 @@ spec:
       type: image
       panel: input
       required: true
-      floating_panel: true
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: prompt
       label: Prompt
       description: The prompt to edit the image.
@@ -175,16 +213,14 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
-      default: " "
-      floating_panel: false
+      default: ' '
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -195,15 +231,14 @@ spec:
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
-        value: 1080
-        height: 1080
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -229,7 +264,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
@@ -240,7 +274,6 @@ spec:
       min: 1
       max: 100
       step: 1
-      floating_panel: false
     - id: height
       label: Height
       description: Explicit height override

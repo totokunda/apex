@@ -1,49 +1,67 @@
 {
     "engine_kwargs": {
         "engine_type": "flux",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/flux/flux-dev-control-canny-1.0.0.v1.yml",
-        "model_type": "control",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/flux/dreamomni2-1.0.0.v1.yml",
+        "model_type": "dreamomni2",
         "selected_components": {
             "scheduler": {
                 "name": "FlowMatchEulerDiscreteScheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json"
+                "config_path": "black-forest-labs/FLUX.1-Kontext-dev/scheduler/scheduler_config.json"
             },
             "vae": {
                 "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/vae",
                 "variant": "default",
-                "precision": "fp16"
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "text_encoder": {
                 "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/text_encoder",
                 "variant": "default",
-                "precision": "fp16"
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "text_encoder_2": {
                 "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-dev/text_encoder_2",
                 "variant": "default",
-                "precision": "fp16"
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-Canny-dev/transformer",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/black-forest-labs_FLUX.1-Kontext-dev/transformer",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "llm": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/xiabs_DreamOmni2/vlm-model",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "llm_processor": {
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/xiabs_DreamOmni2/vlm-model",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             }
         },
+        "auto_apply_loras": false,
         "attention_type": "sdpa"
     },
     "inputs": {
-        "control_image": "/home/tosin_coverquick_co/apex-diffusion/cache/567e40f1-50b7-467b-8d76-951592cc_canny_a7bec9e6a675d274/result.png",
-        "prompt": "A beautiful sunset, as waves lap against a beach with a beautiful castle in the background. ",
-        "resolution": 720,
-        "aspect_ratio": 969,
+        "task": "generation",
+        "image_1": "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/0f2cb230-122e-470f-a7e2-9c4ee49b8c70-f44366bb-11a3-46d0-bc3f-45fa4942ebd7_image_1_0_4.png",
+        "image_2": "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/b534b2c0-ac69-4278-85b9-677a20c25cdd-f44366bb-11a3-46d0-bc3f-45fa4942ebd7_image_2_0_4.png",
+        "prompt": "In the scene the two characters are holding each other as they lock eyes with one another, in a loving embrace. ",
+        "resolution": "custom",
+        "aspect_ratio": "custom",
         "num_inference_steps": 50,
-        "height": 704,
-        "width": 1280,
-        "seed": 2123392838,
+        "height": 832,
+        "width": 479,
+        "seed": 2138938417,
         "true_cfg_scale": 1,
-        "guidance_scale": 30,
+        "guidance_scale": 3.5,
         "duration": "5s"
     }
 }

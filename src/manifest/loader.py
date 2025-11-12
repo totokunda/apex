@@ -125,6 +125,8 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         normalized["denoise_type"] = spec["denoise_type"]
     elif spec.get("denoiseType"):  # backward compatibility
         normalized["denoise_type"] = spec["denoiseType"]
+    if spec.get("engine_kwargs"):
+        normalized["engine_kwargs"] = spec["engine_kwargs"]
 
     # components and stages
     for key in (

@@ -7,6 +7,7 @@ from src.vae.mochi.model import AutoencoderKLMochi as MochiVAE
 from src.vae.stepvideo.model import AutoencoderKL as StepVideoVAE
 from src.vae.qwenimage.model import AutoencoderKLQwenImage as QwenImageVAE
 from src.vae.auto.model import AutoencoderKL as AutoVAE
+from src.vae.hunyuanimage.model import AutoencoderKLHunyuanImage as HunyuanImageVAE
 
 __all__ = [
     "CogVideoXVAE",
@@ -18,8 +19,8 @@ __all__ = [
     "StepVideoVAE",
     "QwenImageVAE",
     "AutoVAE",
+    "HunyuanImageVAE",
 ]
-
 
 def get_vae(vae_name: str):
     if vae_name == "cogvideo":
@@ -40,5 +41,7 @@ def get_vae(vae_name: str):
         return QwenImageVAE
     elif vae_name == "auto":
         return AutoVAE
+    elif vae_name == "hunyuanimage":
+        return HunyuanImageVAE
     else:
         raise ValueError(f"VAE {vae_name} not found")

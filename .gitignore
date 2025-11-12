@@ -132,3 +132,4 @@ InfiniteTalk/
 **/debug/*
 taming
 .env
+inputs.json

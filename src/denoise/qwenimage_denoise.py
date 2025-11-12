@@ -71,7 +71,7 @@ class QwenImageDenoise(BaseClass):
                     latent_model_input = torch.cat([latents, image_latents], dim=1)
                 else:
                     latent_model_input = latents
-                    
+                
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,

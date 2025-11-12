@@ -18,7 +18,8 @@ spec:
   model_type: t2i
   engine_type: torch
   denoise_type: base
-  attention_types: [sdpa]
+  attention_types:
+  - sdpa
   components:
   - type: scheduler
     label: Scheduler
@@ -35,6 +36,7 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/vae
       variant: default
+      file_size: 167667722
   - type: text_encoder
     name: text_encoder
     label: CLIP Text Encoder
@@ -42,6 +44,7 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/text_encoder
       variant: default
+      file_size: 246144965
     tokenizer_class: CLIPTokenizer
     tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
@@ -53,6 +56,7 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/text_encoder_2
       variant: default
+      file_size: 9524669251
     tokenizer_class: T5Tokenizer
     tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
@@ -63,13 +67,14 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.1-dev/transformer
       variant: default
+      file_size: 23803075680
   defaults:
     run:
       num_inference_steps: 40
       guidance_scale: 5.0
       true_cfg_scale: 4.0
       return_latents: false
-      text_encoder_kwargs: 
+      text_encoder_kwargs:
         clean_text: false
         max_sequence_length: 77
         pad_with_zero: false
@@ -79,21 +84,6 @@ spec:
         max_sequence_length: 512
       joint_attention_kwargs: {}
   ui:
-    floating_panel:
-      regions:
-        top:
-          inputs:
-          - prompt
-          flow: column
-        middle:
-          inputs:
-          - negative_prompt
-          flow: column
-        bottom:
-          inputs:
-          - resolution
-          - aspect_ratio
-          flow: row
     panels:
     - name: prompting
       label: Prompting
@@ -102,6 +92,13 @@ spec:
         flow: column
         rows:
         - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - negative_prompt
     - name: size
       label: Size
@@ -131,15 +128,13 @@ spec:
       type: text
       panel: prompting
       required: true
-      floating_panel: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
       type: text
-      panel: prompting
+      panel: advanced_prompting
       required: false
-      floating_panel: false
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -150,15 +145,14 @@ spec:
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
-        value: 1080
-        height: 1080
+      - name: Ultra HD 
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480
       - name: Custom
         value: custom
-      floating_panel: true
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
@@ -184,7 +178,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-      floating_panel: true
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
@@ -245,5 +238,3 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-
-

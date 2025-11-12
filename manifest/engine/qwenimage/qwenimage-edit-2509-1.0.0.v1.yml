@@ -1,0 +1,272 @@
+api_version: apex/v1
+kind: Model
+metadata:
+  id: qwenimage-edit-2509
+  model: qwenimage
+  name: QwenImage Edit 2509
+  version: 1.0.0
+  description: QwenImage Edit 2509 is a 20B parameter model for image editing with up to three input images.
+  tags:
+  - qwenimage
+  - edit
+  - multi-image
+  - '2509'
+  author: Apex AI
+  license: Apache-2.0
+  demo_path: https://qianwen-res.oss-accelerate-overseas.aliyuncs.com/Qwen-Image/edit2509/edit2509_top.jpg
+spec:
+  engine: qwenimage
+  model_type: edit_plus
+  engine_type: torch
+  denoise_type: base
+  attention_types:
+  - sdpa
+  components:
+  - type: scheduler
+    label: Scheduler
+    default: FlowMatchEulerDiscreteScheduler
+    scheduler_options:
+    - name: FlowMatchEulerDiscreteScheduler
+      label: FlowMatch Euler Discrete Scheduler
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
+        Edit model.
+      base: diffusers.FlowMatchEulerDiscreteScheduler
+      config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/scheduler/scheduler_config.json
+  - type: vae
+    label: QwenImage VAE
+    base: qwenimage
+    model_path:
+    - path: Qwen/Qwen-Image/vae
+      variant: default
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 253807696
+  - type: text_encoder
+    label: Qwen2.5 VL Text Encoder
+    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit/resolve/main/text_encoder/config.json
+    base: Qwen2_5_VLForConditionalGeneration
+    model_path:
+    - path: Qwen/Qwen-Image/text_encoder
+      variant: default
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 24
+      file_size: 16584475660
+    tokenizer_class: Qwen2Tokenizer
+    tokenizer_name: Qwen/Qwen-Image-Edit-2509
+    tokenizer_kwargs:
+      subfolder: tokenizer
+  - type: transformer
+    label: QwenImage Transformer
+    base: qwenimage.base
+    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/transformer/config.json
+    model_path:
+    - path: Qwen/Qwen-Image-Edit-2509/transformer
+      variant: default
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 40861227514
+  - type: helper
+    name: image.processor
+    label: Image Processor
+    module: transformers.models.qwen2_vl.processing_qwen2_vl
+    base: Qwen2VLProcessor
+    model_path:
+    - path: Qwen/Qwen-Image-Edit-2509/processor
+      type: safetensors
+      file_size: 15879236
+  defaults:
+    run:
+      num_inference_steps: 40
+      return_latents: false
+      text_encoder_kwargs:
+        add_special_tokens: false
+        clean_text: false
+      attention_kwargs: {}
+  ui:
+    panels:
+    - name: input
+      label: Input
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - image_1
+        - - image_2
+        - - image_3
+    - name: prompting
+      label: Prompting
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - prompt
+    - name: advanced_prompting
+      label: Advanced Prompting
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - negative_prompt
+    - name: size
+      label: Size
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - resolution
+        - - aspect_ratio
+        - - height
+          - width
+    - name: sampling
+      label: Sampling
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - num_inference_steps
+        - - true_cfg_scale
+        - - seed
+    inputs:
+    - id: image_1
+      label: First Image
+      description: The first input image to use.
+      type: image
+      panel: input
+      required: true
+      map_h: height
+      map_w: width
+      scale_by: resolution
+    - id: image_2
+      label: Second Image
+      description: The second input image to use.
+      type: image
+      panel: input
+      required: false
+    - id: image_3
+      label: Third Image
+      description: The third input image to use.
+      type: image
+      panel: input
+      required: false
+    - id: prompt
+      label: Prompt
+      description: The prompt to edit the image.
+      placeholder: A beautiful woman with long brown hair and blue eyes.
+      type: text
+      panel: prompting
+      required: true
+    - id: negative_prompt
+      label: Negative Prompt
+      description: Describe what you want to avoid in the generation.
+      placeholder: blurry, low quality, distorted, artifacts
+      type: text
+      panel: advanced_prompting
+      required: false
+      default: ' '
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output image
+      panel: size
+      type: select
+      default: 768
+      options:
+      - name: HD
+        value: 768
+        height: 768
+      - name: Ultra HD
+        value: 1024
+        height: 1024
+      - name: SD
+        value: 480
+        height: 480
+      - name: Custom
+        value: custom
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output image
+      panel: size
+      type: select
+      default: 969
+      options:
+      - name: Wide
+        value: 969
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: 556
+        ratio_w: 9
+        ratio_h: 16
+      - name: Square
+        value: 61
+        ratio_w: 1
+        ratio_h: 1
+      - name: Classic
+        value: 184
+        ratio_w: 4
+        ratio_h: 3
+      - name: Custom
+        value: custom
+    - id: num_inference_steps
+      label: Inference Steps
+      description: Number of denoising steps
+      type: number+slider
+      value_type: integer
+      panel: sampling
+      default: 50
+      min: 1
+      max: 100
+      step: 1
+    - id: height
+      label: Height
+      description: Explicit height override
+      type: number
+      value_type: integer
+      panel: size
+      default: 1024
+      min: 256
+      max: 8192
+      step: 64
+    - id: width
+      label: Width
+      description: Explicit width override
+      type: number
+      value_type: integer
+      panel: size
+      default: 1024
+      min: 256
+      max: 8192
+      step: 64
+    - id: seed
+      label: Seed
+      description: Random seed for reproducibility
+      type: random
+      default: -1
+      min: 0
+      max: 4294967295
+      value_type: integer
+      panel: sampling
+      required: false
+    - id: true_cfg_scale
+      label: True CFG Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 4.0
+      min: 1.0
+      max: 15.0
+      step: 0.5

@@ -191,11 +191,15 @@ class LoraManager(DownloadMixin):
                     local_path, model.config._class_name
                 )
                 
-                if converted:
-                    local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
+                local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
+                
+                keys = list(local_path_state_dict.keys())
+                prefix = None
+                if keys[0].startswith("transformer") and keys[-1].startswith("transformer"):
+                    prefix = "transformer"
                 
                 model.load_lora_adapter(
-                    local_path_state_dict, adapter_name=adapter_name
+                    local_path_state_dict, adapter_name=adapter_name, prefix=prefix,
                 )
                 
                 logger.info(f"Loaded LoRA {adapter_name} from {local_path}")

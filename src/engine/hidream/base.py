@@ -2,8 +2,15 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from PIL import Image
 import math
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.engine.base_engine import BaseEngine  # noqa: F401
+    BaseClass = BaseEngine  # type: ignore
+else:
+    BaseClass = object
 
-class HidreamBaseEngine:
+
+class HidreamBaseEngine(BaseClass):
     """Base class for Hidream engine implementations containing common functionality"""
 
     def __init__(self, main_engine):
@@ -14,6 +21,16 @@ class HidreamBaseEngine:
         self.num_channels_latents = main_engine.num_channels_latents
         self.image_processor = main_engine.image_processor
         self.default_sample_size = main_engine.default_sample_size
+
+    def __getattr__(self, name: str):  # noqa: D401
+        """Delegate attribute access to the composed BaseEngine when not found here."""
+        try:
+            return getattr(self.main_engine, name)
+        except AttributeError as exc:
+            raise AttributeError(f"{self.__class__.__name__!s} has no attribute '{name}'") from exc
+
+    def __dir__(self):
+        return sorted(set[str](list[str](super().__dir__()) + dir(self.main_engine)))
 
     @property
     def text_encoder(self):
@@ -55,68 +72,9 @@ class HidreamBaseEngine:
     def helpers(self):
         return self.main_engine.helpers
     
-    def load_config_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_config_by_type(component_type)
 
-    def load_config_by_name(self, component_name: str):
-        """Load a component by name"""
-        return self.main_engine.load_config_by_name(component_name)
 
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def load_component_by_name(self, component_name: str):
-        """Load a component by name"""
-        return self.main_engine.load_component_by_name(component_name)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
-
-    def _get_latents(
-        self,
-        batch_size: int,
-        num_channels_latents: int,
-        height: int,
-        width: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        seed: int,
-        generator=None,
-        latents=None,
-    ):
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (self.vae_scale_factor * 2))
-        width = 2 * (int(width) // (self.vae_scale_factor * 2))
-
-        shape = (batch_size, num_channels_latents, height, width)
-
-        if seed is not None:
-            generator = torch.Generator(device=device).manual_seed(seed)
-
-        if latents is not None:
-            return latents.to(device=device, dtype=dtype)
-
-        if isinstance(generator, list) and len(generator) != batch_size:
-            raise ValueError(
-                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
-                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
-            )
-
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-
-        return latents
+    # Note: A simplified _get_latents exists later in the file and should be used.
 
     @staticmethod
     def calculate_shift(
@@ -131,49 +89,7 @@ class HidreamBaseEngine:
         mu = image_seq_len * m + b
         return mu
 
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
-
-    def _tensor_to_frame(self, *args, **kwargs):
-        """Convert torch.tensor to PIL image"""
-        return self.main_engine._tensor_to_frame(*args, **kwargs)
+    
 
     def _get_latents(
         self,
@@ -412,3 +328,19 @@ class HidreamBaseEngine:
             pil_image = pil_image.crop((left, 0, left + new_size[0], new_size[1]))
 
         return pil_image
+    
+    def _render_step(self, latents, render_on_step_callback):
+        """Decode latents and render a preview image during denoising."""
+        try:
+            preview_height = getattr(self, "_preview_height", None)
+            preview_width = getattr(self, "_preview_width", None)
+            if preview_height is None or preview_width is None:
+                return self.main_engine._render_step(latents, render_on_step_callback)
+            tensor_image = self.vae_decode(latents, offload=getattr(self, "_preview_offload", True))
+            image = self._tensor_to_frame(tensor_image)
+            render_on_step_callback(image[0])
+        except Exception:
+            try:
+                self.main_engine._render_step(latents, render_on_step_callback)
+            except Exception:
+                pass

@@ -2,7 +2,6 @@ import os
 os.environ["APEX_HOME_DIR"] = "/mnt/localssd"
 os.environ['HF_HOME'] = '/mnt/localssd'
 from src.engine import create_engine
-import torch
 from PIL import Image
 
 engine = create_engine("hidream", "hidream-e1-1-1-0-0-v1", "edit", attention_type="sdpa")

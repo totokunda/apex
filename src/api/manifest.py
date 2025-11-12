@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
-from src.utils.defaults import get_components_path, get_config_path
+from src.utils.defaults import get_components_path, get_config_path, get_lora_path
 
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
@@ -36,7 +36,11 @@ class ModelTypeInfo(BaseModel):
 
 
 MODEL_TYPE_MAPPING = {
-    "vace": "control"
+    "vace": "control",
+    "fill": "inpaint",
+    "kontext": "edit",
+    "edit_plus": "edit",
+    "dreamomni2": "edit",
 }
 
 
@@ -234,6 +238,7 @@ def list_model_types() -> List[ModelTypeInfo]:
         "edit": "Edit",
         "control": "Control",
         "t2i": "Text to Image",
+        "inpaint": "Inpaint",
     }
     description_map = {
         "t2v": "Generate videos from text prompts.",
@@ -242,7 +247,8 @@ def list_model_types() -> List[ModelTypeInfo]:
         "v2v": "Transform an input video with a new style or prompt.",
         "x2v": "Flexible any-to-video generation.",
         "edit": "Edit or modify images using prompts and tools.",
-        "control": "Guide generation with control signals (e.g., canny, pose)."
+        "control": "Guide generation with control signals (e.g., canny, pose).",
+        "inpaint": "Inpaint images using prompts and masks.",
     }
 
     discovered_types = set()
@@ -344,6 +350,35 @@ def get_manifest_content(manifest_id: str):
     if "spec" not in content:
         content["spec"] = {}
     content["spec"]["attention_types_detail"] = attention_options
+    for lora_index, lora in enumerate(content.get("spec", {}).get("loras", [])):
+        if isinstance(lora, str):
+            # check if lora is downloaded
+            is_downloaded = DownloadMixin.is_downloaded(lora, get_components_path()) #!TODO: use lora path
+            # Get the basename of the lora
+            lora_basename = os.path.basename(lora)
+            lora_name = lora_basename.split(".")[0]
+            out_lora = {
+                "label": lora_name,
+                "name": lora_name,
+                "scale": 1.0,
+            }
+            if is_downloaded is not None:
+                out_lora["is_downloaded"] = True
+                out_lora["source"] = is_downloaded
+            else:
+                out_lora["is_downloaded"] = False
+                out_lora["source"] = lora
+            content["spec"]["loras"][lora_index] = out_lora
+        elif isinstance(lora, dict):
+            is_downloaded = DownloadMixin.is_downloaded(lora.get("source"), get_components_path()) #!TODO: use lora path
+            if is_downloaded is not None:
+                lora["is_downloaded"] = True
+                lora["source"] = is_downloaded
+            else:
+                lora["is_downloaded"] = False
+                lora["source"] = lora.get("source")
+            content["spec"]["loras"][lora_index] = lora
+        
     for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
         # check config path too
         is_component_downloaded = True
@@ -351,6 +386,8 @@ def get_manifest_content(manifest_id: str):
             is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
             if is_downloaded is None:
                 is_component_downloaded = False
+            else:
+                component["config_path"] = is_downloaded
                 
         
         if component.get("type") == "scheduler":
@@ -400,6 +437,7 @@ def get_manifest_content(manifest_id: str):
         
         if not any_path_downloaded and len(component.get("model_path", [])) > 0:
             is_component_downloaded = False
+        
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
         
