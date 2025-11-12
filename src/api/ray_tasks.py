@@ -412,18 +412,17 @@ def run_engine_from_manifest(
             model_type = model_type[0] if model_type else None
             
         attention_type = selected_components.pop("attention", {}).get("name", None)
+        
         input_kwargs = {
             "engine_type": engine_type,
             "yaml_path": manifest_path,
             "model_type": model_type,
             "selected_components": selected_components,
+            **(config.get("engine_kwargs", {}) or {}),
         }
         
         if attention_type:
             input_kwargs["attention_type"] = attention_type
-            
-        
-        print(input_kwargs, "input_kwargs")
             
         
         engine = UniversalEngine(**input_kwargs)

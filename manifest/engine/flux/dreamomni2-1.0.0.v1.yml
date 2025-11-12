@@ -16,15 +16,19 @@ spec:
   model_type: dreamomni2
   engine_type: torch
   denoise_type: base
+  engine_kwargs:
+    auto_apply_loras: false
   attention_types:
   - sdpa
   loras:
   - source: https://huggingface.co/xiabs/DreamOmni2/resolve/main/gen_lora/pytorch_lora_weights.safetensors
     scale: 1.0
     name: gen
+    label: Generation LoRA
   - source: https://huggingface.co/xiabs/DreamOmni2/resolve/main/edit_lora/pytorch_lora_weights.safetensors
     scale: 1.0
     name: edit
+    label: Editing LoRA
   components:
   - type: scheduler
     label: Scheduler
@@ -84,13 +88,25 @@ spec:
   - type: helper
     label: LLM Model
     base: Qwen2_5_VLForConditionalGeneration
-    module: diffusers
+    module: transformers
+    name: llm
     model_path:
     - path: xiabs/DreamOmni2/vlm-model
       variant: default
       precision: fp16
       type: safetensors
       file_size: 16600354900
+  - type: helper
+    label: LLM Processor
+    base: Qwen2_5_VLProcessor
+    module: transformers
+    name: llm_processor
+    model_path:
+    - path: xiabs/DreamOmni2/vlm-model
+      variant: default
+      precision: fp16
+      type: safetensors
+
   defaults:
     run:
       num_inference_steps: 40
@@ -109,14 +125,14 @@ spec:
       joint_attention_kwargs: {}
   ui:
     panels:
-    - name: mode
-      label: Mode
+    - name: task
+      label: ''
       collapsible: false
       default_open: true
       layout:
         flow: column
         rows:
-        - - mode
+        - - task
     - name: input
       label: Input
       collapsible: true
@@ -125,9 +141,9 @@ spec:
         flow: column
         rows:
         - - image_1
-        - - image_2
+          - image_2
         - - image_3
-        - - image_4
+          - image_4
     - name: prompting
       label: Prompting
       collapsible: true
@@ -163,12 +179,15 @@ spec:
         flow: column
         rows:
         - - num_inference_steps
+        - - guidance_scale
         - - true_cfg_scale
         - - seed
     inputs:
-    - id: mode
+    - id: task
       type: select
-      panel: mode
+      label: Task
+      description: Select the task to perform.
+      panel: task
       default: generation
       options:
       - name: Generation
@@ -265,7 +284,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 40
+      default: 50
       min: 1
       max: 100
       step: 1
@@ -306,6 +325,17 @@ spec:
       panel: sampling
       required: false
       default: 1.0
+      min: 1.0
+      max: 15.0
+      step: 0.5
+    - id: guidance_scale
+      label: Guidance Scale
+      description: Guidance scale for the generation.
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 3.5
       min: 1.0
       max: 15.0
       step: 0.5

@@ -225,7 +225,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
         self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
+        if kwargs.get("auto_apply_loras", True):
+            self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
 
     def _init_logger(self):
         self.logger = logger
@@ -514,6 +515,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         self.to_device(helper)
                         return helper
                     except Exception as e:
+                        import traceback
+                        self.logger.error(traceback.format_exc())
                         self.logger.warning(
                             f"Failed to auto-load helper '{helper_key}': {e}"
                         )
