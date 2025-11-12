@@ -414,6 +414,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
     ):
+
         component_type = component.get("type")
         component_module = None
         if component_type == "scheduler":
@@ -426,7 +427,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             text_encoder = self.load_text_encoder(component, no_weights)
             component_module = text_encoder
         elif component_type == "transformer":
+            logger.info(f"\n\nLoading transformer: {component}\n\n")
             transformer = self.load_transformer(component, load_dtype, no_weights)
+
             component_module = transformer
         elif component_type == "helper":
             helper = self.load_helper(component)
@@ -704,7 +707,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
-
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
@@ -826,6 +828,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             "transformer",
             "vae",
         ], "Only transformer and vae are supported for now"
+        if component["model_path"].endswith(".gguf"):
+            return component["model_path"], False
         model_path = component["model_path"]
         component_name = component.get("name", component.get("type"))
 

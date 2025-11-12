@@ -6,6 +6,7 @@ from src.mlx.denoise import WanDenoise as WanDenoiseMLX, DenoiseType as DenoiseT
 import numpy as np
 from PIL import Image
 from src.utils.progress import safe_emit_progress
+from loguru import logger
 
 
 class DenoiseType(EnumType):
@@ -99,6 +100,7 @@ class WanDenoise(WanDenoiseMLX):
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Loading new transformer",
                         )
+
                         self.load_component_by_name("transformer")
                         self.to_device(self.transformer)
                         safe_emit_progress(
@@ -108,6 +110,7 @@ class WanDenoise(WanDenoiseMLX):
                         )
 
                     transformer = self.transformer
+
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[0]
                 else:

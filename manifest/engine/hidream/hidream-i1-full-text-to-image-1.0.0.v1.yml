@@ -97,6 +97,26 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 34211853794
+    - path: https://huggingface.co/city96/HiDream-I1-Full-gguf/resolve/main/hidream-i1-full-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      file_size: 6562298432
+    - path: https://huggingface.co/city96/HiDream-I1-Full-gguf/resolve/main/hidream-i1-full-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      file_size: 10893900352
+    - path: https://huggingface.co/city96/HiDream-I1-Full-gguf/resolve/main/hidream-i1-full-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      file_size: 14679505472
+    - path: https://huggingface.co/city96/HiDream-I1-Full-gguf/resolve/main/hidream-i1-full-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      file_size: 18689407552
   defaults:
     run:
       num_inference_steps: 40
@@ -171,7 +191,12 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature
+      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
+        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
+        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
+        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
+        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
+        legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -214,7 +239,7 @@ spec:
         ratio_w: 4
         ratio_h: 3
       - name: Custom
-        value: custom   
+        value: custom
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
