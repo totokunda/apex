@@ -200,11 +200,11 @@ spec:
       default: 720
       options:
       - name: HD
-        value: 720
+        value: 720  
         height: 720
-      - name: Full HD
-        value: 1080
-        height: 1080
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480

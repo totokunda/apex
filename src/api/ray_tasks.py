@@ -16,7 +16,7 @@ from src.api.preprocessor_registry import (
     get_preprocessor_info
 )
 from src.mixins.download_mixin import DownloadMixin
-from src.utils.defaults import get_components_path
+from src.utils.defaults import get_components_path, get_lora_path, get_preprocessor_path
 from diffusers.utils import export_to_video
 import time
 
@@ -208,6 +208,203 @@ def download_components(paths: List[str], job_id: str, ws_bridge, save_path: Opt
         except Exception:
             pass
         return {"job_id": job_id, "status": "error", "error": err}
+
+
+@ray.remote
+def download_unified(
+    item_type: str,
+    source: Any,
+    job_id: str,
+    ws_bridge,
+    save_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Unified downloader for components, LoRAs, and preprocessors.
+    
+    Behavior:
+    - If item_type == "preprocessor" and source is a known preprocessor id, we initialize it via `.from_pretrained()`
+      and mark it as downloaded, reporting progress over websocket.
+    - Otherwise, we use DownloadMixin to download one or multiple paths directly into the appropriate default folder
+      based on item_type (component, lora, preprocessor) or an explicit save_path override.
+    
+    Args:
+        item_type: One of {"component", "lora", "preprocessor"}.
+        source: A preprocessor id (string) OR a path/url/hf-repo (string) OR a list of such strings.
+        job_id: Job ID for progress tracking.
+        ws_bridge: Ray actor bridge to forward websocket updates.
+        save_path: Optional override directory to save into; otherwise inferred from item_type.
+    """
+    # Helper to send progress
+    def send_progress(progress: Optional[float], message: str, metadata: Optional[Dict[str, Any]] = None):
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
+            if progress is not None:
+                logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+            else:
+                logger.info(f"[{job_id}] {message}")
+        except Exception as e:
+            logger.error(f"Failed to send progress update to websocket: {e}")
+    
+    try:
+        norm_type = (item_type or "").strip().lower()
+        if norm_type not in {"component", "lora", "preprocessor"}:
+            raise ValueError(f"Unknown item_type '{item_type}'. Expected one of: component, lora, preprocessor.")
+        
+        # Determine default directory if not explicitly provided
+        base_save_dir = save_path
+        if base_save_dir is None:
+            if norm_type == "component":
+                base_save_dir = get_components_path()
+            elif norm_type == "lora":
+                base_save_dir = get_lora_path()
+            else:
+                base_save_dir = get_preprocessor_path()
+        os.makedirs(base_save_dir, exist_ok=True)
+        
+        # Case 1: Preprocessor-id based download and initialization
+        if norm_type == "preprocessor" and isinstance(source, str):
+            try:
+                preprocessor_info = get_preprocessor_info(source)
+                # If lookup succeeds, treat source as a preprocessor id
+                def send_pp_progress(local_progress: float, message: str, metadata: Optional[Dict] = None):
+                    try:
+                        ray.get(ws_bridge.send_update.remote(job_id, local_progress, message, metadata))
+                        logger.info(f"[{job_id}] Progress: {local_progress*100:.1f}% - {message}")
+                    except Exception as e:
+                        logger.error(f"Failed to send progress update to websocket: {e}")
+                
+                # Force CPU in worker to avoid MPS/CUDA fork issues
+                os.environ['CUDA_VISIBLE_DEVICES'] = ''
+                os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+                if hasattr(torch, 'set_default_device'):
+                    torch.set_default_device('cpu')
+                
+                send_pp_progress(0.0, f"Starting download of preprocessor '{source}'")
+                send_pp_progress(0.1, "Loading preprocessor module")
+                
+                module = importlib.import_module(preprocessor_info["module"])
+                preprocessor_class = getattr(module, preprocessor_info["class"])
+                
+                # Wire download progress into util
+                from src.preprocess.download_tracker import DownloadProgressTracker
+                from src.preprocess import util as util_module
+                tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_pp_progress(p, m, md))
+                util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
+                try:
+                    preprocessor = preprocessor_class.from_pretrained()
+                    from src.preprocess.base_preprocessor import BasePreprocessor
+                    BasePreprocessor._mark_as_downloaded(source)
+                finally:
+                    util_module.DOWNLOAD_PROGRESS_CALLBACK = None
+                
+                send_pp_progress(1.0, "Download complete")
+                send_pp_progress(1.0, "Complete", {"status": "complete"})
+                return {
+                    "job_id": job_id,
+                    "status": "complete",
+                    "type": "preprocessor",
+                    "id": source,
+                    "message": "Preprocessor downloaded and initialized",
+                }
+            except Exception as maybe_not_preproc:
+                # Not a registered preprocessor id; fall through to generic downloader
+                logger.info(f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}")
+                # continue to generic path-based downloading below
+        
+        # Case 2: Generic path/url/hf download(s) using DownloadMixin
+        # Normalize sources to a list
+        paths: List[str] = []
+        if isinstance(source, list):
+            paths = [str(p) for p in source]
+        elif isinstance(source, str):
+            paths = [source]
+        else:
+            raise ValueError("source must be a string or list of strings representing paths/urls/hf repos.")
+        
+        @ray.remote
+        class ProgressAggregator:
+            def __init__(self, total_items: int):
+                self.total_items = max(1, int(total_items))
+                self.per_index_progress: Dict[int, float] = {}
+                self.last_overall: float = 0.0
+            
+            def update(self, index: int, frac: float, label: str, downloaded: Optional[int] = None, total: Optional[int] = None, filename: Optional[str] = None, message: Optional[str] = None):
+                frac = max(0.0, min(1.0, float(frac)))
+                self.per_index_progress[index] = frac
+                overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+                overall_progress = max(self.last_overall, min(1.0, overall_progress))
+                self.last_overall = overall_progress
+                if filename:
+                    filename_parts = filename.split("_")
+                    if len(filename_parts) > 1:
+                        filename_parts = filename_parts[1:]
+                    filename = "_".join(filename_parts)
+                meta = {"label": label, "bucket": norm_type}
+                if downloaded is not None:
+                    meta["downloaded"] = int(downloaded)
+                if total is not None:
+                    meta["total"] = int(total)
+                if filename is not None:
+                    meta["filename"] = filename
+                msg = message or f"Downloading {label}"
+                try:
+                    # Report aggregated overall progress to the websocket, not per-file fraction
+                    return ray.get(ws_bridge.send_update.remote(job_id, overall_progress, msg, meta))
+                except Exception:
+                    return False
+            
+            def complete(self, index: int, label: str):
+                return self.update(index, 1.0, label, message=f"Completed {label}")
+            
+            def error(self, index: int, label: str, error_msg: str):
+                try:
+                    return ray.get(ws_bridge.send_update.remote(job_id, self.last_overall, error_msg, {"label": label, "status": "error", "bucket": norm_type}))
+                except Exception:
+                    return False
+        
+        @ray.remote
+        def download_single(path: str, dest_dir: str, index: int, aggregator) -> Dict[str, Any]:
+            label = os.path.basename(path.rstrip("/")) or path
+            try:
+                def _cb(downloaded: int, total: Optional[int], filename: Optional[str] = None):
+                    frac = 0.0
+                    if total and total > 0:
+                        frac = max(0.0, min(1.0, downloaded / total))
+                    ray.get(aggregator.update.remote(index, frac, label, downloaded, total, filename))
+                mixin = DownloadMixin()
+                os.makedirs(dest_dir, exist_ok=True)
+                mixin.logger.info(f"[{job_id}] Downloading {path} into {dest_dir}")
+                result_path = mixin.download(path, dest_dir, progress_callback=_cb)
+                ray.get(aggregator.complete.remote(index, label))
+                return {"path": path, "status": "complete", "result_path": result_path}
+            except Exception as e:
+                ray.get(aggregator.error.remote(index, label, str(e)))
+                return {"path": path, "status": "error", "error": str(e)}
+        
+        total = len(paths)
+        aggregator = ProgressAggregator.remote(total)
+        refs = [download_single.remote(p, base_save_dir, i, aggregator) for i, p in enumerate(paths, start=1)]
+        results = ray.get(refs)
+        try:
+            ray.get(ws_bridge.send_update.remote(job_id, 1.0, "All downloads complete", {"status": "complete", "bucket": norm_type}))
+        except Exception:
+            pass
+        has_error = any(r.get("status") == "error" for r in results)
+        return {
+            "job_id": job_id,
+            "status": "error" if has_error else "complete",
+            "bucket": norm_type,
+            "save_dir": base_save_dir,
+            "results": results,
+        }
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(tb)
+        try:
+            send_progress(0.0, str(e), {"status": "error", "error": str(e)})
+        except Exception:
+            pass
+        return {"job_id": job_id, "status": "error", "error": str(e), "traceback": tb}
 
 
 def _execute_preprocessor(
@@ -412,11 +609,13 @@ def run_engine_from_manifest(
             model_type = model_type[0] if model_type else None
             
         attention_type = selected_components.pop("attention", {}).get("name", None)
+        
         input_kwargs = {
             "engine_type": engine_type,
             "yaml_path": manifest_path,
             "model_type": model_type,
             "selected_components": selected_components,
+            **(config.get("engine_kwargs", {}) or {}),
         }
         
         if attention_type:

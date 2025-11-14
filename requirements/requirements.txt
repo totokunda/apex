@@ -52,3 +52,4 @@ uvicorn[standard]==0.32.0
 websockets==14.1
 python-multipart==0.0.20
 av==16.0.1
+dotenv

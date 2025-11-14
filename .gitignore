@@ -130,6 +130,5 @@ thirdparty/flash-attention
 thirdparty/SageAttention
 InfiniteTalk/
 **/debug/*
-taming
 .env
 inputs.json

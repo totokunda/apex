@@ -63,6 +63,8 @@ def get_transformer_converter(model_base: str):
         return SkyReelsTransformerConverter()
     elif model_base == "magi.base":
         return MagiTransformerConverter()
+    elif model_base == "flux.base":
+        return FluxTransformerConverter()
     else:
         return NoOpTransformerConverter()
 

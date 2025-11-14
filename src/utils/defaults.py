@@ -99,15 +99,18 @@ def get_components_path() -> str:
 def get_config_path() -> str:
     return DEFAULT_CONFIG_SAVE_PATH
 
+def get_lora_path() -> str:
+    return DEFAULT_LORA_SAVE_PATH
+
 def set_components_path(path: str) -> None:
     global DEFAULT_COMPONENTS_PATH
     DEFAULT_COMPONENTS_PATH = path
     os.makedirs(DEFAULT_COMPONENTS_PATH, exist_ok=True)
 
-def get_preprocessor_save_path() -> str:
+def get_preprocessor_path() -> str:
     return DEFAULT_PREPROCESSOR_SAVE_PATH
 
-def set_preprocessor_save_path(path: str) -> None:
+def set_preprocessor_path(path: str | None = None) -> None:
     global DEFAULT_PREPROCESSOR_SAVE_PATH
     DEFAULT_PREPROCESSOR_SAVE_PATH = path
     os.makedirs(DEFAULT_PREPROCESSOR_SAVE_PATH, exist_ok=True)

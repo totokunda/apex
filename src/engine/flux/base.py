@@ -21,6 +21,7 @@ class FluxBaseEngine(TextualInversionLoaderMixin, BaseClass):
         self.vae_scale_factor = main_engine.vae_scale_factor
         self.num_channels_latents = main_engine.num_channels_latents
         self.image_processor = main_engine.image_processor
+        
     
     # Dynamic delegation: forward unknown attributes/methods to the underlying BaseEngine
     def __getattr__(self, name: str):  # noqa: D401

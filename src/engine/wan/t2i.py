@@ -20,6 +20,8 @@ class WanT2IEngine(WanBaseEngine):
         num_images: int = 1,
         seed: int | None = None,
         guidance_scale: float = 5.0,
+        high_noise_guidance_scale: float | None = None,
+        low_noise_guidance_scale: float | None = None,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -40,6 +42,9 @@ class WanT2IEngine(WanBaseEngine):
     ):
 
         safe_emit_progress(progress_callback, 0.0, "Starting t2i pipeline")
+        
+        if high_noise_guidance_scale is not None and low_noise_guidance_scale is not None:
+            guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -52,6 +57,7 @@ class WanT2IEngine(WanBaseEngine):
             num_videos_per_prompt=num_images,
             **text_encoder_kwargs,
         )
+        
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
         
         batch_size = prompt_embeds.shape[0]

@@ -24,6 +24,7 @@ from .qwenimage.base.model import QwenImageTransformer2DModel
 from .flux.base.model import FluxTransformer2DModel
 from .hidream.base.model import HiDreamImageTransformer2DModel
 from .chroma.base.model import ChromaTransformer2DModel
+from .hunyuanimage.base.model import HunyuanImageTransformer2DModel
 
 __all__ = [
     "TRANSFORMERS_REGISTRY",
@@ -48,4 +49,5 @@ __all__ = [
     "FluxTransformer2DModel",
     "HiDreamImageTransformer2DModel",
     "ChromaTransformer2DModel",
+    "HunyuanImageTransformer2DModel",
 ]

@@ -105,7 +105,6 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["torch_dtype"] = load_dtype
                 
             self.logger.info(f"Loading {model_class} from {model_path}")
-            self.logger.info(f"Extra kwargs: {extra_kwargs}")
             model = model_class.from_pretrained(model_path, **extra_kwargs)
             return model
 
@@ -149,8 +148,7 @@ class LoaderMixin(DownloadMixin):
 
         if no_weights:
             return model
-
-
+    
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")
@@ -162,7 +160,7 @@ class LoaderMixin(DownloadMixin):
             gguf_weights = mx.load(model_path)
             check_mlx_convolutional_weights(gguf_weights, model)
             model.load_weights(gguf_weights)
-            
+        
         elif (
             model_path.endswith(".gguf")
         ):

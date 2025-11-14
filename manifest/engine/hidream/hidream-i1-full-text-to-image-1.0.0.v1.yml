@@ -80,7 +80,7 @@ spec:
       subfolder: tokenizer_3
   - type: helper
     name: llama
-    label: Llama 3.1 Instruct Helper
+    label: Llama 3.1 Instruct
     base: hidream.llama
     model_path:
     - path: meta-llama/Llama-3.1-8B-Instruct
@@ -208,9 +208,9 @@ spec:
       - name: HD
         value: 720
         height: 720
-      - name: Full HD
-        value: 1080
-        height: 1080
+      - name: Ultra HD
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480
