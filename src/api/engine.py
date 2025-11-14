@@ -63,7 +63,7 @@ def _resolve_manifest_path(manifest_id: Optional[str], yaml_path: Optional[str])
 
     if manifest_id:
         manifests = get_all_manifest_files()
-        m = next((m for m in manifests if m.id == manifest_id), None)
+        m = next((m for m in manifests if m["id"] == manifest_id), None)
         if not m:
             raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
         full = (MANIFEST_BASE_PATH / m.full_path).resolve()
@@ -94,7 +94,6 @@ def run_engine(request: RunEngineRequest):
     try:
         from .ray_tasks import run_engine_from_manifest  # lazy import to avoid cycles
         
-
         ref = run_engine_from_manifest.options(**resources).remote(
             manifest_path,
             job_id,

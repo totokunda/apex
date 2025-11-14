@@ -160,8 +160,6 @@ def load_transformer_gguf(
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
     
-
-    i = 0 
     for tensor in tqdm(reader.tensors):
         name = tensor.name
         shape = get_orig_shape(reader, name)
