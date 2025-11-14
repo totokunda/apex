@@ -107,10 +107,10 @@ def set_components_path(path: str) -> None:
     DEFAULT_COMPONENTS_PATH = path
     os.makedirs(DEFAULT_COMPONENTS_PATH, exist_ok=True)
 
-def get_preprocessor_save_path() -> str:
+def get_preprocessor_path() -> str:
     return DEFAULT_PREPROCESSOR_SAVE_PATH
 
-def set_preprocessor_save_path(path: str) -> None:
+def set_preprocessor_path(path: str | None = None) -> None:
     global DEFAULT_PREPROCESSOR_SAVE_PATH
     DEFAULT_PREPROCESSOR_SAVE_PATH = path
     os.makedirs(DEFAULT_PREPROCESSOR_SAVE_PATH, exist_ok=True)

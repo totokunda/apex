@@ -11,7 +11,7 @@ import torch
 from huggingface_hub import constants, hf_hub_download, snapshot_download
 from torch.utils.model_zoo import load_url
 from ast import literal_eval
-from src.utils.defaults import DEFAULT_PREPROCESSOR_SAVE_PATH, DEFAULT_CACHE_PATH
+from src.utils.defaults import get_preprocessor_path, get_cache_path
 
 HF_MODEL_NAME = "lllyasviel/Annotators"
 DWPOSE_MODEL_NAME = "yzd-v/DWPose"
@@ -34,7 +34,7 @@ DEPTH_ANYTHING_V2_MODEL_NAME_DICT = {
 }
 
 temp_dir = tempfile.gettempdir()
-annotator_ckpts_path = DEFAULT_PREPROCESSOR_SAVE_PATH
+annotator_ckpts_path = get_preprocessor_path()
 USE_SYMLINKS = False
 
 # Global callback for download progress
@@ -47,7 +47,7 @@ except:
     pass
 
 try:
-    temp_dir = DEFAULT_CACHE_PATH
+    temp_dir = get_cache_path()
     if len(temp_dir) >= 60:
         warnings.warn(f"custom temp dir is too long. Using default")
         temp_dir = tempfile.gettempdir()
@@ -260,135 +260,111 @@ def check_hash_from_torch_hub(file_path, filename):
     return curr_hash[:len(ref_hash)] == ref_hash
 
 def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
-    """Download PyTorch models using PyTorch 2.7's built-in download mechanism."""
+    """Download PyTorch models using the shared DownloadMixin URL downloader."""
+    from src.mixins.download_mixin import DownloadMixin
     model_url = "https://download.pytorch.org/models/" + filename
-    
-    # Use PyTorch's built-in model downloading with custom cache directory
     local_dir = os.path.join(ckpts_dir, "torch")
     if not os.path.exists(local_dir):
         os.makedirs(local_dir, exist_ok=True)
-    
     model_path = os.path.join(local_dir, filename)
-    
-    if not os.path.exists(model_path):
-        print(f"Downloading {filename} from pytorch.org...")
-        
-        # Setup progress callback for torch downloads
-        def progress_hook(count, block_size, total_size):
-            if DOWNLOAD_PROGRESS_CALLBACK and total_size > 0:
-                current = count * block_size
-                DOWNLOAD_PROGRESS_CALLBACK(filename, min(current, total_size), total_size)
-        
+    if os.path.exists(model_path):
+        return model_path
+    # Use a cache directory for the raw download, then copy into final destination
+    cache_dir_d = os.path.join(temp_dir, "ckpts", "torch")
+    Path(cache_dir_d).mkdir(parents=True, exist_ok=True)
+    def _progress_cb(downloaded: int, total: int, _label: str = None):
+        if DOWNLOAD_PROGRESS_CALLBACK:
+            try:
+                DOWNLOAD_PROGRESS_CALLBACK(filename, int(downloaded or 0), int(total or 0))
+            except Exception:
+                pass
+    try:
+        dl = DownloadMixin()
+        downloaded_file = dl.download_from_url(
+            url=model_url,
+            save_path=cache_dir_d,
+            progress_callback=_progress_cb,
+            filename=filename,
+        )
+        # Optional hash verification (matches torch hub filename pattern name-<hash>.ext)
         try:
-            # Use PyTorch 2.7's load_url which handles caching, progress, and hash checking
-            # Note: load_url uses urllib which doesn't support custom progress callbacks
-            # So we'll just report at start and end
-            if DOWNLOAD_PROGRESS_CALLBACK:
-                DOWNLOAD_PROGRESS_CALLBACK(filename, 0, 100)
-            
-            state_dict = load_url(model_url, model_dir=local_dir, file_name=filename, progress=True, check_hash=True)
-            # The file is already saved by load_url, we just need the path
-            
-            if DOWNLOAD_PROGRESS_CALLBACK:
-                DOWNLOAD_PROGRESS_CALLBACK(filename, 100, 100)
-        except Exception as e:
-            warnings.warn(f"Download failed with error: {e}")
-            raise
-    
-    print(f"model_path is {model_path}")
-    return model_path
+            if not check_hash_from_torch_hub(downloaded_file, filename):
+                raise ValueError(f"Checksum mismatch for {filename}")
+        except Exception:
+            # If verification logic cannot run (unexpected filename), skip strict check
+            pass
+        # Copy into final destination path
+        import shutil
+        Path(local_dir).mkdir(parents=True, exist_ok=True)
+        shutil.copy2(downloaded_file, model_path)
+        return model_path
+    except Exception as e:
+        warnings.warn(f"Download failed with error: {e}")
+        raise
 
-def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, ckpts_dir=annotator_ckpts_path, subfolder='', use_symlinks=USE_SYMLINKS, repo_type="model"):
+def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, ckpts_dir=annotator_ckpts_path, subfolder=''):
 
+    # Build final path in ckpts directory
     local_dir = os.path.join(ckpts_dir, pretrained_model_or_path)
     model_path = Path(local_dir).joinpath(*subfolder.split('/'), filename).__str__()
 
     if len(str(model_path)) >= 255:
         warnings.warn(f"Path {model_path} is too long, \n please change annotator_ckpts_path in config.yaml")
 
-    if not os.path.exists(model_path):
-        print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
-        print(f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml")
-        if use_symlinks:
-            cache_dir_d = constants.HF_HUB_CACHE    # use huggingface newer env variables `HF_HUB_CACHE`
-            if cache_dir_d is None:
-                import platform
-                if platform.system() == "Windows":
-                    cache_dir_d = Path(os.getenv("USERPROFILE")).joinpath(".cache", "huggingface", "hub").__str__()
-                else:
-                    cache_dir_d = os.path.join(os.getenv("HOME"), ".cache", "huggingface", "hub")
-            try:
-                # test_link
-                Path(cache_dir_d).mkdir(parents=True, exist_ok=True)
-                Path(ckpts_dir).mkdir(parents=True, exist_ok=True)
-                (Path(cache_dir_d) / f"linktest_{filename}.txt").touch()
-                # symlink instead of link avoid `invalid cross-device link` error.
-                os.symlink(os.path.join(cache_dir_d, f"linktest_{filename}.txt"), os.path.join(ckpts_dir, f"linktest_{filename}.txt"))
-                print("Using symlinks to download models. \n",\
-                      "Make sure you have enough space on your cache folder. \n",\
-                      "And do not purge the cache folder after downloading.\n",\
-                      "Otherwise, you will have to re-download the models every time you run the script.\n",\
-                      "You can use USE_SYMLINKS: False in config.yaml to avoid this behavior.")
-            except:
-                print("Maybe not able to create symlink. Disable using symlinks.")
-                use_symlinks = False
-                cache_dir_d = Path(cache_dir).joinpath("ckpts", pretrained_model_or_path).__str__()
-            finally:    # always remove test link files
-                with suppress(FileNotFoundError):
-                    os.remove(os.path.join(ckpts_dir, f"linktest_{filename}.txt"))
-                    os.remove(os.path.join(cache_dir_d, f"linktest_{filename}.txt"))
-        else:
-            cache_dir_d = os.path.join(cache_dir, "ckpts", pretrained_model_or_path)
+    # If already present at destination, return immediately
+    if os.path.exists(model_path):
+        print(f"model_path is {model_path}")
+        return model_path
 
-        # Setup progress callback if available
-        if DOWNLOAD_PROGRESS_CALLBACK is not None:
-            from tqdm import tqdm as original_tqdm
-            
-            class ProgressTqdm(original_tqdm):
-                def __init__(self, *args, **kwargs):
-                    super().__init__(*args, **kwargs)
-                    self.filename = filename
-                    
-                def update(self, n=1):
-                    result = super().update(n)
-                    if DOWNLOAD_PROGRESS_CALLBACK and self.total:
-                        DOWNLOAD_PROGRESS_CALLBACK(self.filename, self.n, self.total)
-                    return result
-            
-            # Use snapshot_download with tqdm_class for progress tracking
-            snapshot_dir = snapshot_download(
-                repo_id=pretrained_model_or_path,
-                cache_dir=cache_dir_d,
-                local_dir=local_dir,
-                local_dir_use_symlinks=use_symlinks,
-                resume_download=True,
-                etag_timeout=100,
-                repo_type=repo_type,
-                tqdm_class=ProgressTqdm,
-                allow_patterns=[f"{subfolder}/{filename}".lstrip("/") if subfolder else filename]
-            )
-            # Construct the path to the specific file
-            model_path = Path(local_dir).joinpath(*subfolder.split('/'), filename).__str__()
-        else:
-            # Use hf_hub_download for single file without progress tracking
-            model_path = hf_hub_download(
-                repo_id=pretrained_model_or_path,
-                cache_dir=cache_dir_d,
-                local_dir=local_dir,
-                subfolder=subfolder,
-                filename=filename,
-                local_dir_use_symlinks=use_symlinks,
-                resume_download=True,
-                etag_timeout=100,
-                repo_type=repo_type,
-            )
-        if not use_symlinks:
-            try:
-                import shutil
-                shutil.rmtree(os.path.join(cache_dir, "ckpts"))
-            except Exception as e :
-                print(e)
+    print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
+    print(f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml")
 
-    print(f"model_path is {model_path}")
+    # Choose a cache directory for temporary downloads
+    cache_dir_d = os.path.join(cache_dir, "ckpts", pretrained_model_or_path)
+    Path(cache_dir_d).mkdir(parents=True, exist_ok=True)
+
+    # Use DownloadMixin to fetch from HF (single-file path)
+    try:
+        from src.mixins.download_mixin import DownloadMixin
+        # Compose a repo path that targets the desired file
+        repo_path = pretrained_model_or_path
+        if subfolder:
+            repo_path = f"{repo_path}/{subfolder}/{filename}"
+        else:
+            repo_path = f"{repo_path}/{filename}"
+
+        def _progress_cb(downloaded: int, total: int, _label: str = None):
+            if DOWNLOAD_PROGRESS_CALLBACK:
+                try:
+                    # total can be None; use 0 to keep signature stable
+                    DOWNLOAD_PROGRESS_CALLBACK(filename, int(downloaded or 0), int(total or 0))
+                except Exception:
+                    pass
+
+        dl = DownloadMixin()
+        downloaded_file = dl._download_from_huggingface(
+            repo_id=repo_path,
+            save_path=cache_dir_d,
+            progress_callback=_progress_cb,
+        )
+    except Exception as e:
+        warnings.warn(f"Download via DownloadMixin failed with error: {e}")
+        raise
+
+    # Ensure destination directory exists
+    target_dir = Path(local_dir).joinpath(*subfolder.split('/')).__str__()
+    Path(target_dir).mkdir(parents=True, exist_ok=True)
+
+    # Place the file at the expected model_path
+    try:
+        import shutil
+        shutil.copy2(downloaded_file, model_path)
+        # Clean temporary ckpts cache to reclaim space
+        with suppress(Exception):
+            import shutil as _shutil
+            _shutil.rmtree(os.path.join(cache_dir, "ckpts"))
+    except Exception as e:
+        warnings.warn(f"Failed to finalize downloaded file to {model_path}: {e}")
+        raise
 
     return model_path

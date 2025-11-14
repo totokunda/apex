@@ -13,26 +13,11 @@ router = APIRouter(prefix="/manifest", tags=["manifest"])
 # Base path to manifest directory
 MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "engine"
 
-class ManifestInfo(BaseModel):
-    id: str
-    name: str
-    model: str
-    model_type: List[str] | str
-    full_path: str
-    version: str
-    description: str
-    tags: List[str]
-    author: str
-    license: str
-    demo_path: str
-    downloaded: bool = False
 
 class ModelTypeInfo(BaseModel):
     key: str
     label: str
     description: str
-    
-    
 
 
 MODEL_TYPE_MAPPING = {
@@ -43,10 +28,150 @@ MODEL_TYPE_MAPPING = {
     "dreamomni2": "edit",
 }
 
+def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
+    """Load a manifest by relative path and enrich it with runtime info."""
+    file_path = MANIFEST_BASE_PATH / relative_path
+    content = load_yaml_content(file_path)
 
-def get_all_manifest_files() -> List[ManifestInfo]:
-    """Scan manifest directory and return all YAML files with their metadata."""
-    manifests = []
+    # ----------------- Attention backends enrichment (name/label/desc) ----------------- #
+    spec = content.get("spec", {}) if isinstance(content, dict) else {}
+    metadata = content.get("metadata", {}) if isinstance(content, dict) else {}
+    configured_attention = spec.get("support_attention")
+    if configured_attention is None:
+        configured_attention = spec.get("attention_types")
+    if isinstance(configured_attention, list):
+        attention_allowed: Optional[List[str]] = [x for x in configured_attention if isinstance(x, str)]
+    else:
+        attention_allowed = None  # fall back to all available backends
+
+    attention_options = _build_attention_options(attention_allowed)
+    if "spec" not in content:
+        content["spec"] = {}
+    content["spec"]["attention_types_detail"] = attention_options
+
+    # Enrich LoRA entries
+    for lora_index, lora in enumerate(content.get("spec", {}).get("loras", [])):
+        if isinstance(lora, str):
+            is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
+            lora_basename = os.path.basename(lora)
+            lora_name = lora_basename.split(".")[0]
+            out_lora = {
+                "label": lora_name,
+                "name": lora_name,
+                "scale": 1.0,
+            }
+            if is_downloaded is not None:
+                out_lora["is_downloaded"] = True
+                out_lora["source"] = is_downloaded
+            else:
+                out_lora["is_downloaded"] = False
+                out_lora["source"] = lora
+            content["spec"]["loras"][lora_index] = out_lora
+        elif isinstance(lora, dict):
+            is_downloaded = DownloadMixin.is_downloaded(lora.get("source"), get_lora_path())
+            if is_downloaded is not None:
+                lora["is_downloaded"] = True
+                lora["source"] = is_downloaded
+            else:
+                lora["is_downloaded"] = False
+                lora["source"] = lora.get("source")
+            content["spec"]["loras"][lora_index] = lora
+
+    # Enrich components entries
+    for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
+        is_component_downloaded = True
+        if config_path := component.get("config_path"):
+            is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
+            if is_downloaded is None:
+                is_component_downloaded = False
+            else:
+                component["config_path"] = is_downloaded
+
+        if component.get("type") == "scheduler":
+            options = component.get("scheduler_options", []) or []
+            is_scheduler_downloaded = False
+            has_downloadable_config = False
+            for idx, option in enumerate(options):
+                if option.get("config_path"):
+                    has_downloadable_config = True
+                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_config_path())
+                    if is_downloaded is not None:
+                        is_scheduler_downloaded = True
+                        options[idx]['config_path'] = is_downloaded                   
+                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_components_path())
+                    if is_downloaded is not None:
+                        is_scheduler_downloaded = True
+                        options[idx]['config_path'] = is_downloaded
+
+            if not is_scheduler_downloaded and has_downloadable_config:
+                is_component_downloaded = False
+            
+        
+            component['scheduler_options'] = options
+
+        any_path_downloaded = False
+        for index, model_path in enumerate(component.get("model_path", [])):
+            is_downloaded = DownloadMixin.is_downloaded(model_path.get("path"), get_components_path())
+            if is_downloaded is not None:
+                model_path["is_downloaded"] = True
+                model_path["path"] = is_downloaded
+                any_path_downloaded = True
+            else:
+                model_path["is_downloaded"] = False
+            
+            component["model_path"][index] = model_path
+
+        if not any_path_downloaded and len(component.get("model_path", [])) > 0:
+            is_component_downloaded = False
+
+        component['is_downloaded'] = is_component_downloaded
+        content["spec"]["components"][component_index] = component
+
+    # Convenience fields for filtering and compatibility with previous ManifestInfo
+    # Normalize and expose common metadata at the top level
+    # ID, name, model
+    content["id"] = metadata.get("id", "")
+    content["name"] = metadata.get("name", "")
+    content["model"] = metadata.get("model", "")
+    # Model type mapping
+    model_type_field = spec.get("model_type", [])
+    if isinstance(model_type_field, list):
+        mapped_model_type = [MODEL_TYPE_MAPPING.get(t, t) for t in model_type_field]
+    else:
+        mapped_model_type = MODEL_TYPE_MAPPING.get(model_type_field, model_type_field)
+    content["model_type"] = mapped_model_type
+    # Other top-level convenience fields
+    content["version"] = str(metadata.get("version", ""))
+    content["description"] = metadata.get("description", "")
+    content["tags"] = [str(t) for t in metadata.get("tags", [])]
+    content["author"] = metadata.get("author", "")
+    content["license"] = metadata.get("license", "")
+    content["demo_path"] = metadata.get("demo_path", "")
+    # Keep relative path for downstream use
+    content["full_path"] = relative_path
+    # Manifest-level downloaded flag: true if there are components and all are downloaded
+    components_list = content.get("spec", {}).get("components", []) or []
+    content["downloaded"] = bool(components_list) and all(
+        isinstance(c, dict) and c.get("is_downloaded", False) for c in components_list
+    )
+
+    return content
+
+def get_manifest(manifest_id: str):
+    """Get the actual YAML content of a specific manifest by name."""
+    # Resolve manifest path via cached id->path index to avoid full list load
+    id_index = _get_manifest_id_index()
+    relative_path = id_index.get(manifest_id)
+    if not relative_path:
+        raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
+    # Load and enrich only the requested manifest
+    return _load_and_enrich_manifest(relative_path)
+
+
+
+def _get_all_manifest_files_uncached() -> List[Dict[str, Any]]:
+    """Scan manifest directory and return all enriched manifest contents (no cache)."""
+    manifests: List[Dict[str, Any]] = []
     
     for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
         for file in files:
@@ -54,89 +179,78 @@ def get_all_manifest_files() -> List[ManifestInfo]:
                 file_path = Path(root) / file
                 relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
 
-                # Extract model and model_type from path structure
-                file_data = load_yaml_content(file_path)
-                model_type = file_data.get("spec", {}).get("model_type", [])
-                if isinstance(model_type, list):
-                    model_type = [MODEL_TYPE_MAPPING.get(t, t) for t in model_type]
-                else:
-                    model_type = MODEL_TYPE_MAPPING.get(model_type, model_type)
-                model = file_data.get("metadata", {}).get("model", "")
-                manifest_name = file_data.get("metadata", {}).get("name", file.replace('.yml', ''))
-                # Determine if manifest is considered downloaded: at least one model_path per component is present,
-                # and if a config_path exists it must also be present.
-                components = file_data.get("spec", {}).get("components", [])
-                manifest_downloaded = bool(components)
-                for component in components:
-                    comp_type = component.get("type")
-                    component_ok = True
-
-                    if comp_type == "scheduler":
-                        # For schedulers, iterate all options: OK if any option with a config_path is downloaded.
-                        options = component.get("scheduler_options", []) or []
-                        if isinstance(options, list) and options:
-                            any_downloaded = False
-                            has_downloadable_config = False
-                            for opt in options:
-                                if not isinstance(opt, dict):
-                                    continue
-                                config_path = opt.get("config_path")
-                                if config_path:
-                                    has_downloadable_config = True
-                                    if DownloadMixin.is_downloaded(config_path, get_config_path()) is not None:
-                                        any_downloaded = True
-                                        break
-                                    if DownloadMixin.is_downloaded(config_path, get_components_path()) is not None:
-                                        any_downloaded = True
-                                        break
-                            if has_downloadable_config:
-                                component_ok = any_downloaded
-                            else:
-                                # Built-in or inline-config schedulers don't require downloads
-                                component_ok = True
-                        else:
-                            # No scheduler options; treat as OK
-                            component_ok = True
-                        
-                    else:
-                        model_paths = component.get("model_path", [])
-                        if isinstance(model_paths, (str, dict)):
-                            model_paths = [model_paths]
-                        model_ok = len(model_paths) == 0
-                        for mp in model_paths:
-                            if isinstance(mp, str):
-                                if DownloadMixin.is_downloaded(mp, get_components_path()) is not None:
-                                    model_ok = True
-                                    break
-                            elif isinstance(mp, dict):
-                                path_val = mp.get("path")
-                                if path_val and DownloadMixin.is_downloaded(path_val, get_components_path()) is not None:
-                                    model_ok = True
-                                    break
-                                
-                        component_ok =  model_ok
-                        
-                    if not component_ok:
-                        manifest_downloaded = False
-                        break
+                # Load and enrich each manifest directly
+                enriched = _load_and_enrich_manifest(str(relative_path))
+                manifests.append(enriched)
                 
-                manifests.append(ManifestInfo(
-                        id=file_data.get("metadata", {}).get("id", ""),
-                        name=manifest_name,
-                        model=model,
-                        model_type=model_type,
-                        full_path=str(relative_path),
-                        version=str(file_data.get("metadata", {}).get("version", "")),
-                        description=file_data.get("metadata", {}).get("description", ""),
-                        tags=[str(t) for t in file_data.get("metadata", {}).get("tags", [])],
-                        author=file_data.get("metadata", {}).get("author", ""),
-                        license=file_data.get("metadata", {}).get("license", ""),
-                        demo_path=file_data.get("metadata", {}).get("demo_path", ""),
-                        downloaded=manifest_downloaded
-                    ))
-                
-
     return manifests
+
+
+def _env_truthy(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@lru_cache(maxsize=1)
+def _get_all_manifest_files_cached(cache_key: str) -> List[Dict[str, Any]]:
+    # cache_key is only used to differentiate cache entries; actual logic ignores it
+    return _get_all_manifest_files_uncached()
+
+
+def get_all_manifest_files() -> List[Dict[str, Any]]:
+    """Return all enriched manifests, optionally cached based on environment variables.
+    
+    Controls:
+    - APEX_MANIFEST_CACHE or APEX_MANIFEST_CACHE_ENABLED: enable caching when truthy (default disabled)
+    - APEX_MANIFEST_CACHE_BUSTER: changing this string invalidates the cache (e.g., set to a timestamp)
+    """
+    enabled = _env_truthy(os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0")))
+    if not enabled:
+        return _get_all_manifest_files_uncached()
+    buster = os.getenv("APEX_MANIFEST_CACHE_BUSTER", "")
+    cache_key = f"v1:{buster}"
+    return _get_all_manifest_files_cached(cache_key)
+
+def _build_manifest_id_index_uncached() -> Dict[str, str]:
+    """
+    Build a mapping of manifest_id -> relative_path (str) without enriching all manifests.
+    """
+    index: Dict[str, str] = {}
+    for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
+        for file in files:
+            if not file.endswith(".yml") or file.startswith("shared"):
+                continue
+            file_path = Path(root) / file
+            relative_path = str(file_path.relative_to(MANIFEST_BASE_PATH))
+            try:
+                data = load_yaml_content(file_path)
+                manifest_id = ""
+                if isinstance(data, dict):
+                    meta = data.get("metadata", {})
+                    if isinstance(meta, dict):
+                        manifest_id = str(meta.get("id", "")).strip()
+                if manifest_id:
+                    index.setdefault(manifest_id, relative_path)
+            except HTTPException:
+                continue
+    return index
+
+@lru_cache(maxsize=1)
+def _get_manifest_id_index_cached(cache_key: str) -> Dict[str, str]:
+    return _build_manifest_id_index_uncached()
+
+def _get_manifest_id_index() -> Dict[str, str]:
+    """
+    Get the manifest id index, optionally cached controlled by the same env flags
+    used for manifest list caching.
+    """
+    enabled = _env_truthy(os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0")))
+    if not enabled:
+        return _build_manifest_id_index_uncached()
+    buster = os.getenv("APEX_MANIFEST_CACHE_BUSTER", "")
+    cache_key = f"v1:{buster}"
+    return _get_manifest_id_index_cached(cache_key)
 
 def load_yaml_content(file_path: Path) -> Dict[Any, Any]:
     """Load and return YAML file content."""
@@ -283,164 +397,92 @@ def list_model_types() -> List[ModelTypeInfo]:
 
     return results
 
-@router.get("/list", response_model=List[ManifestInfo])
+
+
+@router.get("/list")
 def list_all_manifests():
     """List all available manifest names."""
     manifests = get_all_manifest_files()
     return manifests
 
-@router.get("/list/model/{model}", response_model=List[ManifestInfo])
+@router.get("/list/model/{model}")
 def list_manifests_by_model(model: str):
     """List all manifest names for a specific model."""
     manifests = get_all_manifest_files()
-    filtered = [m for m in manifests if m.model == model]
+    filtered = [m for m in manifests if m.get("model") == model]
     if not filtered:
         raise HTTPException(status_code=404, detail=f"No manifests found for model: {model}")
     return filtered
 
-@router.get("/list/type/{model_type}", response_model=List[ManifestInfo])
+@router.get("/list/type/{model_type}")
 def list_manifests_by_model_type(model_type: str):
     """List all manifest names for a specific model type."""
     manifests = get_all_manifest_files()
-    
-    filtered = [m for m in manifests if m.model_type == model_type]
+    filtered: List[Dict[str, Any]] = []
+    for m in manifests:
+        mt = m.get("model_type")
+        if isinstance(mt, list):
+            if model_type in mt:
+                filtered.append(m)
+        else:
+            if mt == model_type:
+                filtered.append(m)
     if not filtered:
         raise HTTPException(status_code=404, detail=f"No manifests found for model_type: {model_type}")
     return filtered
 
-@router.get("/list/model/{model}/model_type/{model_type}", response_model=List[ManifestInfo])
+@router.get("/list/model/{model}/model_type/{model_type}")
 def list_manifests_by_model_and_type(model: str, model_type: str):
     """List all manifest names for a specific model and model type combination."""
     manifests = get_all_manifest_files()
-    filtered = [m for m in manifests if m.model == model and m.model_type == model_type]
+    filtered: List[Dict[str, Any]] = []
+    for m in manifests:
+        model_match = (m.get("model") == model)
+        mt = m.get("model_type")
+        if isinstance(mt, list):
+            type_match = (model_type in mt)
+        else:
+            type_match = (mt == model_type)
+        if model_match and type_match:
+            filtered.append(m)
     if not filtered:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"No manifests found for model: {model} and model_type: {model_type}"
-        )
+        raise HTTPException(status_code=404, detail=f"No manifests found for model: {model} and model_type: {model_type}")
     return filtered
 
+
 @router.get("/{manifest_id}")
-def get_manifest_content(manifest_id: str):
-    """Get the actual YAML content of a specific manifest by name."""
-    manifests = get_all_manifest_files()
-    
-    # Find manifest by name
-    manifest = next((m for m in manifests if m.id == manifest_id), None)
-    if not manifest:
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
-    
-    # Load and return YAML content
-    file_path = MANIFEST_BASE_PATH / manifest.full_path
-    content = load_yaml_content(file_path)
+def get_manifest_by_id(manifest_id: str) -> Dict[Any, Any]:
+    return get_manifest(manifest_id)
 
-    # ----------------- Attention backends enrichment (name/label/desc) ----------------- #
-    spec = content.get("spec", {}) if isinstance(content, dict) else {}
-    # Support both historical and current field names
-    configured_attention = spec.get("support_attention")
-    if configured_attention is None:
-        configured_attention = spec.get("attention_types")
-    if isinstance(configured_attention, list):
-        attention_allowed: Optional[List[str]] = [x for x in configured_attention if isinstance(x, str)]
-    else:
-        attention_allowed = None  # fall back to all available backends
-
-    attention_options = _build_attention_options(attention_allowed)
-    # Keep the original field as-is; add a parallel enriched field for the UI/API
-    if "spec" not in content:
-        content["spec"] = {}
-    content["spec"]["attention_types_detail"] = attention_options
-    for lora_index, lora in enumerate(content.get("spec", {}).get("loras", [])):
-        if isinstance(lora, str):
-            # check if lora is downloaded
-            is_downloaded = DownloadMixin.is_downloaded(lora, get_components_path()) #!TODO: use lora path
-            # Get the basename of the lora
-            lora_basename = os.path.basename(lora)
-            lora_name = lora_basename.split(".")[0]
-            out_lora = {
-                "label": lora_name,
-                "name": lora_name,
-                "scale": 1.0,
-            }
-            if is_downloaded is not None:
-                out_lora["is_downloaded"] = True
-                out_lora["source"] = is_downloaded
+@router.get("/{manifest_id}/part")
+def get_manifest_part(manifest_id: str, path: Optional[str] = None):
+    """
+    Return a specific part of the enriched manifest given a dot-separated path.
+    Examples:
+      - path=spec.loras
+      - path=spec.components
+      - path=spec.components.0.model_path
+    Supports numeric tokens to index into lists.
+    """
+    doc = get_manifest(manifest_id)
+    if not path:
+        return doc
+    value: Any = doc
+    for token in path.split("."):
+        if isinstance(value, dict):
+            if token in value:
+                value = value[token]
             else:
-                out_lora["is_downloaded"] = False
-                out_lora["source"] = lora
-            content["spec"]["loras"][lora_index] = out_lora
-        elif isinstance(lora, dict):
-            is_downloaded = DownloadMixin.is_downloaded(lora.get("source"), get_components_path()) #!TODO: use lora path
-            if is_downloaded is not None:
-                lora["is_downloaded"] = True
-                lora["source"] = is_downloaded
-            else:
-                lora["is_downloaded"] = False
-                lora["source"] = lora.get("source")
-            content["spec"]["loras"][lora_index] = lora
-        
-    for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
-        # check config path too
-        is_component_downloaded = True
-        if config_path := component.get("config_path"):
-            is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
-            if is_downloaded is None:
-                is_component_downloaded = False
-            else:
-                component["config_path"] = is_downloaded
-                
-        
-        if component.get("type") == "scheduler":
-            options = component.get("scheduler_options", []) or []
-            is_scheduler_downloaded = False
-            has_downloadable_config = False
-            for option in options:
-                if option.get("config_path"):
-                    has_downloadable_config = True
-                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_config_path())
-                    if is_downloaded is not None:
-                        is_scheduler_downloaded = True
-                        break
-                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_components_path())
-                    if is_downloaded is not None:
-                        is_scheduler_downloaded = True
-                        break
+                raise HTTPException(status_code=404, detail=f"Key not found at segment '{token}'")
+        elif isinstance(value, list):
+            try:
+                idx = int(token)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Expected list index at segment '{token}'")
+            if idx < 0 or idx >= len(value):
+                raise HTTPException(status_code=404, detail=f"List index out of range at segment '{token}'")
+            value = value[idx]
+        else:
+            raise HTTPException(status_code=404, detail=f"Path not traversable at segment '{token}'")
 
-            if not is_scheduler_downloaded and has_downloadable_config:
-                is_component_downloaded = False
-            elif not has_downloadable_config:
-                is_component_downloaded = True
-
-        any_path_downloaded = False
-        for index, model_path in enumerate(component.get("model_path", [])):
-            # we check if model path is downloaded
-            if isinstance(model_path, str):
-                is_downloaded = DownloadMixin.is_downloaded(model_path, get_components_path())
-                model_path = {
-                    "path": model_path,
-                    "is_downloaded": is_downloaded is not None,
-                    "type": "safetensors"
-                }
-            else:
-                is_downloaded = DownloadMixin.is_downloaded(model_path.get("path"), get_components_path())
-                
-
-                if is_downloaded is not None:
-                    model_path["is_downloaded"] = True
-                    model_path["path"] = is_downloaded
-                    any_path_downloaded = True
-                else:
-                    model_path["is_downloaded"] = False
-                    
-        
-            component["model_path"][index] = model_path
-        
-        if not any_path_downloaded and len(component.get("model_path", [])) > 0:
-            is_component_downloaded = False
-        
-        component['is_downloaded'] = is_component_downloaded
-        content["spec"]["components"][component_index] = component
-        
-        
-                
-    return content
+    return value

@@ -15,6 +15,14 @@ class WebSocketManager:
         # Store latest updates for each job (for clients connecting late)
         self.latest_updates: Dict[str, dict] = {}
     
+    def clear_latest(self, job_id: str):
+        """Clear the cached latest update for a job_id to avoid replaying stale state."""
+        try:
+            if job_id in self.latest_updates:
+                del self.latest_updates[job_id]
+        except Exception:
+            pass
+    
     async def connect(self, websocket: WebSocket, job_id: str):
         """Register a websocket connection for a job"""
         await websocket.accept()
@@ -90,6 +98,15 @@ class RayWebSocketBridge:
         updates = self.updates.get(job_id, [])
         self.updates[job_id] = []  # Clear after retrieving
         return updates
+    
+    def clear_updates(self, job_id: str) -> bool:
+        """Clear any pending updates for a job_id (used when restarting a job)."""
+        try:
+            if job_id in self.updates:
+                self.updates[job_id] = []
+            return True
+        except Exception:
+            return False
     
     def get_all_job_ids(self) -> list:
         """Get all job IDs that have updates"""
