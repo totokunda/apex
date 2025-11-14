@@ -22,7 +22,7 @@ from loguru import logger
 from .ws_manager import get_ray_ws_bridge
 from .job_store import register_job, job_store
 from .ray_resources import get_best_gpu, get_ray_resources
-from .manifest import get_all_manifest_files, MANIFEST_BASE_PATH
+from .manifest import get_manifest, MANIFEST_BASE_PATH
 
 
 router = APIRouter(prefix="/engine", tags=["engine"])
@@ -62,14 +62,10 @@ def _resolve_manifest_path(manifest_id: Optional[str], yaml_path: Optional[str])
         return str(p.resolve())
 
     if manifest_id:
-        manifests = get_all_manifest_files()
-        m = next((m for m in manifests if m["id"] == manifest_id), None)
-        if not m:
+        manifest = get_manifest(manifest_id)
+        if not manifest:
             raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
-        full = (MANIFEST_BASE_PATH / m.full_path).resolve()
-        if not full.exists():
-            raise HTTPException(status_code=404, detail=f"Manifest file missing on disk: {full}")
-        return str(full)
+        return MANIFEST_BASE_PATH / manifest['full_path']
 
     raise HTTPException(status_code=400, detail="Provide either manifest_id or yaml_path")
 
