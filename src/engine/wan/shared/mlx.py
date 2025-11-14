@@ -1,10 +1,8 @@
 from __future__ import annotations
 from typing import Iterable, Optional, TYPE_CHECKING
-
 import mlx.core as mx
 from loguru import logger
 from tqdm import tqdm
-from src.utils.type import EnumType
 from src.utils.mlx import convert_dtype_to_mlx, torch_to_mlx, to_torch
 from src.utils.progress import safe_emit_progress
 
@@ -14,45 +12,10 @@ if TYPE_CHECKING:
 else:
     BaseClass = object
 
-class DenoiseType(EnumType):
-    BASE = "mlx.base"
-    MOE = "mlx.moe"
-    DIFFUSION_FORCING = "mlx.diffusion_forcing"
-    MULTITALK = "mlx.multitalk"
-
-
-class WanDenoise(BaseClass):
-    def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.denoise_type = denoise_type
-        # The following attributes are expected to be provided by the engine hosting this class:
-        # - self.transformer (and optionally self.transformer_2)
-        # - self.logger (fallback to loguru if missing)
+class WanMLXDenoise(BaseClass):
 
     def _get_logger(self):
         return getattr(self, "logger", logger)
-
-    def denoise(self, *args, **kwargs) -> mx.array:
-        if self.denoise_type == DenoiseType.BASE:
-            return self.mlx_base_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.MOE:
-            return self.mlx_moe_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.DIFFUSION_FORCING:
-            return self.mlx_diffusion_forcing_denoise(*args, **kwargs)
-        elif self.denoise_type == DenoiseType.MULTITALK:
-            return self.mlx_multitalk_denoise(*args, **kwargs)
-        else:
-            raise ValueError(f"Denoise type {self.denoise_type} not supported")
-
-    # Placeholder for parity with torch version; can be implemented as needed
-    def mlx_diffusion_forcing_denoise(self, *args, **kwargs) -> mx.array:
-        raise NotImplementedError("diffusion_forcing_denoise not implemented for MLX")
-
-    def mlx_multitalk_denoise(self, *args, **kwargs) -> mx.array:
-        raise NotImplementedError("multitalk_denoise not implemented for MLX")
-
-    def mlx_recam_denoise(self, *args, **kwargs) -> mx.array:
-        raise NotImplementedError("recam_denoise not implemented for MLX")
 
     def _maybe_to_dtype(self, array: mx.array, dtype):
         if dtype is None:

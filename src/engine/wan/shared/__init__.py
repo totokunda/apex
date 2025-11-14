@@ -11,8 +11,9 @@ from diffusers.video_processor import VideoProcessor
 from diffusers.image_processor import VaeImageProcessor
 from src.utils.progress import safe_emit_progress
 from src.utils.cache import empty_cache
+from .mlx import WanMLXDenoise
 
-class WanShared(BaseEngine):
+class WanShared(BaseEngine, WanMLXDenoise):
     """Base class for WAN engine implementations containing common functionality"""
 
     def __init__(self, yaml_path: str, **kwargs):
