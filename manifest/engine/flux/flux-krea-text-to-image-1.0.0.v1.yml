@@ -67,6 +67,30 @@ spec:
     - path: black-forest-labs/FLUX.1-Krea-dev/transformer
       variant: default
       file_size: 23803075696
+    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q4_1.gguf
+      variant: GGUF_Q4_1
+      precision: q4_1
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 10
+      file_size: 7536977184
+    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 10
+        recommended_vram_gb: 12
+      file_size: 9848349984
+    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 14
+      file_size: 12714452256
   defaults:
     run:
       num_inference_steps: 40

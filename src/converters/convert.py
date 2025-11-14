@@ -244,10 +244,13 @@ def convert_transformer(
     config: dict,
     model_base: str,
     ckpt_path: str | List[str] = None,
+    state_dict: Dict[str, Any] = None,
     model_key: str = None,
     pattern: str | None = None,
     **transformer_converter_kwargs,
 ):
+
+
 
     if "mlx" in model_base:
         using_mlx = True

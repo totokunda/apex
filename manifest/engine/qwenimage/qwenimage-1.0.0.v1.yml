@@ -71,6 +71,7 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.base
+    config_path: https://huggingface.co/Qwen/Qwen-Image/resolve/main/transformer/config.json
     model_path:
     - path: Qwen/Qwen-Image/transformer
       variant: default
@@ -80,6 +81,38 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227138
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 7062518304
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 14
+        recommended_vram_gb: 20
+      file_size: 12140608032
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 18
+        recommended_vram_gb: 28
+      file_size: 16824990240
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 36
+      file_size: 21761817120
   defaults:
     run:
       num_inference_steps: 40

@@ -6,6 +6,7 @@ import json
 with open("inputs.json", "r") as f:
     data = json.load(f)
 
+print(data)
 engine_kwargs = data["engine_kwargs"]
 inputs = data["inputs"]
 

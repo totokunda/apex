@@ -165,13 +165,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     logger: Logger
     attention_type: str = "sdpa"
     check_weights: bool = True
-    save_converted_weights: bool = True
+    save_converted_weights: bool = False
     vae_scale_factor_temporal: float = 1.0
     vae_scale_factor_spatial: float = 1.0
     vae_scale_factor: float = 1.0
     num_channels_latents: int = 4
     denoise_type: str | None = None
-    vae_tiling: bool = False
+    vae_tiling: bool =  False
     vae_slicing: bool = False
     lora_manager: LoraManager | None = None
     loaded_loras: Dict[str, LoraItem] = {}
@@ -415,6 +415,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
     ):
+
         component_type = component.get("type")
         component_module = None
         if component_type == "scheduler":
@@ -427,7 +428,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             text_encoder = self.load_text_encoder(component, no_weights)
             component_module = text_encoder
         elif component_type == "transformer":
+            logger.info(f"Loading transformer component: {component}")
             transformer = self.load_transformer(component, load_dtype, no_weights)
+
             component_module = transformer
         elif component_type == "helper":
             helper = self.load_helper(component)
@@ -730,7 +733,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
-
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
@@ -796,7 +798,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 registry = TRANSFORMERS_REGISTRY_TORCH
                 dtype_converter = convert_dtype_to_torch
             
-
             transformer = self._load_model(
                 component,
                 registry.get,
@@ -852,6 +853,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             "transformer",
             "vae",
         ], "Only transformer and vae are supported for now"
+        if component["model_path"].endswith(".gguf"):
+            return component["model_path"], False
         model_path = component["model_path"]
         component_name = component.get("name", component.get("type"))
 
@@ -999,6 +1002,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         missing_keys = iterating_keys - found_keys
         return len(missing_keys) == 0
+    
+
 
     def convert_transformer_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
@@ -1025,6 +1030,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             config,
             component["base"],
             model_path,
+            state_dict,
             component.get("model_key", None),
             component.get("file_pattern", None),
         )
