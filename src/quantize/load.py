@@ -166,6 +166,7 @@ def load_transformer_gguf(
         if shape is None:
             # GGUF stores dims reversed
             shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
+        
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -194,7 +195,6 @@ def load_transformer_gguf(
         qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
 
         
-
     return state_dict, qtype_dict
 
 

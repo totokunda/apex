@@ -8,6 +8,7 @@ import importlib
 import re
 from collections import Counter
 import torch
+from src.quantize.ggml_ops import ggml_cat, ggml_chunk
 
 TRANSFORMER_CONFIG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transformer_configs"
@@ -16,7 +17,6 @@ TRANSFORMER_CONFIG_DIR = os.path.join(
 VAE_CONFIG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vae_configs"
 )
-
 
 def get_transformer_config(model_tag: str, config_path: str | None = None):
     if config_path is None:
@@ -58,14 +58,14 @@ def get_empty_model(model_class, config: dict):
 
 def swap_scale_shift(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     """[shift, scale]  ->  [scale, shift] along `dim`."""
-    shift, scale = t.chunk(2, dim=dim)
-    return torch.cat([scale, shift], dim=dim)
+    shift, scale = ggml_chunk(t, 2, dim=dim)
+    return ggml_cat([scale, shift], dim=dim)
 
 
 def swap_proj_gate(t: torch.Tensor) -> torch.Tensor:
     """[proj, gate]  ->  [gate, proj] for Gated-GeLU/SiLU MLPs."""
-    proj, gate = t.chunk(2, dim=0)
-    return torch.cat([gate, proj], dim=0)
+    proj, gate = ggml_chunk(t, 2, dim=0)
+    return ggml_cat([gate, proj], dim=0)
 
 
 def update_state_dict_(sd: Dict[str, Any], old_key: str, new_key: str):

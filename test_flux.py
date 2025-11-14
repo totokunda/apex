@@ -3,6 +3,7 @@ from src.quantize.ggml_layer import patch_model
 from accelerate import init_empty_weights
 from src.transformer.flux.base.model import FluxTransformer2DModel
 from src.converters.convert import get_transformer_converter
+from src.quantize.dequant import dequantize_tensor 
 path  = "/Users/tosinkuye/apex-workspace/apex/382ed0e097a9ed0a9d7c7b6318c3ede4ecde9d540dc1d187e66ef85864e63927_flux1-kontext-dev-Q2_K.gguf"
 state_dict, qtype_dict = load_gguf(path, type="transformer")
 
@@ -31,8 +32,7 @@ with init_empty_weights():
     
     converter = get_transformer_converter("flux.base")
     converter.convert(state_dict)
-    model_state_dict = model.state_dict()
     patch_model(model)
 
-model.load_state_dict(model_state_dict, assign=True)
-print(model)
+
+model.load_state_dict(state_dict, assign=True)

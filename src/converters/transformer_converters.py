@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from src.converters.utils import update_state_dict_, swap_proj_gate, swap_scale_shift
+from src.quantize.ggml_ops import ggml_cat, ggml_chunk, ggml_split
 import torch
 import re
 
@@ -250,7 +251,7 @@ class CogVideoXTransformerConverter(TransformerConverter):
         to_q_key = key.replace("query_key_value", "to_q")
         to_k_key = key.replace("query_key_value", "to_k")
         to_v_key = key.replace("query_key_value", "to_v")
-        to_q, to_k, to_v = torch.chunk(state_dict[key], chunks=3, dim=0)
+        to_q, to_k, to_v = ggml_chunk(state_dict[key], chunks=3, dim=0)
         state_dict[to_q_key] = to_q
         state_dict[to_k_key] = to_k
         state_dict[to_v_key] = to_v
@@ -272,10 +273,10 @@ class CogVideoXTransformerConverter(TransformerConverter):
         layer_id, _, weight_or_bias = key.split(".")[-3:]
 
         weights_or_biases = state_dict[key].chunk(12, dim=0)
-        norm1_weights_or_biases = torch.cat(
+        norm1_weights_or_biases = ggml_cat(
             weights_or_biases[0:3] + weights_or_biases[6:9]
         )
-        norm2_weights_or_biases = torch.cat(
+        norm2_weights_or_biases = ggml_cat(
             weights_or_biases[3:6] + weights_or_biases[9:12]
         )
 
@@ -377,7 +378,7 @@ class HunyuanTransformerConverter(TransformerConverter):
     def remap_norm_scale_shift_(key, state_dict):
         weight = state_dict.pop(key)
         shift, scale = weight.chunk(2, dim=0)
-        new_weight = torch.cat([scale, shift], dim=0)
+        new_weight = ggml_cat([scale, shift], dim=0)
         state_dict[key.replace("final_layer.adaLN_modulation.1", "norm_out.linear")] = (
             new_weight
         )
@@ -437,7 +438,7 @@ class HunyuanTransformerConverter(TransformerConverter):
                 hidden_size,
                 linear1_weight.size(0) - 3 * hidden_size,
             )
-            q, k, v, mlp = torch.split(linear1_weight, split_size, dim=0)
+            q, k, v, mlp = ggml_split(linear1_weight, split_size, dim=0)
             new_key = key.replace(
                 "single_blocks", "single_transformer_blocks"
             ).removesuffix(".linear1.weight")
@@ -454,7 +455,7 @@ class HunyuanTransformerConverter(TransformerConverter):
                 hidden_size,
                 linear1_bias.size(0) - 3 * hidden_size,
             )
-            q_bias, k_bias, v_bias, mlp_bias = torch.split(
+            q_bias, k_bias, v_bias, mlp_bias = ggml_split(
                 linear1_bias, split_size, dim=0
             )
             new_key = key.replace(
@@ -786,6 +787,7 @@ class FluxTransformerConverter(TransformerConverter):
         num_layers, num_single_layers, inner_dim, mlp_ratio = (
             self._infer_hyperparams_from_state_dict(original_state_dict)
         )
+        
 
         # time_text_embed.timestep_embedder <- time_in
         converted_state_dict[
@@ -867,62 +869,65 @@ class FluxTransformerConverter(TransformerConverter):
             ] = original_state_dict.pop(f"double_blocks.{i}.txt_mod.lin.bias")
 
             # Q, K, V
-            sample_q, sample_k, sample_v = torch.chunk(
+            
+            sample_q, sample_k, sample_v = ggml_chunk(
                 original_state_dict.pop(f"double_blocks.{i}.img_attn.qkv.weight"),
                 3,
                 dim=0,
             )
-            context_q, context_k, context_v = torch.chunk(
+
+            context_q, context_k, context_v = ggml_chunk(
                 original_state_dict.pop(f"double_blocks.{i}.txt_attn.qkv.weight"),
                 3,
                 dim=0,
             )
-            sample_q_bias, sample_k_bias, sample_v_bias = torch.chunk(
+            sample_q_bias, sample_k_bias, sample_v_bias = ggml_chunk(
                 original_state_dict.pop(f"double_blocks.{i}.img_attn.qkv.bias"),
                 3,
                 dim=0,
             )
-            context_q_bias, context_k_bias, context_v_bias = torch.chunk(
+            context_q_bias, context_k_bias, context_v_bias = ggml_chunk(
                 original_state_dict.pop(f"double_blocks.{i}.txt_attn.qkv.bias"),
                 3,
                 dim=0,
             )
-
-            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = torch.cat(
+            
+            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat(
                 [sample_q]
             )
-            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = torch.cat(
+
+            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
                 [sample_q_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat(
                 [sample_k]
             )
-            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
                 [sample_k_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat(
                 [sample_v]
             )
-            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
                 [sample_v_bias]
             )
 
-            converted_state_dict[f"{block_prefix}attn.add_q_proj.weight"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_q_proj.weight"] = ggml_cat(
                 [context_q]
             )
-            converted_state_dict[f"{block_prefix}attn.add_q_proj.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_q_proj.bias"] = ggml_cat(
                 [context_q_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.add_k_proj.weight"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_k_proj.weight"] = ggml_cat(
                 [context_k]
             )
-            converted_state_dict[f"{block_prefix}attn.add_k_proj.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_k_proj.bias"] = ggml_cat(
                 [context_k_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.add_v_proj.weight"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_v_proj.weight"] = ggml_cat(
                 [context_v]
             )
-            converted_state_dict[f"{block_prefix}attn.add_v_proj.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.add_v_proj.bias"] = ggml_cat(
                 [context_v_bias]
             )
 
@@ -1004,31 +1009,32 @@ class FluxTransformerConverter(TransformerConverter):
             # Q, K, V, mlp
             mlp_hidden_dim = int(inner_dim * mlp_ratio)
             split_size = (inner_dim, inner_dim, inner_dim, mlp_hidden_dim)
-            q, k, v, mlp = torch.split(
+            q, k, v, mlp = ggml_split(
                 original_state_dict.pop(f"single_blocks.{i}.linear1.weight"),
                 split_size,
                 dim=0,
             )
-            q_bias, k_bias, v_bias, mlp_bias = torch.split(
+
+            q_bias, k_bias, v_bias, mlp_bias = ggml_split(
                 original_state_dict.pop(f"single_blocks.{i}.linear1.bias"),
                 split_size,
                 dim=0,
             )
 
-            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = torch.cat([q])
-            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat([q])
+            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
                 [q_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = torch.cat([k])
-            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat([k])
+            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
                 [k_bias]
             )
-            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = torch.cat([v])
-            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat([v])
+            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
                 [v_bias]
             )
-            converted_state_dict[f"{block_prefix}proj_mlp.weight"] = torch.cat([mlp])
-            converted_state_dict[f"{block_prefix}proj_mlp.bias"] = torch.cat(
+            converted_state_dict[f"{block_prefix}proj_mlp.weight"] = ggml_cat([mlp])
+            converted_state_dict[f"{block_prefix}proj_mlp.bias"] = ggml_cat(
                 [mlp_bias]
             )
 

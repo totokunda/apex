@@ -66,7 +66,6 @@ class LoaderMixin(DownloadMixin):
         model_base = component.get("base")
         model_path = component.get("model_path")
 
-
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
