@@ -38,7 +38,7 @@ from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous, RMSNorm
-from src.attention.processors.qwenimage_processor import (
+from .attention import (
     QwenDoubleStreamAttnProcessor2_0,
 )
 from src.transformer import TRANSFORMERS_REGISTRY

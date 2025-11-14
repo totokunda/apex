@@ -49,7 +49,7 @@ from diffusers.models.normalization import (
     FP32LayerNorm,
 )
 from src.attention import attention_register
-from src.attention.processors.hunyuan_processor import (
+from src.transformer.hunyuan.base.attention import (
     HunyuanAvatarVideoAttnProcessor2_0,
 )
 from src.transformer.base import TRANSFORMERS_REGISTRY

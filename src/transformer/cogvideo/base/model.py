@@ -38,7 +38,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNorm, CogVideoXLayerNormZero
-from src.attention.processors.cogvideo_processor import (
+from .attention import (
     CogVideoXAttnProcessor2_0,
     FusedCogVideoXAttnProcessor2_0,
 )

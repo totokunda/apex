@@ -30,7 +30,7 @@ from diffusers.models.embeddings import FluxPosEmbed, PixArtAlphaTextProjection,
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import CombinedTimestepLabelEmbeddings, FP32LayerNorm, RMSNorm
-from src.attention.processors.flux_processor import FluxAttnProcessor
+from src.transformer.flux.base.attention import FluxAttnProcessor
 from src.transformer.flux.base.model import FluxAttention
 from src.transformer.base import TRANSFORMERS_REGISTRY
 

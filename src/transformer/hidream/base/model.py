@@ -18,7 +18,7 @@ from diffusers.utils import (
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import Attention
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
-from src.attention.processors.hidream_processor import (
+from .attention import (
     HiDreamAttention,
     HiDreamAttnProcessor,
 )

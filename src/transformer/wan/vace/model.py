@@ -37,7 +37,7 @@ from src.transformer.wan.base.model import (
     WanTimeTextImageEmbedding,
     WanTransformerBlock,
 )
-from src.attention.processors.wan_processor import WanAttnProcessor2_0
+from src.transformer.wan.base.attention import WanAttnProcessor2_0
 from src.transformer.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name

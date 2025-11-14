@@ -39,7 +39,7 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 
 from diffusers.models.normalization import FP32LayerNorm
-from src.attention.processors.wan_processor import WanAttnProcessor2_0
+from .attention import WanAttnProcessor2_0
 
 from src.transformer.base import TRANSFORMERS_REGISTRY
 

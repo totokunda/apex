@@ -40,8 +40,8 @@ from diffusers.models.embeddings import (
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import FP32LayerNorm
-from src.attention.processors.wan_processor import WanAttnProcessor2_0
-from src.attention.processors.multitalk_wan_processor import (
+from src.transformer.wan.base.attention import WanAttnProcessor2_0
+from .attention import (
     MultiTalkWanAttnProcessor2_0,
 )
 from src.attention import attention_register

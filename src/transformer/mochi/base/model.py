@@ -38,7 +38,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous, RMSNorm
-from src.attention.processors.mochi_processor import MochiAttnProcessor2_0
+from .attention import MochiAttnProcessor2_0
 from src.transformer.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name

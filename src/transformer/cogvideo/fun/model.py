@@ -22,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention import Attention, FeedForward
-from src.attention.processors.cogvideo_processor import (
+from src.transformer.cogvideo.base.attention import (
     CogVideoXAttnProcessor2_0,
     FusedCogVideoXAttnProcessor2_0,
 )

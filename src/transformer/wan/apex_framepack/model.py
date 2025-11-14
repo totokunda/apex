@@ -26,7 +26,7 @@ import einops
 from src.transformer.wan.apex_framepack.module import BaseSchedule
 import src.transformer.wan.apex_framepack.module
 from diffusers.models.attention import Attention, FeedForward
-from src.attention.processors.wan_processor import WanAttnProcessor2_0
+from src.transformer.wan.base.attention import WanAttnProcessor2_0
 import torch.nn.functional as F
 from src.transformer import TRANSFORMERS_REGISTRY
 

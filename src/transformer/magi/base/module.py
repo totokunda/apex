@@ -43,7 +43,7 @@ from einops import rearrange
 from torch import Tensor
 from torch.nn import Parameter
 
-from src.attention.processors.magi_processor import (
+from .attention import (
     FusedLayerNorm,
     Attention,
     MagiCrossAttentionProcessor,

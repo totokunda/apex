@@ -48,7 +48,7 @@ from diffusers.models.normalization import (
     AdaLayerNormZeroSingle,
     FP32LayerNorm,
 )
-from src.attention.processors.hunyuan_processor import HunyuanVideoAttnProcessor2_0
+from .attention import HunyuanVideoAttnProcessor2_0
 from src.transformer.base import TRANSFORMERS_REGISTRY
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name

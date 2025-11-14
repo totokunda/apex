@@ -49,7 +49,7 @@ from diffusers.models.normalization import (
     AdaLayerNormZero,
     AdaLayerNormZeroSingle,
 )
-from src.attention.processors.flux_processor import (
+from .attention import (
     FluxAttnProcessor,
     FluxIPAdapterAttnProcessor,
 )

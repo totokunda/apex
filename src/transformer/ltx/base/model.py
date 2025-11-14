@@ -35,7 +35,7 @@ from diffusers.models.embeddings import PixArtAlphaTextProjection
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormSingle, RMSNorm
-from src.attention.processors.ltx_processor import (
+from .attention import (
     LTXVideoAttentionProcessor2_0,
     SkipLayerStrategy,
 )

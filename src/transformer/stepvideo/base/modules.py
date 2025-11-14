@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import math
 from einops import rearrange
-from src.attention.processors.stepvideo_processor import StepVideoAttnProcessor
+from .attention import StepVideoAttnProcessor
 
 
 class RoPE1D:

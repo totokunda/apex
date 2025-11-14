@@ -39,7 +39,7 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
 from src.transformer.base import TRANSFORMERS_REGISTRY
-from src.attention.processors.hunyuanimage_processor import HunyuanImageAttnProcessor
+from .attention import HunyuanImageAttnProcessor
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

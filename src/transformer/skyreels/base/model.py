@@ -41,7 +41,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import FP32LayerNorm
-from src.attention.processors.skyreels_processor import SkyReelsAttnProcessor
+from .attention import SkyReelsAttnProcessor
 
 from src.transformer.base import TRANSFORMERS_REGISTRY
 

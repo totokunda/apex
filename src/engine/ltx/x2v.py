@@ -4,7 +4,7 @@ import torch
 import numpy as np
 from PIL import Image
 import math
-from src.attention.processors.ltx_processor import SkipLayerStrategy
+from src.transformer.ltx.base.attention import SkipLayerStrategy
 from src.scheduler.rf import TimestepShifter
 
 class LTXX2VEngine(LTXBaseEngine):
