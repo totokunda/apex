@@ -3,7 +3,8 @@ import os
 import packaging.version as pver
 import numpy as np
 from torchvision import transforms
-
+from src.engine.base_engine import BaseEngine
+from diffusers.video_processor import VideoProcessor
 
 OPTIMUS_LOAD_LIBRARIES = {
     "torch2.2": "https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/lib/liboptimus_ths-torch2.2-cu121.cpython-310-x86_64-linux-gnu.so",
@@ -11,19 +12,31 @@ OPTIMUS_LOAD_LIBRARIES = {
     "torch2.5": "https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so",
 }
 
-
-class StepVideoBaseEngine:
+class StepVideoShared(BaseEngine):
     """Base class for StepVideo engine implementations containing common functionality"""
 
-    def __init__(self, main_engine):
-        self.main_engine = main_engine
-        # Delegate common properties to the main engine
-        self.device = main_engine.device
-        self.logger = main_engine.logger
-        self.vae_scale_factor_temporal = main_engine.vae_scale_factor_temporal
-        self.vae_scale_factor_spatial = main_engine.vae_scale_factor_spatial
-        self.num_channels_latents = main_engine.num_channels_latents
-        self.video_processor = main_engine.video_processor
+    def __init__(self, yaml_path: str, **kwargs):
+        
+        super().__init__(yaml_path, **kwargs)
+
+        self.vae_scale_factor_temporal = (
+            2 ** sum(self.vae.temporal_compression_ratio)
+            if getattr(self.vae, "temporal_compression_ratio", None)
+            else 8
+        )
+
+        self.vae_scale_factor_spatial = (
+            2 ** len(self.vae.spatial_compression_ratio)
+            if getattr(self.vae, "spatial_compression_ratio", None)
+            else 16
+        )
+
+        self.num_channels_latents = getattr(self.vae, "config", {}).get(
+            "z_channels", 16
+        )
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
 
         self._load_optimus()
 
@@ -54,7 +67,7 @@ class StepVideoBaseEngine:
                     library_url = OPTIMUS_LOAD_LIBRARIES.get(library_key)
                     if library_url:
                         # Construct save path - avoid /dev/shm for shared libraries
-                        save_path = getattr(self.main_engine, "save_path", None)
+                        save_path = getattr(self, "save_path", None)
                         if save_path is None:
                             from src.utils.defaults import DEFAULT_SAVE_PATH
 
@@ -79,7 +92,7 @@ class StepVideoBaseEngine:
                                 self.logger.info(
                                     f"Downloading Optimus library {library_key} from {library_url}"
                                 )
-                                downloaded_path = self.main_engine._download(
+                                downloaded_path = self._download(
                                     library_url, optimus_dir
                                 )
 
@@ -179,49 +192,6 @@ class StepVideoBaseEngine:
                 )
                 return False
 
-    @property
-    def text_encoder(self):
-        return self.main_engine.text_encoder
-
-    @property
-    def transformer(self):
-        return self.main_engine.transformer
-
-    @property
-    def scheduler(self):
-        return self.main_engine.scheduler
-
-    @property
-    def vae(self):
-        return self.main_engine.vae
-
-    @property
-    def helpers(self):
-        return self.main_engine.helpers
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
-
-    def _get_latents(self, *args, **kwargs):
-        """Get latents"""
-        return self.main_engine._get_latents(*args, **kwargs)
-
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
 
     def _parse_num_frames(self, duration: int | str, fps: int = 16):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
@@ -246,29 +216,6 @@ class StepVideoBaseEngine:
         duration = max(duration, 1)
         return duration
 
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
 
     @torch.no_grad()
     def vae_decode(
@@ -300,9 +247,6 @@ class StepVideoBaseEngine:
             self._offload(self.vae)
         return video.to(dtype=dtype)
 
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
 
     def resize_to_desired_aspect_ratio(self, video, aspect_size):
         ## video is in shape [f, c, h, w]
@@ -346,3 +290,47 @@ class StepVideoBaseEngine:
             [resize_crop_transform(frame.contiguous()) for frame in video], dim=0
         )
         return video
+
+    def base_denoise(self, *args, **kwargs) -> torch.Tensor:
+        timesteps = kwargs.get("timesteps", None)
+        latents = kwargs.get("latents", None)
+        transformer_dtype = kwargs.get("transformer_dtype", None)
+        use_cfg_guidance = kwargs.get("use_cfg_guidance", True)
+        render_on_step = kwargs.get("render_on_step", False)
+        render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        scheduler = kwargs.get("scheduler", None)
+        guidance_scale = kwargs.get("guidance_scale", 5.0)
+
+        with self._progress_bar(
+            len(timesteps), desc=f"Sampling {self.model_type}"
+        ) as pbar:
+            for t in timesteps:
+                latent_model_input = (
+                    torch.cat([latents] * 2) if use_cfg_guidance else latents
+                )
+                latent_model_input = latent_model_input.to(transformer_dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(transformer_dtype)
+
+                # Forward pass with both text and image conditioning
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    return_dict=False,
+                    **kwargs.get("transformer_kwargs", {}),
+                )[0]
+
+                if use_cfg_guidance:
+                    noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
+
+                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+                pbar.update(1)
+
+            self.logger.info("Denoising completed.")
+
+        return latents

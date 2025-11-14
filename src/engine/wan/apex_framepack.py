@@ -1,9 +1,8 @@
 import torch
 from typing import Dict, Any, Callable, List
-from .base import WanBaseEngine
+from .shared import WanShared
 
-
-class WanApexFramepackEngine(WanBaseEngine):
+class WanApexFramepackEngine(WanShared):
     """WAN Apex Framepack Engine Implementation"""
 
     def run(

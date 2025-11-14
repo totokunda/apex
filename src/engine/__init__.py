@@ -1,31 +1,24 @@
+"""
+Engine package public API.
+
+Engines are now discovered automatically based on the directory / filename
+convention implemented in ``src.engine.registry.EngineRegistry``. New engines
+do not need to be imported or re-exported here; they are picked up via
+autodiscovery.
+"""
+
 from .registry import (
     EngineRegistry,
     UniversalEngine,
+    get_engine_registry,
     create_engine,
     list_available_engines,
 )
-from .wan import WanEngine, ModelType as WanModelType
-from .cogvideo import CogVideoEngine, ModelType as CogVideoModelType
-from .magi import MagiEngine, ModelType as MagiModelType
-from .stepvideo import StepVideoEngine, ModelType as StepVideoModelType
-from .mochi import MochiEngine, ModelType as MochiModelType
-from .skyreels import SkyReelsEngine, ModelType as SkyReelsModelType
-from .ltx import LTXEngine, ModelType as LTXModelType
-from .hunyuan import HunyuanEngine, ModelType as HunyuanModelType
 
 __all__ = [
     "EngineRegistry",
     "UniversalEngine",
+    "get_engine_registry",
     "create_engine",
     "list_available_engines",
-    "WanEngine",
-    "ModelType",
-    "CogVideoEngine",
-    "MagiEngine",
-    "StepVideoEngine",
-    "MochiEngine",
-    "SkyReelsEngine",
-    "LTXEngine",
-    "HunyuanEngine",
-    "ModelType",
 ]

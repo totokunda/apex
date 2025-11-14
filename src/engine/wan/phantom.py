@@ -2,10 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from .base import WanBaseEngine
+from .shared import WanShared
 
 
-class WanPhantomEngine(WanBaseEngine):
+class WanPhantomEngine(WanShared):
     """WAN Phantom Engine Implementation for subject reference image processing"""
 
     def run(

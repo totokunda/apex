@@ -2,11 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
+from .shared import WanShared
 
-from .base import WanBaseEngine
 
-
-class WanV2VEngine(WanBaseEngine):
+class WanV2VEngine(WanShared):
     """WAN Video-to-Video Engine Implementation"""
 
     def run(

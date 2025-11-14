@@ -5,109 +5,49 @@ import numpy as np
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 import inspect
 import torch.nn.functional as F
+from src.engine.base_engine import BaseEngine
+from diffusers.video_processor import VideoProcessor
+from diffusers.schedulers import CogVideoXDPMScheduler
+from contextlib import nullcontext
+from src.utils.type import EnumType
+import math
 
-
-class CogVideoBaseEngine:
+class CogVideoShared(BaseEngine):
     """Base class for CogVideo engine implementations containing common functionality"""
 
-    def __init__(self, main_engine):
-        self.main_engine = main_engine
-        # Delegate common properties to the main engine
-        self.device = main_engine.device
-        self.logger = main_engine.logger
-        self.vae_scale_factor_temporal = main_engine.vae_scale_factor_temporal
-        self.vae_scale_factor_spatial = main_engine.vae_scale_factor_spatial
-        self.vae_scaling_factor_image = main_engine.vae_scaling_factor_image
-        self.num_channels_latents = main_engine.num_channels_latents
-        self.video_processor = main_engine.video_processor
-
-    @property
-    def text_encoder(self):
-        return self.main_engine.text_encoder
-
-    @property
-    def transformer(self):
-        return self.main_engine.transformer
-
-    @property
-    def scheduler(self):
-        return self.main_engine.scheduler
-
-    @property
-    def vae(self):
-        return self.main_engine.vae
-
-    @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def load_config_by_type(self, component_type: str):
-        """Load a config by type"""
-        return self.main_engine.load_config_by_type(component_type)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
-
-    def _get_latents(self, *args, **kwargs):
-        """Get latents"""
-        return self.main_engine._get_latents(*args, **kwargs)
-
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
+    def __init__(
+        self,
+        yaml_path: str,
+        **kwargs,
+    ):
+        super().__init__(yaml_path, **kwargs)
+        self.vae_scale_factor_temporal = (
+            getattr(self.vae, "config", {}).get("temporal_compression_ratio", None) or 4
+            if getattr(self, "vae", None)
+            else 4
+        )
+        self.vae_scale_factor_spatial = (
+            2
+            ** (
+                len(
+                    getattr(self.vae, "config", {}).get("block_out_channels", [1, 1, 1])
+                )
+                - 1
+            )
+            if getattr(self, "vae", None)
+            else 8
+        )
+        self.vae_scaling_factor_image = (
+            getattr(self.vae, "config", {}).get("scaling_factor", None) or 0.7
+            if getattr(self, "vae", None)
+            else 0.7
+        )
+        self.num_channels_latents = getattr(self.vae, "config", {}).get(
+            "latent_channels", 16
+        )
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
 
     def _encode_prompt(
         self,
@@ -320,31 +260,6 @@ class CogVideoBaseEngine:
         else:
             raise AttributeError("Could not access latents of provided encoder_output")
 
-    def _prepare_control_latents(
-        self,
-        mask: Optional[torch.Tensor] = None,
-        masked_image: Optional[torch.Tensor] = None,
-    ):
-        """Prepare control latents for control video generation"""
-        if mask is not None:
-            masks = []
-            for i in range(mask.size(0)):
-                current_mask = mask[i].unsqueeze(0)
-                current_mask = self.vae_encode(current_mask, sample_mode="mode")
-                masks.append(current_mask)
-            mask = torch.cat(masks, dim=0)
-
-        if masked_image is not None:
-            mask_pixel_values = []
-            for i in range(masked_image.size(0)):
-                mask_pixel_value = masked_image[i].unsqueeze(0)
-                mask_pixel_value = self.vae_encode(mask_pixel_value, sample_mode="mode")
-                mask_pixel_values.append(mask_pixel_value)
-            masked_image_latents = torch.cat(mask_pixel_values, dim=0)
-        else:
-            masked_image_latents = None
-
-        return mask, masked_image_latents
 
     def _add_noise_to_reference_video(self, image, ratio=None):
         if ratio is None:
@@ -360,30 +275,7 @@ class CogVideoBaseEngine:
         image = image + image_noise
         return image
 
-    def _prepare_mask_latents(
-        self, masked_image, noise_aug_strength, transformer_config
-    ):
-        # resize the mask to latents shape as we concatenate the mask to the latents
-        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
-        # and half precision
-
-        if masked_image is not None:
-            if transformer_config.get("add_noise_in_inpaint_model", False):
-                masked_image = self._add_noise_to_reference_video(
-                    masked_image, ratio=noise_aug_strength
-                )
-            masked_image = masked_image.to(device=self.device, dtype=self.vae.dtype)
-            bs = 1
-            new_mask_pixel_values = []
-            for i in range(0, masked_image.shape[0], bs):
-                mask_pixel_values_bs = masked_image[i : i + bs]
-                mask_pixel_values_bs = self.vae.encode(mask_pixel_values_bs)[0]
-                mask_pixel_values_bs = mask_pixel_values_bs.mode()
-                new_mask_pixel_values.append(mask_pixel_values_bs)
-            masked_image_latents = torch.cat(new_mask_pixel_values, dim=0)
-            masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
-
-        return masked_image_latents
+    
 
     def _resize_mask(self, mask, latent, process_first_frame_only=True):
         latent_size = latent.size()
@@ -419,3 +311,125 @@ class CogVideoBaseEngine:
                 mask, size=target_size, mode="trilinear", align_corners=False
             )
         return resized_mask
+
+    def base_denoise(self, *args, **kwargs) -> torch.Tensor:
+        """Unified denoising loop for all CogVideo modes"""
+        latents = kwargs.get("latents", None)
+        timesteps = kwargs.get("timesteps", None)
+        scheduler = kwargs.get("scheduler", None)
+        guidance_scale = kwargs.get("guidance_scale", 6.0)
+        use_dynamic_cfg = kwargs.get("use_dynamic_cfg", False)
+        do_classifier_free_guidance = kwargs.get("do_classifier_free_guidance", False)
+        noise_pred_kwargs = kwargs.get("noise_pred_kwargs", {})
+        render_on_step = kwargs.get("render_on_step", False)
+        render_on_step_callback = kwargs.get("render_on_step_callback", None)
+        num_inference_steps = kwargs.get("num_inference_steps", 50)
+        transformer_dtype = kwargs.get("transformer_dtype", None)
+        extra_step_kwargs = kwargs.get("extra_step_kwargs", {})
+
+        # Mode-specific inputs
+        image_latents = kwargs.get("image_latents", None)
+
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * scheduler.order, 0
+        )
+
+        with self._progress_bar(
+            total=num_inference_steps, desc=f"Denoising"
+        ) as pbar:
+            old_pred_original_sample = None
+            for i, t in enumerate(timesteps):
+                # Expand latents if doing classifier free guidance
+                latent_model_input = (
+                    torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                )
+                latent_model_input = scheduler.scale_model_input(
+                    latent_model_input, t
+                ).to(transformer_dtype)
+
+                # Mode-specific input preparation
+                if image_latents is not None:
+                    # Concatenate with image latents for I2V
+                    latent_image_input = (
+                        torch.cat([image_latents] * 2)
+                        if do_classifier_free_guidance
+                        else image_latents
+                    )
+                    latent_model_input = torch.cat(
+                        [latent_model_input, latent_image_input], dim=2
+                    ).to(transformer_dtype)
+
+                # Broadcast timestep to batch dimension
+                timestep = t.expand(latent_model_input.shape[0])
+
+                # Predict noise
+                if hasattr(self.transformer, "cache_context"):
+                    cache_context = self.transformer.cache_context(
+                        "cond_uncond" if do_classifier_free_guidance else None
+                    )
+                else:
+                    cache_context = nullcontext()
+
+                with cache_context:
+                    noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        timestep=timestep,
+                        return_dict=False,
+                        **noise_pred_kwargs,
+                    )[0]
+
+                noise_pred = noise_pred.float()
+
+                # Perform guidance
+                if use_dynamic_cfg:
+                    # Dynamic CFG scaling based on timestep
+                    dynamic_guidance_scale = 1 + guidance_scale * (
+                        (
+                            1
+                            - math.cos(
+                                math.pi
+                                * (
+                                    (num_inference_steps - t.item())
+                                    / num_inference_steps
+                                )
+                                ** 5.0
+                            )
+                        )
+                        / 2
+                    )
+                else:
+                    dynamic_guidance_scale = guidance_scale
+
+                if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + dynamic_guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
+
+                # Scheduler step - handle different scheduler types
+                if not isinstance(self.scheduler, CogVideoXDPMScheduler):
+                    latents = self.scheduler.step(
+                        noise_pred, t, latents, **extra_step_kwargs, return_dict=False
+                    )[0]
+                else:
+                    latents, old_pred_original_sample = self.scheduler.step(
+                        noise_pred,
+                        old_pred_original_sample,
+                        t,
+                        timesteps[i - 1] if i > 0 else None,
+                        latents,
+                        **extra_step_kwargs,
+                        return_dict=False,
+                    )
+
+                latents = latents.to(transformer_dtype)
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % scheduler.order == 0
+                ):
+                    pbar.update(1)
+
+        self.logger.info(f"Denoising completed.")

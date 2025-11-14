@@ -1,4 +1,4 @@
-from .base import Cosmos2BaseEngine
+from .shared import Cosmos2Shared
 from typing import Dict, Any, Callable, List, Union, Optional
 import torch
 import numpy as np
@@ -7,7 +7,7 @@ from loguru import logger
 
 
 # Referencing from diffusers.pipelines.cosmos.pipeline_cosmos2_video2world.Cosmos2VideoToWorldPipeline.prepare_latents
-class Cosmos2I2VEngine(Cosmos2BaseEngine):
+class Cosmos2I2VEngine(Cosmos2Shared):
     """Cosmos Image-to-Video Engine Implementation"""
 
     def run(

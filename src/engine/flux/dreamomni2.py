@@ -2,7 +2,7 @@ from typing import Dict, Any, Callable, List, Union, Optional, Tuple
 from PIL import Image
 import numpy as np
 import torch
-from .base import FluxBaseEngine
+from .shared import FluxShared
 from src.types import InputImage
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from diffusers.utils.torch_utils import randn_tensor
@@ -28,9 +28,15 @@ PREFERRED_KONTEXT_RESOLUTIONS = [
     (1568, 672),
 ]
 
-class DreamOmni2Engine(FluxBaseEngine):
+class DreamOmni2Engine(FluxShared):
     """DreamOmni engine implementation"""
-        
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_channels_latents = (
+            self.transformer.config.in_channels // 4 if self.transformer else 16
+        )
+
     def run(
         self,
         image_1: InputImage,
@@ -272,15 +278,9 @@ class DreamOmni2Engine(FluxBaseEngine):
         safe_emit_progress(progress_callback, 0.50, "Starting denoise")
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            # Fallback for safety
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         latents = self.denoise(
             latents=latents,

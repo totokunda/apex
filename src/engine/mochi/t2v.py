@@ -1,8 +1,7 @@
 import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 import numpy as np
-from .base import MochiBaseEngine
-
+from src.engine.base_engine import BaseEngine
 
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
@@ -28,8 +27,61 @@ def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=Non
     return np.array(sigma_schedule)
 
 
-class MochiT2VEngine(MochiBaseEngine):
+class MochiT2VEngine(BaseEngine):
     """Mochi Text-to-Video Engine Implementation"""
+    def __init__(self, yaml_path: str, **kwargs):
+        super().__init__(yaml_path, model_type=ModelType.T2V, **kwargs)
+        self.vae_scale_factor_spatial = (
+            self.vae.config.get("scaling_factor", 8) if self.vae else 8
+        )
+        self.vae_scale_factor_temporal = 6  # Mochi specific
+
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
+        self.num_channels_latents = (
+            self.transformer.config.in_channels if self.transformer else 12
+        )
+    
+    def vae_decode(
+        self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype = None
+    ):
+        if self.vae is None:
+            self.load_component_by_type("vae")
+        self.to_device(self.vae)
+
+        # unscale/denormalize the latents
+        has_latents_mean = (
+            hasattr(self.vae.config, "latents_mean")
+            and self.vae.config.latents_mean is not None
+        )
+        has_latents_std = (
+            hasattr(self.vae.config, "latents_std")
+            and self.vae.config.latents_std is not None
+        )
+        if has_latents_mean and has_latents_std:
+            latents_mean = (
+                torch.tensor(self.vae.config.latents_mean)
+                .view(1, self.num_channels_latents, 1, 1, 1)
+                .to(latents.device, latents.dtype)
+            )
+            latents_std = (
+                torch.tensor(self.vae.config.latents_std)
+                .view(1, self.num_channels_latents, 1, 1, 1)
+                .to(latents.device, latents.dtype)
+            )
+            latents = (
+                latents * latents_std / self.vae.config.scaling_factor + latents_mean
+            )
+        else:
+            latents = latents / self.vae.config.scaling_factor
+
+        video = self.vae.decode(latents.to(self.vae.dtype), return_dict=False)[0]
+
+        if offload:
+            self._offload(self.vae)
+
+        return video.to(dtype=dtype)
 
     def run(
         self,
@@ -136,21 +188,58 @@ class MochiT2VEngine(MochiBaseEngine):
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
 
-        latents = self.denoise(
-            latents=latents,
-            timesteps=timesteps,
-            num_warmup_steps=num_warmup_steps,
-            num_inference_steps=num_inference_steps,
-            prompt_embeds=prompt_embeds,
-            prompt_attention_mask=prompt_attention_mask,
-            attention_kwargs=attention_kwargs,
-            use_cfg_guidance=use_cfg_guidance,
-            guidance_scale=guidance_scale,
-            render_on_step=render_on_step,
-            scheduler=self.scheduler,
-            transformer_dtype=transformer_dtype,
-            render_on_step_callback=render_on_step_callback,
-        )
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising Mochi T2V"
+        ) as pbar:
+            for i, t in enumerate(timesteps):
+                if use_cfg_guidance:
+                    latent_model_input = torch.cat([latents] * 2).to(transformer_dtype)
+                else:
+                    latent_model_input = latents.to(transformer_dtype)
+
+                # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+                timestep = (
+                    t.expand(latent_model_input.shape[0])
+                    .to(self.device)
+                    .to(transformer_dtype)
+                )
+
+                if hasattr(self.transformer, "cache_context"):
+                    cache_context = self.transformer.cache_context("cond_uncond")
+                else:
+                    cache_context = nullcontext()
+
+                with cache_context:
+                    noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        encoder_hidden_states=prompt_embeds,
+                        timestep=timestep,
+                        encoder_attention_mask=prompt_attention_mask,
+                        attention_kwargs=attention_kwargs,
+                        return_dict=False,
+                    )[0]
+
+                noise_pred = noise_pred.to(torch.float32)
+
+                if use_cfg_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
+
+                latents = scheduler.step(
+                    noise_pred, t, latents.to(torch.float32), return_dict=False
+                )[0].to(transformer_dtype)
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % scheduler.order == 0
+                ):
+                    pbar.update(1)
+
+        self.logger.info("Denoising completed.")
 
         if offload:
             self._offload(self.transformer)

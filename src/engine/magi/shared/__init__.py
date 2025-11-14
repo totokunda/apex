@@ -6,6 +6,9 @@ import numpy as np
 from PIL import Image
 import io
 import ffmpeg
+from diffusers.video_processor import VideoProcessor
+from src.engine.base_engine import BaseEngine
+from .denoise import MagiDenoise 
 
 SPECIAL_TOKEN_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
@@ -50,102 +53,34 @@ SPECIAL_TOKEN_DICT = {
 }
 
 
-class MagiBaseEngine:
+class MagiShared(BaseEngine, MagiDenoise):
     """Base class for Magi engine implementations containing common functionality"""
 
-    def __init__(self, main_engine):
-        self.main_engine = main_engine
-        # Delegate common properties to the main engine
-        self.device = main_engine.device
-        self.logger = main_engine.logger
-        self.vae_scale_factor_temporal = main_engine.vae_scale_factor_temporal
-        self.vae_scale_factor_spatial = main_engine.vae_scale_factor_spatial
-        self.num_channels_latents = main_engine.num_channels_latents
-        self.video_processor = main_engine.video_processor
+    def __init__(self, yaml_path: str, **kwargs):
+        super().__init__(yaml_path, **kwargs)
+        
+        self.vae_scale_factor_temporal = (
+            getattr(self.vae, "temporal_compression_ratio", None)
+            or getattr(self.vae, "patch_length", None)
+            or 4
+            if getattr(self, "vae", None)
+            else 4
+        )
+        self.vae_scale_factor_spatial = (
+            getattr(self.vae, "spatial_compression_ratio", None)
+            or getattr(self.vae, "patch_size", None)
+            or 8
+            if getattr(self, "vae", None)
+            else 8
+        )
 
-    @property
-    def text_encoder(self):
-        return self.main_engine.text_encoder
+        # MAGI uses different channel configurations
+        self.num_channels_latents = getattr(self.vae, "config", {}).get("z_chans", 16)
 
-    @property
-    def transformer(self):
-        return self.main_engine.transformer
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
 
-    @property
-    def scheduler(self):
-        return self.main_engine.scheduler
-
-    @property
-    def vae(self):
-        return self.main_engine.vae
-
-    @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-
-    def load_component_by_type(self, component_type: str):
-        """Load a component by type"""
-        return self.main_engine.load_component_by_type(component_type)
-
-    def load_preprocessor_by_type(self, preprocessor_type: str):
-        """Load a preprocessor by type"""
-        return self.main_engine.load_preprocessor_by_type(preprocessor_type)
-
-    def to_device(self, component):
-        """Move component to device"""
-        return self.main_engine.to_device(component)
-
-    def _offload(self, component):
-        """Offload component"""
-        return self.main_engine._offload(component)
-
-    def _get_latents(self, *args, **kwargs):
-        """Get latents"""
-        return self.main_engine._get_latents(*args, **kwargs)
-
-    def _get_timesteps(self, *args, **kwargs):
-        """Get timesteps"""
-        return self.main_engine._get_timesteps(*args, **kwargs)
-
-    def _load_video(self, *args, **kwargs):
-        """Load video"""
-        return self.main_engine._load_video(*args, **kwargs)
-
-    def _load_image(self, *args, **kwargs):
-        """Load image"""
-        return self.main_engine._load_image(*args, **kwargs)
-
-    def _parse_num_frames(self, *args, **kwargs):
-        """Parse number of frames"""
-        return self.main_engine._parse_num_frames(*args, **kwargs)
-
-    def _aspect_ratio_resize(self, *args, **kwargs):
-        """Aspect ratio resize"""
-        return self.main_engine._aspect_ratio_resize(*args, **kwargs)
-
-    def _progress_bar(self, *args, **kwargs):
-        """Progress bar context manager"""
-        return self.main_engine._progress_bar(*args, **kwargs)
-
-    def _tensor_to_frames(self, *args, **kwargs):
-        """Convert torch.tensor to list of PIL images or np.ndarray"""
-        return self.main_engine._tensor_to_frames(*args, **kwargs)
-
-    def vae_encode(self, *args, **kwargs):
-        """VAE encode"""
-        return self.main_engine.vae_encode(*args, **kwargs)
-
-    def vae_decode(self, *args, **kwargs):
-        """VAE decode"""
-        return self.main_engine.vae_decode(*args, **kwargs)
-
-    def denoise(self, *args, **kwargs):
-        """Denoise function"""
-        return self.main_engine.denoise(*args, **kwargs)
 
     def pad_duration_token_keys(
         self, special_token_keys: List[str], pad_duration: bool = True

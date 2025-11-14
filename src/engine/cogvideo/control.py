@@ -3,13 +3,38 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 
-from .base import CogVideoBaseEngine
+from .shared import CogVideoShared
 import torch.nn.functional as F
 from einops import rearrange
 
-
-class CogVideoControlEngine(CogVideoBaseEngine):
+class CogVideoControlEngine(CogVideoShared):
     """CogVideo Fun Engine Implementation"""
+    
+    def _prepare_control_latents(
+        self,
+        mask: Optional[torch.Tensor] = None,
+        masked_image: Optional[torch.Tensor] = None,
+    ):
+        """Prepare control latents for control video generation"""
+        if mask is not None:
+            masks = []
+            for i in range(mask.size(0)):
+                current_mask = mask[i].unsqueeze(0)
+                current_mask = self.vae_encode(current_mask, sample_mode="mode")
+                masks.append(current_mask)
+            mask = torch.cat(masks, dim=0)
+
+        if masked_image is not None:
+            mask_pixel_values = []
+            for i in range(masked_image.size(0)):
+                mask_pixel_value = masked_image[i].unsqueeze(0)
+                mask_pixel_value = self.vae_encode(mask_pixel_value, sample_mode="mode")
+                mask_pixel_values.append(mask_pixel_value)
+            masked_image_latents = torch.cat(mask_pixel_values, dim=0)
+        else:
+            masked_image_latents = None
+
+        return mask, masked_image_latents
 
     def run(
         self,

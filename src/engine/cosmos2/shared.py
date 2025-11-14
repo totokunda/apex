@@ -1,24 +1,36 @@
 import torch
-import math
-from src.utils.type import EnumType
-from src.utils.cache import empty_cache
+from PIL import Image
+import numpy as np
+import torchvision.transforms.functional as F
+import torch.nn.functional as F
+from src.engine.base_engine import BaseEngine
+from diffusers.video_processor import VideoProcessor
 
+class Cosmos2Shared(BaseEngine):
+    """Base class for Cosmos engine implementations containing common functionality"""
 
-class DenoiseType(EnumType):
-    BASE = "base"
+    def __init__(self, yaml_path: str, **kwargs):
+        super().__init__(yaml_path, **kwargs)
 
+        self.vae_scale_factor_temporal = (
+            2 ** sum(self.vae.temperal_downsample)
+            if getattr(self.vae, "temperal_downsample", None)
+            else 4
+        )
 
-class Cosmos2Denoise:
-    def __init__(self, denoise_type: DenoiseType = DenoiseType.BASE, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.denoise_type = denoise_type
+        self.vae_scale_factor_spatial = (
+            2 ** len(self.vae.temperal_downsample)
+            if getattr(self.vae, "temperal_downsample", None)
+            else 8
+        )
 
-    def denoise(self, *args, **kwargs) -> torch.Tensor:
-        if self.denoise_type == DenoiseType.BASE:
-            return self.base_denoise(*args, **kwargs)
-        else:
-            raise ValueError(f"Denoise type {self.denoise_type} not supported")
+        self.num_channels_latents = getattr(self.vae, "config", {}).get("z_dim", 16)
 
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
+        
+    
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents")
         timesteps = kwargs.get("timesteps")

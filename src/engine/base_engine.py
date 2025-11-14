@@ -32,7 +32,6 @@ import torch.nn as nn
 import importlib
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
 
-
 from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
@@ -1601,6 +1600,51 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         return timesteps, num_inference_steps
 
+    def denoise(self, *args, **kwargs):
+        """
+        Dispatch denoising to a type-specific implementation.
+
+        If ``self.denoise_type`` is set, this looks for a method named
+        ``\"{denoise_type}_denoise\"`` on ``self`` (where ``denoise_type`` is
+        either the string value or, for enums, the ``.value``). If such a
+        method exists, it is called with all provided ``*args`` and
+        ``**kwargs``.
+        """
+        denoise_type = getattr(self, "denoise_type", None)
+        if denoise_type is None:
+            raise ValueError("denoise_type is not set on this engine")
+
+        # Support both plain strings and Enum-like objects with a .value
+        if not isinstance(denoise_type, str) and hasattr(denoise_type, "value"):
+            denoise_key = str(denoise_type.value)
+        else:
+            denoise_key = str(denoise_type)
+
+        method_name = f"{denoise_key}_denoise"
+        fn = getattr(self, method_name, None)
+
+        # Primary: type-specific denoise method, e.g. "base_denoise"
+        if fn is not None and callable(fn):
+            return fn(*args, **kwargs)
+
+        # Fallback: locate the first class in the MRO (excluding BaseEngine and
+        # object) that defines a `denoise` attribute directly on the class
+        # dict. This lets shared mixins override denoising by simply defining
+        # a `denoise` method.
+        for cls in type(self).mro():
+            if cls is BaseEngine or cls is object:
+                continue
+            if "denoise" in cls.__dict__:
+                candidate = cls.__dict__["denoise"]
+                if callable(candidate):
+                    # Bind the function to this instance and call it
+                    return candidate(self, *args, **kwargs)
+
+        raise AttributeError(
+            f"No denoise implementation found for type '{denoise_key}' "
+            f"(expected method '{method_name}' or a class-defined 'denoise')"
+        )
+
     def _parse_num_frames(self, duration: int | str, fps: int = 16):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
 
@@ -1628,10 +1672,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         duration = max(duration, 1)
         return duration
 
+    if TYPE_CHECKING:
+        # Hint to type-checkers/IDEs: unknown attributes accessed on engines
+        # (e.g. dynamically attached components) are treated as nn.Module by
+        # default. This does not affect runtime behaviour.
+        def __getattr__(self, name: str) -> nn.Module: ...
+
     def __str__(self):
         return f"BaseEngine(config={self.config}, device={self.device})"
 
     def __repr__(self):
         return self.__str__()
-    
-    

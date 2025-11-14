@@ -3,11 +3,10 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
+from .shared import WanShared
 
-from .base import WanBaseEngine
 
-
-class WanT2VEngine(WanBaseEngine):
+class WanT2VEngine(WanShared):
     """WAN Text-to-Video Engine Implementation"""
 
     def run(
@@ -138,12 +137,9 @@ class WanT2VEngine(WanBaseEngine):
             boundary_timestep = None
 
         # Set preview context for per-step rendering on the main engine when available
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            pass
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)

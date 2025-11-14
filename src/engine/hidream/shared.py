@@ -2,79 +2,27 @@ import torch
 from diffusers.utils.torch_utils import randn_tensor
 from PIL import Image
 import math
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from src.engine.base_engine import BaseEngine  # noqa: F401
-    BaseClass = BaseEngine  # type: ignore
-else:
-    BaseClass = object
+from src.engine.base_engine import BaseEngine  # noqa: F401
+from diffusers.image_processor import VaeImageProcessor
 
 
-class HidreamBaseEngine(BaseClass):
-    """Base class for Hidream engine implementations containing common functionality"""
+class HidreamShared(BaseEngine):
+    """Shared functionality for Hidream engine implementations"""
 
-    def __init__(self, main_engine):
-        self.main_engine = main_engine
-        self.device = main_engine.device
-        self.logger = main_engine.logger
-        self.vae_scale_factor = main_engine.vae_scale_factor
-        self.num_channels_latents = main_engine.num_channels_latents
-        self.image_processor = main_engine.image_processor
-        self.default_sample_size = main_engine.default_sample_size
+    def __init__(self, yaml_path: str, **kwargs):
 
-    def __getattr__(self, name: str):  # noqa: D401
-        """Delegate attribute access to the composed BaseEngine when not found here."""
-        try:
-            return getattr(self.main_engine, name)
-        except AttributeError as exc:
-            raise AttributeError(f"{self.__class__.__name__!s} has no attribute '{name}'") from exc
+        super().__init__(yaml_path, **kwargs)
 
-    def __dir__(self):
-        return sorted(set[str](list[str](super().__dir__()) + dir(self.main_engine)))
-
-    @property
-    def text_encoder(self):
-        return self.main_engine.text_encoder
-
-    @property
-    def text_encoder_2(self):
-        return getattr(self.main_engine, "text_encoder_2", None)
-
-    @property
-    def text_encoder_3(self):
-        return getattr(self.main_engine, "text_encoder_3", None)
-    
-    @property
-    def refiner(self):
-        return getattr(self.main_engine, "refiner", None)
-    
-    @property
-    def transformer(self):
-        return self.main_engine.transformer
-
-    @property
-    def scheduler(self):
-        return self.main_engine.scheduler
-
-    @property
-    def vae(self):
-        return self.main_engine.vae
-
-    @property
-    def preprocessors(self):
-        return self.main_engine.preprocessors
-
-    @property
-    def component_dtypes(self):
-        return self.main_engine.component_dtypes
-    
-    @property
-    def helpers(self):
-        return self.main_engine.helpers
-    
-
-
-    # Note: A simplified _get_latents exists later in the file and should be used.
+        self.vae_scale_factor = (
+            2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8
+        )
+        self.default_sample_size = 128
+        self.image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
+        self.num_channels_latents = (
+            self.transformer.config.in_channels // 4 if self.transformer else 16
+        )
 
     @staticmethod
     def calculate_shift(
@@ -335,12 +283,10 @@ class HidreamBaseEngine(BaseClass):
             preview_height = getattr(self, "_preview_height", None)
             preview_width = getattr(self, "_preview_width", None)
             if preview_height is None or preview_width is None:
-                return self.main_engine._render_step(latents, render_on_step_callback)
+                return super()._render_step(latents, render_on_step_callback)
             tensor_image = self.vae_decode(latents, offload=getattr(self, "_preview_offload", True))
             image = self._tensor_to_frame(tensor_image)
             render_on_step_callback(image[0])
         except Exception:
-            try:
-                self.main_engine._render_step(latents, render_on_step_callback)
-            except Exception:
-                pass
+            return super()._render_step(latents, render_on_step_callback)
+      

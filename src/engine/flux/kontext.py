@@ -2,11 +2,17 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from .base import FluxBaseEngine
+from .shared import FluxShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
-class FluxKontextEngine(FluxBaseEngine):
+class FluxKontextEngine(FluxShared):
     """Flux Kontext Engine Implementation"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_channels_latents = (
+            self.transformer.config.in_channels // 4 if self.transformer else 16
+        )
 
     def run(
         self,
@@ -188,15 +194,9 @@ class FluxKontextEngine(FluxBaseEngine):
         safe_emit_progress(progress_callback, 0.50, "Starting denoise")
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            # Fallback for safety
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         latents = self.denoise(
             latents=latents,

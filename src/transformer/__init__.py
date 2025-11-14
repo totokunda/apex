@@ -1,53 +1,68 @@
+import importlib
+import inspect
+from pathlib import Path
+from diffusers.models.modeling_utils import ModelMixin
 from .base import TRANSFORMERS_REGISTRY
-from .cogvideo.base.model import CogVideoXTransformer3DModel
-from .cogvideo.fun.model import (
-    CogVideoXTransformer3DModel as CogVideoFunTransformer3DModel,
-)
-from .cosmos.base.model import CosmosTransformer3DModel
-from .hunyuan.avatar.model import (
-    HunyuanAvatarVideoTransformer3DModel as HunyuanAvatarTransformer3DModel,
-)
-from .hunyuan.base.model import HunyuanVideoTransformer3DModel
-from .hunyuan.framepack.model import HunyuanVideoFramepackTransformer3DModel
-from .ltx.base.model import LTXVideoTransformer3DModel
-from .magi.base.model import MagiTransformer3DModel
-from .mochi.base.model import MochiTransformer3DModel
-from .stepvideo.base.model import StepVideoModel as StepVideoTransformer3DModel
-from .skyreels.base.model import SkyReelsTransformer3DModel
-from .wan.base.model import WanTransformer3DModel
-from .wan.fun.model import WanFunTransformer3DModel
-from .wan.causal.model import CausalWanTransformer3DModel
-from .wan.vace.model import WanVACETransformer3DModel
-from .wan.multitalk.model import WanMultiTalkTransformer3DModel
-from .wan.apex_framepack.model import WanApexFramepackTransformer3DModel
-from .qwenimage.base.model import QwenImageTransformer2DModel
-from .flux.base.model import FluxTransformer2DModel
-from .hidream.base.model import HiDreamImageTransformer2DModel
-from .chroma.base.model import ChromaTransformer2DModel
-from .hunyuanimage.base.model import HunyuanImageTransformer2DModel
+
+
+def _auto_register_transformers():
+    """
+    Automatically register transformer models by scanning the transformer package.
+
+    A transformer is assumed to live under ``<root>/<family>/<variant>/model.py`` and expose
+    at least one class that inherits from ``ModelMixin``. It is registered under the key
+    ``"{family}.{variant}"`` (lowercased).
+
+    Existing registrations (for example via the TRANSFORMERS_REGISTRY decorator) are preserved.
+    """
+
+    root = Path(__file__).resolve().parent
+
+    for family_dir in root.iterdir():
+        if not family_dir.is_dir():
+            continue
+        if family_dir.name.startswith("_") or family_dir.name == "__pycache__":
+            continue
+
+        for variant_dir in family_dir.iterdir():
+            if not variant_dir.is_dir():
+                continue
+
+            model_file = variant_dir / "model.py"
+            if not model_file.is_file():
+                continue
+
+            key = f"{family_dir.name}.{variant_dir.name}".lower()
+
+            # If something already registered this key (e.g. via decorator), leave it alone.
+            store = getattr(TRANSFORMERS_REGISTRY, "_store", {})
+            if key in store:
+                continue
+
+            module_name = f"{__name__}.{family_dir.name}.{variant_dir.name}.model"
+            try:
+                module = importlib.import_module(module_name)
+            except Exception:
+                # If import fails for any reason, skip auto-registration for this module.
+                continue
+
+            # Find the first class defined in this module that subclasses ModelMixin.
+            for _, cls in inspect.getmembers(module, inspect.isclass):
+                if cls.__module__ != module.__name__:
+                    continue
+                try:
+                    if issubclass(cls, ModelMixin) and cls is not ModelMixin:
+                        TRANSFORMERS_REGISTRY.register(key, cls)
+                        break
+                except TypeError:
+                    # Builtins and certain extension types can raise here; just ignore them.
+                    continue
+
+
+# Ensure all transformers are registered on import.
+_auto_register_transformers()
+
 
 __all__ = [
-    "TRANSFORMERS_REGISTRY",
-    "CogVideoXTransformer3DModel",
-    "CogVideoFunTransformer3DModel",
-    "HunyuanVideoTransformer3DModel",
-    "HunyuanAvatarTransformer3DModel",
-    "CosmosTransformer3DModel",
-    "HunyuanVideoFramepackTransformer3DModel",
-    "LTXVideoTransformer3DModel",
-    "MagiTransformer3DModel",
-    "MochiTransformer3DModel",
-    "StepVideoTransformer3DModel",
-    "SkyReelsTransformer3DModel",
-    "WanTransformer3DModel",
-    "WanFunTransformer3DModel",
-    "CausalWanTransformer3DModel",
-    "WanVACETransformer3DModel",
-    "WanMultiTalkTransformer3DModel",
-    "WanApexFramepackTransformer3DModel",
-    "QwenImageTransformer2DModel",
-    "FluxTransformer2DModel",
-    "HiDreamImageTransformer2DModel",
-    "ChromaTransformer2DModel",
-    "HunyuanImageTransformer2DModel",
+    "TRANSFORMERS_REGISTRY"
 ]

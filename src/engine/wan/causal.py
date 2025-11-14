@@ -2,11 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
+from .shared import WanShared
 
-from .base import WanBaseEngine
 
-
-class WanCausalEngine(WanBaseEngine):
+class WanCausalEngine(WanShared):
     """WAN Causal Engine Implementation"""
 
     def run(
@@ -401,6 +400,9 @@ class WanCausalEngine(WanBaseEngine):
                     return_dict=False,
                 )
                 current_start_frame += current_num_frames
+        
+        if offload:
+            self._offload(self.transformer)
 
         if return_latents:
             return output

@@ -2,11 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
+from .shared import CogVideoShared
 
-from .base import CogVideoBaseEngine
 
-
-class CogVideoI2VEngine(CogVideoBaseEngine):
+class CogVideoI2VEngine(CogVideoShared):
     """CogVideo Image-to-Video Engine Implementation"""
 
     def run(

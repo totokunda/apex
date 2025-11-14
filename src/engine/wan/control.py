@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 import torch.nn.functional as F
 from src.helpers.wan.fun_camera import Camera
-from .base import WanBaseEngine
+from .shared import WanShared
 from einops import rearrange
 
-class WanControlEngine(WanBaseEngine):
+class WanControlEngine(WanShared):
     """WAN Control Engine Implementation for camera control and video guidance"""
 
     def run(
@@ -129,7 +129,7 @@ class WanControlEngine(WanBaseEngine):
             generator=generator,
         )
         
-        if self.main_engine.denoise_type == "moe" and start_image is not None:
+        if self.denoise_type == "moe" and start_image is not None:
             # convert start image into video 
             start_image = self._load_image(start_image)
             video = [start_image] * num_frames
@@ -211,7 +211,7 @@ class WanControlEngine(WanBaseEngine):
         
         
         
-        if video is not None and self.main_engine.denoise_type == "moe":
+        if video is not None and self.denoise_type == "moe":
             if mask is not None:
                 mask = self._load_video(mask, fps=fps)
                 mask = torch.from_numpy(np.array([np.array(frame) for frame in mask]))[:num_frames]
@@ -265,7 +265,8 @@ class WanControlEngine(WanBaseEngine):
                         latents = (1 - _mask) * masked_video_latents + _mask * latents 
                 else:
                     _mask = None
-        elif self.main_engine.denoise_type == "moe":
+                
+        elif self.denoise_type == "moe":
             mask_latents = torch.tile(
                     torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype), [1, 4, 1, 1, 1]
                 )
@@ -304,7 +305,7 @@ class WanControlEngine(WanBaseEngine):
         elif start_image is not None:
             clip_image = start_image
 
-        if clip_image is not None and self.main_engine.denoise_type != "moe":
+        if clip_image is not None and self.denoise_type != "moe":
             loaded_image = self._load_image(clip_image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width

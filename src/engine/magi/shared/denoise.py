@@ -3,11 +3,6 @@ from src.utils.type import EnumType
 from typing import List, Dict, Any, Tuple
 from collections import Counter
 
-
-class MagiDenoiseType(EnumType):
-    BASE = "base"
-
-
 class UnconditionGuard:
     def __init__(self, kwargs):
         self.kwargs = kwargs

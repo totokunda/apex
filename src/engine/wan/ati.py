@@ -2,8 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-
-from .base import WanBaseEngine
+from .shared import WanShared
 
 # Copyright (c) 2024-2025 Bytedance Ltd. and/or its affiliates
 #
@@ -180,7 +179,7 @@ def patch_motion(
     )
 
 
-class WanATIEngine(WanBaseEngine):
+class WanATIEngine(WanShared):
     """WAN Audio-to-Video Engine Implementation"""
 
     def run(

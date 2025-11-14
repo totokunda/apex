@@ -1,13 +1,13 @@
 import torch
 import math
 from typing import Dict, Any, Callable, List
-from .base import QwenImageBaseEngine
+from .shared import QwenImageShared
 import numpy as np
 from PIL import Image   
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from loguru import logger
 
-class QwenImageEditEngine(QwenImageBaseEngine):
+class QwenImageEditEngine(QwenImageShared):
     """QwenImage Edit Engine Implementation"""
 
     def run(
@@ -198,15 +198,9 @@ class QwenImageEditEngine(QwenImageBaseEngine):
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            # Fallback for safety
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         latents = self.denoise(
             latents=latents,
@@ -229,6 +223,8 @@ class QwenImageEditEngine(QwenImageBaseEngine):
             render_on_step_callback=render_on_step_callback,
             denoise_progress_callback=denoise_progress_callback,
         )
+        
+        
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
