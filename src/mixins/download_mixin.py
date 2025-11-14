@@ -8,7 +8,6 @@ from loguru import logger
 import hashlib
 from typing import Dict, Any
 import tempfile
-import shutil
 
 class DownloadMixin:
     logger: Logger = logger

@@ -148,8 +148,7 @@ class LoaderMixin(DownloadMixin):
 
         if no_weights:
             return model
-
-
+    
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")
@@ -161,7 +160,7 @@ class LoaderMixin(DownloadMixin):
             gguf_weights = mx.load(model_path)
             check_mlx_convolutional_weights(gguf_weights, model)
             model.load_weights(gguf_weights)
-            
+        
         elif (
             model_path.endswith(".gguf")
         ):

@@ -10,7 +10,7 @@ class _Downloader(DownloadMixin):
 save_dir = "./"
 dl = _Downloader()
 
-url = "https://huggingface.co/Phr00t/WAN2.2-14B-Rapid-AllInOne/resolve/main/Mega-v9/wan2.2-rapid-mega-aio-nsfw-v9.safetensors"
+url = "https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/resolve/main/transformer/config.json"
 progress_callback = lambda x, y, z: print(f"Downloaded {x} bytes of {y} bytes for {z}")
 result_path = dl.download(url, save_dir, progress_callback)
 detected = dl.is_downloaded(url, save_dir)

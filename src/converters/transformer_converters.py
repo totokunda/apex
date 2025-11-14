@@ -639,7 +639,7 @@ class MagiTransformerConverter(TransformerConverter):
             "self_attention.linear_kv_xattn": "attn2.to_kv",
         }
         self.pre_special_keys_map = {}
-            
+        
 class FluxTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
@@ -671,162 +671,403 @@ class FluxTransformerConverter(TransformerConverter):
             "linear2": "proj_out",
             "final_layer.linear": "proj_out",
         }
-        
-        self.pre_special_keys_map = {
-            "lora_unet_single_blocks_": self.remap_single_transformer_blocks_lora,
-            "lora_unet_double_blocks_": self.remap_double_transformer_blocks_lora,
-        }
-        
-        self.special_keys_map = {
-            "img_attn_qkv": self.remap_img_attn_qkv_,
-            "txt_attn_qkv": self.remap_txt_attn_qkv_,
-            "single_blocks": self.remap_single_transformer_blocks_,
-            "final_layer.adaLN_modulation.1": self.remap_norm_scale_shift_,
-        }
-    
-    @staticmethod
-    def remap_norm_scale_shift_(key, state_dict):
-        weight = state_dict.pop(key)
-        shift, scale = weight.chunk(2, dim=0)
-        new_weight = torch.cat([scale, shift], dim=0)
-        state_dict[key.replace("final_layer.adaLN_modulation.1", "norm_out.linear")] = (
-            new_weight
+        # These rename rules aren't used in the overridden `convert` method below,
+        # but are kept for compatibility with the general pattern used elsewhere.
+        self.pre_special_keys_map = {}
+        self.special_keys_map = {}
+
+        # Defaults taken from the Flux dev config used in `test_flux.py`.
+        # These act as fallbacks if we can't infer values from the checkpoint.
+        self.num_layers = 19
+        self.num_single_layers = 38
+        self.inner_dim = 3072
+        self.mlp_ratio = 4.0
+
+    def _infer_hyperparams_from_state_dict(self, sd: Dict[str, Any]):
+        """
+        Infer num_layers, num_single_layers, inner_dim and mlp_ratio directly from the
+        checkpoint state_dict when possible, falling back to the defaults otherwise.
+        """
+        # Start with no inference; fall back to existing attributes if needed
+        num_layers = None
+        num_single_layers = None
+        inner_dim = None
+        mlp_ratio = None
+
+        double_block_indices = set()
+        single_block_indices = set()
+
+        for key, tensor in sd.items():
+            # Collect layer indices for double and single blocks
+            if key.startswith("double_blocks."):
+                m = re.match(r"double_blocks\.(\d+)\.", key)
+                if m:
+                    double_block_indices.add(int(m.group(1)))
+            elif key.startswith("single_blocks."):
+                m = re.match(r"single_blocks\.(\d+)\.", key)
+                if m:
+                    single_block_indices.add(int(m.group(1)))
+
+            # Try to infer inner_dim and mlp_ratio from single_blocks linear1 weight
+            if (
+                inner_dim is None or mlp_ratio is None
+            ) and "single_blocks." in key and key.endswith(".linear1.weight"):
+                # shape: (3 * inner_dim + mlp_hidden_dim, inner_dim)
+                if hasattr(tensor, "shape") and len(tensor.shape) == 2:
+                    out_features, in_features = tensor.shape
+                    inferred_inner = in_features
+                    mlp_hidden_dim = out_features - 3 * inferred_inner
+                    if mlp_hidden_dim > 0:
+                        inner_dim = inferred_inner
+                        mlp_ratio = float(mlp_hidden_dim) / float(inferred_inner)
+
+            # Fallback: infer inner_dim from qkv weights of double blocks
+            if (
+                inner_dim is None
+                and "double_blocks." in key
+                and "img_attn.qkv.weight" in key
+            ):
+                # shape: (3 * inner_dim, query_dim)
+                if hasattr(tensor, "shape") and len(tensor.shape) == 2:
+                    out_features, _ = tensor.shape
+                    inferred_inner = out_features // 3
+                    if inferred_inner > 0:
+                        inner_dim = inferred_inner
+
+            # Fallback for mlp_ratio using img_mlp weights from double blocks
+            if (
+                mlp_ratio is None
+                and "double_blocks." in key
+                and "img_mlp.0.weight" in key
+            ):
+                # shape: (mlp_hidden_dim, inner_dim)
+                if hasattr(tensor, "shape") and len(tensor.shape) == 2:
+                    mlp_hidden_dim, maybe_inner = tensor.shape
+                    if inner_dim is None:
+                        inner_dim = maybe_inner
+                    if inner_dim and mlp_hidden_dim > 0:
+                        mlp_ratio = float(mlp_hidden_dim) / float(inner_dim)
+
+        if double_block_indices:
+            num_layers = max(double_block_indices) + 1
+        if single_block_indices:
+            num_single_layers = max(single_block_indices) + 1
+
+        # Fallbacks to defaults where inference failed
+        if num_layers is None:
+            num_layers = self.num_layers
+        if num_single_layers is None:
+            num_single_layers = self.num_single_layers
+        if inner_dim is None:
+            inner_dim = self.inner_dim
+        if mlp_ratio is None:
+            mlp_ratio = self.mlp_ratio
+
+        # Persist inferred values on the instance for potential debugging
+        self.num_layers = num_layers
+        self.num_single_layers = num_single_layers
+        self.inner_dim = inner_dim
+        self.mlp_ratio = mlp_ratio
+
+        return num_layers, num_single_layers, inner_dim, mlp_ratio
+
+    def convert(self, state_dict: Dict[str, Any]):
+        """
+        Convert a Flux transformer checkpoint to the diffusers format.
+
+        This mirrors the logic in `convert_flux_transformer_checkpoint_to_diffusers`
+        from `test_flux.py`, but mutates `state_dict` in-place to conform to the
+        converter API used elsewhere in this module.
+        """
+        # Work on a copy so we can freely pop while building a fresh dict
+        original_state_dict = dict(state_dict)
+        converted_state_dict: Dict[str, Any] = {}
+
+        num_layers, num_single_layers, inner_dim, mlp_ratio = (
+            self._infer_hyperparams_from_state_dict(original_state_dict)
         )
-    
-    @staticmethod
-    def remap_img_attn_qkv_(key, state_dict):
-        weight = state_dict.pop(key)
-        to_q, to_k, to_v = weight.chunk(3, dim=0)
-        state_dict[key.replace("img_attn_qkv", "attn.to_q")] = to_q
-        state_dict[key.replace("img_attn_qkv", "attn.to_k")] = to_k
-        state_dict[key.replace("img_attn_qkv", "attn.to_v")] = to_v
 
-    @staticmethod
-    def remap_txt_attn_qkv_(key, state_dict):
-        weight = state_dict.pop(key)
-        to_q, to_k, to_v = weight.chunk(3, dim=0)
-        state_dict[key.replace("txt_attn_qkv", "attn.add_q_proj")] = to_q
-        state_dict[key.replace("txt_attn_qkv", "attn.add_k_proj")] = to_k
-        state_dict[key.replace("txt_attn_qkv", "attn.add_v_proj")] = to_v
-        
-    @staticmethod
-    def remap_single_transformer_blocks_lora(key, state_dict):
-        # Normalize odd markers like "(3)" that can appear in some dumps
-        clean_key = re.sub(r"\(\d+\)", "", key)
+        # time_text_embed.timestep_embedder <- time_in
+        converted_state_dict[
+            "time_text_embed.timestep_embedder.linear_1.weight"
+        ] = original_state_dict.pop("time_in.in_layer.weight")
+        converted_state_dict[
+            "time_text_embed.timestep_embedder.linear_1.bias"
+        ] = original_state_dict.pop("time_in.in_layer.bias")
+        converted_state_dict[
+            "time_text_embed.timestep_embedder.linear_2.weight"
+        ] = original_state_dict.pop("time_in.out_layer.weight")
+        converted_state_dict[
+            "time_text_embed.timestep_embedder.linear_2.bias"
+        ] = original_state_dict.pop("time_in.out_layer.bias")
 
-        # Expected formats (examples):
-        #   lora_unet_single_blocks_0_linear1.lora_down.weight
-        #   lora_unet_single_blocks_0_linear2.lora_up.weight
-        #   lora_unet_single_blocks_0_modulation_lin.alpha
-        m = re.match(r"^lora_unet_single_blocks_(\d+)_(.+)$", clean_key)
-        if not m:
-            return
+        # time_text_embed.text_embedder <- vector_in
+        converted_state_dict[
+            "time_text_embed.text_embedder.linear_1.weight"
+        ] = original_state_dict.pop("vector_in.in_layer.weight")
+        converted_state_dict[
+            "time_text_embed.text_embedder.linear_1.bias"
+        ] = original_state_dict.pop("vector_in.in_layer.bias")
+        converted_state_dict[
+            "time_text_embed.text_embedder.linear_2.weight"
+        ] = original_state_dict.pop("vector_in.out_layer.weight")
+        converted_state_dict[
+            "time_text_embed.text_embedder.linear_2.bias"
+        ] = original_state_dict.pop("vector_in.out_layer.bias")
 
-        block_idx, rest = m.groups()
+        # guidance
+        has_guidance = any("guidance" in k for k in original_state_dict)
+        if has_guidance:
+            converted_state_dict[
+                "time_text_embed.guidance_embedder.linear_1.weight"
+            ] = original_state_dict.pop("guidance_in.in_layer.weight")
+            converted_state_dict[
+                "time_text_embed.guidance_embedder.linear_1.bias"
+            ] = original_state_dict.pop("guidance_in.in_layer.bias")
+            converted_state_dict[
+                "time_text_embed.guidance_embedder.linear_2.weight"
+            ] = original_state_dict.pop("guidance_in.out_layer.weight")
+            converted_state_dict[
+                "time_text_embed.guidance_embedder.linear_2.bias"
+            ] = original_state_dict.pop("guidance_in.out_layer.bias")
 
-        # Convert specific tokens, but keep component names intact
-        # e.g. modulation_lin -> modulation.lin
-        rest = re.sub(r"^modulation_lin", "modulation.lin", rest)
+        # context_embedder
+        converted_state_dict["context_embedder.weight"] = original_state_dict.pop(
+            "txt_in.weight"
+        )
+        converted_state_dict["context_embedder.bias"] = original_state_dict.pop(
+            "txt_in.bias"
+        )
 
-        new_key = f"single_blocks.{block_idx}.{rest}"
-        state_dict[new_key] = state_dict.pop(key)
-    
-    @staticmethod
-    def remap_double_transformer_blocks_lora(key, state_dict):
-        # Normalize odd markers like "(3)" that can appear in some dumps
-        clean_key = re.sub(r"\(\d+\)", "", key)
+        # x_embedder
+        converted_state_dict["x_embedder.weight"] = original_state_dict.pop(
+            "img_in.weight"
+        )
+        converted_state_dict["x_embedder.bias"] = original_state_dict.pop(
+            "img_in.bias"
+        )
 
-        # Examples to handle:
-        #   lora_unet_double_blocks_0_img_attn_proj.lora_down.weight
-        #   lora_unet_double_blocks_0_img_attn_qkv.lora_up.weight
-        #   lora_unet_double_blocks_0_img_mlp_0.lora_down.weight
-        #   lora_unet_double_blocks_0_img_mlp_2.lora_up.weight
-        #   lora_unet_double_blocks_0_txt_attn_proj.alpha
-        #   lora_unet_double_blocks_0_txt_attn_qkv.lora_down.weight
-        #   lora_unet_double_blocks_0_txt_mlp_0.lora_up.weight
-        m = re.match(r"^lora_unet_double_blocks_(\d+)_(.+)$", clean_key)
-        if not m:
-            return
+        # double transformer blocks
+        for i in range(num_layers):
+            block_prefix = f"transformer_blocks.{i}."
 
-        block_idx, rest = m.groups()
+            # norms
+            converted_state_dict[
+                f"{block_prefix}norm1.linear.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mod.lin.weight")
+            converted_state_dict[
+                f"{block_prefix}norm1.linear.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mod.lin.bias")
 
-        # Map the first token(s) precisely so rename_dict matches later:
-        #   img_attn_proj -> img_attn.proj
-        #   img_attn_qkv  -> img_attn.qkv
-        #   txt_attn_proj -> txt_attn.proj
-        #   txt_attn_qkv  -> txt_attn.qkv
-        #   img_mlp_0     -> img_mlp.0
-        #   img_mlp_2     -> img_mlp.2
-        #   txt_mlp_0     -> txt_mlp.0
-        #   txt_mlp_2     -> txt_mlp.2
-        #   img_mod_lin   -> img_mod.lin
-        #   txt_mod_lin   -> txt_mod.lin
-        substitutions = [
-            (r"^img_attn_proj", "img_attn.proj"),
-            (r"^img_attn_qkv", "img_attn.qkv"),
-            (r"^txt_attn_proj", "txt_attn.proj"),
-            (r"^txt_attn_qkv", "txt_attn.qkv"),
-            (r"^img_mlp_([02])", r"img_mlp.\1"),
-            (r"^txt_mlp_([02])", r"txt_mlp.\1"),
-            (r"^img_mod_lin", "img_mod.lin"),
-            (r"^txt_mod_lin", "txt_mod.lin"),
-        ]
+            converted_state_dict[
+                f"{block_prefix}norm1_context.linear.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mod.lin.weight")
+            converted_state_dict[
+                f"{block_prefix}norm1_context.linear.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mod.lin.bias")
 
-        for pattern, repl in substitutions:
-            rest = re.sub(pattern, repl, rest)
-
-        new_key = f"double_blocks.{block_idx}.{rest}"
-        state_dict[new_key] = state_dict.pop(key)
-
-    @staticmethod
-    def remap_single_transformer_blocks_(key, state_dict):
-        hidden_size = 3072
-
-        if "linear1.weight" in key:
-            linear1_weight = state_dict.pop(key)
-            split_size = (
-                hidden_size,
-                hidden_size,
-                hidden_size,
-                linear1_weight.size(0) - 3 * hidden_size,
+            # Q, K, V
+            sample_q, sample_k, sample_v = torch.chunk(
+                original_state_dict.pop(f"double_blocks.{i}.img_attn.qkv.weight"),
+                3,
+                dim=0,
             )
-            q, k, v, mlp = torch.split(linear1_weight, split_size, dim=0)
-            new_key = key.replace(
-                "single_blocks", "single_transformer_blocks"
-            ).removesuffix(".linear1.weight")
-            state_dict[f"{new_key}.attn.to_q.weight"] = q
-            state_dict[f"{new_key}.attn.to_k.weight"] = k
-            state_dict[f"{new_key}.attn.to_v.weight"] = v
-            state_dict[f"{new_key}.proj_mlp.weight"] = mlp
+            context_q, context_k, context_v = torch.chunk(
+                original_state_dict.pop(f"double_blocks.{i}.txt_attn.qkv.weight"),
+                3,
+                dim=0,
+            )
+            sample_q_bias, sample_k_bias, sample_v_bias = torch.chunk(
+                original_state_dict.pop(f"double_blocks.{i}.img_attn.qkv.bias"),
+                3,
+                dim=0,
+            )
+            context_q_bias, context_k_bias, context_v_bias = torch.chunk(
+                original_state_dict.pop(f"double_blocks.{i}.txt_attn.qkv.bias"),
+                3,
+                dim=0,
+            )
 
-        elif "linear1.bias" in key:
-            linear1_bias = state_dict.pop(key)
-            split_size = (
-                hidden_size,
-                hidden_size,
-                hidden_size,
-                linear1_bias.size(0) - 3 * hidden_size,
+            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = torch.cat(
+                [sample_q]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = torch.cat(
+                [sample_q_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = torch.cat(
+                [sample_k]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = torch.cat(
+                [sample_k_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = torch.cat(
+                [sample_v]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = torch.cat(
+                [sample_v_bias]
+            )
+
+            converted_state_dict[f"{block_prefix}attn.add_q_proj.weight"] = torch.cat(
+                [context_q]
+            )
+            converted_state_dict[f"{block_prefix}attn.add_q_proj.bias"] = torch.cat(
+                [context_q_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.add_k_proj.weight"] = torch.cat(
+                [context_k]
+            )
+            converted_state_dict[f"{block_prefix}attn.add_k_proj.bias"] = torch.cat(
+                [context_k_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.add_v_proj.weight"] = torch.cat(
+                [context_v]
+            )
+            converted_state_dict[f"{block_prefix}attn.add_v_proj.bias"] = torch.cat(
+                [context_v_bias]
+            )
+
+            # qk_norm
+            converted_state_dict[f"{block_prefix}attn.norm_q.weight"] = (
+                original_state_dict.pop(
+                    f"double_blocks.{i}.img_attn.norm.query_norm.scale"
+                )
+            )
+            converted_state_dict[f"{block_prefix}attn.norm_k.weight"] = (
+                original_state_dict.pop(
+                    f"double_blocks.{i}.img_attn.norm.key_norm.scale"
+                )
+            )
+            converted_state_dict[f"{block_prefix}attn.norm_added_q.weight"] = (
+                original_state_dict.pop(
+                    f"double_blocks.{i}.txt_attn.norm.query_norm.scale"
+                )
+            )
+            converted_state_dict[f"{block_prefix}attn.norm_added_k.weight"] = (
+                original_state_dict.pop(
+                    f"double_blocks.{i}.txt_attn.norm.key_norm.scale"
+                )
+            )
+
+            # ff img_mlp
+            converted_state_dict[
+                f"{block_prefix}ff.net.0.proj.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mlp.0.weight")
+            converted_state_dict[
+                f"{block_prefix}ff.net.0.proj.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mlp.0.bias")
+            converted_state_dict[
+                f"{block_prefix}ff.net.2.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mlp.2.weight")
+            converted_state_dict[
+                f"{block_prefix}ff.net.2.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_mlp.2.bias")
+
+            converted_state_dict[
+                f"{block_prefix}ff_context.net.0.proj.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mlp.0.weight")
+            converted_state_dict[
+                f"{block_prefix}ff_context.net.0.proj.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mlp.0.bias")
+            converted_state_dict[
+                f"{block_prefix}ff_context.net.2.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mlp.2.weight")
+            converted_state_dict[
+                f"{block_prefix}ff_context.net.2.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_mlp.2.bias")
+
+            # output projections
+            converted_state_dict[
+                f"{block_prefix}attn.to_out.0.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_attn.proj.weight")
+            converted_state_dict[
+                f"{block_prefix}attn.to_out.0.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.img_attn.proj.bias")
+            converted_state_dict[
+                f"{block_prefix}attn.to_add_out.weight"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_attn.proj.weight")
+            converted_state_dict[
+                f"{block_prefix}attn.to_add_out.bias"
+            ] = original_state_dict.pop(f"double_blocks.{i}.txt_attn.proj.bias")
+
+        # single transformer blocks
+        for i in range(num_single_layers):
+            block_prefix = f"single_transformer_blocks.{i}."
+
+            # norm.linear <- single_blocks.i.modulation.lin
+            converted_state_dict[
+                f"{block_prefix}norm.linear.weight"
+            ] = original_state_dict.pop(f"single_blocks.{i}.modulation.lin.weight")
+            converted_state_dict[
+                f"{block_prefix}norm.linear.bias"
+            ] = original_state_dict.pop(f"single_blocks.{i}.modulation.lin.bias")
+
+            # Q, K, V, mlp
+            mlp_hidden_dim = int(inner_dim * mlp_ratio)
+            split_size = (inner_dim, inner_dim, inner_dim, mlp_hidden_dim)
+            q, k, v, mlp = torch.split(
+                original_state_dict.pop(f"single_blocks.{i}.linear1.weight"),
+                split_size,
+                dim=0,
             )
             q_bias, k_bias, v_bias, mlp_bias = torch.split(
-                linear1_bias, split_size, dim=0
+                original_state_dict.pop(f"single_blocks.{i}.linear1.bias"),
+                split_size,
+                dim=0,
             )
-            new_key = key.replace(
-                "single_blocks", "single_transformer_blocks"
-            ).removesuffix(".linear1.bias")
-            state_dict[f"{new_key}.attn.to_q.bias"] = q_bias
-            state_dict[f"{new_key}.attn.to_k.bias"] = k_bias
-            state_dict[f"{new_key}.attn.to_v.bias"] = v_bias
-            state_dict[f"{new_key}.proj_mlp.bias"] = mlp_bias
 
-        else:
-            new_key = key.replace("single_blocks", "single_transformer_blocks")
-            new_key = new_key.replace("linear2", "proj_out")
-            new_key = new_key.replace("modulation.lin", "norm.linear")
-            new_key = new_key.replace("norm.query_norm.scale", "attn.norm_q.weight")
-            new_key = new_key.replace("norm.key_norm.scale", "attn.norm_k.weight")
-            state_dict[new_key] = state_dict.pop(key)
-            
+            converted_state_dict[f"{block_prefix}attn.to_q.weight"] = torch.cat([q])
+            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = torch.cat(
+                [q_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = torch.cat([k])
+            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = torch.cat(
+                [k_bias]
+            )
+            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = torch.cat([v])
+            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = torch.cat(
+                [v_bias]
+            )
+            converted_state_dict[f"{block_prefix}proj_mlp.weight"] = torch.cat([mlp])
+            converted_state_dict[f"{block_prefix}proj_mlp.bias"] = torch.cat(
+                [mlp_bias]
+            )
 
+            # qk norm
+            converted_state_dict[f"{block_prefix}attn.norm_q.weight"] = (
+                original_state_dict.pop(
+                    f"single_blocks.{i}.norm.query_norm.scale"
+                )
+            )
+            converted_state_dict[f"{block_prefix}attn.norm_k.weight"] = (
+                original_state_dict.pop(
+                    f"single_blocks.{i}.norm.key_norm.scale"
+                )
+            )
+
+            # output projections
+            converted_state_dict[f"{block_prefix}proj_out.weight"] = (
+                original_state_dict.pop(f"single_blocks.{i}.linear2.weight")
+            )
+            converted_state_dict[f"{block_prefix}proj_out.bias"] = (
+                original_state_dict.pop(f"single_blocks.{i}.linear2.bias")
+            )
+
+        converted_state_dict["proj_out.weight"] = original_state_dict.pop(
+            "final_layer.linear.weight"
+        )
+        converted_state_dict["proj_out.bias"] = original_state_dict.pop(
+            "final_layer.linear.bias"
+        )
+        converted_state_dict["norm_out.linear.weight"] = swap_scale_shift(
+            original_state_dict.pop("final_layer.adaLN_modulation.1.weight")
+        )
+        converted_state_dict["norm_out.linear.bias"] = swap_scale_shift(
+            original_state_dict.pop("final_layer.adaLN_modulation.1.bias")
+        )
+
+        # Mutate input dict in-place to follow the converter API
+        state_dict.clear()
+        state_dict.update(converted_state_dict)
 
 
 class NoOpTransformerConverter(TransformerConverter):
