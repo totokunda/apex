@@ -5,8 +5,7 @@ metadata:
   model: hidream
   name: Hidream E1-1
   version: 1.0.0
-  description: Hidream is a 17B parameter model for image generation with
-    edit capabilities.
+  description: Hidream is a 17B parameter model for image generation with edit capabilities.
   tags:
   - hidream
   - edit
@@ -84,10 +83,43 @@ spec:
   - type: transformer
     label: HiDream Transformer
     base: hidream.base
+    config_path: https://huggingface.co/HiDream-ai/HiDream-E1-1/resolve/main/transformer/config.json
     model_path:
     - path: HiDream-ai/HiDream-E1-1/transformer
       variant: default
       file_size: 34211855409
+    - path: https://huggingface.co/QuantStack/HiDream-E1-1-GGUF/resolve/main/HiDream_E1_1_-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 16
+      file_size: 6567249600
+    - path: https://huggingface.co/QuantStack/HiDream-E1-1-GGUF/resolve/main/HiDream_E1_1_-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 14
+        recommended_vram_gb: 20
+      file_size: 10898851520
+    - path: https://huggingface.co/QuantStack/HiDream-E1-1-GGUF/resolve/main/HiDream_E1_1_-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 18
+        recommended_vram_gb: 28
+      file_size: 14684456640
+    - path: https://huggingface.co/QuantStack/HiDream-E1-1-GGUF/resolve/main/HiDream_E1_1_-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 36
+      file_size: 18694358720
   defaults:
     run:
       num_inference_steps: 40
@@ -158,10 +190,10 @@ spec:
       description: The image to edit.
       type: image
       panel: input
-      required: true  
-      map_h: "height"
-      map_w: "width"
-      scale_by: "resolution"
+      required: true
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: prompt
       label: Prompt
       description: Describe the image you want to generate.
@@ -173,7 +205,12 @@ spec:
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
-      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature
+      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
+        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
+        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
+        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
+        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
+        legs, fused fingers, too many fingers, long neck, username, watermark, signature
       type: text
       panel: advanced_prompting
       required: false
@@ -290,4 +327,3 @@ spec:
       min: 0.0
       max: 1.0
       step: 0.01
-      

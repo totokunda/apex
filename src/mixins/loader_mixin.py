@@ -168,7 +168,6 @@ class LoaderMixin(DownloadMixin):
         ):
             logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
-            logger.info(f"\n\n gguf_kwargs: {gguf_kwargs}\n\n")
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
@@ -178,6 +177,7 @@ class LoaderMixin(DownloadMixin):
                 converter.convert(state_dict)
 
             # Load GGMLTensors without replacing nn.Parameters by copying data
+
             patch_model(model)
             model.load_state_dict(state_dict, assign=True)
         else:

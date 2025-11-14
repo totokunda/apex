@@ -8,6 +8,9 @@ from src.quantize.ggml_tensor import GGMLTensor
 from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.utils.dtype import convert_str_dtype
 from loguru import logger
+from src.converters.transformer_converters import TransformerConverter
+
+transformer_converter = TransformerConverter()
 
 T5_SD_MAP = {
     "enc.": "encoder.",
@@ -64,6 +67,7 @@ STEP_SD_MAP = {
 
 
 def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
+
     if key_map == "t5":
         key_map = T5_SD_MAP
     elif key_map == "llama":
@@ -188,6 +192,8 @@ def load_transformer_gguf(
         state_dict[name] = ggml_tensor
         tensor_type_str = getattr(tensor.tensor_type, "name", repr(tensor.tensor_type))
         qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
+
+        
 
     return state_dict, qtype_dict
 

@@ -272,9 +272,7 @@ spec:
       panel: sampling
       required: false
       max_items: 2
-      default:
-      - 4.0
-      - 3.0
+      default: [4.0, 3.0]
       min: 1.0
       max: 15.0
       step: 0.5

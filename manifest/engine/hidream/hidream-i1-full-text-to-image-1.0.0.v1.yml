@@ -91,6 +91,7 @@ spec:
   - type: transformer
     label: HiDream Transformer
     base: hidream.base
+    config_path: https://huggingface.co/HiDream-ai/HiDream-I1-Full/resolve/main/transformer/config.json
     model_path:
     - path: HiDream-ai/HiDream-I1-Full/transformer
       variant: default
