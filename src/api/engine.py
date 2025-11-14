@@ -65,7 +65,7 @@ def _resolve_manifest_path(manifest_id: Optional[str], yaml_path: Optional[str])
         manifest = get_manifest(manifest_id)
         if not manifest:
             raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
-        return MANIFEST_BASE_PATH / manifest['full_path']
+        return str((MANIFEST_BASE_PATH / manifest['full_path']).resolve())
 
     raise HTTPException(status_code=400, detail="Provide either manifest_id or yaml_path")
 
