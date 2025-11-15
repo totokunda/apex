@@ -91,7 +91,6 @@ def set_cache_path(path: str) -> None:
     global DEFAULT_CACHE_PATH
     DEFAULT_CACHE_PATH = path
     os.makedirs(DEFAULT_CACHE_PATH, exist_ok=True)
-    
 
 def get_components_path() -> str:
     return DEFAULT_COMPONENTS_PATH
@@ -114,4 +113,13 @@ def set_preprocessor_path(path: str | None = None) -> None:
     global DEFAULT_PREPROCESSOR_SAVE_PATH
     DEFAULT_PREPROCESSOR_SAVE_PATH = path
     os.makedirs(DEFAULT_PREPROCESSOR_SAVE_PATH, exist_ok=True)
+    
+
+def get_postprocessor_path() -> str:
+    return DEFAULT_POSTPROCESSOR_SAVE_PATH  
+
+def set_postprocessor_path(path: str | None = None) -> None:
+    global DEFAULT_POSTPROCESSOR_SAVE_PATH
+    DEFAULT_POSTPROCESSOR_SAVE_PATH = path
+    os.makedirs(DEFAULT_POSTPROCESSOR_SAVE_PATH, exist_ok=True)
 

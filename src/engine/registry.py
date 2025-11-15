@@ -2,7 +2,7 @@ from typing import Dict, Type, Any, Optional, List, Literal, Tuple
 from pathlib import Path
 import importlib
 import inspect
-
+from src.utils.yaml import load_yaml
 import torch
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
@@ -45,16 +45,10 @@ class EngineRegistry:
         root: Path = Path(__file__).resolve().parent
 
         for pkg_path in root.iterdir():
-            if not pkg_path.is_dir():
-                continue
             if pkg_path.name.startswith("_"):
-                continue
-            if not (pkg_path / "__init__.py").exists():
-                # Not an engine package
                 continue
 
             engine_type = pkg_path.name.lower()
-
             for module_path in pkg_path.glob("*.py"):
                 stem = module_path.stem
                 # Skip package and shared helpers; these do not represent
@@ -63,6 +57,7 @@ class EngineRegistry:
                     continue
 
                 module_name = f"src.engine.{engine_type}.{stem}"
+
                 try:
                     module = importlib.import_module(module_name)
                 except Exception:
@@ -74,13 +69,14 @@ class EngineRegistry:
                     if (
                         inspect.isclass(attr)
                         and issubclass(attr, BaseEngine)
-                        and attr is not BaseEngine
+                        and attr is not BaseEngine # ignore classes with shared in name
+                        and not (attr_name.lower().startswith("shared") or attr_name.lower().endswith("shared"))
                     ):
                         model_type = stem.lower()
                         engine_map = self._discovered.setdefault(engine_type, {})
                         # First one wins for a given (engine_type, model_type)
                         engine_map.setdefault(model_type, attr)
-
+ 
     def get_engine_class(
         self, engine_type: str, model_type: Optional[str] = None
     ) -> Optional[Type[BaseEngine]]:
@@ -94,7 +90,6 @@ class EngineRegistry:
 
         engine_key = engine_type.lower()
         model_key = model_type.lower() if isinstance(model_type, str) else None
-
         if model_key is not None:
             family = self._discovered.get(engine_key, {})
             if model_key in family:
@@ -117,8 +112,8 @@ class EngineRegistry:
 
     def create_engine(
         self,
-        engine_type: str,
         yaml_path: str,
+        engine_type: str | None = None,
         model_type: Optional[str] = None,
         **kwargs,
     ) -> Any:
@@ -132,11 +127,21 @@ class EngineRegistry:
         """
 
         resolved = resolve_manifest_reference(yaml_path) or yaml_path
+        
+        if engine_type is None or model_type is None:
+            # read from yaml_path
+            data = load_yaml(resolved)
+            spec = data.get("spec", {})
+            engine_type = spec.get("engine")
+            model_type = spec.get("model_type")
+            if engine_type is None or model_type is None:
+                raise ValueError(f"Engine type and model type must be provided in the yaml file: {resolved}")
 
         # Prefer auto‑discovered concrete engines when model_type is given.
         impl_class = self.get_engine_class(engine_type, model_type) if model_type else None
+
         if impl_class is not None and impl_class is not BaseEngine:
-            return impl_class(yaml_path=resolved, **kwargs)
+            return impl_class(yaml_path=resolved, model_type=model_type, **kwargs)
 
         # No autodiscovered implementation found
         raise ValueError(
@@ -152,13 +157,13 @@ class UniversalEngine:
 
     def __init__(
         self,
-        engine_type: str,
-        yaml_path: str,
+        engine_type: str | None = None,
+        yaml_path: str | None = None,
         model_type: Optional[str] = None,
         **kwargs,
     ):
         self.registry = EngineRegistry()
-        self.engine: BaseEngine = self.registry.create_engine(
+        self.engine = self.registry.create_engine(
             engine_type=engine_type,
             yaml_path=yaml_path,
             model_type=model_type,
@@ -166,11 +171,18 @@ class UniversalEngine:
         )
         self.engine_type = engine_type
         self.model_type = model_type
+        
+        if not self.engine_type:
+            self.engine_type = self.engine.config.get("engine", None)
+        if not self.model_type:
+            self.model_type = self.engine.model_type
 
     @torch.no_grad()
-    def run(self, **kwargs):
+    def run(self, *args, **kwargs):
         """Run the engine with given parameters"""
-        return self.engine.run(**kwargs)
+        default_kwargs = self.engine._get_default_kwargs("run")
+        merged_kwargs = {**default_kwargs, **kwargs}
+        return self.engine.run(*args, **merged_kwargs)
 
     def __getattr__(self, name):
         """Delegate any missing attributes to the underlying engine"""
@@ -193,8 +205,8 @@ def get_engine_registry() -> EngineRegistry:
 
 
 def create_engine(
-    engine_type: str,
     yaml_path: str,
+    engine_type: str | None = None,
     model_type: str | None = None,
     **kwargs,
 ) -> BaseEngine:

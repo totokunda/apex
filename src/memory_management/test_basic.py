@@ -6,12 +6,19 @@ import time
 import sys
 import os
 
-# Add the memory_management module to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add the memory_management module directory to the path when executed as a script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-from memory_manager import MemoryManager, auto_manage_model
-from config import MemoryConfig
-from memory_monitor import MemoryMonitor
+try:
+    from .memory_manager import MemoryManager, auto_manage_model
+    from .config import MemoryConfig
+    from .memory_monitor import MemoryMonitor
+except ImportError:
+    from memory_manager import MemoryManager, auto_manage_model  # type: ignore
+    from config import MemoryConfig  # type: ignore
+    from memory_monitor import MemoryMonitor  # type: ignore
 
 
 def test_memory_monitor():
@@ -153,6 +160,94 @@ def test_manual_offloading():
     print("✓ Manual offloading test passed\n")
 
 
+def test_eager_offload_on_wrap_behavior():
+    """Ensure eager_offload_on_wrap toggles initial offload state."""
+    print("Testing eager offload on wrap behavior...")
+
+    config = MemoryConfig(eager_offload_on_wrap=True)
+    manager = MemoryManager(config)
+    manager.start()
+    model = nn.Linear(32, 32)
+    wrapped = manager.wrap_module(model, module_id="eager_linear")
+
+    info = wrapped.get_memory_info()
+    retained_1d = sum(1 for meta in wrapped._param_metadata.values() if len(meta.shape) <= 1)
+    assert info["offloaded_parameters"] == info["total_parameters"] - retained_1d
+
+    manager.cleanup()
+
+    config_lazy = MemoryConfig(eager_offload_on_wrap=False)
+    manager_lazy = MemoryManager(config_lazy)
+    manager_lazy.start()
+    model_lazy = nn.Linear(32, 32)
+    wrapped_lazy = manager_lazy.wrap_module(model_lazy, module_id="lazy_linear")
+    lazy_info = wrapped_lazy.get_memory_info()
+    assert lazy_info["offloaded_parameters"] == 0
+    manager_lazy.cleanup()
+
+    print("✓ Eager offload on wrap test passed\n")
+
+
+def test_bias_offload_policy():
+    """Ensure 1D parameters stay resident unless explicitly allowed."""
+    print("Testing bias offload policy...")
+
+    config = MemoryConfig(eager_offload_on_wrap=True, offload_1d_parameters=False)
+    manager = MemoryManager(config)
+    manager.start()
+    layer = nn.Linear(8, 4)
+    wrapped = manager.wrap_module(layer, module_id="bias_default")
+    assert "bias" in wrapped._param_metadata
+    assert not wrapped._param_metadata["bias"].is_offloaded
+    assert wrapped._original_module.bias.shape == torch.Size([4])
+    manager.cleanup()
+
+    config_on = MemoryConfig(eager_offload_on_wrap=True, offload_1d_parameters=True)
+    manager_on = MemoryManager(config_on)
+    manager_on.start()
+    layer_on = nn.Linear(8, 4)
+    wrapped_on = manager_on.wrap_module(layer_on, module_id="bias_enabled")
+    assert wrapped_on._param_metadata["bias"].is_offloaded
+    sample = torch.randn(2, 8)
+    wrapped_on(sample)
+    assert wrapped_on._original_module.bias.shape == torch.Size([4])
+    manager_on.cleanup()
+
+    print("✓ Bias offload policy test passed\n")
+
+
+def test_placeholder_weights_reload_on_forward():
+    """Simulate lost tracking and ensure placeholders reload before forward."""
+    print("Testing placeholder reload safety...")
+
+    config = MemoryConfig(eager_offload_on_wrap=True)
+    manager = MemoryManager(config)
+    manager.start()
+    model = nn.Linear(16, 16)
+    wrapped = manager.wrap_module(model, module_id="placeholder_test")
+
+    # Force placeholder state
+    wrapped.offload_all()
+    weight_meta = wrapped._param_metadata["weight"]
+    bias_meta = wrapped._param_metadata.get("bias")
+
+    # Simulate stale tracking information
+    wrapped._offloaded_params.clear()
+    weight_meta.is_offloaded = False
+    if bias_meta:
+        bias_meta.is_offloaded = False
+
+    x = torch.randn(4, 16)
+    wrapped(x)
+
+    assert wrapped._original_module.weight.shape == weight_meta.shape
+    if bias_meta:
+        assert wrapped._original_module.bias.shape == bias_meta.shape
+
+    manager.cleanup()
+    print("✓ Placeholder reload safety test passed\n")
+
+
 def test_forward_pass_with_management():
     """Test that forward passes work correctly with memory management."""
     print("Testing forward pass with memory management...")
@@ -218,6 +313,9 @@ def run_all_tests():
         test_memory_monitor()
         test_basic_module_wrapping()
         test_manual_offloading()
+        test_eager_offload_on_wrap_behavior()
+        test_bias_offload_policy()
+        test_placeholder_weights_reload_on_forward()
         test_forward_pass_with_management()
 
         print("🎉 All tests passed successfully!")

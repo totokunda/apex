@@ -3,6 +3,7 @@
 import threading
 import time
 import weakref
+import warnings
 from typing import Any, Dict, List, Optional, Set, Tuple
 import torch
 import torch.nn as nn
@@ -57,9 +58,17 @@ class OffloadableModule(nn.Module):
         self._is_active = False
         self._last_forward_time = 0
         self._forward_count = 0
+        # Debug flag to avoid spamming placeholder diagnostics
+        self._debug_logged = False
 
         # Setup parameter tracking
         self._setup_parameter_tracking()
+
+        # Create lightweight stub Parameters on the wrapper itself for any top-level
+        # parameters (e.g. `weight`, `bias`) so that external code can still access
+        # attributes like `.weight.shape` and `.weight.dtype` on the OffloadableModule,
+        # without keeping a full copy of the real tensor in memory.
+        self._create_param_stubs()
 
         # Register hooks for automatic management
         self._register_hooks()
@@ -80,6 +89,40 @@ class OffloadableModule(nn.Module):
                     self._param_metadata[name] = ParameterMetadata(
                         name=name, param=buffer, module_id=self.module_id, is_parameter=False
                     )
+
+    def _create_param_stubs(self):
+        """
+        Create fake but shape/dtype-accurate Parameters on this wrapper for any
+        top-level parameters such as `weight` and `bias`.
+
+        The real tensors live on `self._original_module`, and may be offloaded or
+        replaced with placeholders. These stubs are never used for computation;
+        they exist solely so that code which expects `module.weight.shape`,
+        `module.bias.dtype`, etc. to be present on the OffloadableModule will
+        continue to work.
+        """
+        for name, metadata in self._param_metadata.items():
+            # Only expose top-level parameters (no dotted paths) that were originally
+            # registered as Parameters, and do not override existing attributes.
+            if not metadata.is_parameter:
+                continue
+            if "." in name:
+                continue
+            if hasattr(self, name):
+                continue
+
+            # Create a minimal CPU stub tensor; we avoid meta tensors so that
+            # calling `.to(device)` on the wrapped model continues to work.
+            # The stub never participates in computation, so we keep it tiny but
+            # let callers rely on its dtype.
+            stub_tensor = torch.empty(
+                (1,),
+                dtype=metadata.dtype,
+                device="cpu",
+            )
+
+            stub_param = nn.Parameter(stub_tensor, requires_grad=False)
+            setattr(self, name, stub_param)
 
     def _register_hooks(self):
         """Register forward and backward hooks for automatic management."""
@@ -118,7 +161,25 @@ class OffloadableModule(nn.Module):
 
     def _ensure_parameters_loaded(self, target_device: Optional[torch.device] = None):
         """Ensure all parameters are loaded on the correct device."""
-        for name in list(self._offloaded_params):
+        names_to_load: Set[str] = set(self._offloaded_params)
+
+        for name, metadata in self._param_metadata.items():
+            if metadata.is_offloaded:
+                names_to_load.add(name)
+                continue
+
+            if self._is_placeholder_tensor(name, metadata):
+                metadata.is_offloaded = True
+                names_to_load.add(name)
+
+        if not names_to_load:
+            return
+
+        # Guard inside _load_parameter expects the name to be tracked
+        for name in names_to_load:
+            self._offloaded_params.add(name)
+
+        for name in list(names_to_load):
             self._load_parameter(name, target_device)
 
     def _should_offload(self) -> bool:
@@ -158,6 +219,13 @@ class OffloadableModule(nn.Module):
 
         metadata = self._param_metadata[param_name]
 
+        # Optionally keep 1D parameters (biases, LayerNorm scales) resident to avoid shape-mismatch issues
+        if (
+            not self.config.offload_1d_parameters
+            and len(metadata.shape) <= 1
+        ):
+            return
+
         # Get current parameter/buffer
         param = self._get_parameter_by_name(param_name)
         if param is None:
@@ -184,16 +252,12 @@ class OffloadableModule(nn.Module):
 
     def _load_parameter(self, param_name: str, target_device: Optional[torch.device] = None):
         """Load a specific parameter back to device."""
-        if param_name not in self._offloaded_params:
-            return
-
-        metadata = self._param_metadata[param_name]
-
-        if metadata.offload_metadata is None:
+        metadata = self._param_metadata.get(param_name)
+        if metadata is None or metadata.offload_metadata is None:
             return
 
         try:
-            # Reload tensor using the stored strategy
+            # Reload tensor using the stored strategy (original weights)
             tensor = self.offload_strategy.reload(metadata.offload_metadata)
 
             # Determine final desired device
@@ -214,7 +278,7 @@ class OffloadableModule(nn.Module):
             metadata.access_count += 1
             # Update original_device to reflect current placement
             metadata.original_device = desired_device
-            self._offloaded_params.remove(param_name)
+            self._offloaded_params.discard(param_name)
 
             # Clean up offload storage
             self.offload_strategy.cleanup(metadata.offload_metadata)
@@ -281,6 +345,36 @@ class OffloadableModule(nn.Module):
 
         return None
 
+    def _is_placeholder_tensor(
+        self, name: str, metadata: ParameterMetadata
+    ) -> bool:
+        """Detect if the current tensor is a placeholder instead of real data."""
+        tensor = self._get_parameter_by_name(name)
+        if tensor is None or metadata is None:
+            return False
+
+        # Treat 1-element tensors backed by offload metadata or mismatched shapes as placeholders.
+        if tensor.numel() != 1:
+            return False
+
+        # If we have offload metadata, this name was offloaded at some point – a 1‑element tensor is a placeholder.
+        if metadata.offload_metadata is not None:
+            return True
+
+        # If the current shape does not match the recorded original shape, it's a placeholder.
+        if tensor.shape != metadata.shape:
+            return True
+
+        # As a final guard, if the recorded original parameter had >1 elements but we now see a single element,
+        # treat it as a placeholder even if shapes somehow match (defensive against bad tracking).
+        original_numel = 1
+        for dim in metadata.shape:
+            original_numel *= dim
+        if original_numel > 1:
+            return True
+
+        return False
+
     def _replace_parameter_with_placeholder(self, param_name: str):
         """Replace parameter with empty placeholder to free memory."""
         metadata = self._param_metadata[param_name]
@@ -344,8 +438,7 @@ class OffloadableModule(nn.Module):
             if target_device is None and kwargs:
                 target_device = self._infer_target_device(self._original_module, kwargs)
             self._ensure_parameters_loaded(target_device)
-
-        return self._original_module(*args, **kwargs)
+            return self._original_module(*args, **kwargs)
 
     def offload_all(self):
         """Manually offload all parameters."""
@@ -422,7 +515,18 @@ def wrap_module(
     module_id: Optional[str] = None,
 ) -> OffloadableModule:
     """Convenience function to wrap a module with memory management."""
-    return OffloadableModule(module, config, memory_monitor, module_id)
+    wrapped = OffloadableModule(module, config, memory_monitor, module_id)
+
+    if config.eager_offload_on_wrap:
+        try:
+            wrapped.offload_all()
+        except Exception as exc:
+            warnings.warn(
+                f"Failed to eagerly offload module '{module_id or type(module).__name__}': {exc}",
+                RuntimeWarning,
+            )
+
+    return wrapped
 
 
 def wrap_model_layers(
@@ -450,6 +554,11 @@ def wrap_model_layers(
 
         for name, child in list(module.named_children()):
             child_prefix = f"{prefix}.{name}" if prefix else name
+
+            # If the child is already an OffloadableModule, do not attempt to wrap its
+            # internal `_original_module` again. Treat it as an atomic managed unit.
+            if isinstance(child, OffloadableModule):
+                continue
 
             # Check if this child should be wrapped
             if type(child) in layer_types:

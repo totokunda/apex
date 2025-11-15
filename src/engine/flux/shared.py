@@ -1,11 +1,9 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
+from typing import Union, List, Optional, Dict, Any, Callable
 from PIL import Image
 from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
-from src.utils.type import EnumType
-from src.engine.flux import ModelType
 from src.engine.base_engine import BaseEngine 
 from src.utils.progress import safe_emit_progress
 
@@ -21,14 +19,6 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor * 2
         )
-        if self.model_type == ModelType.CONTROL:
-            self.num_channels_latents = (
-                self.transformer.config.in_channels // 8 if self.transformer else 16
-            )
-        else:
-            self.num_channels_latents = (
-                self.transformer.config.in_channels // 4 if self.transformer else 16
-            )
         
         self.default_sample_size = 128
         
@@ -236,8 +226,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             if isinstance(negative_prompt, str):
                 negative_prompt = [negative_prompt]
             negative_prompt = self.maybe_convert_prompt(negative_prompt, self.text_encoder.tokenizer)
-        
-        
+
         pooled_prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,

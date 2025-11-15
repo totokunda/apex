@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import shutil
 import accelerate
-from src.utils.defaults import DEFAULT_CACHE_PATH, get_components_path
+from src.utils.defaults import DEFAULT_CACHE_PATH, get_components_path, get_preprocessor_path, get_postprocessor_path
 from src.utils.module import find_class_recursive
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
@@ -36,13 +36,11 @@ from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
     DEFAULT_SAVE_PATH,
-    DEFAULT_COMPONENTS_PATH,
-    DEFAULT_PREPROCESSOR_SAVE_PATH,
-    DEFAULT_POSTPROCESSOR_SAVE_PATH,
     DEFAULT_LORA_SAVE_PATH,
 )
 
 import tempfile
+from src.transformer import _auto_register_transformers
 from src.mixins import LoaderMixin, ToMixin, OffloadMixin
 from glob import glob
 from safetensors import safe_open
@@ -60,6 +58,7 @@ import inspect
 from src.postprocess import postprocessor_registry
 from src.lora import LoraManager, LoraItem
 from src.helpers.helpers import helpers
+_auto_register_transformers()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -203,22 +202,26 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 "device",
             ]:
                 setattr(self, key, value)
+                
+        if not hasattr(self, "selected_components") or self.selected_components is None:
+            self.selected_components = {}
         
         self.download(self.save_path)
+        
 
-        # Normalize optional memory management mapping
+        # Normalize optional memory management mapping.
+        # If no explicit mapping is provided, we will try to infer sensible
+        # defaults based on the size of the models that will be loaded.
         self._memory_management_map = self._normalize_memory_management(
             kwargs.get("memory_management", None)
         )
-
+        
         self._parse_config(
             self.config,
             kwargs.get("config_kwargs", {}),
             kwargs.get("components_to_load", None),
             kwargs.get("component_load_dtypes", None),
-            kwargs.get("component_dtypes", None),
-            kwargs.get("preprocessors_to_load", None),
-            kwargs.get("postprocessors_to_load", None),
+            kwargs.get("component_dtypes", None)
         )
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
@@ -336,8 +339,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         components_to_load: List[str] | None,
         component_load_dtypes: Dict[str, torch.dtype] | None,
         component_dtypes: Dict[str, str] | None,
-        preprocessors_to_load: List[str] | None,
-        postprocessors_to_load: List[str] | None,
     ):
         self.logger.info(f"Loading model {config['name']}")
         ideal_dtypes = select_ideal_dtypes()
@@ -397,16 +398,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if attention_type:
             attention_register.set_default(attention_type)
         self.attention_type = attention_type
-
-    @torch.no_grad()
+    
     def run(self, *args, **kwargs):
-        default_kwargs = self._get_default_kwargs("run")
-        merged_kwargs = {**default_kwargs, **kwargs}
-        if hasattr(self, "implementation_engine"):
-            out = self.implementation_engine.run(*args, **merged_kwargs)
-            return out
-        else:
-            raise NotImplementedError("Subclasses must implement this method")
+        raise NotImplementedError("Subclasses must implement this method")
 
     def load_component(
         self,
@@ -613,9 +607,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if self.vae_slicing:
             self.enable_vae_slicing()
         vae = vae.eval()
-
-        # Apply memory management if configured
-        self._maybe_apply_memory_management(component, vae)
         return vae
 
     def enable_vae_tiling(self):
@@ -814,9 +805,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
         transformer = transformer.eval()
-
-        # Apply memory management if configured
-        self._maybe_apply_memory_management(component, transformer)
         return transformer
 
     def _get_safetensors_keys(
@@ -880,6 +868,112 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if os.path.isdir(os.path.join(model_path, component_name)):
                 return os.path.join(model_path, component_name), True
         return model_path, False
+
+    # -------------------------
+    # Model size estimation helpers
+    # -------------------------
+    def _estimate_component_model_size_bytes(self, component: Dict[str, Any]) -> int:
+        """Roughly estimate total on-disk size of the model weights for a component."""
+        model_path = component.get("model_path")
+        if not model_path:
+            return 0
+
+        total_size = 0
+
+        # Normalize to list so we can handle main + extra paths uniformly
+        paths: List[str] = [model_path]
+        extra_model_paths = component.get("extra_model_paths", [])
+        if isinstance(extra_model_paths, str):
+            extra_model_paths = [extra_model_paths]
+        if isinstance(extra_model_paths, list):
+            paths.extend(extra_model_paths)
+
+        # Common weight file extensions
+        extensions = ("safetensors", "bin", "pt", "pth", "ckpt", "gguf")
+
+        for path in paths:
+            if not path:
+                continue
+            try:
+                if os.path.isdir(path):
+                    for ext in extensions:
+                        for f in glob(os.path.join(path, f"*.{ext}")):
+                            try:
+                                total_size += os.path.getsize(f)
+                            except OSError:
+                                continue
+                elif os.path.isfile(path):
+                    # Only count files that look like weights
+                    if path.endswith(extensions):
+                        try:
+                            total_size += os.path.getsize(path)
+                        except OSError:
+                            continue
+            except Exception:
+                # This is a best-effort heuristic; ignore unexpected errors
+                continue
+
+        return total_size
+
+    def _auto_memory_management_from_components(self) -> Optional[Dict[str, MemoryConfig]]:
+        """
+        Infer a default memory_management mapping based on model sizes.
+
+        Heuristic:
+        - For each large component (transformer / vae / text_encoder), estimate the
+          total weight size and compare it to available GPU memory (if any).
+        - Enable MemoryConfig.for_low_memory() when a component is likely to be
+          close to or exceed available VRAM.
+        """
+        components = self.config.get("components", [])
+        if not components:
+            return None
+
+        # Try to detect total GPU memory if CUDA is available
+        gpu_total_gb: Optional[float] = None
+        if torch.cuda.is_available():
+            try:
+                props = torch.cuda.get_device_properties(0)
+                gpu_total_gb = float(props.total_memory) / 1e9
+            except Exception:
+                gpu_total_gb = None
+
+        auto_map: Dict[str, MemoryConfig] = {}
+
+        for comp in components:
+            ctype = comp.get("type")
+            if ctype not in {"transformer", "vae", "text_encoder"}:
+                continue
+
+            size_bytes = self._estimate_component_model_size_bytes(comp)
+            if size_bytes <= 0:
+                continue
+
+            size_gb = float(size_bytes) / 1e9
+            key = comp.get("name") or ctype
+
+            config_for_component: Optional[MemoryConfig] = None
+
+            if gpu_total_gb is not None and gpu_total_gb > 0:
+                ratio = size_gb / gpu_total_gb
+                # Very large relative to VRAM → aggressive low-memory config
+                if ratio >= 0.8:
+                    config_for_component = MemoryConfig.for_low_memory()
+                # Moderately large → default MemoryConfig (less aggressive)
+                elif ratio >= 0.4:
+                    config_for_component = MemoryConfig()
+            else:
+                # Fallback when GPU information is not available:
+                # use absolute size thresholds as a rough heuristic.
+                if size_gb >= 8.0:
+                    config_for_component = MemoryConfig.for_low_memory()
+                elif size_gb >= 3.0:
+                    config_for_component = MemoryConfig()
+
+            if config_for_component is not None:
+                auto_map[key] = config_for_component
+
+        return auto_map or None
 
     def _check_weights(self, component: Dict[str, Any]):
         assert "model_path" in component, "`model_path` is required"
@@ -1001,7 +1095,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         missing_keys = iterating_keys - found_keys
         return len(missing_keys) == 0
-    
 
 
     def convert_transformer_weights(self, component: Dict[str, Any]):
@@ -1029,7 +1122,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             config,
             component["base"],
             model_path,
-            state_dict,
             component.get("model_key", None),
             component.get("file_pattern", None),
         )
@@ -1142,28 +1234,38 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     def _normalize_memory_management(
         self, spec: Optional[Dict[str, Union[str, MemoryConfig]]]
     ) -> Optional[Dict[str, MemoryConfig]]:
-        if not spec:
-            return None
-
+        # Start with any explicit mapping provided by the caller.
         normalized: Dict[str, MemoryConfig] = {}
 
-        def to_config(v: Union[str, MemoryConfig]) -> MemoryConfig:
-            if isinstance(v, MemoryConfig):
-                return v
-            preset = str(v).strip().lower().replace(" ", "_")
-            if preset in {"low", "low_memory", "low-memory"}:
-                return MemoryConfig.for_low_memory()
-            if preset in {"high", "high_performance", "high-performance"}:
-                return MemoryConfig.for_high_performance()
-            raise ValueError(
-                f"Unknown memory preset '{v}'. Use 'low_memory' or 'high_performance' or pass MemoryConfig."
-            )
+        if spec:
+            def to_config(v: Union[str, MemoryConfig]) -> MemoryConfig:
+                if isinstance(v, MemoryConfig):
+                    return v
+                preset = str(v).strip().lower().replace(" ", "_")
+                if preset in {"low", "low_memory", "low-memory"}:
+                    return MemoryConfig.for_low_memory()
+                if preset in {"high", "high_performance", "high-performance"}:
+                    return MemoryConfig.for_high_performance()
+                raise ValueError(
+                    f"Unknown memory preset '{v}'. Use 'low_memory' or 'high_performance' or pass MemoryConfig."
+                )
 
-        for key, value in spec.items():
-            try:
-                normalized[key] = to_config(value)
-            except Exception as e:
-                self.logger.warning(f"Invalid memory_management entry for '{key}': {e}")
+            for key, value in spec.items():
+                try:
+                    normalized[key] = to_config(value)
+                except Exception as e:
+                    self.logger.warning(
+                        f"Invalid memory_management entry for '{key}': {e}"
+                    )
+
+        # If nothing explicit was provided (or everything failed to parse),
+        # attempt to infer a sensible default mapping from the configured components.
+        auto_map = self._auto_memory_management_from_components()
+        if auto_map:
+            # Do not overwrite any explicit entries; only fill in missing keys.
+            for key, cfg in auto_map.items():
+                if key not in normalized:
+                    normalized[key] = cfg
 
         return normalized if normalized else None
 
@@ -1330,22 +1432,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         postprocessors_path: str | None = None,
     ):
         if save_path is None:
-            save_path = self.save_path
-        if save_path is None:
             save_path = DEFAULT_SAVE_PATH
         if components_path is None:
-            components_path = DEFAULT_COMPONENTS_PATH
+            components_path = get_components_path()
         if preprocessors_path is None:
-            preprocessors_path = DEFAULT_PREPROCESSOR_SAVE_PATH
+            preprocessors_path = get_preprocessor_path()
         if postprocessors_path is None:
-            postprocessors_path = DEFAULT_POSTPROCESSOR_SAVE_PATH
+            postprocessors_path = get_postprocessor_path()
 
         os.makedirs(save_path, exist_ok=True)
         for i, component in enumerate(self.config.get("components", []) ):
-            save_path = component.get("save_path", components_path)
             if config_path := component.get("config_path"):
                 downloaded_config_path = self.fetch_config(
-                    config_path, return_path=True
+                    config_path, return_path=True, config_save_path=components_path
                 )
                 if downloaded_config_path:
                     component["config_path"] = downloaded_config_path
@@ -1359,14 +1458,20 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     continue
                 selected_scheduler_option = self.selected_components.get(component_name, self.selected_components.get(component_type, None))
                 if not selected_scheduler_option:
-                    # take the first scheduler option
+                    # take the first scheduler option 
                     selected_scheduler_option = scheduler_options[0]
-                else:
-                    for scheduler_option in scheduler_options:
-                        if selected_scheduler_option['name'] == scheduler_option['name']:
-                            component = selected_scheduler_option.copy()
-                            component['type'] = 'scheduler'
-                            break
+               
+                for scheduler_option in scheduler_options:
+                    if selected_scheduler_option['name'] == scheduler_option['name']:
+                        component = selected_scheduler_option.copy()
+                        component['type'] = 'scheduler'
+                        break
+                        
+                if component.get("config_path"):
+                    downloaded_config_path = self.fetch_config(component["config_path"], return_path=True, config_save_path=components_path)
+                    if downloaded_config_path:
+                        component["config_path"] = downloaded_config_path
+            
             else:
                 model_path = component.get("model_path")
                 if isinstance(model_path, list):
@@ -1374,61 +1479,34 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     if not selected_model_item:
                         # take the first model path item
                         selected_model_item = model_path[0]
+                    
+                    for model_path_item in model_path:
+                        if selected_model_item.get('variant') == model_path_item.get('variant'):
+                            component['model_path'] = selected_model_item.get('path')
+                            component['key_map'] = selected_model_item.get('key_map')
+                            component['extra_kwargs'] = selected_model_item.get('extra_kwargs')
+                            
+                    path = self.is_downloaded(component['model_path'], components_path)
+                    if path is None:
+                        component['model_path'] = self._download(component['model_path'], components_path)
                     else:
-                        for model_path_item in model_path:
-                            if selected_model_item.get('variant') == model_path_item.get('variant'):
-                                component['model_path'] = selected_model_item.get('path')
-                                break
-                        
+                        component['model_path'] = path
+                
                 elif isinstance(model_path, str):
-                    downloaded_model_path = self._download(model_path, save_path)
+                    downloaded_model_path = self._download(model_path, components_path)
                     if downloaded_model_path:
                         component["model_path"] = downloaded_model_path
                 
             if extra_model_paths := component.get("extra_model_paths"):
                 for i, extra_model_path in enumerate(extra_model_paths):
                     downloaded_extra_model_path = self._download(
-                        extra_model_path, save_path
+                        extra_model_path, components_path
                     )
                     if downloaded_extra_model_path:
                         component["extra_model_paths"][i] = downloaded_extra_model_path
 
             self.config["components"][i] = component
 
-        preprocessors = self.config.get("preprocessors", []) or []
-        if preprocessors:
-            self.logger.info(f"Downloading {len(preprocessors)} preprocessors")
-        for preprocessor in preprocessors:
-            if preprocessor_path := preprocessor.get("model_path"):
-                save_path = preprocessor.get("save_path", preprocessors_path)
-                downloaded_preprocessor_path = self._download(
-                    preprocessor_path, save_path
-                )
-                if downloaded_preprocessor_path:
-                    preprocessor["model_path"] = downloaded_preprocessor_path
-            if config_path := preprocessor.get("config_path"):
-                downloaded_config_path = self.fetch_config(
-                    config_path, return_path=True
-                )
-                if downloaded_config_path:
-                    preprocessor["config_path"] = downloaded_config_path
-
-        postprocessors = self.config.get("postprocessors", []) or []
-        if postprocessors:
-            self.logger.info(f"Downloading {len(postprocessors)} postprocessors")
-        for postprocessor in postprocessors:
-            if postprocessor_path := postprocessor.get("model_path"):
-                downloaded_postprocessor_path = self._download(
-                    postprocessor_path, postprocessors_path
-                )
-                if downloaded_postprocessor_path:
-                    postprocessor["model_path"] = downloaded_postprocessor_path
-            if config_path := postprocessor.get("config_path"):
-                downloaded_config_path = self.fetch_config(
-                    config_path, return_path=True
-                )
-                if downloaded_config_path:
-                    postprocessor["config_path"] = downloaded_config_path
                     
     def _get_latents(
         self,
@@ -1518,14 +1596,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         )
         return postprocessed_video
 
-    def _tensor_to_frame(self, image: torch.Tensor, output_type: str = "pil"):
+    def _tensor_to_frame(self, image: torch.Tensor, output_type: str = "pil", **kwargs):
         if hasattr(self, "image_processor"):
             postprocessed_frame = self.image_processor.postprocess(
-                image, output_type=output_type
+                image, output_type=output_type, **kwargs
             )
         else:
             postprocessed_frame = self.video_processor.postprocess(
-                image, output_type=output_type
+                image, output_type=output_type, **kwargs
             )
         return postprocessed_frame
 

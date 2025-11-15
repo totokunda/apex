@@ -26,7 +26,7 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the HunyuanImage
         T2I model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
       config_path: https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/scheduler/scheduler_config.json

@@ -15,7 +15,7 @@ def _auto_register_transformers():
 
     Existing registrations (for example via the TRANSFORMERS_REGISTRY decorator) are preserved.
     """
-
+    global TRANSFORMERS_REGISTRY
     root = Path(__file__).resolve().parent
 
     for family_dir in root.iterdir():
@@ -33,11 +33,12 @@ def _auto_register_transformers():
                 continue
 
             key = f"{family_dir.name}.{variant_dir.name}".lower()
-
             # If something already registered this key (e.g. via decorator), leave it alone.
-            store = getattr(TRANSFORMERS_REGISTRY, "_store", {})
-            if key in store:
+            try:
+                TRANSFORMERS_REGISTRY.get(key)
                 continue
+            except KeyError:
+                pass
 
             module_name = f"{__name__}.{family_dir.name}.{variant_dir.name}.model"
             try:
@@ -52,7 +53,10 @@ def _auto_register_transformers():
                     continue
                 try:
                     if issubclass(cls, ModelMixin) and cls is not ModelMixin:
-                        TRANSFORMERS_REGISTRY.register(key, cls)
+                        try:
+                            TRANSFORMERS_REGISTRY.register(key, cls)
+                        except Exception as e:
+                            continue
                         break
                 except TypeError:
                     # Builtins and certain extension types can raise here; just ignore them.
@@ -61,7 +65,6 @@ def _auto_register_transformers():
 
 # Ensure all transformers are registered on import.
 _auto_register_transformers()
-
 
 __all__ = [
     "TRANSFORMERS_REGISTRY"

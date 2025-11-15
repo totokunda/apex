@@ -27,6 +27,8 @@ class MemoryConfig:
     enable_disk_offload: bool = True
     disk_cache_dir: Optional[str] = None  # Will use temp dir if None
     compress_disk_cache: bool = True  # Compress tensors when saving to disk
+    eager_offload_on_wrap: bool = True  # Immediately offload wrapped modules so .to() won't spike VRAM
+    offload_1d_parameters: bool = False  # Keep biases/LayerNorm scales resident by default
 
     # Performance tuning
     offload_batch_size: int = 10  # Max modules to offload in one batch
@@ -62,6 +64,20 @@ class MemoryConfig:
     @classmethod
     def for_low_memory(cls) -> "MemoryConfig":
         """Create config optimized for low memory environments."""
+        # Derive a VRAM cap from the actual GPU memory on this machine so that
+        # we leave headroom instead of assuming a fixed 16GB limit.
+        vram_cap_gb = 16.0
+        if torch.cuda.is_available():
+            try:
+                total_bytes = torch.cuda.get_device_properties(0).total_memory
+                total_gb = float(total_bytes) / 1e9
+                # Use a conservative fraction of the available VRAM to keep things
+                # in a low‑memory regime while still scaling with device size.
+                vram_cap_gb = max(1.0, total_gb * 0.7)
+            except Exception:
+                # Fall back to the previous default if device query fails
+                vram_cap_gb = 16.0
+
         return cls(
             gpu_offload_threshold=0.70,
             gpu_emergency_threshold=0.85,
@@ -69,7 +85,7 @@ class MemoryConfig:
             cpu_offload_threshold=0.80,
             offload_batch_size=5,
             max_disk_usage_gb=20.0,
-            vram_cap_gb=16.0,
+            vram_cap_gb=vram_cap_gb,
             aggressive_post_forward_offload=True,
             empty_cache_after_offload=True,
         )

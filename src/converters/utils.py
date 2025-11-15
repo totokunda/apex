@@ -9,6 +9,9 @@ import re
 from collections import Counter
 import torch
 from src.quantize.ggml_ops import ggml_cat, ggml_chunk
+from diffusers import ModelMixin
+from transformers import PreTrainedModel, PretrainedConfig
+import inspect
 
 TRANSFORMER_CONFIG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "transformer_configs"
@@ -43,16 +46,71 @@ def get_vae_config(vae_tag: str, config_path: str | None = None):
 
 
 def get_model_class(
-    model_base: str, model_config: dict, model_type: str = "transformer"
+    model_base: str, model_config: dict | None = None, model_type: str = "transformer"
 ):
+    """
+    Import the model module for the given base and return the class that is a subclass
+    of `ModelMixin` from `diffusers`. This no longer relies on `_class_name` inside
+    `model_config`; `model_config` is kept only for backward compatibility and may be
+    omitted.
+    """
     module_type = importlib.import_module(f"src.{model_type}.{model_base}.model")
-    model_class = find_class_recursive(module_type, model_config["_class_name"])
-    return model_class
+
+    # Scan attributes on the module and return the first concrete subclass of ModelMixin.
+    candidate_class = None
+    for attr_name in dir(module_type):
+        attr = getattr(module_type, attr_name)
+        if isinstance(attr, type) and issubclass(attr, ModelMixin):
+            # Skip the base class itself if it ever appears on the module.
+            if attr is ModelMixin:
+                continue
+            candidate_class = attr
+            break
+
+    if candidate_class is None:
+        raise RuntimeError(
+            f"No subclass of ModelMixin found in module "
+            f"'src.{model_type}.{model_base}.model'"
+        )
+    
+    return candidate_class
 
 
-def get_empty_model(model_class, config: dict):
+def get_empty_model(model_class, config: dict, **extra_kwargs):
     with init_empty_weights():
-        model = model_class(**config)
+        # Check the constructor signature to determine what it expects
+        sig = inspect.signature(model_class.__init__)
+        params = list(sig.parameters.values())
+        # Skip 'self' parameter
+        if params and params[0].name == "self":
+            params = params[1:]
+        # Check if the first parameter expects a PretrainedConfig object
+        expects_pretrained_config = False
+        if params:
+            first_param = params[0]
+            if (
+                first_param.annotation == PretrainedConfig
+                or (
+                    hasattr(first_param.annotation, "__name__")
+                    and "Config" in first_param.annotation.__name__
+                )
+                or first_param.name in ["config"]
+                and issubclass(model_class, PreTrainedModel)
+            ):
+                expects_pretrained_config = True
+        if expects_pretrained_config:
+            # Use the model's specific config class if available, otherwise fall back to PretrainedConfig
+            config_class = getattr(model_class, "config_class", PretrainedConfig)
+            conf = config_class(**config)
+            if hasattr(model_class, "_from_config"):
+                model = model_class._from_config(conf, **extra_kwargs)
+            else:
+                model = model_class.from_config(conf, **extra_kwargs)
+        else:
+            if hasattr(model_class, "_from_config"):
+                model = model_class._from_config(config, **extra_kwargs)
+            else:
+                model = model_class.from_config(config, **extra_kwargs)
     return model
 
 

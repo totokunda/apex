@@ -8,6 +8,8 @@ A comprehensive memory management module for PyTorch that provides intelligent o
 - **Intelligent Offloading**: Smart decisions on when and where to offload model parameters
 - **Multiple Storage Tiers**: Support for GPU → CPU → Disk offloading hierarchy
 - **Module Wrapping**: Transparent wrapping of PyTorch modules with minimal code changes
+- **Eager Offload on Wrap**: Automatically offload wrapped modules so `.to()` calls never spike VRAM
+- **Smart Bias Handling**: Keep 1D parameters (biases, LayerNorm scales) resident by default for stability
 - **Configurable Thresholds**: Customizable memory thresholds and behavior
 - **Performance Optimized**: Designed for minimal latency impact on model inference
 - **Thread-Safe**: Safe for multi-threaded applications
@@ -33,6 +35,9 @@ manager = auto_manage_model(model)
 # Use your model normally - memory management happens automatically
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device)
+
+# Wrapped layers are offloaded immediately by default, so calling `.to(device)`
+# is safe even if the model checkpoint is larger than available VRAM.
 
 x = torch.randn(32, 1024, device=device)
 output = model(x)
@@ -126,6 +131,8 @@ print(f"Total offloads: {summary['system']['total_offloads']}")
 | `enable_cpu_offload` | True | Enable CPU offloading |
 | `enable_disk_offload` | True | Enable disk offloading |
 | `compress_disk_cache` | True | Compress tensors on disk |
+| `eager_offload_on_wrap` | True | Immediately offload wrapped modules so `.to()` doesn't blow up VRAM |
+| `offload_1d_parameters` | False | Whether to offload 1D tensors like bias vectors |
 | `max_disk_usage_gb` | 50.0 | Maximum disk cache size |
 | `offload_batch_size` | 10 | Max modules to offload per batch |
 | `prefetch_enabled` | True | Enable predictive loading |
