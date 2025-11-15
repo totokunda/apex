@@ -35,4 +35,6 @@ with init_empty_weights():
     patch_model(model)
 
 
-model.load_state_dict(state_dict, assign=True)
+model.enable_group_offload(
+  
+)

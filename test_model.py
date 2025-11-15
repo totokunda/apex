@@ -10,13 +10,12 @@ import json
 #engine_kwargs = data["engine_kwargs"]
 #inputs = data["inputs"]
 
-
 yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/hunyuanimage3/hunyuanimage-1.0.0.v1.yml"
-engine = UniversalEngine(yaml_path=yaml_path)
+engine = UniversalEngine(yaml_path=yaml_path, attention_type="flash")
 
 out = engine.run(
-    prompt="A beautiful sunset over a calm ocean with a boat in the distance",
-    num_inference_steps=40,
+    prompt="The Death of Ophelia by John Everett Millais, Pre-Raphaelite painting, Ophelia floating in a river surrounded by flowers, detailed natural elements, melancholic and tragic atmosphere",
+    num_inference_steps=30,
     height=1024,
     width=1024,
 )

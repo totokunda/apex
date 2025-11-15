@@ -10,7 +10,8 @@ from contextlib import contextmanager
 from tqdm import tqdm
 import shutil
 import accelerate
-from src.utils.defaults import DEFAULT_CACHE_PATH, get_components_path, get_preprocessor_path, get_postprocessor_path
+import psutil
+from src.utils.defaults import DEFAULT_CACHE_PATH, get_components_path, get_preprocessor_path, get_postprocessor_path, get_offload_path
 from src.utils.module import find_class_recursive
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from src.transformer.base import TRANSFORMERS_REGISTRY as TRANSFORMERS_REGISTRY_TORCH
@@ -917,28 +918,193 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         return total_size
 
-    def _auto_memory_management_from_components(self) -> Optional[Dict[str, MemoryConfig]]:
+    def _estimate_block_structure(self, component: Dict[str, Any]) -> tuple[Optional[int], Optional[int]]:
         """
-        Infer a default memory_management mapping based on model sizes.
-
-        Heuristic:
-        - For each large component (transformer / vae / text_encoder), estimate the
-          total weight size and compare it to available GPU memory (if any).
-        - Enable MemoryConfig.for_low_memory() when a component is likely to be
-          close to or exceed available VRAM.
+        Load an empty model and estimate the size and count of offloadable blocks.
+        
+        Returns:
+            tuple: (block_size_bytes, num_blocks) or (None, None) if estimation fails
         """
-        components = self.config.get("components", [])
-        if not components:
-            return None
+        ctype = component.get("type")
+        if ctype not in {"transformer", "vae", "text_encoder"}:
+            return None, None
+        
+        try:
+            with accelerate.init_empty_weights():
+                # Load component without weights to inspect structure
+                temp_module = self.load_component(component, no_weights=True)
+                
+                # Get the actual module to inspect
+                if ctype == "text_encoder" and hasattr(temp_module, "model"):
+                    inspect_module = temp_module.model
+                else:
+                    inspect_module = temp_module
+                
+                if inspect_module is None:
+                    return None, None
+                
+                # Try to get offloadable_module from config
+                offloadable_module_path = component.get("offloadable_module")
+                if offloadable_module_path:
+                    # Navigate to the offloadable module
+                    parts = offloadable_module_path.split(".")
+                    offloadable_module = inspect_module
+                    for part in parts:
+                        if hasattr(offloadable_module, part):
+                            offloadable_module = getattr(offloadable_module, part)
+                        else:
+                            offloadable_module = None
+                            break
+                else:
+                    offloadable_module = inspect_module
+                
+                if offloadable_module is None:
+                    return None, None
+                
+                # Count blocks - look for common patterns
+                blocks = []
+                for name in ["blocks", "layers", "transformer_blocks", "down_blocks", "up_blocks"]:
+                    if hasattr(offloadable_module, name):
+                        attr = getattr(offloadable_module, name)
+                        if isinstance(attr, (list, nn.ModuleList)):
+                            blocks.extend(list(attr))
+                
+                if not blocks:
+                    return None, None
+                
+                # Estimate size of first block as representative
+                first_block = blocks[0]
+                block_params = sum(p.numel() * p.element_size() for p in first_block.parameters() if hasattr(p, 'numel'))
+                
+                return block_params, len(blocks)
+                
+        except Exception as e:
+            self.logger.debug(f"Could not estimate block structure for {ctype}: {e}")
+            return None, None
 
-        # Try to detect total GPU memory if CUDA is available
+    def _get_system_memory_info(self) -> Dict[str, Optional[float]]:
+        """Get GPU and CPU memory information in GB."""
         gpu_total_gb: Optional[float] = None
+        gpu_available_gb: Optional[float] = None
+        cpu_available_gb: Optional[float] = None
+        cpu_total_gb: Optional[float] = None
+        
+        # GPU memory
         if torch.cuda.is_available():
             try:
                 props = torch.cuda.get_device_properties(0)
                 gpu_total_gb = float(props.total_memory) / 1e9
+                # Get available memory
+                torch.cuda.synchronize()
+                gpu_available_gb = (props.total_memory - torch.cuda.memory_allocated(0)) / 1e9
             except Exception:
-                gpu_total_gb = None
+                pass
+        
+        # CPU memory
+        try:
+            vm = psutil.virtual_memory()
+            cpu_available_gb = float(vm.available) / 1e9
+            cpu_total_gb = float(vm.total) / 1e9
+        except Exception:
+            pass
+        
+        return {
+            "gpu_total": gpu_total_gb,
+            "gpu_available": gpu_available_gb,
+            "cpu_available": cpu_available_gb,
+            "cpu_total": cpu_total_gb,
+        }
+
+    def _determine_memory_strategy(self, component: Dict[str, Any]) -> Optional[MemoryConfig]:
+        """
+        Determine the optimal memory management strategy for a component.
+        
+        This analyzes the component's size, block structure, and available memory to decide:
+        - Whether memory management is needed
+        - Whether to use leaf-level or block-level offloading
+        - Whether to offload to CPU or disk
+        
+        Returns:
+            MemoryConfig if memory management is needed, None otherwise
+        """
+        ctype = component.get("type")
+        if ctype not in {"transformer", "vae", "text_encoder"}:
+            return None
+        
+        # Get system memory info
+        mem_info = self._get_system_memory_info()
+        gpu_total_gb = mem_info["gpu_total"]
+        gpu_available_gb = mem_info["gpu_available"]
+        cpu_available_gb = mem_info["cpu_available"]
+        
+        # Estimate total model size
+        total_size_bytes = self._estimate_component_model_size_bytes(component)
+        if total_size_bytes <= 0:
+            return None
+        
+        total_size_gb = float(total_size_bytes) / 1e9
+        
+        # No GPU or model doesn't fit? Need offloading
+        needs_offload = False
+        if gpu_total_gb is None or gpu_total_gb == 0:
+            # No GPU available
+            return None
+        
+        if gpu_available_gb is not None:
+            # Use available memory for more accurate decision
+            if total_size_gb >= 0.7 * gpu_available_gb:
+                needs_offload = True
+        else:
+            # Fallback to total memory
+            if total_size_gb >= 0.75 * gpu_total_gb:
+                needs_offload = True
+        
+        if not needs_offload:
+            return None
+        
+        # Estimate block structure for smarter offloading
+        block_size_bytes, num_blocks = self._estimate_block_structure(component)
+        
+        # Decide on offloading strategy
+        config = MemoryConfig.for_block_level()
+        
+        # Determine if we need disk offload
+        # Calculate how many blocks will be in CPU memory at once (rough estimate: 2-3 blocks)
+        blocks_in_memory = min(3, num_blocks) if num_blocks else 2
+        
+        if block_size_bytes and num_blocks and cpu_available_gb:
+            # Estimate memory needed for offloaded blocks
+            estimated_cpu_memory_gb = (block_size_bytes * blocks_in_memory) / 1e9
+            
+            # Add safety margin (20%) and check against available CPU RAM
+            if estimated_cpu_memory_gb * 1.2 >= cpu_available_gb * 0.8:
+                # Not enough CPU RAM for safe offloading, use disk
+                config.group_offload_disk_path = get_offload_path()
+                self.logger.info(
+                    f"Component {component.get('name') or ctype}: using disk offload "
+                    f"(estimated {estimated_cpu_memory_gb:.2f}GB needed, "
+                    f"{cpu_available_gb:.2f}GB available)"
+                )
+        elif cpu_available_gb and total_size_gb >= 0.85 * cpu_available_gb:
+            # Fallback: if we don't have block info, use total size
+            config.group_offload_disk_path = get_offload_path()
+            self.logger.info(
+                f"Component {component.get('name') or ctype}: using disk offload "
+                f"(model {total_size_gb:.2f}GB, CPU RAM {cpu_available_gb:.2f}GB available)"
+            )
+        
+        return config
+
+    def _auto_memory_management_from_components(self) -> Optional[Dict[str, MemoryConfig]]:
+        """
+        Infer memory management configuration for all components.
+        
+        Uses robust analysis including empty model loading, block size calculation,
+        and smart CPU/disk offload decisions.
+        """
+        components = self.config.get("components", [])
+        if not components:
+            return None
 
         auto_map: Dict[str, MemoryConfig] = {}
 
@@ -947,33 +1113,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if ctype not in {"transformer", "vae", "text_encoder"}:
                 continue
 
-            size_bytes = self._estimate_component_model_size_bytes(comp)
-            if size_bytes <= 0:
-                continue
-
-            size_gb = float(size_bytes) / 1e9
-            key = comp.get("name") or ctype
-
-            config_for_component: Optional[MemoryConfig] = None
-
-            if gpu_total_gb is not None and gpu_total_gb > 0:
-                ratio = size_gb / gpu_total_gb
-                # Very large relative to VRAM → aggressive low-memory config
-                if ratio >= 0.8:
-                    config_for_component = MemoryConfig.for_low_memory()
-                # Moderately large → default MemoryConfig (less aggressive)
-                elif ratio >= 0.4:
-                    config_for_component = MemoryConfig()
-            else:
-                # Fallback when GPU information is not available:
-                # use absolute size thresholds as a rough heuristic.
-                if size_gb >= 8.0:
-                    config_for_component = MemoryConfig.for_low_memory()
-                elif size_gb >= 3.0:
-                    config_for_component = MemoryConfig()
-
-            if config_for_component is not None:
-                auto_map[key] = config_for_component
+            strategy = self._determine_memory_strategy(comp)
+            if strategy is not None:
+                key = comp.get("name") or ctype
+                auto_map[key] = strategy
 
         return auto_map or None
 
@@ -1233,8 +1376,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     # -------------------------
     # Memory management helpers
     # -------------------------
+    
+    def _has_memory_management_parameters(self, value:Dict[str, Any]) -> bool:
+        # if a dict has any of the keys: group_offload_type, group_offload_num_blocks_per_group, group_offload_use_stream, group_offload_record_stream, group_offload_non_blocking, group_offload_low_cpu_mem_usage, group_offload_offload_device, group_offload_disk_path
+        return any(key in value for key in ["group_offload_type", 
+                                            "group_offload_num_blocks_per_group", 
+                                            "group_offload_use_stream", 
+                                            "group_offload_record_stream", 
+                                            "group_offload_non_blocking", 
+                                            "group_offload_low_cpu_mem_usage", 
+                                            "group_offload_offload_device", 
+                                            "group_offload_disk_path"])
     def _normalize_memory_management(
-        self, spec: Optional[Dict[str, Union[str, MemoryConfig]]]
+        self, spec: Optional[Dict[str, Union[str, MemoryConfig, Dict[str, Any]]]]
     ) -> Optional[Dict[str, MemoryConfig]]:
         # Start with any explicit mapping provided by the caller.
         normalized: Dict[str, MemoryConfig] = {}
@@ -1243,14 +1397,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             def to_config(v: Union[str, MemoryConfig]) -> MemoryConfig:
                 if isinstance(v, MemoryConfig):
                     return v
-                preset = str(v).strip().lower().replace(" ", "_")
-                if preset in {"low", "low_memory", "low-memory"}:
-                    return MemoryConfig.for_low_memory()
-                if preset in {"high", "high_performance", "high-performance"}:
-                    return MemoryConfig.for_high_performance()
-                raise ValueError(
-                    f"Unknown memory preset '{v}'. Use 'low_memory' or 'high_performance' or pass MemoryConfig."
-                )
+                if self._has_memory_management_parameters(v):
+                    return MemoryConfig(**v)
+                return MemoryConfig.for_block_level()
 
             for key, value in spec.items():
                 try:

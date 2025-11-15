@@ -284,8 +284,13 @@ class LoaderMixin(DownloadMixin):
             apply_group_offloading = getattr(self, "_apply_group_offloading", None)
             if callable(apply_group_offloading):
                 label = component.get("name") or component.get("type") or type(model).__name__
+                offloading_module = component.get("offloading_module", None)
+                if offloading_module:
+                    model_to_offload = model.get_submodule(offloading_module)
+                else:
+                    model_to_offload = model
                 try:
-                    apply_group_offloading(model, mm_config, module_label=label)
+                    apply_group_offloading(model_to_offload, mm_config, module_label=label)
                 except Exception as e:
                     if hasattr(self, "logger"):
                         self.logger.warning(

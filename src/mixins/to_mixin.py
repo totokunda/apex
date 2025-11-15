@@ -10,6 +10,70 @@ from src.mlx.mixins.from_model_mixin import _flatten_leaf_arrays, _set_by_path
 from src.quantize.dequant import is_quantized
 from src.quantize.ggml_tensor import GGMLTensor
 
+try:
+    # Private helpers/constants from Diffusers used to detect whether group offloading
+    # is enabled, and whether a particular module is controlled by a group-offload hook.
+    from diffusers.hooks.group_offloading import (
+        _is_group_offload_enabled as _hf_is_group_offload_enabled,
+        _GROUP_OFFLOADING as _HF_GROUP_OFFLOADING,
+    )
+except Exception:  # pragma: no cover - defensive fallback for older Diffusers versions
+    _hf_is_group_offload_enabled = None
+    _HF_GROUP_OFFLOADING = None
+
+
+def _module_has_group_offload_hook(module: torch.nn.Module) -> bool:
+    """
+    Return True if this *specific* module has a Diffusers group-offloading hook
+    registered on it (as opposed to any of its children).
+    """
+    if _HF_GROUP_OFFLOADING is None:
+        return False
+
+    registry = getattr(module, "_diffusers_hook", None)
+    if registry is None:
+        return False
+
+    get_hook = getattr(registry, "get_hook", None)
+    if get_hook is None:
+        return False
+
+    try:
+        return get_hook(_HF_GROUP_OFFLOADING) is not None
+    except Exception:
+        return False
+
+
+def _move_module_to_device_excluding_group_offload(
+    module: torch.nn.Module, device: torch.device
+) -> None:
+    """
+    Recursively move a module tree to `device`, but *skip* any subtrees that are
+    controlled by Diffusers group offloading.
+
+    This lets us handle cases like `HunyuanImage3ForCausalMM`, where the transformer
+    backbone is group-offloaded but surrounding layers (e.g. patch_embed / final_layer)
+    should still be moved to the target device.
+    """
+    # If this module itself is group-offloaded, skip the entire subtree.
+    if _module_has_group_offload_hook(module):
+        return
+
+    # Move parameters and buffers owned by this module.
+    for param in module.parameters(recurse=False):
+        if param is not None:
+            param.data = param.data.to(device)
+            if param.grad is not None:
+                param.grad.data = param.grad.data.to(device)
+
+    for buf in module.buffers(recurse=False):
+        if buf is not None:
+            buf.data = buf.data.to(device)
+
+    # Recurse into children; group-offloaded children will early-return above.
+    for child in module.children():
+        _move_module_to_device_excluding_group_offload(child, device)
+
 
 class ToMixin:
     """
@@ -233,8 +297,22 @@ class ToMixin:
 
         # Move each to device
         for comp in components:
-            if hasattr(comp, "to"):
-                comp.to(device)
+            if not hasattr(comp, "to"):
+                continue
+
+            # For torch modules that contain any group-offloaded submodules, we need
+            # finer-grained control: we move only the non-offloaded parts while
+            # leaving group-offloaded subtrees alone so their hooks can manage them.
+            if isinstance(comp, torch.nn.Module) and _hf_is_group_offload_enabled is not None:
+                try:
+                    if _hf_is_group_offload_enabled(comp):
+                        _move_module_to_device_excluding_group_offload(comp, device)
+                        continue
+                except Exception:
+                    # If detection fails for any reason, fall back to the default behavior.
+                    pass
+
+            comp.to(device)
 
         # Free up any unused CUDA memory
         try:

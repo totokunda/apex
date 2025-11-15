@@ -40,7 +40,7 @@ from transformers.utils import (
     logging,
 )
 
-
+     
 try:
     import flashinfer
 except Exception as e:
@@ -1284,6 +1284,7 @@ class HunyuanImage3SDPAAttention(nn.Module):
         return attn_output, None, past_key_value
 
 
+
 class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
 
     def forward(
@@ -1354,9 +1355,9 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
         with nvtx.range("attention"):
             if mode == "gen_text":
                 if attention_mask is None:
-                    attn_output = attention_register.call(q_fa.transpose(1, 2), k_fa.transpose(1, 2), v_fa.transpose(1, 2), causal=False, key="flash").transpose(1, 2)   # decode attention
+                    attn_output = flash_attn_func(q_fa, k_fa, v_fa, causal=False)   # decode attention
                 else:
-                    attn_output = attention_register.call(q_fa.transpose(1, 2), k_fa.transpose(1, 2), v_fa.transpose(1, 2), causal=True, key="flash").transpose(1, 2)    # prefill attention
+                    attn_output = flash_attn_func(q_fa, k_fa, v_fa, causal=True)    # prefill attention
             else:  # image attention
                 gen_timestep_scatter_index: Optional[torch.Tensor] = kwargs.get("gen_timestep_scatter_index", None)
                 assert gen_timestep_scatter_index is not None, \
@@ -1373,26 +1374,20 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
                     text_query_states = q_fa[:, :casual_len, :, :]
                     text_key_states = k_fa[:, :casual_len, :, :]
                     text_value_states = v_fa[:, :casual_len, :, :]
-                    text_attn_output = attention_register.call(
-                        text_query_states.transpose(1, 2), 
-                        text_key_states.transpose(1, 2), 
-                        text_value_states.transpose(1, 2), 
-                        causal=True).transpose(1, 2)
+                    text_attn_output = flash_attn_func(
+                        text_query_states, text_key_states, text_value_states, causal=True)
                     image_query_states = q_fa[:, casual_len:, :, :]
-                    image_attn_output = attention_register.call(
-                        image_query_states.transpose(1, 2), 
-                        k_fa.transpose(1, 2), 
-                        v_fa.transpose(1, 2), causal=False).transpose(1, 2)
+                    image_attn_output = flash_attn_func(image_query_states, k_fa, v_fa, causal=False)
                     attn_output = torch.cat((text_attn_output, image_attn_output), dim=1)
                 else:
                     casual_len = timestep_index + 1
                     timestep_query_states = q_fa[:, 0:1, :, :]
                     timestep_key_states = k_fa[:, :casual_len, :, :]
                     timestep_value_states = v_fa[:, :casual_len, :, :]
-                    timestep_attn_output = attention_register.call(
-                        timestep_query_states.transpose(1, 2), timestep_key_states.transpose(1, 2), timestep_value_states.transpose(1, 2), causal=True).transpose(1, 2)
+                    timestep_attn_output = flash_attn_func(
+                        timestep_query_states, timestep_key_states, timestep_value_states, causal=True)
                     image_query_states = q_fa[:, 1:, :, :]
-                    image_attn_output = attention_register.call(image_query_states.transpose(1, 2), k_fa.transpose(1, 2), v_fa.transpose(1, 2), causal=False).transpose(1, 2)
+                    image_attn_output = flash_attn_func(image_query_states, k_fa, v_fa, causal=False)
                     attn_output = torch.cat((timestep_attn_output, image_attn_output), dim=1)
 
         attn_output = attn_output.reshape(bsz, q_len, -1)
@@ -1400,7 +1395,6 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
         attn_output = self.o_proj(attn_output)
 
         return attn_output, None, past_key_value
-
 
 Hunyuan_ATTENTION_CLASSES = {
     "eager": HunyuanImage3SDPAAttention,
@@ -1975,7 +1969,7 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
             attention_mask: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.LongTensor] = None,
             past_key_values: Optional[List[torch.FloatTensor]] = None,
-            use_cache: Optional[bool] = None,
+            use_cache: Optional[bool] = True,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
@@ -1998,7 +1992,7 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
     ) -> Union[Tuple, CausalMMOutputWithPast]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         custom_pos_emb = self.get_pos_emb(custom_pos_emb, position_ids)
-
+        self.model.wte.to(input_ids.device)
         inputs_embeds = self.model.wte(input_ids)
         bsz, seq_len, n_embd = inputs_embeds.shape
 

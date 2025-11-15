@@ -30,6 +30,11 @@ DEFAULT_LORA_SAVE_PATH = os.getenv(
     "APEX_LORA_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "loras")
 )
 
+# Default path used for offloading (e.g. to disk)
+DEFAULT_OFFLOAD_PATH = os.getenv(
+    "APEX_OFFLOAD_PATH", str(HOME_DIR / "apex-diffusion" / "offload")
+)
+
 
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)
@@ -38,6 +43,7 @@ os.makedirs(DEFAULT_PREPROCESSOR_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_POSTPROCESSOR_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_CACHE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_LORA_SAVE_PATH, exist_ok=True)
+os.makedirs(DEFAULT_OFFLOAD_PATH, exist_ok=True)
 
 os.environ["HF_HOME"] = os.getenv(
     "APEX_HF_HOME", str(HOME_DIR / "apex-diffusion" / "huggingface")
@@ -91,6 +97,16 @@ def set_cache_path(path: str) -> None:
     global DEFAULT_CACHE_PATH
     DEFAULT_CACHE_PATH = path
     os.makedirs(DEFAULT_CACHE_PATH, exist_ok=True)
+
+
+def get_offload_path() -> str:
+    return DEFAULT_OFFLOAD_PATH
+
+
+def set_offload_path(path: str) -> None:
+    global DEFAULT_OFFLOAD_PATH
+    DEFAULT_OFFLOAD_PATH = path
+    os.makedirs(DEFAULT_OFFLOAD_PATH, exist_ok=True)
 
 def get_components_path() -> str:
     return DEFAULT_COMPONENTS_PATH

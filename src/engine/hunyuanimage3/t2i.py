@@ -122,6 +122,9 @@ class HunyuanImage3T2IEngine(BaseEngine):
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.latent_scale_factor)
         self.cfg_operator = ClassifierFreeGuidance()
         self.num_channels_latents = self._config.get("vae", {}).get("latent_channels", 32)
+        
+        # Memory management is not need for the VAE, so we remove it from the memory management map
+        self._memory_management_map.pop("vae", None)
     
     def vae_encode(self, image, cfg_factor=1, offload=True):
         if self.vae is None:
@@ -169,11 +172,10 @@ class HunyuanImage3T2IEngine(BaseEngine):
 
         if hasattr(self.vae, "ffactor_temporal"):
             latents = latents.unsqueeze(2)
-            
-
-        image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
-            
         
+        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=True):
+            image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
+
         if hasattr(self.vae, "ffactor_temporal"):
             assert image.shape[2] == 1, "image should have shape [B, C, T, H, W] and T should be 1"
             image = image.squeeze(2)
@@ -722,10 +724,10 @@ class HunyuanImage3T2IEngine(BaseEngine):
         
         if self.transformer is None:
             self.load_component_by_type("transformer")
-            
+        
         
         self.to_device(self.transformer)
-
+        
         # Prepare model kwargs
         input_ids = model_kwargs.pop("input_ids")
         attention_mask = self._prepare_attention_mask_for_generation(     # noqa
@@ -740,7 +742,6 @@ class HunyuanImage3T2IEngine(BaseEngine):
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                break
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * cfg_factor)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -755,6 +756,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
                 )
 
                 with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
+                    self.to_device(self.transformer.model.wte)
                     model_output = self.transformer(**model_inputs, first_step=(i == 0))
                     pred = model_output["diffusion_prediction"]
 
@@ -792,6 +794,5 @@ class HunyuanImage3T2IEngine(BaseEngine):
         # b c t h w
 
         do_denormalize = [True] * image.shape[0]
-        image = self._tensor_to_frame(image, output_type='np', do_denormalize=do_denormalize)
-        exit()
+        image = self._tensor_to_frame(image, output_type='pil', do_denormalize=do_denormalize)
         return image
