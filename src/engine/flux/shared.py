@@ -467,7 +467,8 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         image_latents = kwargs.get("image_latents")
         concat_latents = kwargs.get("concat_latents")
         denoise_progress_callback = kwargs.get("denoise_progress_callback")
-
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
+        
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -536,7 +537,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided

@@ -28,6 +28,7 @@ class QwenImageControlNetEngine(QwenImageShared):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        render_on_step_interval: int = 3,
         progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -271,7 +272,7 @@ class QwenImageControlNetEngine(QwenImageShared):
                     if torch.backends.mps.is_available():
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided

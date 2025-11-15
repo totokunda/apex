@@ -47,7 +47,7 @@ def frame_interpolate(request: FrameInterpolateRequest):
 
     # Choose resources (prefer GPU if available)
     device_index, device_type = get_best_gpu()
-    resources = get_ray_resources(device_index, device_type)
+    resources = get_ray_resources(device_index, device_type, load_profile="medium")
 
     try:
         job_id = request.job_id or str(uuid.uuid4())

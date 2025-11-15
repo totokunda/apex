@@ -113,7 +113,7 @@ class WanMLXDenoise(BaseClass):
 
             mx.eval(latents)
 
-            if render_on_step and render_on_step_callback:
+            if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                 try:
                     self._render_step(to_torch(latents), render_on_step_callback)
                 except Exception as e:
@@ -223,7 +223,7 @@ class WanMLXDenoise(BaseClass):
 
             mx.eval(latents)
 
-            if render_on_step and render_on_step_callback:
+            if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                 try:
                     # convert to torch
                     self._render_step(to_torch(latents), render_on_step_callback)

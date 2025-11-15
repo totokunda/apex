@@ -36,6 +36,7 @@ class FluxFillEngine(FluxShared):
         text_encoder_2_kwargs: Dict[str, Any] = {},
         joint_attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        render_on_step_interval: int = 3,
         progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -201,6 +202,7 @@ class FluxFillEngine(FluxShared):
             num_warmup_steps=num_warmup_steps,
             true_cfg_scale=true_cfg_scale,
             denoise_progress_callback=denoise_progress_callback,
+            render_on_step_interval=render_on_step_interval,
         )
 
         if return_latents:

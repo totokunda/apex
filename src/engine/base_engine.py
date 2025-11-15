@@ -175,6 +175,36 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     _memory_management_map: Dict[str, MemoryConfig] | None = None
     selected_components: Dict[str, Any] | None = None
     
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # Wrap subclass __init__ so that `post_init` is called automatically
+        # after the subclass' own initialization logic completes.
+        if cls is BaseEngine:
+            return
+
+        # Avoid double‑wrapping the same subclass
+        if getattr(cls, "_apex_post_init_wrapped", False):
+            return
+
+        original_init = cls.__init__
+
+        def __init_wrapper(self, *args, **init_kwargs):
+            # Run the original __init__ chain (including BaseEngine.__init__)
+            original_init(self, *args, **init_kwargs)
+
+            # Ensure post_init runs exactly once per instance, at the very end
+            if getattr(self, "_apex_post_init_ran", False):
+                return
+
+            post_init = getattr(self, "post_init", None)
+            if callable(post_init):
+                post_init()
+                setattr(self, "_apex_post_init_ran", True)
+
+        cls.__init__ = __init_wrapper
+        cls._apex_post_init_wrapped = True
+
     def __init__(
         self,
         yaml_path: str,
@@ -183,6 +213,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     ):
         self.device = device
         self._helpers = AutoLoadingHelperDict(self)
+        # Keep a copy of the original initialization kwargs so that
+        # `post_init` can access them after all subclasses have finished
+        # their own initialization.
+        self._init_kwargs = dict(kwargs)
         self._init_logger()
         self.config = self._load_yaml(yaml_path)
 
@@ -210,9 +244,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         # Normalize optional memory management mapping.
         # If no explicit mapping is provided, we will try to infer sensible
         # defaults based on the size of the models that will be loaded.
-        self._memory_management_map = self._normalize_memory_management(
-            kwargs.get("memory_management", None)
-        )
+        
         
         self._parse_config(
             self.config,
@@ -227,6 +259,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
         if kwargs.get("auto_apply_loras", True):
             self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
+
+    def post_init(self):
+        """
+        Run final setup that depends on fully-initialized subclasses.
+
+        By default this normalizes the optional memory-management mapping
+        using the original kwargs passed at construction time.
+        """
+        init_kwargs = getattr(self, "_init_kwargs", {}) or {}
+        memory_spec = init_kwargs.get("memory_management", None)
+        self._memory_management_map = self._normalize_memory_management(memory_spec)
 
     def _init_logger(self):
         self.logger = logger
@@ -421,7 +464,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         elif component_type == "transformer":
             logger.info(f"Loading transformer component: {component}")
             transformer = self.load_transformer(component, load_dtype, no_weights)
-
             component_module = transformer
         elif component_type == "helper":
             helper = self.load_helper(component)
@@ -596,8 +638,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             key_map=component.get("key_map", {}),
             extra_kwargs=component.get("extra_kwargs", {}),
         )
-        self.vae = vae
-
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(vae, self.component_dtypes["vae"])
         if self.vae_tiling:
@@ -1071,6 +1111,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         # Determine if we need disk offload
         # Calculate how many blocks will be in CPU memory at once (rough estimate: 2-3 blocks)
         blocks_in_memory = min(3, num_blocks) if num_blocks else 2
+        
+        if block_size_bytes and num_blocks and cpu_available_gb and num_blocks * block_size_bytes <= (cpu_available_gb * 1e9) * 0.9:
+            config.group_offload_low_cpu_mem_usage = False
         
         if block_size_bytes and num_blocks and cpu_available_gb:
             # Estimate memory needed for offloaded blocks
@@ -1678,8 +1721,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     for model_path_item in model_path:
                         if selected_model_item.get('variant') == model_path_item.get('variant'):
                             component['model_path'] = selected_model_item.get('path')
-                            component['key_map'] = selected_model_item.get('key_map')
-                            component['extra_kwargs'] = selected_model_item.get('extra_kwargs')
+                            component['key_map'] = model_path_item.get('key_map')
+                            component['extra_kwargs'] = model_path_item.get('extra_kwargs')
                             
                     path = self.is_downloaded(component['model_path'], components_path)
                     if path is None:

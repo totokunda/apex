@@ -89,7 +89,11 @@ def get_best_gpu():
     logger.info("No GPU available, using CPU")
     return None, "cpu"
 
-def get_ray_resources(device_index: int = None, device_type: str = "cuda"):
+def get_ray_resources(
+    device_index: int = None,
+    device_type: str = "cuda",
+    load_profile: str = "light",
+):
     """
     Get Ray resource requirements dynamically based on current availability.
 
@@ -104,15 +108,53 @@ def get_ray_resources(device_index: int = None, device_type: str = "cuda"):
     Args:
         device_index: GPU index to use (None means CPU when device_type is "cpu").
         device_type: "cuda", "mps", or "cpu".
+        load_profile: CPU load profile: "light" (≈1 CPU), "medium" (more CPUs),
+            or "heavy" (most of the machine's CPUs).
 
     Returns:
         Dictionary of Ray resource requirements for task/actor scheduling.
     """
+    # Normalize CPU load profile
+    profile = (load_profile or "light").lower()
+    if profile not in {"light", "medium", "heavy", "all"}:
+        profile = "light"
+
     # Ray may not be initialized in all code paths; guard calls accordingly.
     try:
         ray_initialized = ray.is_initialized()
     except Exception:
         ray_initialized = False
+
+    def _select_cpus(cpu_avail: float, total_cpus: float, profile: str) -> float:
+        """
+        Choose how many CPUs to request based on availability and profile.
+
+        light  -> ~1 CPU (or a small fraction if less is left)
+        medium -> a few CPUs (2–4) when available
+        heavy  -> most of the remaining CPUs (leave a little headroom)
+        """
+        if total_cpus is None or total_cpus <= 0:
+            total_cpus = 1.0
+        if cpu_avail <= 0:
+            # Preserve previous behavior: default to 1 CPU when Ray reports none,
+            # but still respect the load profile relative to total_cpus.
+            cpu_avail = float(total_cpus)
+
+        # Medium: use a moderate fraction of the machine's CPUs
+        if profile == "medium":
+            target = max(2.0, total_cpus * 0.3)  # at least 2 CPUs or 25% of machine
+            return min(cpu_avail, target)
+
+        # Heavy: use most of the machine's CPUs, leaving a little headroom
+        if profile == "heavy":
+            target = max(1.0, total_cpus * 0.9)  # ~90% of machine
+            return min(cpu_avail, target)
+        
+        if profile == "all":
+            return cpu_avail
+
+        # Default: light profile -> ~1 CPU
+        return 1.0 if cpu_avail >= 1.0 else max(0.25, cpu_avail)
 
     # Helper to read available/cluster resources if Ray is up
     available = {}
@@ -128,19 +170,24 @@ def get_ray_resources(device_index: int = None, device_type: str = "cuda"):
     if device_type == "cpu" or device_index is None:
         if ray_initialized:
             cpu_avail = float(available.get("CPU", 0.0))
-            # Request 1 CPU if available, otherwise take remaining (down to 0.25 min)
-            num_cpus = 1.0 if cpu_avail >= 1.0 else max(0.25, cpu_avail) if cpu_avail > 0 else 1.0
+            total_cpus = float(cluster.get("CPU", cpu_avail)) or cpu_avail
+            num_cpus = _select_cpus(cpu_avail, total_cpus, profile)
             return {"num_cpus": num_cpus}
         # Fallback when Ray isn't initialized
-        return {"num_cpus": 1}
+        total_cpus = os.cpu_count() or 1
+        num_cpus = _select_cpus(float(total_cpus), float(total_cpus), profile)
+        return {"num_cpus": num_cpus}
 
     # Apple MPS: Ray does not track an MPS resource; treat as CPU-only scheduling
     if device_type == "mps":
         if ray_initialized:
             cpu_avail = float(available.get("CPU", 0.0))
-            num_cpus = 1.0 if cpu_avail >= 1.0 else max(0.25, cpu_avail) if cpu_avail > 0 else 1.0
+            total_cpus = float(cluster.get("CPU", cpu_avail)) or cpu_avail
+            num_cpus = _select_cpus(cpu_avail, total_cpus, profile)
             return {"num_cpus": num_cpus, "num_gpus": 0}
-        return {"num_cpus": 1, "num_gpus": 0}
+        total_cpus = os.cpu_count() or 1
+        num_cpus = _select_cpus(float(total_cpus), float(total_cpus), profile)
+        return {"num_cpus": num_cpus, "num_gpus": 0}
 
     # CUDA path
     if device_type == "cuda":
@@ -148,8 +195,9 @@ def get_ray_resources(device_index: int = None, device_type: str = "cuda"):
             cpu_avail = float(available.get("CPU", 0.0))
             gpu_avail = float(available.get("GPU", 0.0))
 
-            # CPU request: prefer 1, otherwise take what's left (with a small floor)
-            num_cpus = 1.0 if cpu_avail >= 1.0 else max(0.25, cpu_avail) if cpu_avail > 0 else 1.0
+            # CPU request: shape based on load profile and machine size
+            total_cpus = float(cluster.get("CPU", cpu_avail)) or cpu_avail
+            num_cpus = _select_cpus(cpu_avail, total_cpus, profile)
 
             # GPU request: prefer 1 full GPU; otherwise try to take at least 0.25 if possible,
             # else take whatever fractional remains (> 0)
@@ -174,8 +222,10 @@ def get_ray_resources(device_index: int = None, device_type: str = "cuda"):
                 result["resources"] = resources
             return result
 
-        # Fallback when Ray isn't initialized: assume single-node defaults
-        return {"num_cpus": 1, "num_gpus": 1}
+        # Fallback when Ray isn't initialized: assume single-node machine
+        total_cpus = os.cpu_count() or 1
+        num_cpus = _select_cpus(float(total_cpus), float(total_cpus), profile)
+        return {"num_cpus": num_cpus, "num_gpus": 1}
 
     # Unknown device type -> default to 1 CPU
     return {"num_cpus": 1}

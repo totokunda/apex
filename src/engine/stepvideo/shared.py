@@ -300,11 +300,12 @@ class StepVideoShared(BaseEngine):
         render_on_step_callback = kwargs.get("render_on_step_callback", None)
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         with self._progress_bar(
             len(timesteps), desc=f"Sampling {self.model_type}"
         ) as pbar:
-            for t in timesteps:
+            for i, t in enumerate(timesteps):
                 latent_model_input = (
                     torch.cat([latents] * 2) if use_cfg_guidance else latents
                 )
@@ -327,7 +328,7 @@ class StepVideoShared(BaseEngine):
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
 

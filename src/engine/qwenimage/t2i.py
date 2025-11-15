@@ -4,7 +4,6 @@ from .shared import QwenImageShared
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
-
 class QwenImageT2IEngine(QwenImageShared):
     """QwenImage Text-to-Image Engine Implementation"""
 
@@ -23,6 +22,7 @@ class QwenImageT2IEngine(QwenImageShared):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        render_on_step_interval: int = 3,
         progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -185,6 +185,7 @@ class QwenImageT2IEngine(QwenImageShared):
             render_on_step_callback=render_on_step_callback,
             use_cfg_guidance=use_cfg_guidance,
             denoise_progress_callback=denoise_progress_callback,
+            render_on_step_interval=render_on_step_interval,
         )
         
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")

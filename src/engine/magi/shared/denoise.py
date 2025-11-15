@@ -45,18 +45,9 @@ def check_forward(module, inputs, outputs):
 
 class MagiDenoise:
     def __init__(
-        self, denoise_type: MagiDenoiseType = MagiDenoiseType.BASE, *args, **kwargs
+        self,  *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
-        self.denoise_type = denoise_type
-
-    def denoise(self, *args, **kwargs) -> torch.Tensor:
-        """Unified denoising method that handles chunk-based generation"""
-        # Store MAGI runtime config if provided
-        if self.denoise_type == MagiDenoiseType.BASE:
-            return self.base_denoise(*args, **kwargs)
-        else:
-            raise ValueError(f"Invalid denoise type: {self.denoise_type}")
 
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents", None)

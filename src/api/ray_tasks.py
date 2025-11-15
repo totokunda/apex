@@ -548,7 +548,7 @@ def run_preprocessor(
     )
 
 
-@ray.remote()
+@ray.remote
 def run_engine_from_manifest(
     manifest_path: str,
     job_id: str,
@@ -566,6 +566,13 @@ def run_engine_from_manifest(
                 logger.info(f"[{job_id}] Progress: {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update: {e}")
+
+    # Track large objects so we can explicitly drop references in a finally block
+    engine = None
+    raw = None
+    config = None
+    prepared_inputs: Dict[str, Any] = {}
+    preprocessor_jobs: List[Dict[str, Any]] = []
 
     try:
         from src.utils.yaml import load_yaml as load_manifest_yaml
@@ -785,6 +792,7 @@ def run_engine_from_manifest(
 
         # Progress callback forwarded into the engine
         def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
+            logger.info(f"Progress callback: {progress}, {message}, {metadata}")
             if progress is None:
                 send_progress(None, message, metadata)
                 return
@@ -818,6 +826,17 @@ def run_engine_from_manifest(
         except Exception:
             pass
         return {"job_id": job_id, "status": "error", "error": str(e), "traceback": tb}
+    finally:
+        # Ensure we aggressively release references and clear CUDA/MPS caches
+        try:
+            engine = None
+            raw = None
+            config = None
+            prepared_inputs = {}
+            preprocessor_jobs = []
+        except Exception as cleanup_err:
+            logger.warning(f"run_engine_from_manifest cleanup failed: {cleanup_err}")
+        empty_cache()
 
 
 @ray.remote

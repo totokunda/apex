@@ -299,6 +299,7 @@ class QwenImageShared(BaseEngine):
         mask = kwargs.get("mask", None)
         noise = kwargs.get("noise", None)
         denoise_progress_callback = kwargs.get("denoise_progress_callback", None)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         if denoise_progress_callback is not None:
@@ -377,7 +378,7 @@ class QwenImageShared(BaseEngine):
                     if torch.backends.mps.is_available():
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided

@@ -27,6 +27,7 @@ class StepVideoI2VEngine(StepVideoShared):
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
+        render_on_step_interval: int = 3,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
@@ -188,6 +189,7 @@ class StepVideoI2VEngine(StepVideoShared):
             render_on_step_callback=render_on_step_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
+            render_on_step_interval=render_on_step_interval,
         )
 
         if offload:

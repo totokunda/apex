@@ -8,6 +8,8 @@ from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 from diffusers.image_processor import VaeImageProcessor
 from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
+from diffusers.utils.torch_utils import randn_tensor
+import re
 
 class HunyuanImageT2IEngine(BaseEngine):
     
@@ -305,6 +307,7 @@ class HunyuanImageT2IEngine(BaseEngine):
             offload: bool = True,
             render_on_step: bool = False,
             render_on_step_callback: Callable = None,
+            render_on_step_interval: int = 3,
             progress_callback: Callable = None,
             **kwargs,
             ):
@@ -525,7 +528,7 @@ class HunyuanImageT2IEngine(BaseEngine):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
