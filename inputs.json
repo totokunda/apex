@@ -1,0 +1,53 @@
+{
+    "engine_kwargs": {
+        "engine_type": "wan",
+        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan-2.2-a14b-text-to-video-1.0.0.v1.yml",
+        "model_type": "t2v",
+        "selected_components": {
+            "scheduler": {
+                "name": "UniPCMultistepScheduler",
+                "base": "diffusers.UniPCMultistepScheduler",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/9bcf6ca67780d1db310af5d300a504eb1cac05165ed5d990ba83537160b57eb6_scheduler_config.json"
+            },
+            "wan/vae_2.2": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/80c000c3efae1f240d5c61184edeba077ebd45f69eb1c30ccec6e4a1483288f9_Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf",
+                "variant": "GGUF_Q4_K_S",
+                "precision": "q4_k_s",
+                "type": "gguf"
+            },
+            "transformer_2": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/6b8596c4cafe5c862b3f1d0ff5a8e4b433085956ee307bebe81e54ec27a1c044_Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf",
+                "variant": "GGUF_Q4_K_S",
+                "precision": "q4_k_s",
+                "type": "gguf"
+            }
+        },
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "prompt": "a couple in an intense argument",
+        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
+        "resolution": 720,
+        "aspect_ratio": 61,
+        "num_inference_steps": 50,
+        "height": 704,
+        "width": 704,
+        "duration": "5s",
+        "seed": 4007794247,
+        "high_noise_guidance_scale": 4,
+        "low_noise_guidance_scale": 3,
+        "boundary_ratio": 0.875
+    }
+}

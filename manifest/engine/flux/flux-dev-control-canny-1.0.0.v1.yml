@@ -68,6 +68,7 @@ spec:
   - type: transformer
     label: Flux Canny Transformer
     base: flux.base
+    config_path: black-forest-labs/FLUX.1-Canny-dev/transformer/config.json
     model_path:
     - path: black-forest-labs/FLUX.1-Canny-dev/transformer
       variant: default
@@ -77,14 +78,6 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 16
       file_size: 23803468971
-    - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-F16-GGUF.gguf
-      variant: GGUF_F16
-      precision: fp16
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      file_size: 23809434912
     - path: https://huggingface.co/SporkySporkness/FLUX.1-Canny-dev-GGUF/resolve/main/flux1-canny-dev-fp16-Q8_0-GGUF.gguf
       variant: GGUF_Q8_0
       precision: q8_0
