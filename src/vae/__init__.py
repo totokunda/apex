@@ -1,47 +1,64 @@
-from src.vae.cogvideo.model import AutoencoderKLCogVideoX as CogVideoXVAE
-from src.vae.wan.model import AutoencoderKLWan as WanVAE
-from src.vae.hunyuan.model import AutoencoderKLHunyuanVideo as HunyuanVideoVAE
-from src.vae.ltx.model import AutoencoderKLLTXVideo as LTXVideoVAE
-from src.vae.magi.model import AutoencoderKLMagi as MagiVAE
-from src.vae.mochi.model import AutoencoderKLMochi as MochiVAE
-from src.vae.stepvideo.model import AutoencoderKL as StepVideoVAE
-from src.vae.qwenimage.model import AutoencoderKLQwenImage as QwenImageVAE
-from src.vae.auto.model import AutoencoderKL as AutoVAE
-from src.vae.hunyuanimage.model import AutoencoderKLHunyuanImage as HunyuanImageVAE
+import importlib
+import inspect
+from pathlib import Path
+from typing import Dict, Type
+from diffusers.models.modeling_utils import ModelMixin
+from src.register import ClassRegister
+VAE_REGISTRY = ClassRegister()
 
-__all__ = [
-    "CogVideoXVAE",
-    "WanVAE",
-    "HunyuanVideoVAE",
-    "LTXVideoVAE",
-    "MagiVAE",
-    "MochiVAE",
-    "StepVideoVAE",
-    "QwenImageVAE",
-    "AutoVAE",
-    "HunyuanImageVAE",
-]
+
+def _auto_register_vaes():
+    """
+    Automatically register VAE models by scanning the ``src.vae`` package.
+
+    A VAE is assumed to live under ``<root>/<name>/model.py`` and expose at least one class
+    that inherits from ``ModelMixin``. It is registered under the key ``"<name>"`` (lowercased).
+
+    Existing entries in ``VAE_REGISTRY`` are preserved so current VAEs keep their explicit mapping.
+    """
+
+    root = Path(__file__).resolve().parent
+
+    for vae_dir in root.iterdir():
+        if not vae_dir.is_dir():
+            continue
+        if vae_dir.name.startswith("_") or vae_dir.name == "__pycache__":
+            continue
+
+        key = vae_dir.name.lower()
+        if key in VAE_REGISTRY:
+            # Already mapped explicitly above; leave as-is.
+            continue
+
+        model_file = vae_dir / "model.py"
+        if not model_file.is_file():
+            continue
+
+        module_name = f"{__name__}.{vae_dir.name}.model"
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            # If import fails for any reason, skip auto-registration for this module.
+            continue
+
+        # Find the first class defined in this module that subclasses ModelMixin.
+        for _, cls in inspect.getmembers(module, inspect.isclass):
+            if cls.__module__ != module.__name__:
+                continue
+            try:
+                if issubclass(cls, ModelMixin) and cls is not ModelMixin:
+                    VAE_REGISTRY.register(key, cls)
+                    break
+            except TypeError:
+                # Builtins and certain extension types can raise here; just ignore them.
+                continue
+
+
+_auto_register_vaes()
+
 
 def get_vae(vae_name: str):
-    if vae_name == "cogvideo":
-        return CogVideoXVAE
-    elif vae_name == "wan":
-        return WanVAE
-    elif vae_name == "hunyuan":
-        return HunyuanVideoVAE
-    elif vae_name == "ltx":
-        return LTXVideoVAE
-    elif vae_name == "magi":
-        return MagiVAE
-    elif vae_name == "mochi":
-        return MochiVAE
-    elif vae_name == "stepvideo":
-        return StepVideoVAE
-    elif vae_name == "qwenimage":
-        return QwenImageVAE
-    elif vae_name == "auto":
-        return AutoVAE
-    elif vae_name == "hunyuanimage":
-        return HunyuanImageVAE
-    else:
-        raise ValueError(f"VAE {vae_name} not found")
+    key = vae_name.lower()
+    if key in VAE_REGISTRY:
+        return VAE_REGISTRY.get(key)
+    raise ValueError(f"VAE {vae_name} not found")

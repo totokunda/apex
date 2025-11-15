@@ -51,6 +51,7 @@ def fetch_and_save_tokenizer_from_config(
             tokenizer_class = find_class_recursive(transformers, tokenizer_class)
         else:
             tokenizer_class = AutoTokenizer
+
         tokenizer = tokenizer_class.from_pretrained(_name_or_path, **tokenizer_kwargs)
         save_dir = Path(model_path).parent
         os.makedirs(save_dir, exist_ok=True)

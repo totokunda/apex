@@ -3,10 +3,10 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
-from .base import WanBaseEngine
+from .shared import WanShared
 
 
-class WanVaceEngine(WanBaseEngine):
+class WanVaceEngine(WanShared):
     """WAN VACE (Video Acceleration) Engine Implementation"""
     def run(
         self,

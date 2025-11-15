@@ -2,14 +2,38 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-
-from .base import CogVideoBaseEngine
+from .shared import CogVideoShared
 import torch.nn.functional as F
 from einops import rearrange
 
 
-class CogVideoInpEngine(CogVideoBaseEngine):
+class CogVideoInpEngine(CogVideoShared):
     """CogVideo Fun Engine Implementation"""
+    
+    def _prepare_mask_latents(
+        self, masked_image, noise_aug_strength, transformer_config
+    ):
+        # resize the mask to latents shape as we concatenate the mask to the latents
+        # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
+        # and half precision
+
+        if masked_image is not None:
+            if transformer_config.get("add_noise_in_inpaint_model", False):
+                masked_image = self._add_noise_to_reference_video(
+                    masked_image, ratio=noise_aug_strength
+                )
+            masked_image = masked_image.to(device=self.device, dtype=self.vae.dtype)
+            bs = 1
+            new_mask_pixel_values = []
+            for i in range(0, masked_image.shape[0], bs):
+                mask_pixel_values_bs = masked_image[i : i + bs]
+                mask_pixel_values_bs = self.vae.encode(mask_pixel_values_bs)[0]
+                mask_pixel_values_bs = mask_pixel_values_bs.mode()
+                new_mask_pixel_values.append(mask_pixel_values_bs)
+            masked_image_latents = torch.cat(new_mask_pixel_values, dim=0)
+            masked_image_latents = masked_image_latents * self.vae.config.scaling_factor
+
+        return masked_image_latents
 
     def run(
         self,

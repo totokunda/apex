@@ -1,15 +1,16 @@
 import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
-from .base import WanBaseEngine
+from .shared import WanShared
 from torch.nn import functional as F
 from torchvision import transforms as T
 from diffusers.utils.torch_utils import randn_tensor
 from src.utils.models.wan import match_and_blend_colors
 import numpy as np
+import math
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
-
-class WanMultitalkEngine(WanBaseEngine):
+class WanMultitalkEngine(WanShared):
     """WAN MultiTalk (Audio-driven) Engine Implementation"""
 
     def run(
@@ -35,6 +36,7 @@ class WanMultitalkEngine(WanBaseEngine):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -43,6 +45,7 @@ class WanMultitalkEngine(WanBaseEngine):
         face_scale: float = 0.05,
         color_correction_strength: float = 1.0,
         bbox: Optional[Dict[str, List[float]]] = None,
+        attention_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
         """
@@ -173,6 +176,8 @@ class WanMultitalkEngine(WanBaseEngine):
 
 
         using_video_input = input_video is not None
+        
+        
         while True:
             audio_embs = []
             # split audio with window size
@@ -342,29 +347,116 @@ class WanMultitalkEngine(WanBaseEngine):
                 C, T_m, H, W = add_latent.shape
                 latents[:, :C, :T_m, :H, :W] = add_latent
 
-            latents = self.denoise(
-                latent_motion_frames=latent_motion_frames,
-                using_video_input=using_video_input,
-                cur_motion_frames_latent_num=cur_motion_frames_latent_num,
-                timesteps=input_timesteps,
-                latents=latents,
-                latent_condition=latent_condition,
-                image_embeds=image_embeds.to(self.device).to(transformer_dtype),
-                audio_embeds=audio_embs.to(self.device).to(transformer_dtype),
-                prompt_embeds=prompt_embeds.to(self.device).to(transformer_dtype),
-                negative_prompt_embeds=negative_prompt_embeds.to(self.device).to(
-                    transformer_dtype
-                ),
-                ref_target_masks=ref_target_masks,
-                transformer_dtype=transformer_dtype,
-                use_cfg_guidance=use_cfg_guidance,
-                render_on_step=render_on_step,
-                render_on_step_callback=render_on_step_callback,
-                scheduler=scheduler,
-                guidance_scale=guidance_scale,
-                audio_guidance_scale=audio_guidance_scale,
-            )
+            total_steps = len(timesteps) if timesteps is not None else 0
+            #!TODO: This is incorrect. 
+            denoise_progress_callback = make_mapped_progress(progress_callback, 0.0, 1.0)
+            audio_embeds = audio_embs.to(transformer_dtype).to(self.device)
 
+            with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
+                total_steps = len(timesteps)
+                for i, t in enumerate(timesteps):
+                    if using_video_input:
+                        latents[:, :, :cur_motion_frames_latent_num] = (
+                            latent_motion_frames.unsqueeze(0)
+                        )
+
+                    latent_model_input = torch.cat([latents, latent_condition], dim=1).to(
+                        transformer_dtype
+                    )
+
+                    timestep = t.expand(latents.shape[0])
+
+                    noise_pred_cond = self.transformer(
+                        latent_model_input,
+                        timestep,
+                        encoder_hidden_states=prompt_embeds,
+                        encoder_hidden_states_image=image_embeds,
+                        encoder_hidden_states_audio=audio_embeds,
+                        ref_target_masks=ref_target_masks,
+                        human_num=human_num,
+                        return_dict=False,
+                        **attention_kwargs,
+                    )[0]
+
+                    if math.isclose(guidance_scale, 1.0):
+                        noise_pred_drop_audio = self.transformer(
+                            latent_model_input,
+                            timestep,
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_hidden_states_image=image_embeds,
+                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
+                            ref_target_masks=ref_target_masks,
+                            human_num=human_num,
+                            return_dict=False,
+                            **attention_kwargs,
+                        )[0]
+                    else:
+                        noise_pred_drop_text = self.transformer(
+                            latent_model_input,
+                            timestep,
+                            encoder_hidden_states=negative_prompt_embeds,
+                            encoder_hidden_states_image=image_embeds,
+                            encoder_hidden_states_audio=audio_embeds,
+                            ref_target_masks=ref_target_masks,
+                            human_num=human_num,
+                            return_dict=False,
+                            **attention_kwargs,
+                        )[0]
+
+                        noise_pred_uncond = self.transformer(
+                            latent_model_input,
+                            timestep,
+                            encoder_hidden_states=negative_prompt_embeds,
+                            encoder_hidden_states_image=image_embeds,
+                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
+                            ref_target_masks=ref_target_masks,
+                            human_num=human_num,
+                            return_dict=False,
+                            **attention_kwargs,
+                        )[0]
+
+                    if math.isclose(guidance_scale, 1.0):
+                        noise_pred = noise_pred_drop_audio + audio_guidance_scale * (
+                            noise_pred_cond - noise_pred_drop_audio
+                        )
+                    else:
+                        noise_pred = (
+                            noise_pred_uncond
+                            + guidance_scale * (noise_pred_cond - noise_pred_drop_text)
+                            + audio_guidance_scale
+                            * (noise_pred_drop_text - noise_pred_uncond)
+                        )
+
+                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+                    if not is_first_clip:
+                        latent_motion_frames = latent_motion_frames.to(latents.dtype).to(
+                            self.device
+                        )
+                        motion_add_noise = torch.randn_like(
+                            latent_motion_frames
+                        ).contiguous()
+                        add_latent = scheduler.add_noise(
+                            latent_motion_frames, motion_add_noise, timesteps[i + 1]
+                        )
+                        _, T_m, _, _ = add_latent.shape
+                        latents[:, :T_m] = add_latent
+
+                    if using_video_input:
+                        latents[:, :, :cur_motion_frames_latent_num] = (
+                            latent_motion_frames.unsqueeze(0)
+                        )
+
+                    if render_on_step and render_on_step_callback:
+                        self._render_step(latents, render_on_step_callback)
+                    pbar.update(1)
+                    safe_emit_progress(
+                        denoise_progress_callback,
+                        float(i + 1) / float(total_steps),
+                        f"Denoising step {i + 1}/{total_steps}",
+                    )
+
+                self.logger.info("Denoising completed.")
             videos = self.vae_decode(latents, offload=offload)
 
             # >>> START OF COLOR CORRECTION STEP <<<

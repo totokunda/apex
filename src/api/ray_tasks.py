@@ -548,7 +548,7 @@ def run_preprocessor(
     )
 
 
-@ray.remote
+@ray.remote()
 def run_engine_from_manifest(
     manifest_path: str,
     job_id: str,

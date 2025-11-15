@@ -2,12 +2,12 @@ import torch
 from typing import Dict, Any, Callable, List
 import numpy as np
 from diffusers.schedulers import UniPCMultistepScheduler
-from .base import HidreamBaseEngine
+from .shared import HidreamShared
 import math
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
-class HidreamT2IEngine(HidreamBaseEngine):
+class HidreamT2IEngine(HidreamShared):
     """Hidream Text-to-Image Engine Implementation"""
 
     def run(
@@ -152,32 +152,72 @@ class HidreamT2IEngine(HidreamBaseEngine):
         safe_emit_progress(progress_callback, 0.45, "Preparing denoise")
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            # Fallback for safety
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         safe_emit_progress(progress_callback, 0.50, "Starting denoise")
-        latents = self.denoise(
-            latents=latents,
-            timesteps=timesteps,
-            num_inference_steps=num_inference_steps,
-            prompt_embeds=prompt_embeds,
-            pooled_prompt_embeds=pooled_prompt_embeds,
-            use_cfg_guidance=use_cfg_guidance,
-            joint_attention_kwargs=joint_attention_kwargs,
-            llama_prompt_embeds=llama_prompt_embeds,
-            render_on_step=render_on_step,
-            render_on_step_callback=render_on_step_callback,
-            num_warmup_steps=num_warmup_steps,
-            guidance_scale=guidance_scale,
-            denoise_progress_callback=denoise_progress_callback,
-        )
+        
+        total_steps = len(timesteps) if timesteps is not None else 0
+        if denoise_progress_callback is not None:
+            try:
+                denoise_progress_callback(0.0, "Starting denoise")
+            except Exception:
+                pass
+
+        with self._progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+
+                # expand the latents if we are doing classifier free guidance
+                latent_model_input = (
+                    torch.cat([latents] * 2) if use_cfg_guidance else latents
+                )
+                # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+                timestep = t.expand(latent_model_input.shape[0])
+
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timesteps=timestep,
+                    encoder_hidden_states_t5=prompt_embeds,
+                    encoder_hidden_states_llama3=llama_prompt_embeds,
+                    pooled_embeds=pooled_prompt_embeds,
+                    return_dict=False,
+                )[0]
+                noise_pred = -noise_pred
+
+                # perform guidance
+                if use_cfg_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
+
+                # compute the previous noisy sample x_t -> x_t-1
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
+
+                if latents.dtype != latents_dtype:
+                    if torch.backends.mps.is_available():
+                        # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+                        latents = latents.to(latents_dtype)
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
+                    progress_bar.update()
+
+                if denoise_progress_callback is not None and total_steps > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                    except Exception:
+                        pass
+        
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:

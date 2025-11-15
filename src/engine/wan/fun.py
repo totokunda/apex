@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 import torch.nn.functional as F
 from src.helpers.wan.fun_camera import Camera
-from .base import WanBaseEngine
+from .shared import WanShared
 
 
-class WanFunEngine(WanBaseEngine):
+class WanFunEngine(WanShared):
     """WAN FUN (Controllable) Engine Implementation"""
 
     def run(

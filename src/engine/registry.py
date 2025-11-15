@@ -1,231 +1,155 @@
-from typing import Dict, Type, Any, Optional, List, Literal
-from enum import Enum
+from typing import Dict, Type, Any, Optional, List, Literal, Tuple
+from pathlib import Path
+import importlib
+import inspect
+from src.utils.yaml import load_yaml
 import torch
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
 
-
-class EngineType(Enum):
-    """Supported engine types"""
-    WAN = "wan"
-    HUNYUAN = "hunyuan"
-    LTX = "ltx"
-    COGVIDEO = "cogvideo"
-    MAGI = "magi"
-    STEPVIDEO = "stepvideo"
-    MOCHI = "mochi"
-    SKYREELS = "skyreels"
-    COSMOS2 = "cosmos2"
-    QWENIMAGE = "qwenimage"
-    FLUX = "flux"
-    HIDREAM = "hidream"
-    CHROMA = "chroma"
-    HUNYUANIMAGE = "hunyuanimage"
-
 class EngineRegistry:
-    """Central registry for all engine implementations"""
+    """Central registry for all engine implementations.
+
+    There are two sources of truth:
+
+    - **Legacy, family-level engines** registered explicitly in
+      :meth:`_register_engines`. These typically expose a ``model_type`` enum
+      and internally route to per‑mode implementations.
+    - **New, auto-discovered engines**, where each concrete engine subclass
+      :class:`BaseEngine` lives in its own module
+      ``src.engine.<engine>/<model_type>.py`` (optionally inheriting from a
+      shared base defined in ``shared.py``). For these, the ``model_type`` is
+      inferred from the filename and no enum is required.
+    """
 
     def __init__(self):
-        self._engines: Dict[str, Type] = {}
-        self._register_engines()
+        # Auto-discovered engines:
+        #   engine_type (folder name) → model_type (filename) → engine class
+        # All keys are stored lowercase for consistency.
+        self._discovered: Dict[str, Dict[str, Type[BaseEngine]]] = {}
 
-    def _register_engines(self):
-        """Register all available engines"""
+        self._auto_discover_engines()
 
-        # Register WAN engine
-        try:
-            from src.engine.wan import WanEngine
+    def _auto_discover_engines(self) -> None:
+        """Discover concrete engine implementations from the filesystem.
 
-            self._engines[EngineType.WAN.value] = WanEngine
-        except ImportError as e:
-            print(f"Warning: Could not import WAN engine: {e}")
+        Discovery rules:
+        - Look under ``src/engine/<engine_type>/`` directories.
+        - Import every ``*.py`` module except ``__init__.py`` and ``shared.py``.
+        - Within each module, register any classes that subclass
+          :class:`BaseEngine` (excluding :class:`BaseEngine` itself).
+        - The ``engine_type`` is the folder name, and the ``model_type`` is
+          inferred from the filename (e.g. ``t2i.py`` → ``model_type="t2i"``).
+        """
 
-        # Register Hunyuan engine
-        try:
-            from src.engine.hunyuan import HunyuanEngine
+        root: Path = Path(__file__).resolve().parent
 
-            self._engines[EngineType.HUNYUAN.value] = HunyuanEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Hunyuan engine: {e}")
+        for pkg_path in root.iterdir():
+            if pkg_path.name.startswith("_"):
+                continue
 
-        # Register LTX engine
-        try:
-            from src.engine.ltx import LTXEngine
+            engine_type = pkg_path.name.lower()
+            for module_path in pkg_path.glob("*.py"):
+                stem = module_path.stem
+                # Skip package and shared helpers; these do not represent
+                # concrete model variants.
+                if stem in {"__init__", "shared"}:
+                    continue
 
-            self._engines[EngineType.LTX.value] = LTXEngine
-        except ImportError as e:
-            print(f"Warning: Could not import LTX engine: {e}")
+                module_name = f"src.engine.{engine_type}.{stem}"
 
-        # Register CogVideo engine
-        try:
-            from src.engine.cogvideo import CogVideoEngine
+                try:
+                    module = importlib.import_module(module_name)
+                except Exception:
+                    # Best-effort discovery; failures here should not block startup
+                    continue
 
-            self._engines[EngineType.COGVIDEO.value] = CogVideoEngine
-        except ImportError as e:
-            print(f"Warning: Could not import CogVideo engine: {e}")
+                for attr_name in dir(module):
+                    attr = getattr(module, attr_name)
+                    if (
+                        inspect.isclass(attr)
+                        and issubclass(attr, BaseEngine)
+                        and attr is not BaseEngine # ignore classes with shared in name
+                        and not (attr_name.lower().startswith("shared") or attr_name.lower().endswith("shared"))
+                    ):
+                        model_type = stem.lower()
+                        engine_map = self._discovered.setdefault(engine_type, {})
+                        # First one wins for a given (engine_type, model_type)
+                        engine_map.setdefault(model_type, attr)
+ 
+    def get_engine_class(
+        self, engine_type: str, model_type: Optional[str] = None
+    ) -> Optional[Type[BaseEngine]]:
+        """Get an engine class.
 
-        # Register Magi engine
-        try:
-            from src.engine.magi import MagiEngine
+        Resolution:
+        - If ``model_type`` is provided and a matching auto‑discovered class
+          exists (``src.engine.<engine_type>/<model_type>.py``), return it.
+        - Otherwise, return ``None``.
+        """
 
-            self._engines[EngineType.MAGI.value] = MagiEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Magi engine: {e}")
+        engine_key = engine_type.lower()
+        model_key = model_type.lower() if isinstance(model_type, str) else None
+        if model_key is not None:
+            family = self._discovered.get(engine_key, {})
+            if model_key in family:
+                return family[model_key]
 
-        # Register StepVideo engine
-        try:
-            from src.engine.stepvideo import StepVideoEngine
-
-            self._engines[EngineType.STEPVIDEO.value] = StepVideoEngine
-        except ImportError as e:
-            print(f"Warning: Could not import StepVideo engine: {e}")
-
-        # Register Mochi engine
-        try:
-            from src.engine.mochi import MochiEngine
-
-            self._engines[EngineType.MOCHI.value] = MochiEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Mochi engine: {e}")
-
-        # Register SkyReels engine
-        try:
-            from src.engine.skyreels import SkyReelsEngine
-
-            self._engines[EngineType.SKYREELS.value] = SkyReelsEngine
-        except ImportError as e:
-            print(f"Warning: Could not import SkyReels engine: {e}")
-
-        # Register Cosmos engine
-
-        try:
-            from src.engine.cosmos2 import Cosmos2Engine
-
-            self._engines[EngineType.COSMOS2.value] = Cosmos2Engine
-        except ImportError as e:
-            print(f"Warning: Could not import Cosmos engine: {e}")
-
-        # Register QwenImage engine
-        try:
-            from src.engine.qwenimage import QwenImageEngine
-
-            self._engines[EngineType.QWENIMAGE.value] = QwenImageEngine
-        except ImportError as e:
-            print(f"Warning: Could not import QwenImage engine: {e}")
-
-        # Register Flux engine
-
-        try:
-            from src.engine.flux import FluxEngine
-
-            self._engines[EngineType.FLUX.value] = FluxEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Flux engine: {e}")
-
-        # Register Hidream engine
-        try:
-            from src.engine.hidream import HidreamEngine
-
-            self._engines[EngineType.HIDREAM.value] = HidreamEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Hidream engine: {e}")
-
-        # Register Chroma engine
-
-        try:
-            from src.engine.chroma import ChromaEngine
-            self._engines[EngineType.CHROMA.value] = ChromaEngine
-        except ImportError as e:
-            print(f"Warning: Could not import Chroma engine: {e}")
-
-        # Register HunyuanImage engine
-
-        try:
-            from src.engine.hunyuanimage import HunyuanImageEngine
-            self._engines[EngineType.HUNYUANIMAGE.value] = HunyuanImageEngine
-        except ImportError as e:
-            print(f"Warning: Could not import HunyuanImage engine: {e}")
-
-    def get_engine_class(self, engine_type: str) -> Optional[Type]:
-        """Get engine class by type"""
-        return self._engines.get(engine_type)
+        return None
 
     def list_engines(self) -> List[str]:
-        """List all available engine types"""
-        return list(self._engines.keys())
+        """List all available engines.
+
+        Returns combined identifiers of the form ``"<engine>/<model_type>"``
+        (e.g. ``"chroma/t2i"``) for all auto‑discovered engines.
+        """
+
+        names = set()
+        for engine_type, model_map in self._discovered.items():
+            for model_type in model_map.keys():
+                names.add(f"{engine_type}/{model_type}")
+        return sorted(names)
 
     def create_engine(
         self,
-        engine_type: str,
         yaml_path: str,
+        engine_type: str | None = None,
         model_type: Optional[str] = None,
         **kwargs,
     ) -> Any:
-        """Create an engine instance"""
-        engine_class = self.get_engine_class(engine_type)
-        if engine_class is None:
-            raise ValueError(f"Unknown engine type: {engine_type}")
+        """Create an engine instance.
 
-        # For engines that support model_type
-        if model_type is not None:
-            kwargs["model_type"] = self._get_model_type_enum(engine_type, model_type)
+        Behaviour:
+        - If a concrete auto‑discovered engine is available for the given
+          ``engine_type`` and ``model_type`` (based on filename), that class
+          is instantiated directly.
+        - Otherwise, a ``ValueError`` is raised.
+        """
 
         resolved = resolve_manifest_reference(yaml_path) or yaml_path
-        return engine_class(yaml_path=resolved, **kwargs)
-
-    def _get_model_type_enum(self, engine_type: str, model_type: str):
-        """Get the appropriate ModelType enum for an engine"""
-        if engine_type == EngineType.WAN.value:
-            from src.engine.wan import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.HUNYUAN.value:
-            from src.engine.hunyuan import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.LTX.value:
-            from src.engine.ltx import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.COGVIDEO.value:
-            from src.engine.cogvideo import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.MAGI.value:
-            from src.engine.magi import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.STEPVIDEO.value:
-            from src.engine.stepvideo import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.SKYREELS.value:
-            from src.engine.skyreels import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.COSMOS2.value:
-            from src.engine.cosmos2 import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.FLUX.value:
-            from src.engine.flux import ModelType
-
-            return ModelType(model_type)
-
-        elif engine_type == EngineType.HIDREAM.value:
-            from src.engine.hidream import ModelType
-
-            return ModelType(model_type)
-        elif engine_type == EngineType.CHROMA.value:
-            from src.engine.chroma import ModelType
-            return ModelType(model_type)
         
-        elif engine_type == EngineType.HUNYUANIMAGE.value:
-            from src.engine.hunyuanimage import ModelType
-            return ModelType(model_type)
-        else:
-            # Fall back to string for engines without ModelType enum
-            return model_type
+        if engine_type is None or model_type is None:
+            # read from yaml_path
+            data = load_yaml(resolved)
+            spec = data.get("spec", {})
+            engine_type = spec.get("engine")
+            model_type = spec.get("model_type")
+            if engine_type is None or model_type is None:
+                raise ValueError(f"Engine type and model type must be provided in the yaml file: {resolved}")
+
+        # Prefer auto‑discovered concrete engines when model_type is given.
+        impl_class = self.get_engine_class(engine_type, model_type) if model_type else None
+
+        if impl_class is not None and impl_class is not BaseEngine:
+            return impl_class(yaml_path=resolved, model_type=model_type, **kwargs)
+
+        # No autodiscovered implementation found
+        raise ValueError(
+            "Unknown engine implementation for "
+            f"engine_type='{engine_type}' model_type='{model_type}'. "
+            "Ensure there is a "
+            f"src/engine/{engine_type}/{model_type}.py defining a BaseEngine subclass."
+        )
 
 
 class UniversalEngine:
@@ -233,13 +157,13 @@ class UniversalEngine:
 
     def __init__(
         self,
-        engine_type: str,
-        yaml_path: str,
+        engine_type: str | None = None,
+        yaml_path: str | None = None,
         model_type: Optional[str] = None,
         **kwargs,
     ):
         self.registry = EngineRegistry()
-        self.engine: BaseEngine = self.registry.create_engine(
+        self.engine = self.registry.create_engine(
             engine_type=engine_type,
             yaml_path=yaml_path,
             model_type=model_type,
@@ -247,11 +171,18 @@ class UniversalEngine:
         )
         self.engine_type = engine_type
         self.model_type = model_type
+        
+        if not self.engine_type:
+            self.engine_type = self.engine.config.get("engine", None)
+        if not self.model_type:
+            self.model_type = self.engine.model_type
 
     @torch.no_grad()
-    def run(self, **kwargs):
+    def run(self, *args, **kwargs):
         """Run the engine with given parameters"""
-        return self.engine.run(**kwargs)
+        default_kwargs = self.engine._get_default_kwargs("run")
+        merged_kwargs = {**default_kwargs, **kwargs}
+        return self.engine.run(*args, **merged_kwargs)
 
     def __getattr__(self, name):
         """Delegate any missing attributes to the underlying engine"""
@@ -274,28 +205,24 @@ def get_engine_registry() -> EngineRegistry:
 
 
 def create_engine(
-    engine_type: Literal[
-        "wan",
-        "hunyuan",
-        "ltx",
-        "cogvideo",
-        "magi",
-        "stepvideo",
-        "mochi",
-        "skyreels",
-        "cosmos2",
-        "flux",
-        "hidream",
-        "chroma",
-        "hunyuanimage",
-    ],
     yaml_path: str,
+    engine_type: str | None = None,
     model_type: str | None = None,
     **kwargs,
-) -> UniversalEngine:
-    """Convenience function to create an engine"""
+) -> BaseEngine:
+    """Convenience function to create a concrete engine instance.
+
+    This uses the global :class:`EngineRegistry` and supports both legacy
+    family-level engines and the new autodiscovered engines, where
+    ``engine_type`` is the directory name under ``src/engine`` and
+    ``model_type`` is the stem of the Python file.
+    """
+
     return _global_registry.create_engine(
-        engine_type=engine_type, yaml_path=yaml_path, model_type=model_type, **kwargs
+        engine_type=engine_type,
+        yaml_path=yaml_path,
+        model_type=model_type,
+        **kwargs,
     )
 
 

@@ -2,12 +2,11 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-
-from .base import WanBaseEngine
+from .shared import WanShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
-class WanT2IEngine(WanBaseEngine):
+class WanT2IEngine(WanShared):
     """WAN Text-to-Image Engine Implementation"""
 
     def run(
@@ -141,14 +140,10 @@ class WanT2IEngine(WanBaseEngine):
         safe_emit_progress(progress_callback, 0.40, "Starting denoising")
 
         # Set preview context for step-wise rendering
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,

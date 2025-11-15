@@ -1,6 +1,5 @@
 from src.register import ClassRegister
 
-
 TRANSFORMERS_REGISTRY = ClassRegister()
 
 

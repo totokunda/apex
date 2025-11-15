@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 from src.utils.models.hunyuan import get_rotary_pos_embed
 import torch.nn.functional as F
-from .base import HunyuanBaseEngine
+from .shared import HunyuanShared
 
 
-class HunyuanAvatarEngine(HunyuanBaseEngine):
+class HunyuanAvatarEngine(HunyuanShared):
     """Hunyuan Avatar Engine Implementation"""
 
     def run(
@@ -278,46 +278,294 @@ class HunyuanAvatarEngine(HunyuanBaseEngine):
             )
         elif not use_cache:
             no_cache_steps = list(range(len(timesteps)))
+        
+        if video_length == frame_per_batch or infer_length == frame_per_batch:
+            infer_length = frame_per_batch
+            shift_offset = 0
+            latents_all = latents_all[:, :, :infer_length]
+            audio_prompts_all = audio_prompts_all[:, : infer_length * 4]
 
-        latents = self.denoise(
-            infer_length=infer_length,
-            latents_all=latents,
-            audio_prompts_all=audio_prompts_all,
-            uncond_audio_prompts=uncond_audio_prompts,
-            face_masks=face_masks,
-            negative_prompt_embeds=negative_prompt_embeds,
-            prompt_embeds=prompt_embeds,
-            negative_prompt_attention_mask=negative_prompt_attention_mask,
-            prompt_attention_mask=prompt_attention_mask,
-            pooled_prompt_embeds=pooled_prompt_embeds,
-            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
-            ref_latents=image_latents,
-            uncond_ref_latents=image_latents,
-            timesteps=timesteps,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            use_cfg_guidance=use_cfg_guidance,
-            dynamic_guidance_start=dynamic_guidance_start,
-            dynamic_guidance_end=dynamic_guidance_end,
-            hidden_size=hidden_size,
-            motion_exp=motion_exp,
-            motion_pose=motion_pose,
-            fps_tensor=fps_tensor,
-            freqs_cis=freqs_cis,
-            num_videos=num_videos,
-            transformer_dtype=transformer_dtype,
-            frame_per_batch=frame_per_batch,
-            shift_offset=shift_offset,
-            no_cache_steps=no_cache_steps,
-            guidance_rescale=guidance_rescale,
-            video_length=video_length,
-            **kwargs,
-        )
+        if use_cfg_guidance:
+            prompt_embeds_input = torch.cat([negative_prompt_embeds, prompt_embeds])
+            prompt_mask_input = torch.cat(
+                [negative_prompt_attention_mask, prompt_attention_mask]
+            )
+            pooled_prompt_embeds_input = torch.cat(
+                [negative_pooled_prompt_embeds, pooled_prompt_embeds]
+            )
+            ref_latents_input = torch.cat([image_latents, image_latents])
+
+        cache_tensor = {}
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising Hunyuan Avatar"
+        ) as progress_bar:
+            for i, t in enumerate(timesteps):
+
+                pred_latents = torch.zeros_like(latents_all, dtype=transformer_dtype)
+
+                counter = torch.zeros(
+                    (latents_all.shape[0], latents_all.shape[1], infer_length, 1, 1),
+                    dtype=transformer_dtype,
+                ).to(device=latents_all.device)
+
+                for index_start in range(0, infer_length, frame_per_batch):
+
+                    if hasattr(self.scheduler, "_step_index"):
+                        self.scheduler._step_index = None
+
+                    index_start = index_start - shift
+
+                    idx_list = [
+                        ii % infer_length
+                        for ii in range(index_start, index_start + frame_per_batch)
+                    ]
+                    latents = latents_all[:, :, idx_list].clone()
+
+                    idx_list_audio = [
+                        ii % audio_prompts_all.shape[1]
+                        for ii in range(
+                            index_start * 4, (index_start + frame_per_batch) * 4 - 3
+                        )
+                    ]
+
+                    # Ensure audio prompt list is not out of bounds
+                    if max(idx_list_audio) >= audio_prompts_all.shape[1]:
+                        idx_list_audio = [
+                            min(i, audio_prompts_all.shape[1] - 1)
+                            for i in idx_list_audio
+                        ]
+
+                    audio_prompts = audio_prompts_all[:, idx_list_audio].clone()
+
+                    # Classifier-Free Guidance setup
+                    if use_cfg_guidance:
+                        latent_model_input = torch.cat([latents] * 2)
+                    else:
+                        latent_model_input = latents
+                    latent_model_input = self.scheduler.scale_model_input(
+                        latent_model_input, t
+                    ).to(transformer_dtype)
+
+                    if use_cfg_guidance:
+                        # Dynamic Guidance
+                        if i < 10:
+                            current_guidance_scale = (1 - i / len(timesteps)) * (
+                                guidance_scale - 2
+                            ) + 2
+                            audio_prompts_input = torch.cat(
+                                [uncond_audio_prompts, audio_prompts], dim=0
+                            )
+                            face_masks_input = torch.cat([face_masks * 0.6] * 2, dim=0)
+                        else:
+                            current_guidance_scale = (1 - i / len(timesteps)) * (
+                                dynamic_guidance_end - dynamic_guidance_start
+                            ) + dynamic_guidance_start
+                            prompt_embeds_input = torch.cat(
+                                [prompt_embeds, prompt_embeds]
+                            )
+                            prompt_mask_input = torch.cat(
+                                [prompt_attention_mask, prompt_attention_mask]
+                            )
+                            pooled_prompt_embeds_input = torch.cat(
+                                [pooled_prompt_embeds, pooled_prompt_embeds]
+                            )
+                            audio_prompts_input = torch.cat(
+                                [uncond_audio_prompts, audio_prompts], dim=0
+                            )
+                            face_masks_input = torch.cat([face_masks] * 2, dim=0)
+
+                        motion_exp_input = torch.cat([motion_exp] * 2)
+                        motion_pose_input = torch.cat([motion_pose] * 2)
+                        fps_input = torch.cat([fps_tensor] * 2)
+                    else:
+                        current_guidance_scale = guidance_scale
+                        prompt_embeds_input = prompt_embeds
+                        prompt_mask_input = prompt_attention_mask
+                        pooled_prompt_embeds_input = pooled_prompt_embeds
+                        audio_prompts_input = audio_prompts
+                        face_masks_input = face_masks
+                        ref_latents_input = image_latents
+                        motion_exp_input = motion_exp
+                        motion_pose_input = motion_pose
+                        fps_input = fps_tensor
+
+                    latent_input_len = (
+                        (latent_model_input.shape[-1] // 2)
+                        * (latent_model_input.shape[-2] // 2)
+                        * latent_model_input.shape[-3]
+                    )
+                    latent_ref_len = (
+                        (latent_model_input.shape[-1] // 2)
+                        * (latent_model_input.shape[-2] // 2)
+                        * (latent_model_input.shape[-3] + 1)
+                    )
+
+                    timestep = t.repeat(latent_model_input.shape[0])
+
+                    if i in no_cache_steps:
+                        use_cache = False
+
+                        with torch.autocast(
+                            device_type=self.device.type, dtype=transformer_dtype
+                        ):
+                            noise_pred = self.transformer(
+                                hidden_states=latent_model_input,
+                                timestep=timestep,
+                                encoder_hidden_states=prompt_embeds_input,
+                                encoder_attention_mask=prompt_mask_input,
+                                pooled_projections=pooled_prompt_embeds_input,
+                                ref_latents=ref_latents_input,
+                                encoder_hidden_states_face_mask=face_masks_input,
+                                encoder_hidden_states_audio=audio_prompts_input,
+                                encoder_hidden_states_motion=motion_exp_input,
+                                encoder_hidden_states_pose=motion_pose_input,
+                                encoder_hidden_states_fps=fps_input,
+                                freqs_cos=freqs_cis[0],
+                                freqs_sin=freqs_cis[1],
+                                use_cache=False,
+                                return_dict=False,
+                            )[0]
+
+                        if not cache_tensor:
+                            cache_tensor = {
+                                "reference_latent": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        (latent_model_input.shape[-1] // 2)
+                                        * (latent_model_input.shape[-2] // 2),
+                                        hidden_size,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
+                                "input_latent": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        (latent_model_input.shape[-1] // 2)
+                                        * (latent_model_input.shape[-2] // 2),
+                                        hidden_size,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
+                                "prompt_embeds": torch.zeros(
+                                    [
+                                        latent_model_input.shape[0],
+                                        latents_all.shape[-3],
+                                        prompt_embeds_input.shape[1],
+                                        hidden_size,
+                                    ]
+                                )
+                                .to(self.transformer.latent_cache.dtype)
+                                .to(latent_model_input.device)
+                                .clone(),
+                            }
+
+                        cache_tensor["reference_latent"][:, idx_list] = (
+                            self.transformer.latent_cache[
+                                :, : latent_ref_len - latent_input_len
+                            ]
+                            .reshape(latent_model_input.shape[0], 1, -1, hidden_size)
+                            .repeat(1, len(idx_list), 1, 1)
+                            .to(latent_model_input.device)
+                        )
+                        cache_tensor["input_latent"][:, idx_list] = (
+                            self.transformer.latent_cache[
+                                :, latent_ref_len - latent_input_len : latent_ref_len
+                            ]
+                            .reshape(
+                                latent_model_input.shape[0],
+                                len(idx_list),
+                                -1,
+                                hidden_size,
+                            )
+                            .to(latent_model_input.device)
+                        )
+                        cache_tensor["prompt_embeds"][:, idx_list] = (
+                            self.transformer.latent_cache[:, latent_ref_len:]
+                            .unsqueeze(1)
+                            .repeat(1, len(idx_list), 1, 1)
+                            .to(latent_model_input.device)
+                        )
+                    else:
+                        use_cache = True
+                        self.transformer.latent_cache[
+                            :, : latent_ref_len - latent_input_len
+                        ] = cache_tensor["reference_latent"][:, idx_list][:, 0].clone()
+                        self.transformer.latent_cache[
+                            :, latent_ref_len - latent_input_len : latent_ref_len
+                        ] = (
+                            cache_tensor["input_latent"][:, idx_list]
+                            .reshape(-1, latent_input_len, hidden_size)
+                            .clone()
+                        )
+                        self.transformer.latent_cache[:, latent_ref_len:] = (
+                            cache_tensor["prompt_embeds"][:, idx_list][:, 0].clone()
+                        )
+
+                        with torch.autocast(
+                            device_type=self.device.type, dtype=transformer_dtype
+                        ):
+                            noise_pred = self.transformer(
+                                hidden_states=latent_model_input,
+                                timestep=timestep,
+                                encoder_hidden_states=prompt_embeds_input,
+                                encoder_attention_mask=prompt_mask_input,
+                                pooled_projections=pooled_prompt_embeds_input,
+                                ref_latents=ref_latents_input,
+                                encoder_hidden_states_face_mask=face_masks_input,
+                                encoder_hidden_states_audio=audio_prompts_input,
+                                encoder_hidden_states_motion=motion_exp_input,
+                                encoder_hidden_states_pose=motion_pose_input,
+                                encoder_hidden_states_fps=fps_input,
+                                freqs_cos=freqs_cis[0],
+                                freqs_sin=freqs_cis[1],
+                                use_cache=use_cache,
+                                return_dict=False,
+                            )[0]
+
+                    if use_cfg_guidance:
+                        # Perform guidance
+                        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                        noise_pred = noise_pred_uncond + current_guidance_scale * (
+                            noise_pred_text - noise_pred_uncond
+                        )
+
+                    if use_cfg_guidance and guidance_rescale > 0:
+                        noise_pred = self.rescale_noise_cfg(
+                            noise_pred,
+                            noise_pred_text,
+                            guidance_rescale=guidance_rescale,
+                        )
+                    # Scheduler step
+                    latents = self.scheduler.step(
+                        noise_pred, t, latents, return_dict=False
+                    )[0]
+
+                    latents = latents.to(transformer_dtype)
+
+                    for iii in range(frame_per_batch):
+                        p = (index_start + iii) % pred_latents.shape[2]
+                        pred_latents[:, :, p] += latents[:, :, iii]
+                        counter[:, :, p] += 1
+
+                shift += shift_offset
+                shift = shift % frame_per_batch
+                pred_latents = pred_latents / counter
+                latents_all = pred_latents
+
+                progress_bar.update()
+
+        self.logger.info("Denoising completed.")
 
         if offload:
             self._offload(self.transformer)
 
-        latents = latents.float()[:, :, :video_length]
+        latents = latents_all.float()[:, :, :video_length]
 
         if return_latents:
             return latents

@@ -1,10 +1,9 @@
 import torch
 from typing import Dict, Any, Callable, List
+from .shared import StepVideoShared
 
-from .base import StepVideoBaseEngine
 
-
-class StepVideoT2VEngine(StepVideoBaseEngine):
+class StepVideoT2VEngine(StepVideoShared):
     """StepVideo Text-to-Video Engine Implementation"""
 
     def run(

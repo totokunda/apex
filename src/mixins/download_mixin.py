@@ -73,17 +73,7 @@ class DownloadMixin:
         except Exception:
             return True
 
-    def fetch_config(
-        self,
-        config_path: str,
-        config_save_path: str = DEFAULT_CONFIG_SAVE_PATH,
-        return_path: bool = False,
-    ):
-        path = self._download(config_path, config_save_path)
-        if return_path:
-            return path
-        else:
-            return self._load_config_file(path)
+    
 
     def _save_config(self, config: Dict[str, Any], save_path: str):
         import json
@@ -1100,7 +1090,7 @@ class DownloadMixin:
         progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
         session=None,
         filename: Optional[str] = None,
-        chunk_size: int = 1024 * 1024, # 10MB
+        chunk_size: int = 1024 * 1024, # 1MB
         adaptive: bool = True,
         initial_chunk_size: int = 512 * 1024,  # 512KB starting point for probing
         target_chunk_seconds: float = 0.25,    # aim ~250ms per read

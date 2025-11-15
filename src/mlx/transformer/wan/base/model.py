@@ -2,7 +2,7 @@ import mlx.core as mx
 from mlx import nn
 from src.mlx.transformer.base import TRANSFORMERS_REGISTRY
 from typing import Optional, Tuple, Union, Dict, Any
-from src.mlx.attention.processors.wan_processor import WanAttnProcessor2_0
+from .attention import WanAttnProcessor2_0
 from src.mlx.attention.base_attention import Attention
 from src.mlx.modules.layers import FP32LayerNorm, FeedForward, PixArtAlphaTextProjection
 from src.mlx.modules.embedding import Timesteps, TimestepEmbedding

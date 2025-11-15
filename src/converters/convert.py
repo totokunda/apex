@@ -250,8 +250,6 @@ def convert_transformer(
     **transformer_converter_kwargs,
 ):
 
-
-
     if "mlx" in model_base:
         using_mlx = True
         model_base = model_base.replace("mlx.", "")
@@ -328,7 +326,7 @@ def convert_vae(
 
     return model
 
-
+ 
 def get_transformer_keys(model_base: str, config: dict):
 
     using_mlx = False

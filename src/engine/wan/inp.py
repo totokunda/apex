@@ -3,11 +3,11 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
-from .base import WanBaseEngine
+from .shared import WanShared
 from einops import rearrange
 
 
-class WanInpEngine(WanBaseEngine):
+class WanInpEngine(WanShared):
     """WAN Inpainting Engine Implementation for video inpainting with masks"""
 
     def run(
@@ -208,7 +208,7 @@ class WanInpEngine(WanBaseEngine):
         else:
             clip_image = None
 
-        if clip_image is not None and self.main_engine.denoise_type != "moe":
+        if clip_image is not None and self.denoise_type != "moe":
             loaded_image = self._load_image(clip_image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width

@@ -1,11 +1,10 @@
 import torch
 from typing import Dict, Any, Callable, List, Union
 import numpy as np
+from .shared import HunyuanShared
 
-from .base import HunyuanBaseEngine
 
-
-class HunyuanT2VEngine(HunyuanBaseEngine):
+class HunyuanT2VEngine(HunyuanShared):
     """Hunyuan Text-to-Video Engine Implementation"""
 
     def run(

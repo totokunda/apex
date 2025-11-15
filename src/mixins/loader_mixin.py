@@ -27,7 +27,7 @@ import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model
-from src.quantize.load import load_gguf, dequantize_tensor
+from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from src.converters.convert import get_transformer_converter
 
@@ -36,6 +36,7 @@ from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
 import mlx.core as mx
 from src.utils.mlx import check_mlx_convolutional_weights
+from src.utils.defaults import DEFAULT_CONFIG_SAVE_PATH
 from src.types import InputImage, InputVideo
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
@@ -48,6 +49,18 @@ VIDEO_EXTS = [
 
 class LoaderMixin(DownloadMixin):
     logger: Logger = logger
+    
+    def fetch_config(
+        self,
+        config_path: str,
+        config_save_path: str = DEFAULT_CONFIG_SAVE_PATH,
+        return_path: bool = False,
+    ):
+        path = self._download(config_path, config_save_path)
+        if return_path:
+            return path
+        else:
+            return self._load_config_file(path)
 
     def _load_model(
         self,
@@ -63,9 +76,25 @@ class LoaderMixin(DownloadMixin):
         if extra_kwargs is None:
             extra_kwargs = {}
 
+        # Detect if memory management is configured for this component on the owning engine.
+        # We intentionally keep this lazy and optional so that LoaderMixin can be used
+        # independently of BaseEngine. Only enable for PyTorch engines, since group offloading
+        # relies on torch.nn.Module hooks provided by diffusers.
+        mm_config = None
+        needs_memory_management = False
+        engine_type = getattr(self, "engine_type", "torch")
+        if engine_type == "torch":
+            resolve_mm_cfg = getattr(self, "_resolve_memory_config_for_component", None)
+            if callable(resolve_mm_cfg):
+                try:
+                    mm_config = resolve_mm_cfg(component)
+                except Exception:
+                    mm_config = None
+                if mm_config is not None:
+                    needs_memory_management = True
+
         model_base = component.get("base")
         model_path = component.get("model_path")
-
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -81,6 +110,7 @@ class LoaderMixin(DownloadMixin):
             config.update(self.fetch_config(config_path))
         if component.get("config"):
             config.update(component.get("config"))
+        
 
         if (
             not config
@@ -88,12 +118,10 @@ class LoaderMixin(DownloadMixin):
                 os.path.isdir(model_path)
                 and os.path.exists(os.path.join(model_path, "config.json"))
             )
-        ) and not component.get("extra_model_paths"):
-            if config:
-                # replace the config.json with the config
-                config_path = os.path.join(model_path, "config.json")
-                self._save_config(config, config_path)
-
+        ) and (
+            not component.get("extra_model_paths")
+        ) and not extra_kwargs.get("load_from_config") and not needs_memory_management:
+           
             if (
                 hasattr(self, "engine_type")
                 and self.engine_type == "mlx"
@@ -153,7 +181,6 @@ class LoaderMixin(DownloadMixin):
             and hasattr(self, "engine_type")
             and self.engine_type == "mlx"
         ):
-
             self.logger.info(f"Loading GGUF model from {model_path}")
             # Can load gguf directly into mlx model no need to convert
             gguf_weights = mx.load(model_path)
@@ -251,6 +278,24 @@ class LoaderMixin(DownloadMixin):
                     "Model has parameters on meta device, this is not supported"
                 )
 
+        # If memory management is enabled for this component and weights are loaded,
+        # activate group offloading on the fully initialized module.
+        if mm_config is not None and not no_weights:
+            apply_group_offloading = getattr(self, "_apply_group_offloading", None)
+            if callable(apply_group_offloading):
+                label = component.get("name") or component.get("type") or type(model).__name__
+                offloading_module = component.get("offloading_module", None)
+                if offloading_module:
+                    model_to_offload = model.get_submodule(offloading_module)
+                else:
+                    model_to_offload = model
+                try:
+                    apply_group_offloading(model_to_offload, mm_config, module_label=label)
+                except Exception as e:
+                    if hasattr(self, "logger"):
+                        self.logger.warning(
+                            f"Failed to enable group offloading for '{label}': {e}"
+                        )
         return model
 
     def _load_config_file(self, file_path: str | Path):

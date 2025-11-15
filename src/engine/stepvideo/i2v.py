@@ -2,10 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List
 from PIL import Image
 from torchvision import transforms as T
-from .base import StepVideoBaseEngine
+from .shared import StepVideoShared
 
 
-class StepVideoI2VEngine(StepVideoBaseEngine):
+class StepVideoI2VEngine(StepVideoShared):
     """StepVideo Image-to-Video Engine Implementation"""
 
     def run(

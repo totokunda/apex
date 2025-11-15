@@ -4,10 +4,10 @@ from PIL import Image
 import math
 from einops import rearrange
 from tqdm import tqdm
-from .base import MagiBaseEngine
+from .shared import MagiShared
 
 
-class MagiI2VEngine(MagiBaseEngine):
+class MagiI2VEngine(MagiShared):
     """Magi Image-to-Video Engine Implementation"""
 
     def run(

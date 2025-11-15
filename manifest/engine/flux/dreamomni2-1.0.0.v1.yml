@@ -106,7 +106,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-
+      file_size: 16600354900
   defaults:
     run:
       num_inference_steps: 40

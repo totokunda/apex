@@ -1,6 +1,6 @@
 import torch
 from typing import Dict, Any, Callable, List
-from .base import QwenImageBaseEngine
+from .shared import QwenImageShared
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from src.types.media import InputImage
@@ -8,7 +8,7 @@ from src.types.media import InputImage
 CONDITION_IMAGE_SIZE = 384 * 384
 VAE_IMAGE_SIZE = 1024 * 1024
 
-class QwenImageEditPlusEngine(QwenImageBaseEngine):
+class QwenImageEditPlusEngine(QwenImageShared):
     """QwenImage Edit Plus Engine Implementation"""
     def run(
         self,
@@ -225,15 +225,9 @@ class QwenImageEditPlusEngine(QwenImageBaseEngine):
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
-        try:
-            self.main_engine._preview_height = height
-            self.main_engine._preview_width = width
-            self.main_engine._preview_offload = offload
-        except Exception:
-            # Fallback for safety
-            self._preview_height = height
-            self._preview_width = width
-            self._preview_offload = offload
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
 
         latents = self.denoise(
             latents=latents,

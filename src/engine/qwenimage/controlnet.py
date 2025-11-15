@@ -1,11 +1,12 @@
 import torch
 from typing import Dict, Any, Callable, List, Union
-from .base import QwenImageBaseEngine
+from .shared import QwenImageShared
 import numpy as np
 from PIL import Image
 from diffusers.models.controlnets.controlnet_qwenimage import QwenImageControlNetModel, QwenImageMultiControlNetModel
+from src.utils.progress import make_mapped_progress
 
-class QwenImageControlNetEngine(QwenImageBaseEngine):
+class QwenImageControlNetEngine(QwenImageShared):
     """QwenImage ControlNet Engine Implementation"""
 
     def run(
@@ -27,6 +28,7 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -187,29 +189,102 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
         )
 
         self.scheduler.set_begin_index(0)
+        
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
-        latents = self.denoise(
-            latents=latents,
-            timesteps=timesteps,
-            num_inference_steps=num_inference_steps,
-            num_warmup_steps=num_warmup_steps,
-            guidance=guidance,
-            true_cfg_scale=true_cfg_scale,
-            prompt_embeds=prompt_embeds,
-            prompt_embeds_mask=prompt_embeds_mask,
-            negative_prompt_embeds=negative_prompt_embeds,
-            negative_prompt_embeds_mask=negative_prompt_embeds_mask,
-            txt_seq_lens=txt_seq_lens,
-            negative_txt_seq_lens=negative_txt_seq_lens,
-            img_shapes=img_shapes,
-            attention_kwargs=attention_kwargs,
-            render_on_step=render_on_step,
-            render_on_step_callback=render_on_step_callback,
-            use_cfg_guidance=use_cfg_guidance,
-            controlnet_keep=controlnet_keep,
-            controlnet_conditioning_scale=controlnet_conditioning_scale,
-            control_image=control_image 
-        )
+        total_steps = len(timesteps) if timesteps is not None else 0
+        if denoise_progress_callback is not None:
+            try:
+                denoise_progress_callback(0.0, "Starting denoise")
+            except Exception:
+                pass
+        
+        with self._progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+                timestep = t.expand(latents.shape[0]).to(latents.dtype)
+                
+                if isinstance(controlnet_keep[i], list):
+                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
+                else:
+                    controlnet_cond_scale = controlnet_conditioning_scale
+                    if isinstance(controlnet_cond_scale, list):
+                        controlnet_cond_scale = controlnet_cond_scale[0]
+                    cond_scale = controlnet_cond_scale * controlnet_keep[i]
+                    
+                controlnet_block_samples = self.controlnet(
+                    hidden_states=latents,
+                    controlnet_cond=control_image,
+                    conditioning_scale=cond_scale,
+                    timestep=timestep / 1000,
+                    encoder_hidden_states=prompt_embeds,
+                    encoder_hidden_states_mask=prompt_embeds_mask,
+                    img_shapes=img_shapes,
+                    txt_seq_lens=txt_seq_lens,
+                    return_dict=False,
+                )
+                    
+                with self.transformer.cache_context("cond"):
+                    noise_pred = self.transformer(
+                        hidden_states=latents,
+                        timestep=timestep / 1000,
+                        guidance=guidance,
+                        encoder_hidden_states_mask=prompt_embeds_mask,
+                        encoder_hidden_states=prompt_embeds,
+                        img_shapes=img_shapes,
+                        txt_seq_lens=txt_seq_lens,
+                        controlnet_block_samples=controlnet_block_samples,
+                        attention_kwargs=attention_kwargs,
+                        return_dict=False,
+                    )[0]
+ 
+                if use_cfg_guidance:
+                    with self.transformer.cache_context("uncond"):
+                        neg_noise_pred = self.transformer(
+                            hidden_states=latents,
+                            timestep=timestep / 1000,
+                            guidance=guidance,
+                            encoder_hidden_states_mask=negative_prompt_embeds_mask,
+                            encoder_hidden_states=negative_prompt_embeds,
+                            img_shapes=img_shapes,
+                            txt_seq_lens=negative_txt_seq_lens,
+                            controlnet_block_samples=controlnet_block_samples,
+                            attention_kwargs=attention_kwargs,
+                            return_dict=False,
+                        )[0]
+
+                    comb_pred = neg_noise_pred + true_cfg_scale * (
+                        noise_pred - neg_noise_pred
+                    )
+
+                    cond_norm = torch.norm(noise_pred, dim=-1, keepdim=True)
+                    noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
+                    noise_pred = comb_pred * (cond_norm / noise_norm)
+
+                # compute the previous noisy sample x_t -> x_t-1
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
+
+                if latents.dtype != latents_dtype:
+                    if torch.backends.mps.is_available():
+                        latents = latents.to(latents_dtype)
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
+                    progress_bar.update()
+
+                if denoise_progress_callback is not None and total_steps > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                    except Exception:
+                        pass
 
         if offload:
             self._offload(self.transformer)
@@ -221,4 +296,4 @@ class QwenImageControlNetEngine(QwenImageBaseEngine):
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
         image = self._tensor_to_frame(tensor_image)
-        return [image]
+        return image

@@ -2,10 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from .base import WanBaseEngine
+from .shared import WanShared
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
-
-class WanRecamEngine(WanBaseEngine):
+class WanRecamEngine(WanShared):
     """WAN Recam Engine Implementation"""
 
     def run(
@@ -39,6 +39,7 @@ class WanRecamEngine(WanBaseEngine):
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
         boundary_ratio: float | None = None,
+        progress_callback: Callable = None,
     ):
 
         if not self.text_encoder:
@@ -175,32 +176,68 @@ class WanRecamEngine(WanBaseEngine):
 
         source_latents = source_latents[:, :, : latents.shape[2], :, :]
 
-        latents = self.denoise(
-            boundary_timestep=boundary_timestep,
-            timesteps=timesteps,
-            latents=latents,
-            source_latents=source_latents,
-            transformer_kwargs=dict(
-                encoder_hidden_states=prompt_embeds,
-                attention_kwargs=attention_kwargs,
-                cam_hidden_states=camera_extrinsics.to(transformer_dtype),
-            ),
-            unconditional_transformer_kwargs=(
-                dict(
-                    encoder_hidden_states=negative_prompt_embeds,
-                    cam_hidden_states=camera_extrinsics.to(transformer_dtype),
-                    attention_kwargs=attention_kwargs,
+        total_steps = len(timesteps) if timesteps is not None else 0
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.5, 0.9)
+        
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+        self.to_device(self.transformer)
+
+        model_type_str = getattr(self, "model_type", "WAN")
+        target_length = latents.shape[2]
+
+        with self._progress_bar(
+            len(timesteps), desc=f"Sampling {model_type_str}"
+        ) as pbar:
+            total_steps = len(timesteps)
+            for i, t in enumerate(timesteps):
+
+                timestep = t.expand(latents.shape[0])
+                latent_model_input = torch.cat([latents, source_latents], dim=2).to(
+                    transformer_dtype
                 )
-                if negative_prompt_embeds is not None
-                else None
-            ),
-            transformer_dtype=transformer_dtype,
-            use_cfg_guidance=use_cfg_guidance,
-            render_on_step=render_on_step,
-            render_on_step_callback=render_on_step_callback,
-            scheduler=scheduler,
-            guidance_scale=guidance_scale,
-        )
+
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep,
+                    return_dict=False,
+                    encoder_hidden_states=prompt_embeds,
+                    attention_kwargs=attention_kwargs,
+                    cam_hidden_states=camera_extrinsics.to(transformer_dtype),
+                )[0]
+
+                if use_cfg_guidance and negative_prompt_embeds is not None:
+                    uncond_noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        timestep=timestep,
+                        return_dict=False,
+                       encoder_hidden_states=negative_prompt_embeds,
+                       cam_hidden_states=camera_extrinsics.to(transformer_dtype),
+                       attention_kwargs=attention_kwargs,
+                    )[0]
+                    noise_pred = uncond_noise_pred + guidance_scale * (
+                        noise_pred - uncond_noise_pred
+                    )
+
+                latents = scheduler.step(
+                    noise_pred[:, :, :target_length],
+                    t,
+                    latents[:, :, :target_length],
+                    return_dict=False,
+                )[0]
+
+                if render_on_step and render_on_step_callback:
+                    self._render_step(latents, render_on_step_callback)
+                pbar.update(1)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(total_steps),
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
+
+            self.logger.info("Denoising completed.")
 
         if offload:
             self._offload(self.transformer)

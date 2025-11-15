@@ -3,12 +3,36 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import math
+from .shared import HunyuanShared
 
-from .base import HunyuanBaseEngine
-
-
-class HunyuanFramepackEngine(HunyuanBaseEngine):
+class HunyuanFramepackEngine(HunyuanShared):
     """Hunyuan Framepack Engine Implementation"""
+    
+    def _soft_append(
+        self, history: torch.Tensor, current: torch.Tensor, overlap: int = 0
+    ):
+        """Soft append with blending for framepack generation"""
+        if overlap <= 0:
+            return torch.cat([history, current], dim=2)
+
+        assert (
+            history.shape[2] >= overlap
+        ), f"Current length ({history.shape[2]}) must be >= overlap ({overlap})"
+        assert (
+            current.shape[2] >= overlap
+        ), f"History length ({current.shape[2]}) must be >= overlap ({overlap})"
+
+        weights = torch.linspace(
+            1, 0, overlap, dtype=history.dtype, device=history.device
+        ).view(1, 1, -1, 1, 1)
+        blended = (
+            weights * history[:, :, -overlap:] + (1 - weights) * current[:, :, :overlap]
+        )
+        output = torch.cat(
+            [history[:, :, :-overlap], blended, current[:, :, overlap:]], dim=2
+        )
+
+        return output.to(history)
 
     def run(
         self,

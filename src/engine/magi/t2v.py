@@ -1,13 +1,13 @@
 import torch
 from typing import Dict, Any, Callable, List, Union
 import math
-from .base import MagiBaseEngine
+from .shared import MagiShared
 from einops import rearrange
 from PIL import Image
 from tqdm import tqdm
 
 
-class MagiT2VEngine(MagiBaseEngine):
+class MagiT2VEngine(MagiShared):
     """Magi Text-to-Video Engine Implementation"""
 
     def run(
