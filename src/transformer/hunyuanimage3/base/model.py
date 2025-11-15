@@ -32,6 +32,7 @@ from transformers.modeling_outputs import (
 )
 from transformers.modeling_utils import PreTrainedModel
 from diffusers.models.modeling_utils import ModelMixin
+from transformers import GenerationMixin
 from transformers.utils import (
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
@@ -1449,6 +1450,8 @@ class HunyuanImage3DecoderLayer(nn.Module):
             self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
             assert False, "other norm_type are not supported"
+            
+            
 
     def forward(
             self,
@@ -1628,13 +1631,110 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
         self.layers = nn.ModuleList(
             [HunyuanImage3DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
-        if not config.add_classification_head:
-            self.ln_f = HunyuanRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-
         # Initialize weights and apply final processing
         self.post_init()
 
         self.shared_tensor = None
+        
+    
+    def instantiate_vae_image_tokens(
+            self,
+            x: torch.Tensor,
+            images: BatchRaggedImages,
+            ts: BatchRaggedTensor,
+            image_mask: torch.Tensor,
+    ):
+        """
+        Instantiate the VAE image embeddings into the input embedding sequence.
+
+        Args:
+            x: input sequence, (batch_size, seq_len, n_embd)
+            images: BatchRaggedImages
+                images can be a 4-D tensor, or a list of 4-D tensors, or a list of lists of 3-D tensors.
+            ts: BatchRaggedTensor
+                ts can be a 1-D tensor, or a list of 1-D tensors
+            image_mask: (batch_size, seq_len)
+        """
+        batch_size, seq_len, n_embd = x.shape
+
+        if isinstance(images, list):
+            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            t_emb = []
+            for i, (image_i, t_i) in enumerate(zip(images, ts)):
+                if isinstance(image_i, torch.Tensor):
+                    # time_embed needs a 1-D tensor as input
+                    t_i_emb = self.time_embed(t_i)
+                    # n_{i} x one_image_seq_len x n_embd
+                    image_i_seq, _, _ = self.patch_embed(image_i, t_i_emb)
+                    # 1 x (n_{i} * one_image_seq_len)
+                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
+                    x[i:i + 1].scatter_(
+                        dim=1,
+                        index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                        # 1 x (n_{i} * one_image_seq_len) x n_embd
+                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x (n_{i} * one_image_seq_len) x n_embd
+                    )
+                    t_emb.append(t_i_emb)
+                elif isinstance(image_i, list):
+                    # time_embed needs a 1-D tensor as input
+                    t_i_emb = self.time_embed(t_i)  # n_{i} x d
+                    image_i_seq_list = [], []
+                    for j in range(len(image_i)):
+                        image_ij = image_i[j]
+                        if image_ij.dim() == 4:
+                            assert image_i[j].shape[0] == 1, "image_i[j] should have a batch dimension of 1"
+                        elif image_ij.dim() == 3:
+                            image_ij = image_ij.unsqueeze(0)
+                        else:
+                            raise ValueError(f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}")
+                        # 1 x one_image_seq_len_{j} x n_embd
+                        image_i_seq_j, _, _ = self.patch_embed(image_ij, t_i_emb[j:j + 1])
+                        image_i_seq_list.append(image_i_seq_j)
+                    # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                    image_i_seq = torch.cat(image_i_seq_list, dim=1)
+                    # 1 x sum_{j}(one_image_seq_len_{j})
+                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
+                    x[i:i + 1].scatter_(
+                        dim=1,
+                        index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                        # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                    )
+                    t_emb.append(t_i_emb)
+                else:
+                    raise TypeError(f"image_i should be a torch.Tensor or a list, got {type(image_i)}")
+            token_h, token_w = None, None
+        else:
+            # images is a 4-D tensor
+            batch_size, seq_len, n_embd = x.shape
+            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            t_emb = self.time_embed(ts)
+            image_seq, token_h, token_w = self.patch_embed(images, t_emb)
+            image_scatter_index = index.masked_select(image_mask.bool()).reshape(batch_size, -1)
+            x.scatter_(
+                dim=1,
+                index=image_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                src=image_seq,
+            )
+
+        return x, token_h, token_w
+
+    def instantiate_timestep_tokens(
+            self,
+            x: torch.Tensor,
+            t: BatchRaggedTensor,
+            timestep_scatter_index: BatchRaggedTensor,
+    ):
+        batch_size, seq_len, n_embd = x.shape
+        # batch_size x n x n_embd
+        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(batch_size, -1, n_embd)
+        x.scatter_(
+            dim=1,
+            index=timestep_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+            src=timestep_scatter_src,
+        )
+
+        return x
 
     @add_start_docstrings_to_model_forward(Hunyuan_INPUTS_DOCSTRING)
     def forward(
@@ -1699,11 +1799,6 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-        if not self.add_classification_head:
-            # Do ln_f outside of the model for compatibility with image generation.
-            pass
-            # hidden_states = self.ln_f(hidden_states)
-
         # add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
@@ -1720,3 +1815,248 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
             attentions=all_self_attns,
         )
 
+
+class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
+    def __init__(self, config: HunyuanImage3Config, **kwargs):
+        super().__init__(config)
+        self.config = config
+        
+        self.model = HunyuanImage3Model(config)
+        
+        self.timestep_emb = TimestepEmbedder(hidden_size=config.hidden_size)
+        if config.img_proj_type == "unet":
+            self.patch_embed = UNetDown(
+                patch_size=config.patch_size,
+                emb_channels=config.hidden_size,
+                in_channels=config.vae["latent_channels"],
+                hidden_channels=config.patch_embed_hidden_dim,
+                out_channels=config.hidden_size,
+            )
+            self.time_embed = TimestepEmbedder(hidden_size=config.hidden_size)
+
+            self.final_layer = UNetUp(
+                patch_size=config.patch_size,
+                emb_channels=config.hidden_size,
+                in_channels=config.hidden_size,
+                hidden_channels=config.patch_embed_hidden_dim,
+                out_channels=config.vae["latent_channels"],
+                out_norm=True,
+            )
+            self.time_embed_2 = TimestepEmbedder(hidden_size=config.hidden_size)
+        else:
+            raise ValueError(f"Unknown img_proj_type {config.img_proj_type}")
+
+        # transformer backbone
+        self.model = HunyuanImage3Model(config)
+
+        self.pad_id = config.pad_id
+        self.vocab_size = config.vocab_size
+        
+    def instantiate_vae_image_tokens(
+            self,
+            x: torch.Tensor,
+            images: BatchRaggedImages,
+            ts: BatchRaggedTensor,
+            image_mask: torch.Tensor,
+    ):
+        """
+        Instantiate the VAE image embeddings into the input embedding sequence.
+
+        Args:
+            x: input sequence, (batch_size, seq_len, n_embd)
+            images: BatchRaggedImages
+                images can be a 4-D tensor, or a list of 4-D tensors, or a list of lists of 3-D tensors.
+            ts: BatchRaggedTensor
+                ts can be a 1-D tensor, or a list of 1-D tensors
+            image_mask: (batch_size, seq_len)
+        """
+        batch_size, seq_len, n_embd = x.shape
+
+        if isinstance(images, list):
+            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            t_emb = []
+            for i, (image_i, t_i) in enumerate(zip(images, ts)):
+                if isinstance(image_i, torch.Tensor):
+                    # time_embed needs a 1-D tensor as input
+                    t_i_emb = self.time_embed(t_i)
+                    # n_{i} x one_image_seq_len x n_embd
+                    image_i_seq, _, _ = self.patch_embed(image_i, t_i_emb)
+                    # 1 x (n_{i} * one_image_seq_len)
+                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
+                    x[i:i + 1].scatter_(
+                        dim=1,
+                        index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                        # 1 x (n_{i} * one_image_seq_len) x n_embd
+                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x (n_{i} * one_image_seq_len) x n_embd
+                    )
+                    t_emb.append(t_i_emb)
+                elif isinstance(image_i, list):
+                    # time_embed needs a 1-D tensor as input
+                    t_i_emb = self.time_embed(t_i)  # n_{i} x d
+                    image_i_seq_list = [], []
+                    for j in range(len(image_i)):
+                        image_ij = image_i[j]
+                        if image_ij.dim() == 4:
+                            assert image_i[j].shape[0] == 1, "image_i[j] should have a batch dimension of 1"
+                        elif image_ij.dim() == 3:
+                            image_ij = image_ij.unsqueeze(0)
+                        else:
+                            raise ValueError(f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}")
+                        # 1 x one_image_seq_len_{j} x n_embd
+                        image_i_seq_j, _, _ = self.patch_embed(image_ij, t_i_emb[j:j + 1])
+                        image_i_seq_list.append(image_i_seq_j)
+                    # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                    image_i_seq = torch.cat(image_i_seq_list, dim=1)
+                    # 1 x sum_{j}(one_image_seq_len_{j})
+                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
+                    x[i:i + 1].scatter_(
+                        dim=1,
+                        index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                        # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                    )
+                    t_emb.append(t_i_emb)
+                else:
+                    raise TypeError(f"image_i should be a torch.Tensor or a list, got {type(image_i)}")
+            token_h, token_w = None, None
+        else:
+            # images is a 4-D tensor
+            batch_size, seq_len, n_embd = x.shape
+            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            t_emb = self.time_embed(ts)
+            image_seq, token_h, token_w = self.patch_embed(images, t_emb)
+            image_scatter_index = index.masked_select(image_mask.bool()).reshape(batch_size, -1)
+            x.scatter_(
+                dim=1,
+                index=image_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+                src=image_seq,
+            )
+
+        return x, token_h, token_w
+
+    def instantiate_timestep_tokens(
+            self,
+            x: torch.Tensor,
+            t: BatchRaggedTensor,
+            timestep_scatter_index: BatchRaggedTensor,
+    ):
+        batch_size, seq_len, n_embd = x.shape
+        # batch_size x n x n_embd
+        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(batch_size, -1, n_embd)
+        x.scatter_(
+            dim=1,
+            index=timestep_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
+            src=timestep_scatter_src,
+        )
+
+        return x
+    
+    def ragged_final_layer(self, x, image_mask, timestep, token_h, token_w, first_step):
+        bsz, seq_len, n_embd = x.shape
+        if first_step:
+            image_output = x.masked_select(image_mask.unsqueeze(-1).bool()).reshape(bsz, -1, n_embd)
+        else:
+            image_output = x[:, 1:, :]
+        timestep_emb = self.time_embed_2(timestep)
+        pred = self.final_layer(image_output, timestep_emb, token_h, token_w)
+        return pred
+    
+    @staticmethod
+    def get_pos_emb(custom_pos_emb, position_ids):
+        cos, sin = custom_pos_emb
+        cos = real_batched_index_select(cos, dim=1, idx=position_ids)
+        sin = real_batched_index_select(sin, dim=1, idx=position_ids)
+        return cos, sin
+    
+    @add_start_docstrings_to_model_forward(Hunyuan_INPUTS_DOCSTRING)
+    def forward(
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+            mode: str = "gen_text",
+            first_step: Optional[bool] = None,
+            # for gen image
+            images: Optional[BatchRaggedImages] = None,
+            image_mask: Optional[torch.Tensor] = None,
+            timestep: Optional[BatchRaggedTensor] = None,
+            gen_timestep_scatter_index: Optional[torch.Tensor] = None,
+            # for cond image
+            cond_vae_images: Optional[BatchRaggedImages] = None,
+            cond_timestep: Optional[BatchRaggedTensor] = None,
+            cond_vae_image_mask: Optional[torch.Tensor] = None,
+            cond_vit_images: Optional[BatchRaggedImages] = None,
+            cond_vit_image_mask: Optional[torch.Tensor] = None,
+            vit_kwargs: Optional[Dict[str, Any]] = None,
+            cond_timestep_scatter_index: Optional[torch.Tensor] = None,
+    ) -> Union[Tuple, CausalMMOutputWithPast]:
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        custom_pos_emb = self.get_pos_emb(custom_pos_emb, position_ids)
+
+        inputs_embeds = self.model.wte(input_ids)
+        bsz, seq_len, n_embd = inputs_embeds.shape
+
+        # Instantiate placeholder tokens: <timestep>, <img> for the gen image
+        
+        if first_step:
+            inputs_embeds, token_h, token_w = self.instantiate_vae_image_tokens(
+                inputs_embeds, images, timestep, image_mask)
+            inputs_embeds = self.instantiate_timestep_tokens(
+                inputs_embeds, timestep, gen_timestep_scatter_index)
+        else:
+            t_emb = self.time_embed(timestep)
+            image_emb, token_h, token_w = self.patch_embed(images, t_emb)
+            timestep_emb = self.timestep_emb(timestep).reshape(bsz, -1, n_embd)
+            inputs_embeds = torch.cat([timestep_emb, image_emb], dim=1)
+
+        # Instantiate placeholder tokens: <timestep>, <img> for cond images
+        # Should only run once with kv-cache enabled.
+        if cond_vae_images is not None:
+            inputs_embeds, _, _ = self.instantiate_vae_image_tokens(
+                inputs_embeds, cond_vae_images, cond_timestep, cond_vae_image_mask)
+            inputs_embeds = self.instantiate_timestep_tokens(
+                inputs_embeds, cond_timestep, cond_timestep_scatter_index)
+
+        # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            custom_pos_emb=custom_pos_emb,
+            mode=mode,
+            first_step=first_step,
+            gen_timestep_scatter_index=gen_timestep_scatter_index,
+        )
+        hidden_states = outputs[0]
+
+
+        logits = None
+        hidden_states = hidden_states.to(input_ids.device)
+        diffusion_prediction = self.ragged_final_layer(
+                hidden_states, image_mask, timestep, token_h, token_w, first_step)
+
+        if not return_dict:
+            output = (logits,) + outputs[1:] + (diffusion_prediction,)
+            return output
+
+        output = CausalMMOutputWithPast(
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+            diffusion_prediction=diffusion_prediction,
+        )
+
+        return output

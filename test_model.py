@@ -16,7 +16,7 @@ engine = UniversalEngine(yaml_path=yaml_path)
 
 out = engine.run(
     prompt="A beautiful sunset over a calm ocean with a boat in the distance",
-    num_inference_steps=50,
+    num_inference_steps=40,
     height=1024,
     width=1024,
 )

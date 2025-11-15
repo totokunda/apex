@@ -57,8 +57,6 @@ spec:
     base: hunyuanimage3.base
     model_path:
     - path: /home/tosin_coverquick_co/apex-diffusion/components/HunyuanImage-3.0
-      key_map:
-        "model.": "" 
       extra_kwargs:
         load_from_config: true
       variant: default
@@ -83,6 +81,7 @@ spec:
     run:
       num_inference_steps: 50
       guidance_scale: 5.0
+      guidance_rescale: 0.0
       height: 1024
       width: 1024
       use_system_prompt: "None"

@@ -5,7 +5,7 @@ from src.transformer.hunyuanimage3.base.model import HunyuanStaticCache, build_b
 from .shared.system_prompt import get_system_prompt
 from .shared.image_processor import HunyuanImage3ImageProcessor
 from src.transformer.hunyuanimage3.base.config import HunyuanImage3Config
-from typing import Union, List, Dict, Any, Callable
+from typing import Union, List, Dict, Any, Callable, Optional
 from diffusers.utils.torch_utils import randn_tensor
 from transformers.utils.generic import ModelOutput
 from transformers.generation.utils import ALL_CACHE_NAMES
@@ -52,6 +52,31 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
     noise_cfg = guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
     return noise_cfg
 
+
+class ClassifierFreeGuidance:
+    def __init__(
+        self,
+        use_original_formulation: bool = False,
+        start: float = 0.0,
+        stop: float = 1.0,
+    ):
+        super().__init__()
+        self.use_original_formulation = use_original_formulation
+
+    def __call__(
+            self,
+            pred_cond: torch.Tensor,
+            pred_uncond: Optional[torch.Tensor],
+            guidance_scale: float,
+            step: int,
+        ) -> torch.Tensor:
+
+        shift = pred_cond - pred_uncond
+        pred = pred_cond if self.use_original_formulation else pred_uncond
+        pred = pred + guidance_scale * shift
+
+        return pred
+
 class HunyuanImage3T2IEngine(BaseEngine):
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
@@ -95,6 +120,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
         self.hy_image_processor = HunyuanImage3ImageProcessor(self.pretrained_config)
         self.latent_scale_factor = self.pretrained_config.vae_downsample_factor
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.latent_scale_factor)
+        self.cfg_operator = ClassifierFreeGuidance()
         self.num_channels_latents = self._config.get("vae", {}).get("latent_channels", 32)
     
     def vae_encode(self, image, cfg_factor=1, offload=True):
@@ -143,9 +169,14 @@ class HunyuanImage3T2IEngine(BaseEngine):
 
         if hasattr(self.vae, "ffactor_temporal"):
             latents = latents.unsqueeze(2)
+            
 
-        with torch.autocast(device_type=self.device.type, dtype=torch.float16, enabled=True):
-            image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
+        image = self.vae.decode(latents, return_dict=False, generator=generator)[0]
+            
+        
+        if hasattr(self.vae, "ffactor_temporal"):
+            assert image.shape[2] == 1, "image should have shape [B, C, T, H, W] and T should be 1"
+            image = image.squeeze(2)
             
         if offload:
             self._offload(self.vae)
@@ -200,11 +231,14 @@ class HunyuanImage3T2IEngine(BaseEngine):
             latents = randn_tensor(latents_shape, generator=generator, device=device, dtype=dtype)
         else:
             latents = latents.to(device)
+        
+        
 
         # Check existence to make it compatible with FlowMatchEulerDiscreteScheduler
         if hasattr(self.scheduler, "init_noise_sigma"):
             # scale the initial noise by the standard deviation required by the scheduler
             latents = latents * self.scheduler.init_noise_sigma
+        
 
         return latents
     
@@ -618,7 +652,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
             bot_task: str | None = 'image',
             num_inference_steps: int | None = None,
             guidance_scale: float | None = None,
-            guidance_rescale: float | None = None,
+            guidance_rescale: float | None = 0.0,
             progress_callback: Callable | None = None,
             render_on_step_callback: Callable | None = None,
             offload: bool = True,
@@ -641,21 +675,19 @@ class HunyuanImage3T2IEngine(BaseEngine):
         system_prompt = get_system_prompt(use_system_prompt, bot_task, system_prompt)
         image_size = f"{height}x{width}"
         # Generate image
-        model_inputs = self.prepare_model_inputs(
+        model_kwargs = self.prepare_model_inputs(
             prompt=prompt, cot_text=cot_text, system_prompt=system_prompt, mode="gen_image", seed=seed,
             image_size=image_size,
             sequence_template=sequence_template,
             drop_think=drop_think,
             max_sequence_length=max_sequence_length,
         )
+
         
-        
-        
-        
-        batch_gen_image_info = model_inputs["batch_gen_image_info"]
+        batch_gen_image_info = model_kwargs["batch_gen_image_info"]
         batch_size = len(batch_gen_image_info)
         image_size = [batch_gen_image_info[0].image_height, batch_gen_image_info[0].image_width]
-        generator = model_inputs["generator"]
+        generator = model_kwargs["generator"]
         self._guidance_scale = guidance_scale
         self._guidance_rescale = guidance_rescale
 
@@ -682,7 +714,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
             generator=generator,
             latents=latents,
         )
-
+        
         # Prepare extra step kwargs.
         _scheduler_step_extra_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step, {"generator": generator}
@@ -694,14 +726,13 @@ class HunyuanImage3T2IEngine(BaseEngine):
         
         self.to_device(self.transformer)
 
-
         # Prepare model kwargs
-        input_ids = model_inputs.pop("input_ids")
+        input_ids = model_kwargs.pop("input_ids")
         attention_mask = self._prepare_attention_mask_for_generation(     # noqa
-            input_ids, model_kwargs=model_inputs,
+            input_ids, model_kwargs=model_kwargs,
         )
         
-        model_inputs["attention_mask"] = attention_mask.to(latents.device)
+        model_kwargs["attention_mask"] = attention_mask.to(latents.device)
 
         # Sampling loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -709,6 +740,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                break
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * cfg_factor)
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -719,24 +751,21 @@ class HunyuanImage3T2IEngine(BaseEngine):
                     input_ids,
                     images=latent_model_input,
                     timestep=t_expand,
-                    **model_inputs,
+                    **model_kwargs,
                 )
 
                 with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
                     model_output = self.transformer(**model_inputs, first_step=(i == 0))
                     pred = model_output["diffusion_prediction"]
-                pred = pred.to(dtype=torch.float32)
-                print(pred.shape)
-                exit()
 
                 # perform guidance
                 if self.do_classifier_free_guidance:
                     pred_cond, pred_uncond = pred.chunk(2)
-                    pred = self.cfg_operator(pred_cond, pred_uncond, self.guidance_scale, step=i)
+                    pred = self.cfg_operator(pred_cond, pred_uncond, guidance_scale, step=i)
 
-                if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
+                if self.do_classifier_free_guidance and guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
-                    pred = rescale_noise_cfg(pred, pred_cond, guidance_rescale=self.guidance_rescale)
+                    pred = rescale_noise_cfg(pred, pred_cond, guidance_rescale=guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(pred, t, latents, **_scheduler_step_extra_kwargs, return_dict=False)[0]
@@ -758,16 +787,11 @@ class HunyuanImage3T2IEngine(BaseEngine):
 
         if offload:
             self._offload(self.transformer)
-       
-        image = self.vae_decode(latents, generator=generator, offload=False)
+
+        image = self.vae_decode(latents, generator=generator, offload=offload)
         # b c t h w
-        
-        if hasattr(self.vae, "ffactor_temporal"):
-            assert image.shape[2] == 1, "image should have shape [B, C, T, H, W] and T should be 1"
-            image = image.squeeze(2)
-        
-        
+
         do_denormalize = [True] * image.shape[0]
-        image = self._tensor_to_frame(image, do_denormalize=do_denormalize)
-        
+        image = self._tensor_to_frame(image, output_type='np', do_denormalize=do_denormalize)
+        exit()
         return image
