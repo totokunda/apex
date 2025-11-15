@@ -33,6 +33,7 @@ class FluxT2IEngine(FluxShared):
         text_encoder_2_kwargs: Dict[str, Any] = {},
         joint_attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        render_on_step_interval: int = 3,
         progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -63,6 +64,7 @@ class FluxT2IEngine(FluxShared):
             num_images,
             text_encoder_kwargs,
             text_encoder_2_kwargs,
+            render_on_step_interval=render_on_step_interval,
         )
 
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")

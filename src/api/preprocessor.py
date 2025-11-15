@@ -280,7 +280,7 @@ def trigger_run(request: RunRequest):
     
     # Get best GPU for the task
     device_index, device_type = get_best_gpu()
-    resources = get_ray_resources(device_index, device_type)
+    resources = get_ray_resources(device_index, device_type, load_profile="medium")
     
     logger.info(f"Submitting run task for preprocessor: {request.preprocessor_name}, input: {request.input_path}, resources: {resources}")
     

@@ -82,7 +82,7 @@ def run_engine(request: RunEngineRequest):
 
     # Choose device resources for scheduling
     device_index, device_type = get_best_gpu()
-    resources = get_ray_resources(device_index, device_type)
+    resources = get_ray_resources(device_index, device_type, load_profile="all")
 
     job_id = request.job_id or str(uuid.uuid4())
     bridge = get_ray_ws_bridge()

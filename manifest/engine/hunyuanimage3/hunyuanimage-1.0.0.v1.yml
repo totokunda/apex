@@ -81,7 +81,7 @@ spec:
     
   defaults:
     run:
-      num_inference_steps: 50
+      num_inference_steps: 30
       guidance_scale: 5.0
       guidance_rescale: 0.0
       height: 1024
@@ -157,7 +157,7 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      default: 3.5
+      default: 5.0
       min: 0.0
       max: 10.0
       step: 0.1
@@ -177,11 +177,8 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 2048
+      default: 1024
       options:
-      - name: 2K Ultra HD
-        value: 2048
-        height: 2048
       - name: Ultra HD
         value: 1024
         height: 1024
@@ -224,7 +221,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 40
+      default: 30
       min: 1
       max: 100
       step: 1
@@ -234,7 +231,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 2048
+      default: 1024
       min: 256
       max: 8192
       step: 64
@@ -244,7 +241,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 2048
+      default: 1024
       min: 256
       max: 8192
       step: 64

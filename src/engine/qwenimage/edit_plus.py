@@ -29,6 +29,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        render_on_step_interval: int = 3,
         progress_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -249,6 +250,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
             denoise_progress_callback=denoise_progress_callback,
+            render_on_step_interval=render_on_step_interval,
         )
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 

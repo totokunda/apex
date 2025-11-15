@@ -132,7 +132,7 @@ class Cosmos2Shared(BaseEngine):
                     noise_pred, t, latents, return_dict=False
                 )[0]
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 pbar.update(1)

@@ -13,6 +13,7 @@ import inspect
 import os
 import random
 from diffusers.image_processor import VaeImageProcessor
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 def default(val, d):
     return val if val is not None else d
@@ -122,9 +123,15 @@ class HunyuanImage3T2IEngine(BaseEngine):
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.latent_scale_factor)
         self.cfg_operator = ClassifierFreeGuidance()
         self.num_channels_latents = self._config.get("vae", {}).get("latent_channels", 32)
-        
-        # Memory management is not need for the VAE, so we remove it from the memory management map
-        self._memory_management_map.pop("vae", None)
+
+    def post_init(self):
+        """
+        Run BaseEngine's post-init logic, then customize memory management
+        for this engine (we don't need memory management for the VAE).
+        """
+        super().post_init()
+        if self._memory_management_map is not None:
+            self._memory_management_map.pop("vae", None)
     
     def vae_encode(self, image, cfg_factor=1, offload=True):
         if self.vae is None:
@@ -670,10 +677,11 @@ class HunyuanImage3T2IEngine(BaseEngine):
             sequence_template: str = 'pretrain',
             drop_think: bool = False,
             max_sequence_length: int = 12800,
+            render_on_step_interval: int = 3,
             **kwargs,
             
     ):
-        
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
         system_prompt = get_system_prompt(use_system_prompt, bot_task, system_prompt)
         image_size = f"{height}x{width}"
         # Generate image
@@ -684,14 +692,15 @@ class HunyuanImage3T2IEngine(BaseEngine):
             drop_think=drop_think,
             max_sequence_length=max_sequence_length,
         )
+        safe_emit_progress(progress_callback, 0.10, "Prepared model inputs")
 
-        
         batch_gen_image_info = model_kwargs["batch_gen_image_info"]
         batch_size = len(batch_gen_image_info)
         image_size = [batch_gen_image_info[0].image_height, batch_gen_image_info[0].image_width]
         generator = model_kwargs["generator"]
         self._guidance_scale = guidance_scale
         self._guidance_rescale = guidance_rescale
+        safe_emit_progress(progress_callback, 0.15, "Resolved generation metadata")
 
         cfg_factor = 1 + self.do_classifier_free_guidance
 
@@ -700,12 +709,14 @@ class HunyuanImage3T2IEngine(BaseEngine):
         
         if self.scheduler is None:
             self.load_component_by_type("scheduler")
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready")
 
         # Prepare timesteps
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler, num_inference_steps, timesteps=timesteps, sigmas=sigmas,
         )
-
+        safe_emit_progress(progress_callback, 0.25, "Timesteps computed")
+        
         # Prepare latent variables
         latents = self._get_latents(
             batch_size=batch_size,
@@ -716,17 +727,19 @@ class HunyuanImage3T2IEngine(BaseEngine):
             generator=generator,
             latents=latents,
         )
-        
+        safe_emit_progress(progress_callback, 0.32, "Initialized latent noise")
         # Prepare extra step kwargs.
         _scheduler_step_extra_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step, {"generator": generator}
         )
         
         if self.transformer is None:
+            safe_emit_progress(progress_callback, 0.34, "Loading transformer")
             self.load_component_by_type("transformer")
         
         
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.36, "Transformer ready")
         
         # Prepare model kwargs
         input_ids = model_kwargs.pop("input_ids")
@@ -735,10 +748,16 @@ class HunyuanImage3T2IEngine(BaseEngine):
         )
         
         model_kwargs["attention_mask"] = attention_mask.to(latents.device)
+        safe_emit_progress(progress_callback, 0.40, "Prepared attention mask and model kwargs")
 
         # Sampling loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
+
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        
+        safe_emit_progress(progress_callback, 0.45, "Starting denoising loop")
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -756,7 +775,6 @@ class HunyuanImage3T2IEngine(BaseEngine):
                 )
 
                 with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, enabled=True):
-                    self.to_device(self.transformer.model.wte)
                     model_output = self.transformer(**model_inputs, first_step=(i == 0))
                     pred = model_output["diffusion_prediction"]
 
@@ -772,6 +790,11 @@ class HunyuanImage3T2IEngine(BaseEngine):
                 # compute the previous noisy sample x_t -> x_t-1
                 latents = self.scheduler.step(pred, t, latents, **_scheduler_step_extra_kwargs, return_dict=False)[0]
 
+                # Map inner denoising progress into [0.50, 0.90]
+                if denoise_progress_callback is not None and self._num_timesteps > 0:
+                    local_p = float(i + 1) / float(self._num_timesteps)
+                    denoise_progress_callback(local_p, f"Denoising step {i + 1}/{self._num_timesteps}")
+
                 if i != len(timesteps) - 1:
                     model_kwargs = self._update_model_kwargs_for_generation(  # noqa
                         model_output,
@@ -780,19 +803,29 @@ class HunyuanImage3T2IEngine(BaseEngine):
                     if input_ids.shape[1] != model_kwargs["position_ids"].shape[1]:
                         input_ids = torch.gather(input_ids, 1, index=model_kwargs["position_ids"])
 
-                if render_on_step_callback is not None:
+                if render_on_step_callback is not None and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if offload:
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         image = self.vae_decode(latents, generator=generator, offload=offload)
         # b c t h w
 
         do_denormalize = [True] * image.shape[0]
         image = self._tensor_to_frame(image, output_type='pil', do_denormalize=do_denormalize)
+        safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
         return image
+    
+    def _render_step(self, latents, render_on_step_callback):
+        image = self.vae_decode(latents, offload=True)
+        do_denormalize = [True] * image.shape[0]
+        image = self._tensor_to_frame(image, output_type='pil', do_denormalize=do_denormalize)
+        render_on_step_callback(image[0])

@@ -95,6 +95,7 @@ class LoaderMixin(DownloadMixin):
 
         model_base = component.get("base")
         model_path = component.get("model_path")
+
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -132,8 +133,15 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["torch_dtype"] = load_dtype
                 
             self.logger.info(f"Loading {model_class} from {model_path}")
-            model = model_class.from_pretrained(model_path, **extra_kwargs)
-            return model
+            if no_weights:
+                with init_empty_weights():
+                    model = model_class.from_pretrained(model_path, **extra_kwargs)
+                return model
+            else:
+                model = model_class.from_pretrained(model_path, **extra_kwargs)
+                return model
+    
+        self.logger.info(f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}")
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects

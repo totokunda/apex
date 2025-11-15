@@ -1,5 +1,5 @@
 import torch
-from typing import Dict, Any, Callable, List, Optional
+from typing import Dict, Any, Callable, List, Optional, Union
 from PIL import Image
 from src.engine.base_engine import BaseEngine
 import numpy as np
@@ -293,6 +293,7 @@ class ChromaT2IEngine(BaseEngine):
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         sigmas: List[float] | None = None,
+        render_on_step_interval: int = 3,
         attention_kwargs: Dict[str, Any] = {},
         ip_adapter_image: Optional[Image.Image | str | np.ndarray] = None,
         ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
@@ -502,7 +503,7 @@ class ChromaT2IEngine(BaseEngine):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided

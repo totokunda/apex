@@ -163,7 +163,7 @@ class UniversalEngine:
         **kwargs,
     ):
         self.registry = EngineRegistry()
-        self.engine = self.registry.create_engine(
+        self.engine:BaseEngine = self.registry.create_engine(
             engine_type=engine_type,
             yaml_path=yaml_path,
             model_type=model_type,

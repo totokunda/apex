@@ -8,7 +8,7 @@ from tempfile import NamedTemporaryFile
 from src.utils.defaults import DEFAULT_COMPONENTS_PATH
 from pathlib import Path
 import torch
-
+from typing import List
 from src.quantize.transformer import (
     ModelArchitecture as TransformerModelArchitecture,
     convert_model as convert_transformer_model,
@@ -168,6 +168,8 @@ class TransformerQuantizer(BaseQuantizer):
         dry_run: bool = False,
         small_first_shard: bool = False,
         bigendian: bool = False,
+        keys_to_exclude: List[str] = None,
+        load_all_in_memory: bool = False,
     ):
 
         if model_path is None:
@@ -188,15 +190,17 @@ class TransformerQuantizer(BaseQuantizer):
         quant_path = self._fix_output_path(output_path, quantization.value)
 
         convert_transformer_model(
-            model_path,
-            quant_path,
-            architecture,
-            split_max_tensors,
-            split_max_size,
-            dry_run,
-            small_first_shard,
-            bigendian,
-            qconfig_map[quantization.value],
+            model_path=model_path,
+            output_path=quant_path,
+            model_architecture=architecture,
+            split_max_tensors=split_max_tensors,
+            split_max_size=split_max_size,
+            dry_run=dry_run,
+            small_first_shard=small_first_shard,
+            bigendian=bigendian,
+            qconfig=qconfig_map[quantization.value],
+            keys_to_exclude=keys_to_exclude,
+            load_all_in_memory=load_all_in_memory,
         )
 
         return quant_path

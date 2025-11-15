@@ -198,6 +198,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         mask_kwargs = kwargs.get("mask_kwargs", {})
         mask = mask_kwargs.get("mask", None)
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -298,7 +299,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 if self.vae_scale_factor_spatial >= 16 and mask is not None and not mask[:, :, 0, :, :].any():
                     latents = (1 - mask) * masked_video_latents + mask * latents
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
                 safe_emit_progress(
@@ -325,6 +326,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         expand_timesteps = kwargs.get("expand_timesteps", False)
         first_frame_mask = kwargs.get("first_frame_mask", None)
         ip_image = kwargs.get("ip_image", None)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -399,7 +401,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                if render_on_step and render_on_step_callback:
+                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
                 safe_emit_progress(
