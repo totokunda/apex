@@ -1,28 +1,14 @@
 """
-Comprehensive Memory Management Module for PyTorch
+Lightweight memory management utilities.
 
-This module provides intelligent memory management for PyTorch models,
-supporting offloading between GPU, CPU, and disk based on memory usage.
+Currently this module exposes `MemoryConfig`, which is used to configure how
+models are offloaded via diffusers' native group offloading APIs.
 """
 
-from .memory_manager import MemoryManager, auto_manage_model, create_memory_manager
-from .module_wrapper import OffloadableModule, wrap_module, wrap_model_layers
-from .memory_monitor import MemoryMonitor
-from .offload_strategies import OffloadStrategy, CPUOffloadStrategy, DiskOffloadStrategy
 from .config import MemoryConfig
 
 __all__ = [
-    "MemoryManager",
-    "OffloadableModule",
-    "MemoryMonitor",
-    "OffloadStrategy",
-    "CPUOffloadStrategy",
-    "DiskOffloadStrategy",
     "MemoryConfig",
-    "auto_manage_model",
-    "create_memory_manager",
-    "wrap_module",
-    "wrap_model_layers",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

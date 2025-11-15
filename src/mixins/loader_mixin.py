@@ -9,7 +9,6 @@ import yaml
 from diffusers import ModelMixin
 from accelerate import init_empty_weights
 import torch
-import torch.nn as nn
 from typing import Callable
 from logging import Logger
 from src.utils.module import find_class_recursive
@@ -39,7 +38,6 @@ import mlx.core as mx
 from src.utils.mlx import check_mlx_convolutional_weights
 from src.utils.defaults import DEFAULT_CONFIG_SAVE_PATH
 from src.types import InputImage, InputVideo
-from src.memory_management import MemoryManager
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 IMAGE_EXTS = [
@@ -80,37 +78,20 @@ class LoaderMixin(DownloadMixin):
 
         # Detect if memory management is configured for this component on the owning engine.
         # We intentionally keep this lazy and optional so that LoaderMixin can be used
-        # independently of BaseEngine. Only enable for PyTorch engines, since the
-        # MemoryManager is implemented for torch.nn.Module models.
-        mm_manager = None
+        # independently of BaseEngine. Only enable for PyTorch engines, since group offloading
+        # relies on torch.nn.Module hooks provided by diffusers.
+        mm_config = None
         needs_memory_management = False
         engine_type = getattr(self, "engine_type", "torch")
         if engine_type == "torch":
             resolve_mm_cfg = getattr(self, "_resolve_memory_config_for_component", None)
-            get_mm_manager = getattr(self, "_get_or_create_memory_manager", None)
-            if callable(resolve_mm_cfg) and callable(get_mm_manager):
+            if callable(resolve_mm_cfg):
                 try:
                     mm_config = resolve_mm_cfg(component)
                 except Exception:
                     mm_config = None
                 if mm_config is not None:
                     needs_memory_management = True
-                    mm_key = (
-                        component.get("name")
-                        or component.get("type")
-                        or component.get("base")
-                        or "component"
-                    )
-                    try:
-                        mm_manager: MemoryManager = get_mm_manager(mm_key, mm_config)
-                    except Exception as e:
-                        # If memory manager creation fails, fall back to normal loading.
-                        if hasattr(self, "logger"):
-                            self.logger.warning(
-                                f"Failed to create memory manager for '{mm_key}': {e}"
-                            )
-                        mm_manager = None
-                        needs_memory_management = False
 
         model_base = component.get("base")
         model_path = component.get("model_path")
@@ -285,61 +266,6 @@ class LoaderMixin(DownloadMixin):
                         f"Model {model} does not have a load_state_dict or load_weights method"
                     )
 
-                # Iteratively wrap layers for memory management as we finish loading
-                # each chunk of weights, instead of wrapping the entire model at once.
-                if (
-                    mm_manager is not None
-                    and not no_weights
-                    and isinstance(model, nn.Module)
-                    and engine_type == "torch"
-                ):
-                    try:
-                        wrapped_layers = getattr(model, "_mm_wrapped_layers", None)
-                        if wrapped_layers is None:
-                            wrapped_layers = set()
-                            setattr(model, "_mm_wrapped_layers", wrapped_layers)
-
-                        # Derive candidate module paths from state_dict keys
-                        module_paths = set()
-                        for key in state_dict.keys():
-                            parts = key.split(".")
-                            if len(parts) <= 1:
-                                continue
-                            # Everything except the last token describes the owning module
-                            module_path = ".".join(parts[:-1])
-                            module_paths.add(module_path)
-
-                        for module_path in module_paths:
-                            if module_path in wrapped_layers:
-                                continue
-
-                            parent_path, _, child_name = module_path.rpartition(".")
-                            parent_module = model
-                            if parent_path:
-                                for attr in parent_path.split("."):
-                                    if not hasattr(parent_module, attr):
-                                        parent_module = None
-                                        break
-                                    parent_module = getattr(parent_module, attr)
-                            if parent_module is None or not hasattr(
-                                parent_module, child_name
-                            ):
-                                continue
-
-                            child_module = getattr(parent_module, child_name)
-                            # Only wrap selected layer types; start with nn.Linear
-                            if isinstance(child_module, nn.Linear):
-                                wrapped_child = mm_manager.wrap_module(
-                                    child_module, module_id=module_path
-                                )
-                                setattr(parent_module, child_name, wrapped_child)
-                                wrapped_layers.add(module_path)
-                    except Exception as e:
-                        if hasattr(self, "logger"):
-                            self.logger.warning(
-                                f"Failed to iteratively wrap layers for memory management: {e}"
-                            )
-
         if hasattr(self, "engine_type") and self.engine_type == "torch":
             has_meta_params = False
             for name, param in model.named_parameters():
@@ -353,17 +279,18 @@ class LoaderMixin(DownloadMixin):
                 )
 
         # If memory management is enabled for this component and weights are loaded,
-        # wrap the model's layers with the configured MemoryManager so that
-        # subsequent forwards can offload/reload parameters as needed.
-        if mm_manager is not None and not no_weights:
-            try:
-                model = mm_manager.wrap_model(model, layer_types=[nn.Linear])
-            except Exception as e:
-                if hasattr(self, "logger"):
-                    self.logger.warning(
-                        f"Failed to wrap model '{component.get('name') or component.get('type')}' "
-                        f"for memory management: {e}"
-                    )
+        # activate group offloading on the fully initialized module.
+        if mm_config is not None and not no_weights:
+            apply_group_offloading = getattr(self, "_apply_group_offloading", None)
+            if callable(apply_group_offloading):
+                label = component.get("name") or component.get("type") or type(model).__name__
+                try:
+                    apply_group_offloading(model, mm_config, module_label=label)
+                except Exception as e:
+                    if hasattr(self, "logger"):
+                        self.logger.warning(
+                            f"Failed to enable group offloading for '{label}': {e}"
+                        )
         return model
 
     def _load_config_file(self, file_path: str | Path):

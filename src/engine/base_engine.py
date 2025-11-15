@@ -27,10 +27,9 @@ from logging import Logger
 from src.scheduler import SchedulerInterface
 from typing import Callable
 from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
-from src.memory_management import MemoryManager, MemoryConfig
+from src.memory_management import MemoryConfig
 import torch.nn as nn
 import importlib
-from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
 
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -55,7 +54,6 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms as TF
 import inspect
-from src.postprocess import postprocessor_registry
 from src.lora import LoraManager, LoraItem
 from src.helpers.helpers import helpers
 _auto_register_transformers()
@@ -174,7 +172,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     lora_manager: LoraManager | None = None
     loaded_loras: Dict[str, LoraItem] = {}
     _memory_management_map: Dict[str, MemoryConfig] | None = None
-    _component_memory_managers: Dict[str, MemoryManager] = {}
     selected_components: Dict[str, Any] | None = None
     
     def __init__(
@@ -443,7 +440,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         # get the helper class
         try:
             helper_class = helpers.get(base)
-        except Exception as e:
+        except Exception:
             helper_class = find_class_recursive(importlib.import_module(module), base)
         if helper_class is None:
             raise ValueError(f"Helper class {base} not found")
@@ -458,7 +455,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 # try download the config file
                 try:
                     config_path = self._download(config_path, get_components_path())
-                except Exception as e:
+                except Exception:
                     pass
                 config = self._load_config_file(config_path)
             helper = helper_class(**config)
@@ -699,14 +696,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
             def _patched_load_model(no_weights: bool = False, *args, **kwargs):
                 model = original_load_model(no_weights=no_weights, *args, **kwargs)
-                # Only wrap once per instance
-                if not hasattr(text_encoder, "_mm_wrapped") or not getattr(
-                    text_encoder, "_mm_wrapped"
-                ):
-                    manager = self._get_or_create_memory_manager("text_encoder", mm_config)
-                    wrapped_model = manager.wrap_model(model, layer_types=[nn.Linear])
-                    text_encoder.model = wrapped_model
-                    setattr(text_encoder, "_mm_wrapped", True)
+                text_encoder.model = model
+
+                if no_weights:
+                    return text_encoder.model
+
+                already_enabled = getattr(text_encoder, "_group_offloading_enabled", False)
+                if not already_enabled:
+                    self._apply_group_offloading(
+                        text_encoder.model,
+                        mm_config,
+                        module_label=component.get("name") or "text_encoder",
+                    )
+                    setattr(text_encoder, "_group_offloading_enabled", True)
                 return text_encoder.model
 
             text_encoder.load_model = _patched_load_model  # type: ignore
@@ -731,7 +733,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             component.pop("extra_model_paths", None)
 
         if self.check_weights and not self._check_weights(component):
-            self.logger.info(f"Found old model weights, converting to diffusers format")
+            self.logger.info("Found old model weights, converting to diffusers format")
             transformer = self.convert_transformer_weights(component)
 
             if self.save_converted_weights:
@@ -776,7 +778,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     # Clean up temp dir if it still exists
                     if os.path.exists(tmp_dir):
                         shutil.rmtree(tmp_dir)
-                self.logger.info(f"Converted transformer weights to diffusers format")
+                self.logger.info("Converted transformer weights to diffusers format")
                 empty_cache()
         else:
             base = component.get("base")
@@ -1101,7 +1103,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         assert "model_path" in component, "`model_path` is required"
         component_type = component.get("type")
         assert component_type == "transformer", "Only transformer is supported for now"
-        self.logger.info(f"Converting old model weights to diffusers format")
+        self.logger.info("Converting old model weights to diffusers format")
         model_path = component["model_path"]
 
         if component.get("extra_model_paths", []):
@@ -1130,7 +1132,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         assert "model_path" in component, "`model_path` is required"
         component_type = component.get("type")
         assert component_type == "vae", "Only vae is supported for now"
-        self.logger.info(f"Converting old model weights to diffusers format")
+        self.logger.info("Converting old model weights to diffusers format")
         config = {}
         config_path = component.get("config_path", None)
         if config_path:
@@ -1285,31 +1287,75 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             return self._memory_management_map["all"]
         return None
 
-    def _get_or_create_memory_manager(
-        self, key: str, config: MemoryConfig
-    ) -> MemoryManager:
-        if key in self._component_memory_managers:
-            return self._component_memory_managers[key]
-        manager = MemoryManager(config)
-        manager.start()
-        self._component_memory_managers[key] = manager
-        return manager
+    def _group_offload_onload_device(self) -> torch.device:
+        candidate = getattr(self, "device", None)
+        if isinstance(candidate, torch.device):
+            return candidate
+        if isinstance(candidate, str):
+            try:
+                return torch.device(candidate)
+            except Exception:
+                pass
+        if torch.cuda.is_available():
+            return torch.device("cuda", 0)
+        return torch.device("cpu")
+
+    def _apply_group_offloading(
+        self,
+        module: Any,
+        config: Optional[MemoryConfig],
+        *,
+        module_label: str,
+    ) -> bool:
+        if module is None or config is None:
+            return False
+
+        if getattr(module, "_apex_group_offloading_enabled", False):
+            return True
+
+        onload_device = self._group_offload_onload_device()
+
+        try:
+            kwargs = config.to_group_offload_kwargs(onload_device)
+        except Exception as exc:
+            self.logger.warning(
+                f"Failed to build group offloading options for '{module_label}': {exc}"
+            )
+            return False
+
+        enable_method = getattr(module, "enable_group_offload", None)
+        try:
+            if callable(enable_method):
+                enable_method(**kwargs)
+            else:
+                from diffusers.hooks import apply_group_offloading
+
+                apply_group_offloading(module, **kwargs)
+        except Exception as exc:
+            self.logger.warning(
+                f"Failed to enable group offloading for '{module_label}': {exc}"
+            )
+            return False
+
+        setattr(module, "_apex_group_offloading_enabled", True)
+        self.logger.info(
+            f"Enabled group offloading for '{module_label}' "
+            f"({kwargs.get('offload_type', 'leaf_level')})"
+        )
+        return True
 
     def _maybe_apply_memory_management(self, component: Dict[str, Any], module: Any):
         mm_config = self._resolve_memory_config_for_component(component)
         if mm_config is None:
             return
         key = component.get("name") or component.get("type")
-        manager = self._get_or_create_memory_manager(key, mm_config)
-        try:
-            wrapped = manager.wrap_model(module, layer_types=[nn.Linear])
-        except Exception as e:
-            self.logger.warning(f"Failed to wrap component '{key}' for memory management: {e}")
+        module_label = key or component.get("base") or type(module).__name__
+        if not self._apply_group_offloading(module, mm_config, module_label=module_label):
             return
-        # Replace references on engine for known types
+        # Replace references on engine for known types to ensure we reuse the same instance.
         ctype = component.get("type")
         if ctype in {"transformer", "vae", "text_encoder"}:
-            setattr(self, ctype, wrapped)
+            setattr(self, ctype, module)
 
     def load_component_by_type(self, component_type: str):
         for component in self.config.get("components", []):
@@ -1543,7 +1589,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         if seed is not None and generator is not None:
             self.logger.warning(
-                f"Both `seed` and `generator` are provided. `seed` will be ignored."
+                "Both `seed` and `generator` are provided. `seed` will be ignored."
             )
 
         if generator is None:
