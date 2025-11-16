@@ -1097,7 +1097,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         
         if gpu_available_gb is not None:
             # Use available memory for more accurate decision
-            if total_size_gb >= 0.75 * gpu_available_gb:
+            if total_size_gb >= 0.25 * gpu_available_gb:
                 needs_offload = True
         else:
             # Fallback to total memory

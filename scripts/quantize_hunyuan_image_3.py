@@ -22,6 +22,5 @@ quantizer.quantize(
         "vision_aligner.",
         "lm_head.",
         "ln_f."
-    ],
-    num_workers=1
+    ]
 )    

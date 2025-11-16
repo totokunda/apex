@@ -377,28 +377,34 @@ def convert_model(
     if num_workers is None:
         num_workers = multiprocessing.cpu_count()
     
-    for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
-        state_dict = load_file(file_path)
-        
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all tasks for tensors in this file
-            futures = {
-                executor.submit(_prepare_and_quantize_tensor, (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)): key
-                for key, data in state_dict.items()
+    print(f"Quantizing with {num_workers} workers")
+    if num_workers == 1:
+        for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
+            state_dict = load_file(file_path)
+            for key, data in tqdm(state_dict.items(), desc=f"Quantizing file {idx + 1}/{len(files_to_load)}"):
+                _quantize_data(data, key, preserve_weights_dtype, keys_to_exclude, qconfig, writer)
+    else:
+        for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
+            state_dict = load_file(file_path)
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                # Submit all tasks for tensors in this file
+                futures = {
+                    executor.submit(_prepare_and_quantize_tensor, (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)): key
+                 for key, data in state_dict.items()
             }
-            
-            # Process results as they complete with live progress updates
+
+                # Process results as they complete with live progress updates
             with tqdm(total=len(futures), desc=f"Quantizing file {idx + 1}/{len(files_to_load)}") as pbar:
-                for future in as_completed(futures):
-                    result = future.result()
-                    if result is not None:
-                        key, data, data_qtype = result
-                        writer.add_tensor(
-                            name=key,
-                            tensor=data,
-                            raw_dtype=data_qtype,
-                        )
-                    pbar.update(1)
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result is not None:
+                            key, data, data_qtype = result
+                            writer.add_tensor(
+                                name=key,
+                                tensor=data,
+                                raw_dtype=data_qtype,
+                            )
+                        pbar.update(1)
 
     writer.add_file_type(ftype=qconfig.ftype)
     writer.add_quantization_version(gguf.GGML_QUANT_VERSION)
