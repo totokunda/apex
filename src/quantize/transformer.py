@@ -344,7 +344,7 @@ def convert_model(
     qconfig: QuantConfig = QuantConfig(
         gguf.LlamaFileType.MOSTLY_F16, gguf.GGMLQuantizationType.F16
     ),
-    load_all_in_memory: bool = False,
+    num_workers: int = None,
 ):
     preserve_weights_dtype = get_f32_weights_preserve_dtype(model_architecture)
 
@@ -373,23 +373,22 @@ def convert_model(
 
     files_to_load += glob(os.path.join(model_path, pth_pattern), recursive=True)
     
-    if load_all_in_memory:
-        state_dict = {}
-        for file_path in tqdm(files_to_load, desc="Loading model weights"):
-            state_dict.update(load_file(file_path))
-        
-        # Parallel quantization with ProcessPoolExecutor for true parallel CPU processing
+    # Parallel quantization with ProcessPoolExecutor for true parallel CPU processing
+    if num_workers is None:
         num_workers = multiprocessing.cpu_count()
+    
+    for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
+        state_dict = load_file(file_path)
         
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all tasks
+            # Submit all tasks for tensors in this file
             futures = {
                 executor.submit(_prepare_and_quantize_tensor, (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)): key
                 for key, data in state_dict.items()
             }
             
             # Process results as they complete with live progress updates
-            with tqdm(total=len(futures), desc="Quantizing model weights") as pbar:
+            with tqdm(total=len(futures), desc=f"Quantizing file {idx + 1}/{len(files_to_load)}") as pbar:
                 for future in as_completed(futures):
                     result = future.result()
                     if result is not None:
@@ -400,16 +399,6 @@ def convert_model(
                             raw_dtype=data_qtype,
                         )
                     pbar.update(1)
-    else:
-        for idx, file_path in tqdm(enumerate(files_to_load), desc="Loading model weights"):
-            state_dict = load_file(file_path)
-
-            for key, data in tqdm(
-                state_dict.items(),
-                total=len(state_dict),
-                desc=f"Quantizing model weights for file {idx + 1}/{len(files_to_load)}",
-            ):
-                _quantize_data(data, key, preserve_weights_dtype, keys_to_exclude, qconfig, writer)
 
     writer.add_file_type(ftype=qconfig.ftype)
     writer.add_quantization_version(gguf.GGML_QUANT_VERSION)

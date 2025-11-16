@@ -209,9 +209,8 @@ class LoaderMixin(DownloadMixin):
                 converter.convert(state_dict)
 
             # Load GGMLTensors without replacing nn.Parameters by copying data
-
             patch_model(model)
-            model.load_state_dict(state_dict, assign=True)
+            model.load_state_dict(state_dict, assign=True, strict=False)
         else:
             if os.path.isdir(model_path):
                 extensions = component.get(

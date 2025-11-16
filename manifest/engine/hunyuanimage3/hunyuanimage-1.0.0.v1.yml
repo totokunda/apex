@@ -57,6 +57,7 @@ spec:
     label: HunyuanImage Transformer
     base: hunyuanimage3.base
     offloading_module: model
+    config_path: /home/tosin_coverquick_co/apex-diffusion/components/HunyuanImage-3.0/config.json
     model_path:
     - path: /home/tosin_coverquick_co/apex-diffusion/components/HunyuanImage-3.0
       extra_kwargs:
@@ -68,6 +69,30 @@ spec:
         min_vram_gb: 80
         recommended_vram_gb: 240
       file_size: 168600103513
+    - path: /home/tosin_coverquick_co/apex-diffusion/gguf/hunyuanimage3_q6.Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 69508089824
+    - path: /home/tosin_coverquick_co/apex-diffusion/gguf/hunyuanimage3_q4.Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 48469837696
+    - path: /home/tosin_coverquick_co/apex-diffusion/gguf/hunyuanimage3_q2.Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 29750790016
   - type: helper
     label: HunyuanImage 3.0 Tokenizer
     base: PreTrainedTokenizerFast

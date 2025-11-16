@@ -9,10 +9,10 @@ save_path = os.path.join(DEFAULT_SAVE_PATH, "gguf")
 os.makedirs(save_path, exist_ok=True)
 
 quantizer = TransformerQuantizer(
-    output_path=os.path.join(save_path, "hunyuanimage3_q6.gguf"),
+    output_path=os.path.join(save_path, "hunyuanimage3_q2.gguf"),
     model_path=model_path,
     architecture="hunyuanimage3",
-    quantization=QuantType.Q6_K,
+    quantization=QuantType.Q2_K,
 )
 
 quantizer.quantize(
@@ -20,6 +20,8 @@ quantizer.quantize(
         "vae.",
         "vision_model.",
         "vision_aligner.",
+        "lm_head.",
+        "ln_f."
     ],
-    load_all_in_memory=True,
+    num_workers=1
 )    

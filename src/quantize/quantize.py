@@ -169,7 +169,7 @@ class TransformerQuantizer(BaseQuantizer):
         small_first_shard: bool = False,
         bigendian: bool = False,
         keys_to_exclude: List[str] = None,
-        load_all_in_memory: bool = False,
+        num_workers: int = None,
     ):
 
         if model_path is None:
@@ -200,7 +200,7 @@ class TransformerQuantizer(BaseQuantizer):
             bigendian=bigendian,
             qconfig=qconfig_map[quantization.value],
             keys_to_exclude=keys_to_exclude,
-            load_all_in_memory=load_all_in_memory,
+            num_workers=num_workers,
         )
 
         return quant_path

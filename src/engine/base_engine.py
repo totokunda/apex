@@ -82,6 +82,7 @@ class AutoLoadingHelperDict(dict):
         from src.helpers.hidream.llama import HidreamLlama
         from src.helpers.stepvideo.text_encoder import StepVideoTextEncoder
         from src.helpers.ltx.patchifier import SymmetricPatchifier
+        from src.helpers.fibo.prompt_gen import PromptGenHelper
 
         # Overloads for known helper keys → precise instance types
         @overload
@@ -104,6 +105,9 @@ class AutoLoadingHelperDict(dict):
 
         @overload
         def __getitem__(self, key: Literal["hunyuan.avatar"]) -> "HunyuanAvatar": ...
+
+        @overload
+        def __getitem__(self, key: Literal["prompt_gen"]) -> "PromptGenHelper": ...
 
         @overload
         def __getitem__(self, key: Literal["hidream.llama"]) -> "HidreamLlama": ...
@@ -422,6 +426,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self.logger.info(f"Loading {len(components_to_load)} components")
 
         self.load_components(components, components_to_load)
+        
 
     @contextmanager
     def _progress_bar(self, total: int, desc: str | None = None, **kwargs):
@@ -1092,7 +1097,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         
         if gpu_available_gb is not None:
             # Use available memory for more accurate decision
-            if total_size_gb >= 0.7 * gpu_available_gb:
+            if total_size_gb >= 0.75 * gpu_available_gb:
                 needs_offload = True
         else:
             # Fallback to total memory
@@ -1960,6 +1965,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             f"No denoise implementation found for type '{denoise_key}' "
             f"(expected method '{method_name}' or a class-defined 'denoise')"
         )
+    
+    @staticmethod
+    def calculate_shift(
+        image_seq_len,
+        base_seq_len: int = 256,
+        max_seq_len: int = 4096,
+        base_shift: float = 0.5,
+        max_shift: float = 1.15,
+    ):
+        m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
+        b = base_shift - m * base_seq_len
+        mu = image_seq_len * m + b
+        return mu
 
     def _parse_num_frames(self, duration: int | str, fps: int = 16):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.

@@ -8,7 +8,7 @@ from src.helpers.wan.multitalk import WanMultiTalk
 from src.helpers.wan.recam import WanRecam
 from src.helpers.ltx import SymmetricPatchifier, Patchifier
 from src.helpers.hidream.llama import HidreamLlama
-
+from src.helpers.fibo.prompt_gen import PromptGenHelper
 
 __all__ = [
     "CLIP",
@@ -22,4 +22,5 @@ __all__ = [
     "SymmetricPatchifier",
     "Patchifier",
     "HidreamLlama",
+    "PromptGenHelper",
 ]

@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Literal
+from typing import Dict, Any, List, Literal, Callable
 import torch
 from src.text_encoder.tokenizer import fetch_and_save_tokenizer_from_config
 from src.mixins.loader_mixin import LoaderMixin
@@ -11,6 +11,7 @@ from src.mixins.to_mixin import ToMixin
 from src.mixins.cache_mixin import CacheMixin
 from src.utils.module import find_class_recursive
 import transformers
+import inspect
 
 class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
@@ -125,6 +126,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         arrange_attention_mask: bool = False,
         pad_with_zero: bool = True,
         clean_text: bool = True,
+        process_inputs_func: Callable = None,
         output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
         lower_case: bool = False,
     ):
@@ -155,7 +157,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "pad_with_zero": pad_with_zero,
             "clean_text": clean_text,
             "output_type": output_type,
-            "lower_case": lower_case
+            "lower_case": lower_case,
+            "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
         }
 
         prompt_hash = self.hash_prompt(kwargs)
@@ -191,6 +194,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             return_tensors="pt",
             return_attention_mask=True,
         )
+        if process_inputs_func is not None:
+            text_inputs = process_inputs_func(text_inputs)
 
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
