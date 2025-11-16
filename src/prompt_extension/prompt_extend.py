@@ -12,6 +12,7 @@ from src.utils.defaults import (
 from src.helpers.base import (
     PreprocessorType,
     BaseOutput,
+    BaseHelper,
 )
 
 
@@ -63,7 +64,6 @@ class PromptExtendHelper(BaseHelper):
             model_path=model_path,
             config_path=model_config_path,
             save_path=save_path,
-            preprocessor_type=PreprocessorType.TEXT,
             **kwargs,
         )
 
@@ -223,7 +223,7 @@ class PromptExtendHelper(BaseHelper):
     def __str__(self) -> str:
         base = type(self.model).__name__
         tok = type(self.tokenizer).__name__
-        return f"PromptExtendPreprocessor(model={base}, tokenizer={tok}, device={self.device}, dtype={self.load_dtype})"
+        return f"PromptExtendHelper(model={base}, tokenizer={tok}, device={self.device}, dtype={self.load_dtype})"
 
     def __repr__(self) -> str:
         return self.__str__()

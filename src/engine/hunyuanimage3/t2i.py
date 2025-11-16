@@ -104,9 +104,10 @@ class HunyuanImage3T2IEngine(BaseEngine):
         if not config_path:
             self.check_weights = False
             config_path = os.path.join(model_path, "config.json")
-            conf = self.fetch_config(config_path)
-            if conf is not None:
-                self._config = conf
+    
+        conf = self.fetch_config(config_path)
+        if conf is not None:
+            self._config = conf
                 
         vae_config = self._config.get("vae", {})
         if not vae_component.get("config") or not vae_component.get("config_path"):

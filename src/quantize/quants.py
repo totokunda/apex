@@ -531,6 +531,189 @@ class Q8_0(__Quant, qtype=GGMLQuantizationType.Q8_0):
 
 class Q2_K(__Quant, qtype=GGMLQuantizationType.Q2_K):
     @classmethod
+    def quantize_blocks(cls, blocks: np.ndarray) -> np.ndarray:
+        """
+        Quantizes a numpy array of floats into Q2_K format.
+        Vectorized implementation of the C++ reference code (quantize_row_q2_K_ref).
+        """
+        # blocks can come in any shape as long as the last dim is a multiple of QK_K
+        if blocks.shape[-1] % QK_K != 0:
+            raise ValueError(
+                f"The last dimension of the input array must be a multiple of {QK_K}, "
+                f"but got {blocks.shape[-1]}"
+            )
+
+        # Flatten to (n_blocks, QK_K)
+        n_blocks = blocks.size // QK_K
+        sub_blocks = blocks.reshape((n_blocks, QK_K // 16, 16)).astype(
+            np.float32, copy=False
+        )
+
+        # --- Vectorized make_qkx2_quants logic (n=16, nmax=3, use_mad=true) ---
+        nmax = 3
+        rmin = -0.5
+        rdelta = 0.1
+        nstep = 15
+
+        # Weights: w[i] = |x[i]|
+        weights = np.abs(sub_blocks)
+        sum_w = np.sum(weights, axis=-1, keepdims=True)
+        sum_x = np.sum(weights * sub_blocks, axis=-1, keepdims=True)
+
+        # Initial min / max per 16-element sub-block
+        min_v = np.min(sub_blocks, axis=-1, keepdims=True)
+        max_v = np.max(sub_blocks, axis=-1, keepdims=True)
+        # As in make_qkx2_quants: clamp min to be <= 0
+        min_v[min_v > 0] = 0.0
+
+        max_minus_min = max_v - min_v
+
+        # Handle flat sub-blocks
+        is_flat = max_minus_min < 1e-8
+        max_minus_min[is_flat] = 1.0  # avoid division by zero
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            iscale = nmax / max_minus_min
+        scale = 1.0 / iscale
+        scale[is_flat] = 0.0
+
+        # Initial codes and error (use MAD as in ref: use_mad = true)
+        l_current = (
+            np_roundf(iscale * (sub_blocks - min_v))
+            .clip(0, nmax)
+            .astype(np.uint8)
+        )
+        diff = scale * l_current + min_v - sub_blocks
+        best_error = np.sum(weights * np.abs(diff), axis=-1)
+
+        scale_best = scale.squeeze(-1)
+        min_best = min_v.squeeze(-1)
+
+        # Iterative search over r in [rmin, rmin + nstep * rdelta]
+        for is_ in range(nstep + 1):
+            with np.errstate(divide="ignore", invalid="ignore"):
+                current_iscale = (rmin + rdelta * is_ + nmax) / max_minus_min
+            current_iscale[is_flat] = 0.0
+
+            l_aux = (
+                np_roundf(current_iscale * (sub_blocks - min_v))
+                .clip(0, nmax)
+                .astype(np.uint8)
+            )
+
+            w_l = weights * l_aux
+            sum_l = np.sum(w_l, axis=-1, keepdims=True)
+            sum_l2 = np.sum(w_l * l_aux, axis=-1, keepdims=True)
+            sum_xl = np.sum(w_l * sub_blocks, axis=-1, keepdims=True)
+
+            D = sum_w * sum_l2 - sum_l * sum_l
+            valid_D_mask = D > 0
+
+            # Least-squares solution for scale and min
+            this_scale = np.divide(
+                (sum_w * sum_xl - sum_x * sum_l),
+                D,
+                out=np.zeros_like(D),
+                where=valid_D_mask,
+            )
+            this_min = np.divide(
+                (sum_l2 * sum_x - sum_l * sum_xl),
+                D,
+                out=np.zeros_like(D),
+                where=valid_D_mask,
+            )
+
+            # If candidate min > 0, force min = 0 and recompute scale
+            min_gt_zero_mask = valid_D_mask & (this_min > 0)
+            if np.any(min_gt_zero_mask):
+                recalc_scale = np.divide(
+                    sum_xl,
+                    sum_l2,
+                    out=np.zeros_like(sum_xl),
+                    where=sum_l2 > 0,
+                )
+                this_scale = np.where(min_gt_zero_mask, recalc_scale, this_scale)
+                this_min = np.where(min_gt_zero_mask, 0.0, this_min)
+
+            # Current error using MAD
+            diff = this_scale * l_aux + this_min - sub_blocks
+            current_error = np.sum(weights * np.abs(diff), axis=-1)
+
+            improvement_mask = valid_D_mask.squeeze(-1) & (
+                current_error < best_error
+            )
+            if np.any(improvement_mask):
+                best_error[improvement_mask] = current_error[improvement_mask]
+                scale_best[improvement_mask] = this_scale.squeeze(-1)[
+                    improvement_mask
+                ]
+                min_best[improvement_mask] = this_min.squeeze(-1)[
+                    improvement_mask
+                ]
+
+        scales_all = scale_best  # (n_blocks, QK_K // 16)
+        mins_all = -min_best  # store positive mins as in ref
+
+        # --- Block-level d and dmin + packing 4-bit scales/mins ---
+        q4scale = 15.0
+
+        max_scale_per_block = np.max(scales_all, axis=1, keepdims=True)
+        max_min_per_block = np.max(mins_all, axis=1, keepdims=True)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            inv_scale = np.where(
+                max_scale_per_block == 0.0, 0.0, q4scale / max_scale_per_block
+            )
+            inv_min = np.where(
+                max_min_per_block == 0.0, 0.0, q4scale / max_min_per_block
+            )
+
+        ls = np.clip(np_roundf(scales_all * inv_scale), 0, 15).astype(np.uint8)
+        lm = np.clip(np_roundf(mins_all * inv_min), 0, 15).astype(np.uint8)
+
+        # One byte per 16-element sub-block: low 4 bits = ls, high 4 bits = lm
+        scales_packed = (ls & np.uint8(0x0F)) | ((lm & np.uint8(0x0F)) << 4)
+
+        # Block-level d and dmin (stored as f16)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            d_val = np.where(
+                max_scale_per_block == 0.0,
+                0.0,
+                max_scale_per_block / q4scale,
+            )
+            dmin_val = np.where(
+                max_min_per_block == 0.0, 0.0, max_min_per_block / q4scale
+            )
+
+        d = d_val.reshape(n_blocks, 1).astype(np.float16).view(np.uint8)
+        dmin = dmin_val.reshape(n_blocks, 1).astype(np.float16).view(np.uint8)
+
+        # --- Final re-quantization to 2 bits using block-level d/dmin + packed scales/mins ---
+        d_eff = (d_val * ls.astype(np.float32)).reshape(n_blocks, -1, 1)
+        m_eff = (dmin_val * lm.astype(np.float32)).reshape(n_blocks, -1, 1)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            L_float = np.divide(
+                sub_blocks + m_eff,
+                d_eff,
+                out=np.zeros_like(sub_blocks),
+                where=d_eff != 0,
+            )
+
+        L = np.clip(np_roundf(L_float), 0, 3).astype(np.uint8)
+
+        # Pack 2-bit codes into bytes to match dequantize_blocks layout
+        # Shape: (n_blocks, QK_K // 16, 16) -> (n_blocks, groups, 4, 32)
+        L_grouped = L.reshape(n_blocks, -1, 4, 32)
+        shifts = np.array([0, 2, 4, 6], dtype=np.uint8).reshape(1, 1, 4, 1)
+        qs_bytes = np.sum(
+            (L_grouped & np.uint8(0x03)) << shifts, axis=2, dtype=np.uint8
+        ).reshape(n_blocks, -1)
+
+        # Assemble final block: [scales (QK_K//16), qs (QK_K//4), d (2), dmin (2)]
+        return np.concatenate([scales_packed, qs_bytes, d, dmin], axis=1)
+    
+    @classmethod
     def dequantize_blocks(cls, blocks: np.ndarray) -> np.ndarray:
         n_blocks = blocks.shape[0]
 
