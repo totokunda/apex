@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: nunchaku-qwenimage-edit
+  id: nunchaku-qwenimage-edit-2509-lightning-8steps
   model: qwenimage
-  name: Nunchaku QwenImage Edit
+  name: Nunchaku QwenImage Edit 2509 Lightning 8 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage is a 20B parameter model for image editing.
+  description: Nunchaku QwenImage Edit 2509 Lightning v1.0 8-step is a 20B parameter model for fast, higher-quality image editing.
   tags:
   - qwenimage
   - edit
@@ -14,6 +14,9 @@ metadata:
   - nf4
   - int4
   - nunchaku
+  - lightning
+  - 2509
+  - 8steps
   author: Apex AI
   license: Apache-2.0
   demo_path: https://alizila.oss-us-west-1.aliyuncs.com/uploads/2025/08/Qwen-Image-cover.jpg
@@ -102,24 +105,23 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.nunchaku
-   
     model_path:
-    # INT4 (SVDQuant) variants from nunchaku-tech/nunchaku-qwen-image-edit
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r32-qwen-image-edit.safetensors
-      variant: int4_r32
+    # INT4 (SVDQuant) lightning v1.0 8-step variants
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r32-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
+      variant: int4_r32_lightning_v1_0_8steps
       precision: int4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit.safetensors
-      variant: int4_r128
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
+      variant: int4_r128_lightning_v1_0_8steps
       precision: int4
       type: safetensors
-    # NF4 (FP4 SVDQuant) variants from nunchaku-tech/nunchaku-qwen-image-edit
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r32-qwen-image-edit.safetensors
-      variant: nf4_r32
+    # NF4 (FP4 SVDQuant) lightning v1.0 8-step variants
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
+      variant: nf4_r32_lightning_v1_0_8steps
       precision: nf4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r128-qwen-image-edit.safetensors
-      variant: nf4_r128
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
+      variant: nf4_r128_lightning_v1_0_8steps
       precision: nf4
       type: safetensors
   - type: helper
@@ -133,7 +135,6 @@ spec:
       file_size: 15879236
   defaults:
     run:
-      num_inference_steps: 40
       return_latents: false
       text_encoder_kwargs:
         add_special_tokens: false
@@ -183,7 +184,6 @@ spec:
       layout:
         flow: column
         rows:
-        - - num_inference_steps
         - - true_cfg_scale
         - - seed
     inputs:
@@ -254,16 +254,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 40
-      min: 1
-      max: 100
-      step: 1
     - id: height
       label: Height
       description: Explicit height override
@@ -304,3 +294,5 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
+
+
