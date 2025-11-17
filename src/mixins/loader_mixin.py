@@ -30,7 +30,7 @@ from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from src.converters.convert import get_transformer_converter
-
+from contextlib import nullcontext
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
@@ -112,7 +112,6 @@ class LoaderMixin(DownloadMixin):
         if component.get("config"):
             config.update(component.get("config"))
         
-
         if (
             not config
             or (
@@ -121,25 +120,41 @@ class LoaderMixin(DownloadMixin):
             )
         ) and (
             not component.get("extra_model_paths")
-        ) and not extra_kwargs.get("load_from_config") and not needs_memory_management:
-           
+        ) and not extra_kwargs.get("load_from_config"):
             if (
                 hasattr(self, "engine_type")
                 and self.engine_type == "mlx"
                 and component.get("type") == "transformer"
-            ) and load_dtype is not None:
+            ) and load_dtype is not None and "dtype" not in extra_kwargs:
                 extra_kwargs["dtype"] = load_dtype
-            elif load_dtype is not None:
+            elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
                 extra_kwargs["torch_dtype"] = load_dtype
                 
             self.logger.info(f"Loading {model_class} from {model_path}")
-            if no_weights:
-                with init_empty_weights():
-                    model = model_class.from_pretrained(model_path, **extra_kwargs)
-                return model
-            else:
+            context = init_empty_weights() if no_weights else nullcontext()
+            with context:
+                # remove all kwargs that are null 
+                extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
+
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
-                return model
+            
+            if mm_config is not None and not no_weights:
+                apply_group_offloading = getattr(self, "_apply_group_offloading", None)
+                if callable(apply_group_offloading):
+                    label = component.get("name") or component.get("type") or type(model).__name__
+                    offloading_module = component.get("offloading_module", None)
+                    if offloading_module:
+                        model_to_offload = model.get_submodule(offloading_module)
+                    else:
+                        model_to_offload = model
+                    try:
+                        apply_group_offloading(model_to_offload, mm_config, module_label=label)
+                    except Exception as e:
+                        if hasattr(self, "logger"):
+                            self.logger.warning(
+                                f"Failed to enable group offloading for '{label}': {e}"
+                            )
+            return model
     
         self.logger.info(f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}")
 

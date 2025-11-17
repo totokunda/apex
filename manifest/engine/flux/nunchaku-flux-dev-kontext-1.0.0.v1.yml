@@ -1,22 +1,36 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: fibo-ti2i
-  model: fibo
-  name: Fibo TI2I
+  id: nunchaku-flux-dev-kontext
+  model: flux
+  name: Nunchaku Flux Dev Kontext
   version: 1.0.0
-  description: Fibo is an 8B parameter model for text-to-image generation powered by Bria.
+  description: Nunchaku Flux Kontext is a 12B parameter model for image + text conditioned
+    generation.
   tags:
-  - fibo
-  - ti2i
+  - flux
+  - kontext
+  - dev
+  - nunchaku
+  - svdquant
+  - fp4
+  - nf4
+  - int4
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://bria-public.s3.us-east-1.amazonaws.com/car.001.jpeg
+  demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
 spec:
-  engine: fibo
-  model_type: ti2i
+  engine: flux
+  model_type: kontext
   engine_type: torch
   denoise_type: base
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
+    excluded_cuda_architectures:
+    - sm_90  # Nunchaku does not support H100 (Hopper)
   attention_types:
   - sdpa
   components:
@@ -26,61 +40,76 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Fibo
-        TI2I model.
+      description: Scheduler for Flux Kontext dev.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: briaai/FIBO/scheduler/scheduler_config.json
+      config_path: black-forest-labs/FLUX.1-Kontext-dev/scheduler/scheduler_config.json
   - type: vae
-    label: Fibo VAE
-    base: wan
+    label: Flux VAE
+    base: auto
     model_path:
-    - path: briaai/FIBO/vae
+    - path: black-forest-labs/FLUX.1-dev/vae
       variant: default
       precision: fp16
       type: safetensors
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 16
-      
+      file_size: 167667722
   - type: text_encoder
-    label: Fibo Text Encoder
-    base: SmolLM3ForCausalLM
+    name: text_encoder
+    label: CLIP Text Encoder
+    base: CLIPTextModel
     model_path:
-    - path: briaai/FIBO/text_encoder
+    - path: black-forest-labs/FLUX.1-dev/text_encoder
       variant: default
       precision: fp16
       type: safetensors
-      resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 24
-    tokenizer_class: PreTrainedTokenizerFast
-    tokenizer_name: briaai/FIBO
+      file_size: 246144965
+    tokenizer_class: CLIPTokenizer
+    tokenizer_name: black-forest-labs/FLUX.1-dev
     tokenizer_kwargs:
       subfolder: tokenizer
-  
-  - type: transformer
-    label: Fibo Transformer
-    base: fibo.base
+  - type: text_encoder
+    name: text_encoder_2
+    label: T5 Text Encoder
+    base: T5EncoderModel
     model_path:
-    - path: briaai/FIBO/transformer
+    - path: black-forest-labs/FLUX.1-dev/text_encoder_2
       variant: default
       precision: fp16
       type: safetensors
-  - type: helper
-    name:  prompt_gen
-    label: Fibo JSON Prompt Generator
-    base: fibo.prompt_gen
+      file_size: 9524669251
+    tokenizer_class: T5Tokenizer
+    tokenizer_name: black-forest-labs/FLUX.1-dev
+    tokenizer_kwargs:
+      subfolder: tokenizer_2
+  - type: transformer
+    label: Flux Transformer
+    base: flux.nunchaku
     model_path:
-    - path: briaai/FIBO-vlm
+    # INT4 (SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-kontext-dev
+    - path: nunchaku-tech/nunchaku-flux.1-kontext-dev/svdq-int4_r32-flux.1-kontext-dev.safetensors
+      variant: int4_r32
+      precision: int4
+      type: safetensors
+    # NF4 (FP4 SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-kontext-dev
+    - path: nunchaku-tech/nunchaku-flux.1-kontext-dev/svdq-fp4_r32-flux.1-kontext-dev.safetensors
+      variant: nf4_r32
+      precision: nf4
       type: safetensors
   defaults:
     run:
       num_inference_steps: 40
+      guidance_scale: 5.0
       return_latents: false
       text_encoder_kwargs:
-        add_special_tokens: false
         clean_text: false
-      attention_kwargs: {}
+        max_sequence_length: 77
+        pad_with_zero: false
+        add_special_tokens: true
+      text_encoder_2_kwargs:
+        add_special_tokens: true
+        clean_text: false
+        pad_with_zero: false
+        max_sequence_length: 512
+      joint_attention_kwargs: {}
   ui:
     panels:
     - name: input
@@ -126,25 +155,25 @@ spec:
         flow: column
         rows:
         - - num_inference_steps
-        - - guidance_scale
+        - - true_cfg_scale
         - - seed
     inputs:
     - id: image
       label: Image
-      description: The input image to edit.
+      description: The input image to condition on.
       type: image
       panel: input
-      required: false
-      map_h: height
-      map_w: width
-      scale_by: resolution
+      map_h: "height"
+      map_w: "width"
+      scale_by: "resolution"
+      required: true
     - id: prompt
       label: Prompt
-      description: The prompt to create or edit the image. This can be a string or JSON.
-      placeholder: A beautiful woman with long brown hair and blue eyes.
+      description: The text prompt describing desired output.
+      placeholder: A cinematic portrait in soft lighting.
       type: text
       panel: prompting
-      required: false
+      required: true
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what you want to avoid in the generation.
@@ -152,20 +181,12 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: ''
-    - id: structured_prompt
-      label: Structured Prompt
-      description: The structured prompt to edit the image. This should be a valid JSON object.
-      type: text
-      panel: advanced_prompting
-      required: false
-      default: ''
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 1024
       options:
       - name: HD
         value: 720
@@ -183,8 +204,12 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 969
+      default: 61
       options:
+      - name: Square
+        value: 61
+        ratio_w: 1
+        ratio_h: 1
       - name: Wide
         value: 969
         ratio_w: 16
@@ -193,10 +218,6 @@ spec:
         value: 556
         ratio_w: 9
         ratio_h: 16
-      - name: Square
-        value: 61
-        ratio_w: 1
-        ratio_h: 1
       - name: Classic
         value: 184
         ratio_w: 4
@@ -243,13 +264,13 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: guidance_scale
-      label: Guidance Scale
+    - id: true_cfg_scale
+      label: True CFG Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 5.0
+      default: 1.0
       min: 1.0
       max: 15.0
       step: 0.5

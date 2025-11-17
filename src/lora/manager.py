@@ -11,6 +11,10 @@ from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
 
+try: 
+    from nunchaku.lora.flux.compose import compose_lora
+except ImportError:
+    compose_lora = None
 
 @dataclass
 class LoraItem:
@@ -176,41 +180,49 @@ class LoraManager(DownloadMixin):
                 scale = float(scales[idx])
             item.scale = float(scale)
             resolved.append(item)
-
-        for i, item in enumerate(resolved):
-            adapter_name = (
-                adapter_names[i]
-                if adapter_names and i < len(adapter_names) and adapter_names[i]
-                else item.name or f"lora_{self._hash(item.source)}"
-            )
-            final_names.append(adapter_name)
-            final_scales.append(item.scale)
-            # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
-            for local_path in item.local_paths:
-                local_path_state_dict, converted = self.maybe_convert_state_dict(
-                    local_path, model.config._class_name
+        
+        if hasattr(model, "update_lora_params") and compose_lora is not None:
+            composed_lora = []
+            for i, item in enumerate(resolved):
+                for local_path in item.local_paths:
+                    composed_lora.append((local_path, item.scale))
+            composed_lora = compose_lora(composed_lora)
+            model.update_lora_params(composed_lora)
+        else:
+            for i, item in enumerate(resolved):
+                adapter_name = (
+                    adapter_names[i]
+                    if adapter_names and i < len(adapter_names) and adapter_names[i]
+                    else item.name or f"lora_{self._hash(item.source)}"
                 )
-                
-                local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
-                
-                keys = list(local_path_state_dict.keys())
-                prefix = None
-                if keys[0].startswith("transformer") and keys[-1].startswith("transformer"):
-                    prefix = "transformer"
-                
-                model.load_lora_adapter(
-                    local_path_state_dict, adapter_name=adapter_name, prefix=prefix,
-                )
-                
-                logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
+                final_names.append(adapter_name)
+                final_scales.append(item.scale)
+                # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
+                for local_path in item.local_paths:
+                    local_path_state_dict, converted = self.maybe_convert_state_dict(
+                        local_path, model.config._class_name
+                    )
 
-        # Activate all adapters with their weights in one call
-        try:
-            model.set_adapters(final_names, weights=final_scales)
-        except Exception as e:
-            logger.warning(
-                f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
-            )
+                    local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
+
+                    keys = list(local_path_state_dict.keys())
+                    prefix = None
+                    if keys[0].startswith("transformer") and keys[-1].startswith("transformer"):
+                        prefix = "transformer"
+
+                    model.load_lora_adapter(
+                        local_path_state_dict, adapter_name=adapter_name, prefix=prefix,
+                    )
+
+                    logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
+
+            # Activate all adapters with their weights in one call
+            try:
+                model.set_adapters(final_names, weights=final_scales)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
+                )
         return resolved
 
     def maybe_convert_state_dict(self, local_path: str, model_name: str) -> str:

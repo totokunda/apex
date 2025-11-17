@@ -38,6 +38,7 @@ from src.utils.defaults import (
     DEFAULT_SAVE_PATH,
     DEFAULT_LORA_SAVE_PATH,
 )
+from src.utils.compute import validate_compute_requirements, get_compute_capability
 
 import tempfile
 from src.transformer import _auto_register_transformers
@@ -223,6 +224,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self._init_kwargs = dict(kwargs)
         self._init_logger()
         self.config = self._load_yaml(yaml_path)
+        
+        # Validate compute requirements if specified in config
+        self._validate_compute_requirements()
 
         self.save_path = kwargs.get("save_path", None)
 
@@ -277,6 +281,38 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
     def _init_logger(self):
         self.logger = logger
+
+    def _validate_compute_requirements(self):
+        """Validate that the current system meets the compute requirements specified in the config."""
+        compute_requirements = self.config.get("compute_requirements")
+        if not compute_requirements:
+            return
+        
+        is_valid, error_message = validate_compute_requirements(compute_requirements)
+        if not is_valid:
+            current_cap = get_compute_capability()
+            error_detail = (
+                f"\n\nCompute Validation Failed:\n"
+                f"  {error_message}\n\n"
+                f"Current System:\n"
+                f"  Compute Type: {current_cap.compute_type}\n"
+            )
+            if current_cap.compute_type == "cuda":
+                error_detail += f"  CUDA Capability: {current_cap.cuda_compute_capability}\n"
+                error_detail += f"  Device: {current_cap.device_name}\n"
+            elif current_cap.compute_type == "metal":
+                error_detail += f"  Metal Version: {current_cap.metal_version}\n"
+            else:
+                error_detail += f"  Platform: {current_cap.cpu_info.get('platform', 'unknown')}\n"
+            
+            error_detail += f"\nRequired:\n"
+            if compute_requirements.get("min_cuda_compute_capability"):
+                error_detail += f"  Min CUDA Capability: {compute_requirements['min_cuda_compute_capability']}\n"
+            if compute_requirements.get("supported_compute_types"):
+                error_detail += f"  Supported Types: {', '.join(compute_requirements['supported_compute_types'])}\n"
+            
+            self.logger.error(error_detail)
+            raise RuntimeError(error_detail)
 
     def _aspect_ratio_resize(
         self,
@@ -835,7 +871,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             else:
                 registry = TRANSFORMERS_REGISTRY_TORCH
                 dtype_converter = convert_dtype_to_torch
-            
+
             transformer = self._load_model(
                 component,
                 registry.get,
@@ -1097,7 +1133,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         
         if gpu_available_gb is not None:
             # Use available memory for more accurate decision
-            if total_size_gb >= 0.25 * gpu_available_gb:
+            if total_size_gb >= 0.75 * gpu_available_gb:
                 needs_offload = True
         else:
             # Fallback to total memory
@@ -1726,9 +1762,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     for model_path_item in model_path:
                         if selected_model_item.get('variant') == model_path_item.get('variant'):
                             component['model_path'] = selected_model_item.get('path')
-                            component['key_map'] = model_path_item.get('key_map')
-                            component['extra_kwargs'] = model_path_item.get('extra_kwargs')
-                            
+                            if isinstance(model_path_item.get('key_map'), dict):
+                                component['key_map'] = model_path_item.get('key_map')
+                            if isinstance(model_path_item.get('extra_kwargs'), dict):
+                                component['extra_kwargs'] = model_path_item.get('extra_kwargs')
+                                              
                     path = self.is_downloaded(component['model_path'], components_path)
                     if path is None:
                         component['model_path'] = self._download(component['model_path'], components_path)

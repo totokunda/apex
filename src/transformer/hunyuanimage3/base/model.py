@@ -60,6 +60,59 @@ BatchRaggedImages = Union[torch.Tensor, List[Union[torch.Tensor, List[torch.Tens
 BatchRaggedTensor = Union[torch.Tensor, List[torch.Tensor]]
 
 
+@dataclass
+class SparseMoERouterState:
+    token_indices: torch.LongTensor
+    expert_indices: torch.LongTensor
+    slot_indices: torch.LongTensor
+    combine_weights: torch.Tensor
+    num_tokens: int
+    num_experts: int
+    expert_capacity: int
+
+    @property
+    def num_assignments(self) -> int:
+        return self.token_indices.numel()
+
+    def dispatch(self, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Build expert inputs without instantiating a dense dispatch mask.
+        Args:
+            inputs: Tensor of shape [num_tokens, hidden_size].
+        Returns:
+            Tensor of shape [num_experts, expert_capacity, hidden_size].
+        """
+        hidden_size = inputs.shape[-1]
+        dispatch_buffer = inputs.new_zeros((self.num_experts * self.expert_capacity, hidden_size))
+
+        if self.num_assignments > 0 and self.expert_capacity > 0:
+            flat_indices = self.expert_indices * self.expert_capacity + self.slot_indices
+            token_values = inputs.index_select(0, self.token_indices)
+            dispatch_buffer.index_copy_(0, flat_indices, token_values)
+
+        return dispatch_buffer.view(self.num_experts, self.expert_capacity, hidden_size)
+
+    def combine(self, expert_outputs: torch.Tensor) -> torch.Tensor:
+        """
+        Combine expert outputs back to tokens using sparse router weights.
+        Args:
+            expert_outputs: Tensor of shape [num_experts, expert_capacity, hidden_size].
+        Returns:
+            Tensor of shape [num_tokens, hidden_size].
+        """
+        hidden_size = expert_outputs.shape[-1]
+        combined = expert_outputs.new_zeros((self.num_tokens, hidden_size))
+
+        if self.num_assignments > 0 and self.expert_capacity > 0:
+            flat_indices = self.expert_indices * self.expert_capacity + self.slot_indices
+            gathered = expert_outputs.view(self.num_experts * self.expert_capacity, hidden_size).index_select(0, flat_indices)
+            weights = self.combine_weights.to(expert_outputs.dtype).unsqueeze(-1)
+            gathered = gathered * weights
+            combined.index_add_(0, self.token_indices, gathered)
+
+        return combined
+
+
 _CONFIG_FOR_DOC = "HunyuanImage3Config"
 
 Hunyuan_START_DOCSTRING = r"""
@@ -291,23 +344,38 @@ def topkgating(
     token_priority = torch.max(token_priority, dim=1)[0]
 
     # Token T can only be routed to expert E if its priority is positive and
-    # less than the expert capacity. One-hot matrix will ignore indices outside
-    # the range [0, expert_capacity).
-    # Shape: [tokens_per_group, num_experts, expert_capacity].
+    # less than the expert capacity. Record only the sparse assignments.
     valid_mask = torch.logical_and(token_priority >= 0, token_priority < expert_capacity)
-    token_priority = torch.masked_fill(token_priority, ~valid_mask, 0)
-    dispatch_mask = F.one_hot(token_priority, expert_capacity).to(torch.bool)
-    valid_mask = valid_mask.unsqueeze(-1).expand(-1, -1, expert_capacity)
-    dispatch_mask = torch.masked_fill(dispatch_mask, ~valid_mask, 0)
+    token_priority = torch.masked_fill(token_priority, ~valid_mask, 0).to(torch.long)
 
-    # The combine array will be used for combining expert outputs, scaled by the
-    # router probabilities. Shape: [num_groups, tokens_per_group, num_experts,
-    # expert_capacity].
-    combine_weights = torch.einsum("...te,...tec->...tec", router_probs, dispatch_mask)
-    exp_counts_capacity = torch.sum(dispatch_mask)
-    exp_capacity_rate = exp_counts_capacity / (logits.shape[0] * topk)
+    nonzero = torch.nonzero(valid_mask, as_tuple=False)
+    if nonzero.numel() > 0:
+        token_indices = nonzero[:, 0]
+        expert_indices = nonzero[:, 1]
+        slot_indices = token_priority[token_indices, expert_indices]
+        combine_weights = router_probs[token_indices, expert_indices]
+    else:
+        device = logits.device
+        token_indices = torch.empty((0,), dtype=torch.long, device=device)
+        expert_indices = torch.empty((0,), dtype=torch.long, device=device)
+        slot_indices = torch.empty((0,), dtype=torch.long, device=device)
+        combine_weights = torch.empty((0,), dtype=gates.dtype, device=device)
 
-    return [l_aux, exp_capacity_rate], combine_weights, dispatch_mask, exp_counts
+    routing_state = SparseMoERouterState(
+        token_indices=token_indices,
+        expert_indices=expert_indices,
+        slot_indices=slot_indices,
+        combine_weights=combine_weights,
+        num_tokens=logits.shape[0],
+        num_experts=num_experts,
+        expert_capacity=expert_capacity,
+    )
+    exp_counts_capacity = token_indices.shape[0]
+    exp_capacity_rate = torch.tensor(0.0, dtype=gates.dtype, device=logits.device)
+    if topk > 0:
+        exp_capacity_rate = routing_state.combine_weights.new_tensor(exp_counts_capacity) / (logits.shape[0] * topk)
+
+    return [l_aux, exp_capacity_rate], routing_state, exp_counts
 
 
 # =======================================================
@@ -1124,15 +1192,15 @@ class HunyuanMoE(nn.Module):
                 )
             else:
                 # Original implementation - fallback for compatibility
-                l_moe, combine_weights, dispatch_mask, exp_counts = self.gate(hidden_states, topk_impl='default')
-                dispatched_input = torch.einsum("sec,sm->ecm", dispatch_mask.type_as(hidden_states), reshaped_input)
+                l_moe, routing_state, exp_counts = self.gate(hidden_states, topk_impl='default')
+                dispatched_input = routing_state.dispatch(reshaped_input)
                 chunks = dispatched_input.chunk(self.num_experts, dim=0)
                 expert_outputs = []
                 for chunk, expert in zip(chunks, self.experts):
                     expert_outputs.append(expert(chunk))
 
                 expert_output = torch.cat(expert_outputs, dim=0)
-                combined_output = torch.einsum("sec,ecm->sm", combine_weights.type_as(hidden_states), expert_output)
+                combined_output = routing_state.combine(expert_output)
 
         combined_output = combined_output.reshape(bsz, seq_len, hidden_size)
 

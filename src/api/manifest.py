@@ -7,11 +7,22 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_config_path, get_lora_path
+from src.utils.compute import get_compute_capability, validate_compute_requirements, ComputeCapability
 
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
 # Base path to manifest directory
 MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "engine"
+
+# Cache the system's compute capability (it doesn't change during runtime)
+_SYSTEM_COMPUTE_CAPABILITY: Optional[ComputeCapability] = None
+
+def _get_system_compute_capability() -> ComputeCapability:
+    """Get the system's compute capability (cached)."""
+    global _SYSTEM_COMPUTE_CAPABILITY
+    if _SYSTEM_COMPUTE_CAPABILITY is None:
+        _SYSTEM_COMPUTE_CAPABILITY = get_compute_capability()
+    return _SYSTEM_COMPUTE_CAPABILITY
 
 
 class ModelTypeInfo(BaseModel):
@@ -154,6 +165,23 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     content["downloaded"] = bool(components_list) and all(
         isinstance(c, dict) and c.get("is_downloaded", False) for c in components_list
     )
+    
+    # Compute compatibility check
+    compute_requirements = spec.get("compute_requirements")
+    if compute_requirements:
+        system_capability = _get_system_compute_capability()
+        is_compatible, compatibility_error = validate_compute_requirements(
+            compute_requirements, 
+            system_capability
+        )
+        content["compute_compatible"] = is_compatible
+        content["compute_compatibility_error"] = compatibility_error
+        content["compute_requirements_present"] = True
+    else:
+        # No compute requirements means it's compatible with all systems
+        content["compute_compatible"] = True
+        content["compute_compatibility_error"] = None
+        content["compute_requirements_present"] = False
 
     return content
 
@@ -170,7 +198,10 @@ def get_manifest(manifest_id: str):
 
 
 def _get_all_manifest_files_uncached() -> List[Dict[str, Any]]:
-    """Scan manifest directory and return all enriched manifest contents (no cache)."""
+    """Scan manifest directory and return all enriched manifest contents (no cache).
+    
+    Filters out manifests that are not compatible with the current system's compute capabilities.
+    """
     manifests: List[Dict[str, Any]] = []
     
     for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
@@ -181,7 +212,10 @@ def _get_all_manifest_files_uncached() -> List[Dict[str, Any]]:
 
                 # Load and enrich each manifest directly
                 enriched = _load_and_enrich_manifest(str(relative_path))
-                manifests.append(enriched)
+                
+                # Only include manifests that are compatible with the current system
+                if enriched.get("compute_compatible", True):
+                    manifests.append(enriched)
                 
     return manifests
 
@@ -399,25 +433,67 @@ def list_model_types() -> List[ModelTypeInfo]:
 
 
 
+@router.get("/system/compute")
+def get_system_compute_info():
+    """Get information about the current system's compute capabilities."""
+    capability = _get_system_compute_capability()
+    return capability.to_dict()
+
+
 @router.get("/list")
-def list_all_manifests():
-    """List all available manifest names."""
-    manifests = get_all_manifest_files()
-    return manifests
+def list_all_manifests(include_incompatible: bool = False):
+    """List all available manifests.
+    
+    Args:
+        include_incompatible: If True, include manifests that are not compatible 
+                            with the current system's compute capabilities.
+                            Default is False (only show compatible manifests).
+    """
+    if include_incompatible:
+        # Load all manifests without filtering
+        manifests: List[Dict[str, Any]] = []
+        for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
+            for file in files:
+                if file.endswith('.yml') and not file.startswith('shared'):
+                    file_path = Path(root) / file
+                    relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
+                    enriched = _load_and_enrich_manifest(str(relative_path))
+                    manifests.append(enriched)
+        return manifests
+    else:
+        # Use the normal filtered list
+        manifests = get_all_manifest_files()
+        return manifests
 
 @router.get("/list/model/{model}")
-def list_manifests_by_model(model: str):
-    """List all manifest names for a specific model."""
-    manifests = get_all_manifest_files()
+def list_manifests_by_model(model: str, include_incompatible: bool = False):
+    """List all manifest names for a specific model.
+    
+    Args:
+        model: The model name to filter by
+        include_incompatible: If True, include manifests not compatible with current system
+    """
+    if include_incompatible:
+        manifests = list_all_manifests(include_incompatible=True)
+    else:
+        manifests = get_all_manifest_files()
     filtered = [m for m in manifests if m.get("model") == model]
     if not filtered:
         raise HTTPException(status_code=404, detail=f"No manifests found for model: {model}")
     return filtered
 
 @router.get("/list/type/{model_type}")
-def list_manifests_by_model_type(model_type: str):
-    """List all manifest names for a specific model type."""
-    manifests = get_all_manifest_files()
+def list_manifests_by_model_type(model_type: str, include_incompatible: bool = False):
+    """List all manifest names for a specific model type.
+    
+    Args:
+        model_type: The model type to filter by
+        include_incompatible: If True, include manifests not compatible with current system
+    """
+    if include_incompatible:
+        manifests = list_all_manifests(include_incompatible=True)
+    else:
+        manifests = get_all_manifest_files()
     filtered: List[Dict[str, Any]] = []
     for m in manifests:
         mt = m.get("model_type")
@@ -432,9 +508,18 @@ def list_manifests_by_model_type(model_type: str):
     return filtered
 
 @router.get("/list/model/{model}/model_type/{model_type}")
-def list_manifests_by_model_and_type(model: str, model_type: str):
-    """List all manifest names for a specific model and model type combination."""
-    manifests = get_all_manifest_files()
+def list_manifests_by_model_and_type(model: str, model_type: str, include_incompatible: bool = False):
+    """List all manifest names for a specific model and model type combination.
+    
+    Args:
+        model: The model name to filter by
+        model_type: The model type to filter by
+        include_incompatible: If True, include manifests not compatible with current system
+    """
+    if include_incompatible:
+        manifests = list_all_manifests(include_incompatible=True)
+    else:
+        manifests = get_all_manifest_files()
     filtered: List[Dict[str, Any]] = []
     for m in manifests:
         model_match = (m.get("model") == model)

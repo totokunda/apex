@@ -136,6 +136,8 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         "shared",
         "helpers",
         "loras",
+        "attention_types",
+        "compute_requirements",
     ):
         if key in spec:
             normalized[key] = spec[key]
