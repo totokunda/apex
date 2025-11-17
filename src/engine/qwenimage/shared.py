@@ -7,9 +7,9 @@ from diffusers.image_processor import VaeImageProcessor
 class QwenImageShared(BaseEngine):
     """Base class for QwenImage engine implementations containing common functionality"""
 
-    def __init__(self, args, **kwargs):
+    def __init__(self, *args, **kwargs):
 
-        super().__init__(args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         self.vae_scale_factor = (
             2 ** len(self.vae.temperal_downsample) if getattr(self, "vae", None) else 8

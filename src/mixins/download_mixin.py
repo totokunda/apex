@@ -829,6 +829,8 @@ class DownloadMixin:
                     all_files = [p for p in all_files if p.startswith(prefix)]
             if not all_files:
                 self.logger.warning(f"No files found in repository: {repo_id}")
+                if subfolder:
+                    return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
             # Prepare session and headers
             token = HfFolder.get_token()
@@ -859,6 +861,8 @@ class DownloadMixin:
                     self.logger.error(f"Failed to resolve signed URL for {rel_path} in {repo_id}: {e}")
             if not file_entries:
                 self.logger.warning(f"No downloadable files resolved in repository: {repo_id}")
+                if subfolder:
+                    return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
             # Progress aggregation across threads
             def make_cb(rel_path: str, size_hint: Optional[int]):
@@ -958,7 +962,7 @@ class DownloadMixin:
                     self.logger.error(f"Failed to finalize Hugging Face download into {dest_path}: {e}")
             if hasattr(self, "logger"):
                 self.logger.info(f"Successfully downloaded from Hugging Face Hub: {repo_id}")
-            return dest_path
+            return dest_path if not subfolder else os.path.join(dest_path, *subfolder).rstrip("*")
         except Exception as e:
             if hasattr(self, "logger"):
                 self.logger.error(

@@ -31,7 +31,7 @@ from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import AttentionModuleMixin, FeedForward
 from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
 from src.transformer.fibo.base.attention import BriaFiboAttnProcessor
-
+ 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 

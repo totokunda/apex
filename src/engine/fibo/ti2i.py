@@ -350,40 +350,6 @@ class FiboTI2IEngine(BaseEngine):
 
         return latents, latent_image_ids
     
-    def vae_decode(self, latents, offload=True):
-        if self.vae is None:
-            self.load_component_by_type("vae")
-        self.to_device(self.vae)
-        
-        latents = latents.unsqueeze(dim=2)
-        latents_device = latents[0].device
-        latents_dtype = latents[0].dtype
-        latents_mean = (
-            torch.tensor(self.vae.config.latents_mean)
-            .view(1, self.vae.config.z_dim, 1, 1, 1)
-            .to(latents_device, latents_dtype)
-        )
-        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-            latents_device, latents_dtype
-        )
-
-        latents_scaled = [latent / latents_std + latents_mean for latent in latents]
-        latents_scaled = torch.cat(latents_scaled, dim=0)
-        image = []
-        for scaled_latent in latents_scaled:
-            curr_image = self.vae.decode(scaled_latent.unsqueeze(0), return_dict=False)[0]
-            curr_image = self.image_processor.postprocess(curr_image.squeeze(dim=2), output_type="pil")
-            image.append(curr_image)
-       
-        if len(image) == 1:
-            image = image[0]
-        else:
-            image = np.stack(image, axis=0)
-            
-        if offload:
-            self._offload(self.vae)
-        return image
-    
     def get_default_negative_prompt(self, existing_json: dict) -> str:
         negative_prompt = ""
         style_medium = existing_json.get("style_medium", "").lower()
@@ -420,6 +386,13 @@ class FiboTI2IEngine(BaseEngine):
         **kwargs,
         ):
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
+
+        # Reserve progress ranges:
+        # - [0.05, 0.40]: prompt / JSON generation
+        # - [0.50, 0.90]: denoising loop
+        prompt_progress_callback = make_mapped_progress(progress_callback, 0.05, 0.40)
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(prompt_progress_callback, 0.0, "Preparing prompt")
         
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
@@ -430,9 +403,21 @@ class FiboTI2IEngine(BaseEngine):
       
         try:
             json.loads(prompt)
-        except:
-            prompt = self._generate_json_prompt(prompt, structured_prompt, image, **generate_prompt_kwargs)
-            
+            safe_emit_progress(prompt_progress_callback, 1.0, "Using provided structured JSON prompt")
+        except Exception:
+            safe_emit_progress(prompt_progress_callback, 0.2, "Generating structured JSON prompt")
+            prompt = self._generate_json_prompt(
+                prompt,
+                structured_prompt,
+                image,
+                offload=offload,
+                progress_callback=prompt_progress_callback,
+                **generate_prompt_kwargs,
+            )
+            safe_emit_progress(prompt_progress_callback, 1.0, "Generated structured JSON prompt")
+        
+        safe_emit_progress(progress_callback, 0.42, "Structured prompt ready")
+
         if not negative_prompt:
             negative_prompt = self.get_default_negative_prompt(json.loads(prompt))
 
@@ -456,6 +441,12 @@ class FiboTI2IEngine(BaseEngine):
             lora_scale=lora_scale,
         )
         prompt_batch_size = prompt_embeds.shape[0]
+        safe_emit_progress(progress_callback, 0.48, "Encoded prompt")
+        
+        if offload:
+            self._offload(self.text_encoder)
+        
+        
         
 
         if not hasattr(self, "transformer") or not self.transformer:
@@ -533,7 +524,7 @@ class FiboTI2IEngine(BaseEngine):
             self.scheduler.config.base_shift,
             self.scheduler.config.max_shift,
         )
-        
+
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps=num_inference_steps,
@@ -543,6 +534,7 @@ class FiboTI2IEngine(BaseEngine):
 
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
+        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
 
         # Support old different diffusers versions
         if len(latent_image_ids.shape) == 3:
@@ -550,9 +542,16 @@ class FiboTI2IEngine(BaseEngine):
 
         if len(text_ids.shape) == 3:
             text_ids = text_ids[0]
+        
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
+        self._do_patching = do_patching
+        
 
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
+            total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if guidance_scale > 1 else latents
@@ -594,6 +593,15 @@ class FiboTI2IEngine(BaseEngine):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                
+                # Map denoising loop progress into [0.50, 0.90]
+                if denoise_progress_callback is not None and total_steps > 0:
+                    step_progress = float(i + 1) / float(total_steps)
+                    safe_emit_progress(
+                        denoise_progress_callback,
+                        step_progress,
+                        f"Denoising step {i + 1}/{total_steps}",
+                    )
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
@@ -610,13 +618,25 @@ class FiboTI2IEngine(BaseEngine):
             else:
                 latents = self._unpack_latents_no_patch(latents, height, width, self.vae_scale_factor)
             
-
+            latents = latents.unsqueeze(dim=2)
             images = self.vae_decode(latents, offload=offload)
+            images = images.squeeze(dim=2)
+            images = self._tensor_to_frame(images)
             safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
             return images
+        
+    def _render_step(self, latents, render_on_step_callback):
+        if self._do_patching:
+            latents = self._unpack_latents(latents, self._preview_height, self._preview_width, self.vae_scale_factor)
+        else:
+            latents = self._unpack_latents_no_patch(latents, self._preview_height, self._preview_width, self.vae_scale_factor)
+        latents = latents.unsqueeze(dim=2)
+        images = self.vae_decode(latents, offload=self._preview_offload)
+        images = images.squeeze(dim=2)
+        images = self._tensor_to_frame(images)
+        render_on_step_callback(images[0])
     
-    
-    
+
     def _build_messages(
         self,
         task: str,
@@ -663,36 +683,43 @@ class FiboTI2IEngine(BaseEngine):
         return messages
     
 
-    def _generate_json_prompt(self, prompt: Union[str, List[str]], 
+    def _generate_json_prompt(self, prompt: Union[str, List[str], None] = None, 
                               structured_prompt:str | None = None, 
                               image: InputImage | None = None, 
                               top_p: float = 0.9,
                               temperature: float = 0.2,
                               max_tokens: int = 4096,
                               stop=["<|im_end|>", "<|end_of_text|>"],
+                              offload: bool = True,
+                              progress_callback: Optional[Callable] = None,
                               **kwargs,
                               ):
         if isinstance(prompt, list):
             prompt = prompt[0]
-            
+        
+        self.logger.info(f"Loading image: {image} {prompt} {structured_prompt}")
+        
+        if image is not None:
+            image = self._load_image(image)
         llm = self.helpers["prompt_gen"]
         self.to_device(llm)
         
+
         refine_image = None
-        if image is None and structured_prompt is None:
+        if not image and not structured_prompt:
             # only got prompt
             task = "generate"
             editing_instructions = None
-        elif image is None and structured_prompt is not None and prompt is not None:
+        elif not image and structured_prompt and prompt:
             # got structured prompt and prompt
             task = "refine"
             editing_instructions = prompt
-        elif image is not None and structured_prompt is None and prompt is not None:
+        elif image and not structured_prompt and prompt:
             # got image and prompt
             task = "refine"
             editing_instructions = prompt
             refine_image = image
-        elif image is not None and structured_prompt is None and prompt is None:
+        elif image and not structured_prompt and not prompt:
             # only got image
             task = "inspire"
             editing_instructions = None
@@ -709,7 +736,14 @@ class FiboTI2IEngine(BaseEngine):
         )
 
         json_str = llm.generate(
-            messages=messages, top_p=top_p, temperature=temperature, max_tokens=max_tokens, stop=stop
+            messages=messages,
+            top_p=top_p,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+            progress_callback=progress_callback,
         )
+        if offload:
+            self._offload(llm)
         return json_str
         

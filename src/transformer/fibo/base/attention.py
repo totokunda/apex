@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from typing import Optional
-from src.attention import attention_register
+from src.attention import attention_register  
 from diffusers.models.embeddings import apply_rotary_emb
 # Copied from diffusers.models.transformers.transformer_flux.FluxAttnProcessor with FluxAttnProcessor->BriaFiboAttnProcessor, FluxAttention->BriaFiboAttention
 

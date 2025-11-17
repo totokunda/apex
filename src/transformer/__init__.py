@@ -3,6 +3,7 @@ import inspect
 from pathlib import Path
 from diffusers.models.modeling_utils import ModelMixin
 from .base import TRANSFORMERS_REGISTRY
+from loguru import logger
 
 
 def _auto_register_transformers():
@@ -43,7 +44,8 @@ def _auto_register_transformers():
             module_name = f"{__name__}.{family_dir.name}.{variant_dir.name}.model"
             try:
                 module = importlib.import_module(module_name)
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error importing module {module_name}: {e}")
                 # If import fails for any reason, skip auto-registration for this module.
                 continue
 
