@@ -1,25 +1,27 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: nunchaku-qwenimage-edit
+  id: nunchaku-qwenimage-t2i-lightning-4steps
   model: qwenimage
-  name: Nunchaku QwenImage Edit
+  name: Nunchaku QwenImage Text-to-Image Lightning 4 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage is a 20B parameter model for image editing.
+  description: Nunchaku QwenImage Lightning v1.0 4-step is a 20B parameter model for fast text-to-image generation.
   tags:
-  - qwenimage
-  - edit
   - svdquant
   - fp4
   - nf4
   - int4
+  - qwenimage
+  - t2i
   - nunchaku
+  - lightning
+  - 4steps
   author: Apex AI
   license: Apache-2.0
   demo_path: https://alizila.oss-us-west-1.aliyuncs.com/uploads/2025/08/Qwen-Image-cover.jpg
 spec:
   engine: qwenimage
-  model_type: edit
+  model_type: t2i
   engine_type: torch
   denoise_type: base
   compute_requirements:
@@ -39,18 +41,18 @@ spec:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
-        Edit model.
+        T2I model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: https://huggingface.co/Qwen/Qwen-Image-Edit/resolve/main/scheduler/scheduler_config.json
+      config_path: https://huggingface.co/Qwen/Qwen-Image/resolve/main/scheduler/scheduler_config.json
     - name: EulerDiscreteScheduler
       label: Euler Discrete Scheduler
-      description: The Euler Discrete Scheduler is a scheduler for the QwenImage Edit
+      description: The Euler Discrete Scheduler is a scheduler for the QwenImage T2I
         model.
       base: diffusers.EulerDiscreteScheduler
     - name: DPMSolverMultistepScheduler
       label: DPMSolver Multistep Scheduler
       description: The DPMSolver Multistep Scheduler is a scheduler for the QwenImage
-        Edit model.
+        T2I model.
       base: diffusers.DPMSolverMultistepScheduler
   - type: vae
     label: QwenImage VAE
@@ -66,10 +68,7 @@ spec:
       file_size: 253807696
   - type: text_encoder
     label: Qwen2.5 VL Text Encoder
-    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit/resolve/main/text_encoder/config.json
     base: Qwen2_5_VLForConditionalGeneration
-    gguf_kwargs:
-      key_map: llama
     model_path:
     - path: Qwen/Qwen-Image/text_encoder
       variant: default
@@ -79,61 +78,34 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 16584475660
-    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q8_0.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 8098524096
-    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 6254197696
     tokenizer_class: Qwen2Tokenizer
-    tokenizer_name: Qwen/Qwen-Image-Edit
+    tokenizer_name: Qwen/Qwen-Image
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.nunchaku
-   
+    extra_kwargs:
+      torch_dtype: null
     model_path:
-    # INT4 (SVDQuant) variants from nunchaku-tech/nunchaku-qwen-image-edit
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r32-qwen-image-edit.safetensors
-      variant: int4_r32
+    - path: nunchaku-tech/nunchaku-qwen-image/svdq-int4_r32-qwen-image-lightningv1.0-4steps.safetensors
+      variant: int4_r32_lightning_v1_0_4steps
       precision: int4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit.safetensors
-      variant: int4_r128
+    - path: nunchaku-tech/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors
+      variant: int4_r128_lightning_v1_0_4steps
       precision: int4
       type: safetensors
-    # NF4 (FP4 SVDQuant) variants from nunchaku-tech/nunchaku-qwen-image-edit
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r32-qwen-image-edit.safetensors
-      variant: nf4_r32
-      precision: nf4
+    - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r32-qwen-image-lightningv1.0-4steps.safetensors
+      variant: nf4_r32_lightning_v1_0_4steps
+      precision: fp4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r128-qwen-image-edit.safetensors
-      variant: nf4_r128
-      precision: nf4
+    - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r128-qwen-image-lightningv1.0-4steps.safetensors
+      variant: nf4_r128_lightning_v1_0_4steps
+      precision: fp4
       type: safetensors
-  - type: helper
-    name: image.processor
-    label: Image Processor
-    module: transformers.models.qwen2_vl.processing_qwen2_vl
-    base: Qwen2VLProcessor
-    model_path:
-    - path: Qwen/Qwen-Image-Edit/processor
-      type: safetensors
-      file_size: 15879236
   defaults:
     run:
-      num_inference_steps: 40
       return_latents: false
       text_encoder_kwargs:
         add_special_tokens: false
@@ -141,14 +113,6 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
-    - name: input
-      label: Input
-      collapsible: true
-      default_open: true
-      layout:
-        flow: column
-        rows:
-        - - image
     - name: prompting
       label: Prompting
       collapsible: true
@@ -183,23 +147,14 @@ spec:
       layout:
         flow: column
         rows:
-        - - num_inference_steps
         - - true_cfg_scale
+        - - guidance_scale
         - - seed
     inputs:
-    - id: image
-      label: Image
-      description: The input image to edit.
-      type: image
-      panel: input
-      required: true
-      map_h: height
-      map_w: width
-      scale_by: resolution
     - id: prompt
       label: Prompt
-      description: The prompt to edit the image.
-      placeholder: A beautiful woman with long brown hair and blue eyes.
+      description: The prompt for text-to-image generation.
+      placeholder: A serene lake surrounded by pine trees at sunrise, ultra realistic.
       type: text
       panel: prompting
       required: true
@@ -254,16 +209,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 40
-      min: 1
-      max: 100
-      step: 1
     - id: height
       label: Height
       description: Explicit height override
@@ -304,3 +249,15 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: guidance_scale
+      label: Guidance Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1.0
+      min: 0.0
+      max: 10.0
+      step: 0.1
+
+

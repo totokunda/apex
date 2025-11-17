@@ -112,22 +112,6 @@ spec:
       variant: int4_r128
       precision: int4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r32-qwen-image-edit-2509-lightningv1.0-4steps.safetensors
-      variant: int4_r32_lightning_v1_0_4steps
-      precision: int4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv1.0-4steps.safetensors
-      variant: int4_r128_lightning_v1_0_4steps
-      precision: int4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r32-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
-      variant: int4_r32_lightning_v1_0_8steps
-      precision: int4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
-      variant: int4_r128_lightning_v1_0_8steps
-      precision: int4
-      type: safetensors
     # NF4 (FP4 SVDQuant) variants from nunchaku-tech/nunchaku-qwen-image-edit-2509
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509.safetensors
       variant: nf4_r32
@@ -135,22 +119,6 @@ spec:
       type: safetensors
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509.safetensors
       variant: nf4_r128
-      precision: nf4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509-lightningv1.0-4steps.safetensors
-      variant: nf4_r32_lightning_v1_0_4steps
-      precision: nf4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509-lightningv1.0-4steps.safetensors
-      variant: nf4_r128_lightning_v1_0_4steps
-      precision: nf4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
-      variant: nf4_r32_lightning_v1_0_8steps
-      precision: nf4
-      type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509-lightningv1.0-8steps.safetensors
-      variant: nf4_r128_lightning_v1_0_8steps
       precision: nf4
       type: safetensors
   - type: helper
