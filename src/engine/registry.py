@@ -6,6 +6,8 @@ from src.utils.yaml import load_yaml
 import torch
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
+from loguru import logger
+import traceback
 
 class EngineRegistry:
     """Central registry for all engine implementations.
@@ -28,6 +30,8 @@ class EngineRegistry:
         # All keys are stored lowercase for consistency.
         self._discovered: Dict[str, Dict[str, Type[BaseEngine]]] = {}
 
+
+
         self._auto_discover_engines()
 
     def _auto_discover_engines(self) -> None:
@@ -43,7 +47,6 @@ class EngineRegistry:
         """
 
         root: Path = Path(__file__).resolve().parent
-
         for pkg_path in root.iterdir():
             if pkg_path.name.startswith("_"):
                 continue
@@ -57,13 +60,13 @@ class EngineRegistry:
                     continue
 
                 module_name = f"src.engine.{engine_type}.{stem}"
-
                 try:
                     module = importlib.import_module(module_name)
                 except Exception:
                     # Best-effort discovery; failures here should not block startup
+                    logger.error(f"Failed to import module {module_name}: {Exception}")
+                    logger.debug("Traceback:\n" + traceback.format_exc())
                     continue
-
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if (
@@ -94,6 +97,7 @@ class EngineRegistry:
             family = self._discovered.get(engine_key, {})
             if model_key in family:
                 return family[model_key]
+
 
         return None
 
@@ -140,6 +144,8 @@ class EngineRegistry:
         # Prefer auto‑discovered concrete engines when model_type is given.
         impl_class = self.get_engine_class(engine_type, model_type) if model_type else None
 
+
+        
         if impl_class is not None and impl_class is not BaseEngine:
             return impl_class(yaml_path=resolved, model_type=model_type, **kwargs)
 

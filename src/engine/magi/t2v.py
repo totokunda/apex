@@ -5,6 +5,7 @@ from .shared import MagiShared
 from einops import rearrange
 from PIL import Image
 from tqdm import tqdm
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class MagiT2VEngine(MagiShared):
@@ -23,6 +24,7 @@ class MagiT2VEngine(MagiShared):
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable | None = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator = None,
@@ -41,10 +43,14 @@ class MagiT2VEngine(MagiShared):
     ):
         """Text-to-video generation using MAGI's chunk-based approach"""
 
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds, prompt_embeds_mask = self.text_encoder.encode(
             prompt,
@@ -54,8 +60,12 @@ class MagiT2VEngine(MagiShared):
             **text_encoder_kwargs,
         )
 
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         batch_size = prompt_embeds.shape[0]
 
@@ -64,6 +74,8 @@ class MagiT2VEngine(MagiShared):
             num_frames // self.vae_scale_factor_temporal / chunk_width
         )
 
+        safe_emit_progress(progress_callback, 0.20, "Computed frame structure")
+
         transformer_dtype = self.component_dtypes.get("transformer", torch.bfloat16)
 
         if not self.transformer:
@@ -71,9 +83,13 @@ class MagiT2VEngine(MagiShared):
 
         self.to_device(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.25, "Transformer ready")
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
+
+        safe_emit_progress(progress_callback, 0.30, "Scheduler ready and timesteps computed")
 
         null_caption_embeds = self.transformer.get_null_caption_embeds(
             device=self.device,
@@ -114,6 +130,8 @@ class MagiT2VEngine(MagiShared):
 
         latent = torch.cat([latent, latent], dim=0)
 
+        safe_emit_progress(progress_callback, 0.40, "Initialized latent noise")
+
         timesteps = self._get_timesteps(
             self.scheduler, num_inference_steps=num_inference_steps
         )
@@ -121,6 +139,10 @@ class MagiT2VEngine(MagiShared):
         time_interval = self.scheduler.set_time_interval(
             num_inference_steps, self.device
         )
+
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         latents = self.denoise(
             latents=latent,
@@ -144,6 +166,7 @@ class MagiT2VEngine(MagiShared):
             clean_chunk_kvrange=clean_chunk_kvrange,
             distill=distill,
             kv_offload=kv_offload,
+            progress_callback=denoise_progress_callback,
         )
 
         if offload:
@@ -152,7 +175,10 @@ class MagiT2VEngine(MagiShared):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return torch.cat(latents, dim=2)
         else:
             videos = []
@@ -160,4 +186,5 @@ class MagiT2VEngine(MagiShared):
                 video = self.vae_decode(latent, offload=False)
                 video = self._tensor_to_frames(video, output_type="pil")[0]
                 videos.extend(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed text-to-video pipeline")
             return [videos]

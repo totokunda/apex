@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 from .shared import WanShared
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class WanI2VEngine(WanShared):
@@ -25,6 +26,7 @@ class WanI2VEngine(WanShared):
         seed: int | None = None,
         fps: int = 16,
         guidance_scale: float = 5.0,
+        progress_callback: Callable = None,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -39,12 +41,17 @@ class WanI2VEngine(WanShared):
         expand_timesteps: bool = False,
         ip_image: Image.Image | str | np.ndarray | torch.Tensor = None,
         enhance_kwargs: Dict[str, Any] = {},
+        **kwargs,
     ):
+
+        safe_emit_progress(progress_callback, 0.0, "Starting image-to-video pipeline")
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -52,6 +59,9 @@ class WanI2VEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -64,8 +74,12 @@ class WanI2VEngine(WanShared):
         else:
             negative_prompt_embeds = None
 
+        safe_emit_progress(progress_callback, 0.14, "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds")
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         loaded_image = self._load_image(image)
 
@@ -129,6 +143,8 @@ class WanI2VEngine(WanShared):
             num_inference_steps=num_inference_steps,
         )
 
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+
         num_frames = self._parse_num_frames(duration, fps)
 
         vae_config = self.load_config_by_type("vae")
@@ -152,6 +168,8 @@ class WanI2VEngine(WanShared):
             dtype=torch.float32,
             generator=generator,
         )
+
+        safe_emit_progress(progress_callback, 0.3, "Initialized latent noise")
 
         if preprocessed_image.ndim == 4:
             preprocessed_image = preprocessed_image.unsqueeze(2)
@@ -229,6 +247,10 @@ class WanI2VEngine(WanShared):
         else:
             boundary_timestep = None
 
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+
         latents = self.denoise(
             boundary_timestep=boundary_timestep,
             timesteps=timesteps,
@@ -254,6 +276,7 @@ class WanI2VEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             expand_timesteps=expand_timesteps,
@@ -263,10 +286,14 @@ class WanI2VEngine(WanShared):
 
         if offload:
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed image-to-video pipeline")
             return postprocessed_video

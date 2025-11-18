@@ -159,7 +159,7 @@ class LTXX2VEngine(BaseEngine):
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
                     f" timestep schedules. Please check whether you are using the correct scheduler."
                 )
-            scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
+            scheduler.set_timesteps(timesteps=timesteps.float().cpu(), device=device, **kwargs)
             timesteps = scheduler.timesteps
             num_inference_steps = len(timesteps)
         else:
@@ -180,7 +180,7 @@ class LTXX2VEngine(BaseEngine):
                 skip_initial_inference_steps : len(timesteps)
                 - skip_final_inference_steps
             ]
-            scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
+            scheduler.set_timesteps(timesteps=timesteps.float().cpu(), device=device, **kwargs)
             num_inference_steps = len(timesteps)
 
         return timesteps, num_inference_steps
@@ -931,8 +931,9 @@ class LTXX2VEngine(BaseEngine):
             generator=generator,
             parse_frames=(video_input is None and initial_latents is None),
         )
-
-        noise = noise * self.scheduler.init_noise_sigma
+        if hasattr(self.scheduler, "init_noise_sigma"):
+                    # scale the initial noise by the standard deviation required by the scheduler
+                    noise = noise * self.scheduler.init_noise_sigma
 
         retrieve_timesteps_kwargs = {}
         if isinstance(self.scheduler, TimestepShifter):
