@@ -284,7 +284,7 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
                 duration_seconds = num_frames / 25.0  # Assume 25 fps
                 audio_array = np.zeros(int(duration_seconds * 16000))
             else:
-                audio_array = self._load_audio_file(audio_file)
+                audio_array = self._load_audio(audio_file, sample_rate=16000, normalize=True)
             audio_arrays.append(audio_array)
 
         # Combine audio based on type
@@ -328,68 +328,7 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
             embeddings_list.append(embedding)
         return embeddings_list
 
-    def _load_audio_file(self, audio_path: str, sample_rate: int = 16000) -> np.ndarray:
-        """Load and normalize audio file."""
-        # Check if it's a video file
-        video_extensions = [".mp4", ".mov", ".avi", ".mkv"]
-        if any(audio_path.lower().endswith(ext) for ext in video_extensions):
-            return self._extract_audio_from_video(audio_path, sample_rate)
-        else:
-            # Load audio file directly
-            audio_array, sr = librosa.load(audio_path, sr=sample_rate)
-            return self._normalize_audio(audio_array, sr)
 
-    def _extract_audio_from_video(
-        self, video_path: str, sample_rate: int
-    ) -> np.ndarray:
-        """Extract audio from video file."""
-        import subprocess
-
-        # Create temporary file for extracted audio
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-            temp_audio_path = temp_file.name
-
-        try:
-            # Use ffmpeg to extract audio
-            ffmpeg_command = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                video_path,
-                "-vn",
-                "-acodec",
-                "pcm_s16le",
-                "-ar",
-                str(sample_rate),
-                "-ac",
-                "1",
-                temp_audio_path,
-            ]
-            subprocess.run(ffmpeg_command, check=True, capture_output=True)
-
-            # Load the extracted audio
-            audio_array, sr = librosa.load(temp_audio_path, sr=sample_rate)
-            return self._normalize_audio(audio_array, sr)
-
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_audio_path):
-                os.remove(temp_audio_path)
-
-    def _normalize_audio(self, audio_array: np.ndarray, sr: int) -> np.ndarray:
-        """Normalize audio loudness."""
-        try:
-            import pyloudnorm as pyln
-
-            meter = pyln.Meter(sr)
-            loudness = meter.integrated_loudness(audio_array)
-            if abs(loudness) < 100:  # Valid loudness measurement
-                normalized_audio = pyln.normalize.loudness(audio_array, loudness, -23)
-                return normalized_audio
-        except ImportError:
-            pass  # pyloudnorm not available, skip normalization
-
-        return audio_array
 
     def _extract_audio_features(
         self, audio_array: np.ndarray, sr: int = 16000

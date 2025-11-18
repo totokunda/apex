@@ -5,13 +5,14 @@ import torchvision.transforms.functional as F
 import torch.nn.functional as F
 import math
 from torchvision import transforms
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, List, Dict, Any, Tuple
 from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
 from diffusers.image_processor import VaeImageProcessor
 from src.utils.progress import safe_emit_progress
 from src.utils.cache import empty_cache
 from .mlx import WanMLXDenoise
+from torch import Tensor
 
 class WanShared(BaseEngine, WanMLXDenoise):
     """Base class for WAN engine implementations containing common functionality"""
@@ -162,6 +163,54 @@ class WanShared(BaseEngine, WanMLXDenoise):
         else:
             super()._render_step(latents, render_on_step_callback)
             
+    def encode_prompt(self,
+        prompt: List[str] | str,
+        negative_prompt: List[str] | str = None,
+        use_cfg_guidance: bool = True,
+        num_videos: int = 1,
+        max_sequence_length: int = 226,
+        progress_callback: Callable | None = None,
+        text_encoder_kwargs: Dict[str, Any] = {},
+        offload: bool = True,
+    ) -> Tuple[Tensor, Tensor]:
+        
+        if not self.text_encoder:
+            self.load_component_by_type("text_encoder")
+
+        self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
+
+        prompt_embeds = self.text_encoder.encode(
+            prompt,
+            device=self.device,
+            num_videos_per_prompt=num_videos,
+            **{"max_sequence_length": max_sequence_length, **text_encoder_kwargs},
+        )
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
+        if negative_prompt is not None and use_cfg_guidance:
+            negative_prompt_embeds = self.text_encoder.encode(
+                negative_prompt,
+                device=self.device,
+                num_videos_per_prompt=num_videos,
+                **{"max_sequence_length": max_sequence_length, **text_encoder_kwargs},
+            )
+        else:
+            negative_prompt_embeds = None
+
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
+        if offload:
+            self._offload(self.text_encoder)
+        
+
+        return prompt_embeds, negative_prompt_embeds
     
     def _encode_ip_image(
         self,
@@ -327,6 +376,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         first_frame_mask = kwargs.get("first_frame_mask", None)
         ip_image = kwargs.get("ip_image", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
+        num_warmup_steps = kwargs.get("num_warmup_steps", 0)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -403,7 +453,10 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
                 if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
                     self._render_step(latents, render_on_step_callback)
-                pbar.update(1)
+                    
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    pbar.update(1)
+                    
                 safe_emit_progress(
                     denoise_progress_callback,
                     float(i + 1) / float(total_steps),

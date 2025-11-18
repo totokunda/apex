@@ -6,6 +6,7 @@ from src.utils.yaml import load_yaml
 import torch
 from src.engine.base_engine import BaseEngine
 from src.manifest.resolver import resolve_manifest_reference
+from loguru import logger
 
 class EngineRegistry:
     """Central registry for all engine implementations.
@@ -60,8 +61,9 @@ class EngineRegistry:
 
                 try:
                     module = importlib.import_module(module_name)
-                except Exception:
+                except Exception as e:
                     # Best-effort discovery; failures here should not block startup
+                    logger.error(f"Error importing module {module_name}: {e}")
                     continue
 
                 for attr_name in dir(module):

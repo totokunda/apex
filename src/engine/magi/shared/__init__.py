@@ -11,7 +11,7 @@ from src.engine.base_engine import BaseEngine
 from .denoise import MagiDenoise 
 
 SPECIAL_TOKEN_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))),
     "assets",
     "magi",
     "special_tokens.npz",

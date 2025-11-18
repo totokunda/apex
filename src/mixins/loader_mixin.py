@@ -37,7 +37,8 @@ from src.utils.safetensors import is_safetensors_file, load_safetensors
 import mlx.core as mx
 from src.utils.mlx import check_mlx_convolutional_weights
 from src.utils.defaults import DEFAULT_CONFIG_SAVE_PATH
-from src.types import InputImage, InputVideo
+from src.types import InputImage, InputVideo, InputAudio
+import librosa
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 IMAGE_EXTS = [
@@ -505,18 +506,26 @@ class LoaderMixin(DownloadMixin):
         self,
         video_input: "InputVideo",
         fps: int | None = None,
+        num_frames: int | None = None,
+        reverse: bool = False,
         return_fps: bool = False,
         convert_method: Callable[[Image.Image], Image.Image] | None = None,
     ) -> List[Image.Image]:
+
+        def _finalize_frames(frames, inferred_fps=None):
+            if reverse:
+                frames = list(reversed(frames))
+            if num_frames is not None:
+                frames = frames[:num_frames]
+            if return_fps:
+                return frames, inferred_fps
+            return frames
 
         if isinstance(video_input, List):
             out_frames = []
             for v in video_input:
                 out_frames.append(self._load_image(v, convert_method=convert_method))
-            if return_fps:
-                return out_frames, fps
-            else:
-                return out_frames
+            return _finalize_frames(out_frames, fps)
 
         if isinstance(video_input, str):
             video_path = video_input
@@ -600,10 +609,7 @@ class LoaderMixin(DownloadMixin):
                             next_frame_time += frame_interval
                         
                         frame_count += 1
-                if return_fps:
-                    return frames, original_fps
-                else:
-                    return frames
+                return _finalize_frames(frames, original_fps)
             finally:
                 if "cap" in locals() and cap.isOpened():
                     cap.release()
@@ -611,7 +617,7 @@ class LoaderMixin(DownloadMixin):
                     os.unlink(tmp_file_path)
 
         if isinstance(video_input, np.ndarray):
-            return [
+            frames = [
                 (
                     convert_method(Image.fromarray(frame))
                     if convert_method
@@ -619,6 +625,7 @@ class LoaderMixin(DownloadMixin):
                 )
                 for frame in video_input
             ]
+            return _finalize_frames(frames, fps)
 
         if isinstance(video_input, torch.Tensor):
             tensor = video_input.cpu()
@@ -652,10 +659,7 @@ class LoaderMixin(DownloadMixin):
                             if convert_method
                             else Image.fromarray(frame).convert("RGB")
                         )
-                if return_fps:
-                    return frames, fps
-                else:
-                    return frames
+                return _finalize_frames(frames, fps)
 
             if tensor.ndim == 4 and (
                 tensor.shape[1] == 3 or tensor.shape[1] == 1
@@ -682,11 +686,149 @@ class LoaderMixin(DownloadMixin):
                 )
                 for frame in numpy_array
             ]
-            if return_fps:
-                return frames, fps
-            else:
-                return frames
+            return _finalize_frames(frames, fps)
         raise ValueError(f"Invalid video type: {type(video_input)}")
+    
+    def _load_audio(
+        self,
+        audio_input: "InputAudio",
+        sample_rate: int = 16000,
+        normalize: bool = True,
+    ) -> np.ndarray:
+        """Robustly load audio from various inputs and optionally normalize.
+
+        Supports:
+        - Local file paths (audio or video files)
+        - Remote URLs (audio or video files, downloaded to a temporary file)
+        - NumPy arrays
+        - Torch tensors
+        - Lists of the above (concatenated into a single 1D array)
+        """
+
+        # If we already have an array, just normalize/return it.
+        if isinstance(audio_input, np.ndarray):
+            audio_array = audio_input
+            if normalize:
+                audio_array = self._normalize_audio(audio_array, sample_rate)
+            return audio_array
+
+        # Handle torch tensors by converting to NumPy.
+        if isinstance(audio_input, torch.Tensor):
+            tensor = audio_input.detach().cpu()
+            # Squeeze extra dimensions if needed (e.g., (1, N) -> (N,))
+            if tensor.ndim > 1:
+                tensor = tensor.squeeze()
+            audio_array = tensor.numpy()
+            if normalize:
+                audio_array = self._normalize_audio(audio_array, sample_rate)
+            return audio_array
+
+        # Handle lists by loading each element and concatenating.
+        if isinstance(audio_input, list):
+            arrays = [
+                self.load_audio(item, sample_rate=sample_rate, normalize=normalize)
+                for item in audio_input
+            ]
+            # Ensure all items are 1D arrays for concatenation.
+            arrays = [np.ravel(a) for a in arrays]
+            return np.concatenate(arrays) if arrays else np.array([], dtype=np.float32)
+
+        # From here on we expect a string-like input (path or URL).
+        if not isinstance(audio_input, str):
+            raise ValueError(f"Invalid audio type: {type(audio_input)}")
+
+        audio_path = audio_input
+        tmp_file_path = None
+
+        # If the input is a URL, download it to a temporary file first.
+        if self._is_url(audio_input):
+            try:
+                response = requests.get(
+                    audio_input,
+                    timeout=10,
+                    headers=DEFAULT_HEADERS,
+                )
+                response.raise_for_status()
+                contents = response.content
+                suffix = Path(urlparse(audio_input).path).suffix or ".wav"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                    tmp_file.write(contents)
+                    tmp_file_path = tmp_file.name
+                audio_path = tmp_file_path
+            except requests.RequestException as e:
+                if tmp_file_path and os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
+                raise IOError(f"Failed to download audio from {audio_input}") from e
+
+        try:
+            # Check if it's a video file by extension.
+            video_extensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]
+            if any(audio_path.lower().endswith(ext) for ext in video_extensions):
+                audio_array = self._extract_audio_from_video(audio_path, sample_rate)
+            else:
+                # Load audio file directly
+                audio_array, sr = librosa.load(audio_path, sr=sample_rate)
+                if normalize:
+                    audio_array = self._normalize_audio(audio_array, sr)
+            return audio_array
+        finally:
+            # Clean up any temporary file we created for remote inputs.
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+
+    def _extract_audio_from_video(
+        self, video_path: str, sample_rate: int, normalize: bool = True
+    ) -> np.ndarray:
+        """Extract audio from video file."""
+        import subprocess
+
+        # Create temporary file for extracted audio
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            temp_audio_path = temp_file.name
+
+        try:
+            # Use ffmpeg to extract audio
+            ffmpeg_command = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                video_path,
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                "1",
+                temp_audio_path,
+            ]
+            subprocess.run(ffmpeg_command, check=True, capture_output=True)
+
+            # Load the extracted audio
+            audio_array, sr = librosa.load(temp_audio_path, sr=sample_rate)
+            if normalize:
+                audio_array = self._normalize_audio(audio_array, sr)
+            return audio_array
+
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+
+    def _normalize_audio(self, audio_array: np.ndarray, sr: int) -> np.ndarray:
+        """Normalize audio loudness."""
+        try:
+            import pyloudnorm as pyln
+
+            meter = pyln.Meter(sr)
+            loudness = meter.integrated_loudness(audio_array)
+            if abs(loudness) < 100:  # Valid loudness measurement
+                normalized_audio = pyln.normalize.loudness(audio_array, loudness, -23)
+                return normalized_audio
+        except ImportError:
+            pass  # pyloudnorm not available, skip normalization
+
+        return audio_array
 
     @staticmethod
     def get_media_type(media_path: str) -> str:
