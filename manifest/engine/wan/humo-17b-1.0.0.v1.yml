@@ -3,9 +3,12 @@ kind: Model
 metadata:
   id: humo-17b
   model: wan
-  name: HuMo 17B 
+  name: HuMo 17B
   version: 1.0.0
-  description: HuMo is a unified, human-centric video generation framework designed to produce high-quality, fine-grained, and controllable human videos from multimodal inputs—including text, images, and audio. It supports strong text prompt following, consistent subject preservation, synchronized audio-driven motion.
+  description: "HuMo is a unified, human-centric video generation framework designed\
+    \ to produce high-quality, fine-grained, and controllable human videos from multimodal\
+    \ inputs\u2014including text, images, and audio. It supports strong text prompt\
+    \ following, consistent subject preservation, synchronized audio-driven motion."
   tags:
   - humo
   - t2v
@@ -27,7 +30,8 @@ spec:
     scheduler_options:
     - name: UniPCMultistepScheduler
       label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to Video.
+      description: The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to
+        Video.
       base: src.scheduler.unipc.UniPCMultistepScheduler
       config:
         shift: 5.0
@@ -57,28 +61,34 @@ spec:
   - type: transformer
     base: wan.humo
     label: HuMo Transformer
-    config: 
+    config:
       text_len: 512
-      patch_size: [ 1, 2, 2 ]
+      patch_size:
+      - 1
+      - 2
+      - 2
       dim: 5120
       ffn_dim: 13824
       freq_dim: 256
       in_dim: 36
-      model_type: "i2v"
+      model_type: i2v
       num_heads: 40
       num_layers: 40
-      window_size: [ -1, -1 ]
-      qk_norm: True
-      cross_attn_norm: True
-      eps: 0.000001
-      insert_audio: True
+      window_size:
+      - -1
+      - -1
+      qk_norm: true
+      cross_attn_norm: true
+      eps: 1.0e-06
+      insert_audio: true
     model_path:
     - path: bytedance-research/HuMo/HuMo-17B
       variant: default
       precision: fp16
       type: safetensors
-      extra_kwargs: 
+      extra_kwargs:
         load_from_config: true
+      file_size: 68224002820
   - type: helper
     base: wan.humo_audio_processor
     label: HuMo Audio Processor
@@ -90,6 +100,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 24701695487
   defaults:
     run:
       num_inference_steps: 50
@@ -155,9 +166,9 @@ spec:
       type: image
       panel: media
       required: true
-      map_h: "height"
-      map_w: "width"
-      scale_by: "resolution"
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: prompt
       label: Prompt
       description: Describe the image you want to generate.
@@ -198,22 +209,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 'wide'
+      default: wide
       options:
       - name: Wide
-        value: 'wide'
+        value: wide
         ratio_w: 26
         ratio_h: 15
       - name: Vertical
-        value: 'vertical'
+        value: vertical
         ratio_w: 15
         ratio_h: 26
-      - name: Square  
-        value: 'square'
+      - name: Square
+        value: square
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: 'classic'
+        value: classic
         ratio_w: 4
         ratio_h: 3
     - id: num_inference_steps
@@ -225,7 +236,6 @@ spec:
       default: 50
       min: 1
       max: 100
-      step: 1
       step: 64
     - id: height
       label: Height
@@ -247,7 +257,7 @@ spec:
       min: 256
       max: 8192
       step: 64
-    - id: seed 
+    - id: seed
       label: Seed
       description: Random seed for reproducibility
       type: random

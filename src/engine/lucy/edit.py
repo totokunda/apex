@@ -9,6 +9,9 @@ import torchvision.transforms.functional as F
 
 class LucyEditEngine(WanShared):
     """Lucy Edit Engine Implementation"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_channels_latents = 48
 
     def run(
         self,
@@ -96,9 +99,6 @@ class LucyEditEngine(WanShared):
             num_frames = video_tensor.shape[2]
     
     
-        print(video_tensor.shape)
-        print(height, width)
-        exit()
         
         # Prepare noise latents
         latents = self._get_latents(
@@ -106,11 +106,13 @@ class LucyEditEngine(WanShared):
             width,
             duration=duration,
             fps=fps,
+            num_channels_latents=self.num_channels_latents,
             batch_size=len(prompt),
             seed=seed,
             dtype=torch.float32,
             generator=generator
         )
+
         safe_emit_progress(progress_callback, 0.35, "Initialized latent noise")
 
         # Prepare condition latents

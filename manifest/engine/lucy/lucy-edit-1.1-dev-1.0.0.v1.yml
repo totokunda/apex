@@ -29,7 +29,11 @@ spec:
     name: lucy/vae
     label: Lucy VAE
     base: wan
-    model_path: decart-ai/Lucy-Edit-1.1-Dev/vae
+    model_path:
+    - path: decart-ai/Lucy-Edit-1.1-Dev/vae
+      variant: default
+      precision: fp16
+      file_size: 2818779509
   - type: text_encoder
     name: lucy/text_encoder
     base: UMT5EncoderModel
@@ -38,12 +42,19 @@ spec:
     tokenizer_name: decart-ai/Lucy-Edit-1.1-Dev
     tokenizer_kwargs:
       subfolder: tokenizer
-    model_path: decart-ai/Lucy-Edit-1.1-Dev/text_encoder
+    model_path:
+    - path: decart-ai/Lucy-Edit-1.1-Dev/text_encoder
+      variant: default
+      precision: fp16
+      file_size: 11361874539
   - type: transformer
     base: wan.base
     label: Lucy Transformer
-    model_path: decart-ai/Lucy-Edit-1.1-Dev/transformer
-
+    model_path:
+    - path: decart-ai/Lucy-Edit-1.1-Dev/transformer
+      variant: default
+      precision: fp16
+      file_size: 20001595375
   defaults:
     run:
       num_inference_steps: 50
@@ -144,7 +155,7 @@ spec:
       description: Number of frames to generate (or "Xs" for seconds).
       type: text
       panel: settings
-      default: "81"
+      default: '81'
     - id: seed
       label: Seed
       description: Random seed for reproducibility.
@@ -155,4 +166,3 @@ spec:
       value_type: integer
       panel: settings
       required: false
-
