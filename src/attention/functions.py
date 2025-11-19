@@ -281,6 +281,7 @@ def sdpa_varlen(
     return torch.cat(packed_out, dim=0)
 
 
+@attention_register("flash_padded")
 def flash_attention_padded(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -372,7 +373,7 @@ def flash_attention_padded(
     # Back to (B, H, Sq, D) and caller’s dtype
     return out.permute(0, 2, 1, 3).to(q.dtype)
 
-
+@attention_register("flash_varlen")
 def flash_attention_varlen(
     q: torch.Tensor,
     k: torch.Tensor,

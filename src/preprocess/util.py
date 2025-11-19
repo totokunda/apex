@@ -23,6 +23,7 @@ UNIMATCH_MODEL_NAME = "hr16/Unimatch"
 DEPTH_ANYTHING_MODEL_NAME = "LiheYoung/Depth-Anything" #HF Space
 DIFFUSION_EDGE_MODEL_NAME = "hr16/Diffusion-Edge"
 METRIC3D_MODEL_NAME = "JUGGHM/Metric3D"
+POSE2D_MODEL_NAME = "Wan-AI/Wan2.2-Animate-14B"
 
 DEPTH_ANYTHING_V2_MODEL_NAME_DICT = {
     "depth_anything_v2_vits.pth": "depth-anything/Depth-Anything-V2-Small",
@@ -313,7 +314,6 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
 
     # If already present at destination, return immediately
     if os.path.exists(model_path):
-        print(f"model_path is {model_path}")
         return model_path
 
     print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
@@ -342,11 +342,12 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
                     pass
 
         dl = DownloadMixin()
-        downloaded_file = dl._download_from_huggingface(
+        downloaded_path = dl._download_from_huggingface(
             repo_id=repo_path,
             save_path=cache_dir_d,
             progress_callback=_progress_cb,
         )
+
     except Exception as e:
         warnings.warn(f"Download via DownloadMixin failed with error: {e}")
         raise
@@ -358,7 +359,10 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
     # Place the file at the expected model_path
     try:
         import shutil
-        shutil.copy2(downloaded_file, model_path)
+        if os.path.isdir(downloaded_path):
+            shutil.copytree(downloaded_path, model_path)
+        else:
+            shutil.copy2(downloaded_path, model_path)
         # Clean temporary ckpts cache to reclaim space
         with suppress(Exception):
             import shutil as _shutil

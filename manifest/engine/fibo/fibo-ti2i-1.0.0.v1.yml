@@ -17,6 +17,9 @@ spec:
   model_type: ti2i
   engine_type: torch
   denoise_type: base
+  model_type: 
+  - t2i
+  - i2i
   attention_types:
   - sdpa
   components:
@@ -41,7 +44,6 @@ spec:
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 16
-      
   - type: text_encoder
     label: Fibo Text Encoder
     base: SmolLM3ForCausalLM
@@ -57,7 +59,6 @@ spec:
     tokenizer_name: briaai/FIBO
     tokenizer_kwargs:
       subfolder: tokenizer
-  
   - type: transformer
     label: Fibo Transformer
     base: fibo.base

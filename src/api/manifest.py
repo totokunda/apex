@@ -37,6 +37,9 @@ MODEL_TYPE_MAPPING = {
     "kontext": "edit",
     "edit_plus": "edit",
     "dreamomni2": "edit",
+    "humo": "a2v",
+    "s2v": "a2v",
+    "animate": "control"
 }
 
 def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
@@ -387,6 +390,7 @@ def list_model_types() -> List[ModelTypeInfo]:
         "control": "Control",
         "t2i": "Text to Image",
         "inpaint": "Inpaint",
+        "a2v": "Audio to Video",
     }
     description_map = {
         "t2v": "Generate videos from text prompts.",
@@ -397,6 +401,7 @@ def list_model_types() -> List[ModelTypeInfo]:
         "edit": "Edit or modify images using prompts and tools.",
         "control": "Guide generation with control signals (e.g., canny, pose).",
         "inpaint": "Inpaint images using prompts and masks.",
+        "a2v": "Generate videos from audio and images.",
     }
 
     discovered_types = set()

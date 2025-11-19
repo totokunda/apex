@@ -84,6 +84,7 @@ class AutoLoadingHelperDict(dict):
         from src.helpers.stepvideo.text_encoder import StepVideoTextEncoder
         from src.helpers.ltx.patchifier import SymmetricPatchifier
         from src.helpers.fibo.prompt_gen import PromptGenHelper
+        from src.helpers.wan.humo_audio_processor import HuMoAudioProcessor
 
         # Overloads for known helper keys → precise instance types
         @overload
@@ -119,6 +120,9 @@ class AutoLoadingHelperDict(dict):
         @overload
         def __getitem__(self, key: Literal["ltx.patchifier"]) -> "SymmetricPatchifier": ...
 
+        @overload
+        def __getitem__(self, key: Literal["wan.humo_audio_processor"]) -> "HuMoAudioProcessor": ...
+        
         @overload
         def __getitem__(self, key: str) -> Any: ...
 
@@ -410,7 +414,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         width = round(image.width * resize_ratio)
         height = round(image.height * resize_ratio)
         size = [width, height]
-        image = TF.center_crop(image, size)
+        image = TF.CenterCrop(size)(image)
         return image, height, width
 
     def _parse_config(
@@ -961,7 +965,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         model_path = component.get("model_path")
         if not model_path:
             return 0
-
+        
+        # First, estimate raw size of weight files on disk
         total_size = 0
 
         # Normalize to list so we can handle main + extra paths uniformly
@@ -996,6 +1001,25 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             except Exception:
                 # This is a best-effort heuristic; ignore unexpected errors
                 continue
+
+        # Adjust the estimate based on the configured in-memory dtype for this component,
+        # since weights may be stored as fp32 on disk but used as fp16 / bf16 in memory.
+        component_type = component.get("type")
+        target_dtype = None
+        if getattr(self, "component_dtypes", None) is not None and component_type:
+            target_dtype = self.component_dtypes.get(component_type)
+
+        try:
+            if target_dtype is not None:
+                target_element_size = torch.tensor([], dtype=target_dtype).element_size()
+                # Assume on-disk weights are fp32 by default when estimating memory usage.
+                source_element_size = torch.tensor([], dtype=torch.float32).element_size()
+                if source_element_size > 0:
+                    scale = float(target_element_size) / float(source_element_size)
+                    return int(total_size * scale)
+        except Exception:
+            # If anything goes wrong with dtype-based scaling, fall back to the raw size.
+            pass
 
         return total_size
 
@@ -1055,9 +1079,31 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 
                 # Estimate size of first block as representative
                 first_block = blocks[0]
-                block_params = sum(p.numel() * p.element_size() for p in first_block.parameters() if hasattr(p, 'numel'))
+
+                # Count parameters in the representative block
+                num_params = sum(
+                    p.numel() for p in first_block.parameters() if hasattr(p, "numel")
+                )
+
+                # Use the configured component dtype (fp16 / bf16 / etc.) to
+                # estimate memory instead of the default (often fp32) dtype
+                target_dtype = None
+                if getattr(self, "component_dtypes", None) is not None:
+                    target_dtype = self.component_dtypes.get(ctype)
+
+                try:
+                    if target_dtype is not None:
+                        element_size = torch.tensor([], dtype=target_dtype).element_size()
+                    else:
+                        # Fallback: assume fp16-style 2-byte params if dtype is unknown
+                        element_size = 2
+                except Exception:
+                    # Very defensive: if anything goes wrong, fall back to 2 bytes
+                    element_size = 2
+
+                block_size_bytes = num_params * element_size
                 
-                return block_params, len(blocks)
+                return block_size_bytes, len(blocks)
                 
         except Exception as e:
             self.logger.debug(f"Could not estimate block structure for {ctype}: {e}")
