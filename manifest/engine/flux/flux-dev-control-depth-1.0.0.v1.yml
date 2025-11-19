@@ -30,7 +30,7 @@ spec:
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Flux
         Dev Control Canny model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-Canny-dev/scheduler/scheduler_config.json
+      config_path: black-forest-labs/FLUX.1-Depth-dev/scheduler/scheduler_config.json
   - type: vae
     label: Flux VAE
     base: auto
@@ -68,8 +68,9 @@ spec:
   - type: transformer
     label: Flux Depth Transformer
     base: flux.base
+    config_path: black-forest-labs/FLUX.1-Depth-dev/transformer/config.json
     model_path:
-    - path: black-forest-labs/FLUX.1-Canny-dev/transformer
+    - path: black-forest-labs/FLUX.1-Depth-dev/transformer
       variant: default
       precision: fp16
       type: safetensors
@@ -77,6 +78,30 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 16
       file_size: 23803468971
+    - path: https://huggingface.co/SporkySporkness/FLUX.1-Depth-dev-GGUF/resolve/main/flux1-depth-dev-fp16-Q8_0-GGUF.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
+      file_size: 12714845472
+    - path: https://huggingface.co/SporkySporkness/FLUX.1-Depth-dev-GGUF/resolve/main/flux1-depth-dev-fp16-Q5_0-GGUF.gguf
+      variant: GGUF_Q5_0
+      precision: q5_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 8277009696
+    - path: https://huggingface.co/SporkySporkness/FLUX.1-Depth-dev-GGUF/resolve/main/flux1-depth-dev-fp16-Q4_0-GGUF.gguf
+      variant: GGUF_Q4_0
+      precision: q4_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 6797731104
   defaults:
     run:
       num_inference_steps: 40

@@ -38,7 +38,6 @@ class WanT2VEngine(WanShared):
         enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
-
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
 
         if not self.text_encoder:

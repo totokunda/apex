@@ -7,5 +7,5 @@ class SkyReelsI2VEngine(WanI2VEngine):
     def run(self, **kwargs):
         """Image-to-video generation for SkyReels model"""
         # Override with fps=24 as per the original implementation
-        kwargs["fps"] = kwargs.get("fps", 24)
+        kwargs["fps"] = kwargs.get("fps", 16)
         return super().run(**kwargs)

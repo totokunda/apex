@@ -436,12 +436,14 @@ def run_engine_from_manifest(
             "selected_components": selected_components,
             **(config.get("engine_kwargs", {}) or {}),
         }
+
         
         if attention_type:
             input_kwargs["attention_type"] = attention_type
             
         
         engine = UniversalEngine(**input_kwargs)
+
 
         def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:
             if isinstance(value, dict):
@@ -577,6 +579,7 @@ def run_engine_from_manifest(
                     result.get("error")
                     or f"Preprocessor {job['preprocessor_name']} failed"
                 )
+            print(f"\n\n\n {result} \n\n\n")
             prepared_inputs[job["input_id"]] = result.get("result_path")
 
         engine_stage_start = len(preprocessor_jobs) / total_steps
