@@ -79,12 +79,45 @@ spec:
   - type: transformer
     label: HunyuanImage Transformer
     base: hunyuanimage.base
+    config_path: https://huggingface.co/hunyuanvideo-community/HunyuanImage-2.1-Diffusers/resolve/main/transformer/config.json
     model_path:
     - path: hunyuanvideo-community/HunyuanImage-2.1-Diffusers/transformer
       variant: default
       precision: fp16
       type: safetensors
       file_size: 34851875299
+    - path: https://huggingface.co/QuantStack/HunyuanImage-2.1-GGUF/resolve/main/HunyuanImage2.1-Q2_K.gguf
+      variant: q2_k
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 6510000000
+    - path: https://huggingface.co/QuantStack/HunyuanImage-2.1-GGUF/resolve/main/HunyuanImage2.1-Q4_K_S.gguf
+      variant: q4_k_s
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 14
+        recommended_vram_gb: 20
+      file_size: 10500000000
+    - path: https://huggingface.co/QuantStack/HunyuanImage-2.1-GGUF/resolve/main/HunyuanImage2.1-Q6_K.gguf
+      variant: q6_k
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 18
+        recommended_vram_gb: 28
+      file_size: 14900000000
+    - path: https://huggingface.co/QuantStack/HunyuanImage-2.1-GGUF/resolve/main/HunyuanImage2.1-Q8_0.gguf
+      variant: q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 32
+      file_size: 19000000000
   - type: helper
     label: Guider
     name: guider

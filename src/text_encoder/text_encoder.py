@@ -42,6 +42,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self.cache_file = cache_file
         self.device = device
         self.max_cache_size = max_cache_size
+
         if self.enable_cache and self.cache_file is None:
             self.cache_file = os.path.join(
                 DEFAULT_CACHE_PATH,

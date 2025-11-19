@@ -495,6 +495,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         no_weights: bool = False,
     ):
 
+
         component_type = component.get("type")
         component_module = None
         if component_type == "scheduler":
@@ -811,10 +812,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
     ):
+
         component["model_path"], is_converted = self._check_convert_model_path(
             component
         )
-
         if is_converted:
             component.pop("extra_model_paths", None)
 
@@ -946,12 +947,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 return component["converted_model_path"], True
 
         if os.path.isfile(model_path):
+
             # check base directory
             if os.path.isdir(os.path.join(os.path.dirname(model_path), component_name)):
-                return (
-                    os.path.join(os.path.dirname(model_path), component_name),
-                    True,
-                )
+                return model_path, False
+
         elif os.path.isdir(model_path):
             if os.path.isdir(os.path.join(model_path, component_name)):
                 return os.path.join(model_path, component_name), True
@@ -1289,6 +1289,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 files = []
                 for ext in extensions:
                     files.extend(glob(os.path.join(model_path, f"*.{ext}")))
+
 
             if len(files) == 0:
                 raise ValueError(
