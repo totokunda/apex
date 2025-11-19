@@ -279,8 +279,9 @@ class DownloadMixin:
         progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
     ):
         # check if model_path is a local path
-        if os.path.exists(model_path):
-            return model_path
+        is_downloaded_path = self.is_downloaded(model_path, save_path)
+        if is_downloaded_path:
+            return is_downloaded_path
         elif "drive.google.com" in model_path:
             return self._download_from_google_drive(model_path, save_path, progress_callback)
         elif model_path.startswith("gs://"):

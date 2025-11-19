@@ -27,7 +27,8 @@ spec:
     scheduler_options:
     - name: UniPCMultistepScheduler
       label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to Video.
+      description: The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to
+        Video.
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.2-Animate-14B-Diffusers/scheduler/scheduler_config.json
   - type: vae
@@ -60,6 +61,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 69099547207
   - type: helper
     name: image_processor
     label: Image Processor
@@ -70,6 +72,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 5030848
   - type: helper
     name: image_encoder
     label: Image Encoder
@@ -80,6 +83,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 1261596722
   defaults:
     run:
       num_inference_steps: 30
@@ -235,9 +239,8 @@ spec:
       default: 20
       min: 1
       max: 100
-      step: 1
       step: 64
-    - id: height # Not shown 
+    - id: height
       label: Height
       description: Explicit height override
       type: number
@@ -247,7 +250,7 @@ spec:
       min: 256
       max: 8192
       step: 64
-    - id: width # Not shown 
+    - id: width
       label: Width
       description: Explicit width override
       type: number
@@ -257,7 +260,7 @@ spec:
       min: 256
       max: 8192
       step: 64
-    - id: seed 
+    - id: seed
       label: Seed
       description: Random seed for reproducibility
       type: random
