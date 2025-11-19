@@ -12,6 +12,8 @@ class LucyEditEngine(WanShared):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_channels_latents = 48
+        self.vae_scale_factor_spatial = 16
+        self.vae_scale_factor_temporal = 4
 
     def run(
         self,
@@ -24,6 +26,7 @@ class LucyEditEngine(WanShared):
         duration: int | str = 81,
         guidance_scale: float = 5.0,
         fps: int = 24,
+        num_videos: int = 1,
         guidance_scale_2: Optional[float] = None,
         boundary_ratio: Optional[float] = None,
         seed: Optional[int] = None,
@@ -39,6 +42,12 @@ class LucyEditEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting edit pipeline")
+        
+        # make sure height and width are divisible by 32
+        height = height // 32 * 32
+        width = width // 32 * 32
+        
+        
 
         # 1. Check inputs and setup defaults
         if self.config.get("boundary_ratio") is not None and boundary_ratio is None:
@@ -60,12 +69,12 @@ class LucyEditEngine(WanShared):
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             negative_prompt,
-            num_videos=1,
+            num_videos=num_videos,
             progress_callback=progress_callback,
             text_encoder_kwargs=text_encoder_kwargs,
             offload=offload
         )
-        
+
         transformer_dtype = self.component_dtypes.get("transformer", torch.float32)
         prompt_embeds = prompt_embeds.to(transformer_dtype)
         if negative_prompt_embeds is not None:
@@ -85,9 +94,11 @@ class LucyEditEngine(WanShared):
         self.to_device(self.vae)
         
         video = self._load_video(video, fps=fps)
-        # aspect ratio resize
+
         for i in range(len(video)):
-            video[i], height, width = self._aspect_ratio_resize(video[i], max_area=height * width)
+            video[i] = video[i].resize((width, height))
+        
+
 
         # Preprocess video
         video_tensor = self.video_processor.preprocess_video(video, height=height, width=width)
@@ -99,7 +110,6 @@ class LucyEditEngine(WanShared):
             num_frames = video_tensor.shape[2]
     
     
-        
         # Prepare noise latents
         latents = self._get_latents(
             height,
@@ -131,7 +141,7 @@ class LucyEditEngine(WanShared):
              boundary_timestep = boundary_ratio * self.scheduler.config.num_train_timesteps
         else:
              boundary_timestep = None
-             
+
         # 6. Denoise
         mapped_denoise_progress = make_mapped_progress(progress_callback, 0.40, 0.92)
         denoise_progress_callback = denoise_progress_callback or mapped_denoise_progress
@@ -146,12 +156,7 @@ class LucyEditEngine(WanShared):
         final_guidance_scale = guidance_scale
         if guidance_scale_2 is not None:
              final_guidance_scale = [guidance_scale, guidance_scale_2]
-             
-            
-        print(latents.shape)
-        print(condition_latents.shape)
-        exit()
-        
+
         # Use custom denoise loop to support Lucy specific logic
         latents = self.lucy_denoise(
             timesteps=timesteps,

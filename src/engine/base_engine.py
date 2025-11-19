@@ -31,6 +31,7 @@ from src.utils.mlx import convert_dtype_to_torch, convert_dtype_to_mlx
 from src.memory_management import MemoryConfig
 import torch.nn as nn
 import importlib
+from diffusers.utils.torch_utils import randn_tensor
 
 from src.utils.defaults import (
     DEFAULT_DEVICE,
@@ -1899,15 +1900,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
         else:
             raise ValueError(f"Invalid order: {order}")
-
-        noise = torch.randn(
+        
+        noise = randn_tensor(
             shape,
             device=device,
             dtype=dtype,
             generator=generator,
             layout=layout or torch.strided,
-        ).to(self.device)
-
+        )
+        
         if return_generator:
             return noise, generator
         else:
