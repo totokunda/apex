@@ -44,7 +44,6 @@ spec:
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 16
-      
   - type: text_encoder
     label: Fibo Text Encoder
     base: SmolLM3ForCausalLM

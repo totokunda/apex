@@ -10,7 +10,7 @@ import os
 import shutil
 import json
 import ray
-from .ray_tasks import download_preprocessor, run_preprocessor
+from .ray_tasks import  run_preprocessor
 from .job_store import register_job, job_store
 from .preprocessor_registry import (
     list_preprocessors,
@@ -190,62 +190,6 @@ def ray_status():
             "ray_connected": False,
             "message": "Error connecting to Ray cluster"
         }
-
-@router.post("/download", response_model=JobResponse)
-def trigger_download(request: DownloadRequest):
-    """
-    Trigger download of a preprocessor model
-    
-    This creates a Ray job for downloading. Use the job_id with the 
-    websocket endpoint /ws/job/{job_id} to get real-time updates.
-    """
-    # Validate preprocessor exists via YAML registry
-    try:
-        get_preprocessor_details(request.preprocessor_name)
-    except ValueError:
-        available = [p["id"] for p in list_preprocessors(check_downloaded=False)]
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown preprocessor: {request.preprocessor_name}. Available: {available}"
-        )
-    
-    logger.info(f"Submitting download task for preprocessor: {request.preprocessor_name}")
-    
-    # Get best GPU for the task
-    device_index, device_type = get_best_gpu()
-    resources = get_ray_resources(device_index, device_type)
-    
-    # Submit Ray task
-    try:
-        job_id = request.job_id or str(uuid.uuid4())
-        
-        # Get websocket bridge
-        bridge = get_ray_ws_bridge()
-        
-        # Submit task with resource constraints
-        task_ref = download_preprocessor.options(**resources).remote(
-            request.preprocessor_name,
-            job_id,
-            bridge
-        )
-        
-        # Register with unified job store
-        register_job(job_id, task_ref, 'preprocessor', { 'preprocessor_name': request.preprocessor_name })
-        legacy_job_store[job_id] = task_ref
-        
-        logger.info(f"Download task submitted with job_id: {job_id}, resources: {resources}")
-        
-        return JobResponse(
-            job_id=job_id,
-            status="queued",
-            message=f"Download job created for {request.preprocessor_name}"
-        )
-    except Exception as e:
-        logger.error(f"Failed to submit download task: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to submit Ray task: {str(e)}"
-        )
 
 
 @router.post("/run", response_model=JobResponse)

@@ -2,7 +2,7 @@ from .shared import WanShared
 from src.types import InputImage, InputAudio, InputVideo, OutputVideo
 from typing import List, Union, Optional, Dict, Any, Tuple, Callable
 import torch
-from src.utils.progress import safe_emit_progress
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 import torch.nn.functional as F
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
@@ -321,7 +321,7 @@ class WanAnimateEngine(WanShared):
         **kwargs,
         ) -> OutputVideo:
         
-        
+        safe_emit_progress(progress_callback, 0.0, "Starting animate pipeline")
         if mode == "animate":
             if pose_video is None:
                 raise ValueError("Pose video is required for animate mode")
@@ -386,6 +386,7 @@ class WanAnimateEngine(WanShared):
             offload=offload,
             progress_callback=progress_callback,
         )
+        safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
 
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(transformer_dtype)
@@ -403,6 +404,7 @@ class WanAnimateEngine(WanShared):
         # Get CLIP features from the reference image
         if image_embeds is None:
             image_embeds = self.encode_image(image, offload=offload)
+        safe_emit_progress(progress_callback, 0.20, "Encoded reference image")
         image_embeds = image_embeds.repeat(batch_size * num_videos, 1, 1)
         image_embeds = image_embeds.to(transformer_dtype)
         
@@ -410,6 +412,7 @@ class WanAnimateEngine(WanShared):
         if self.transformer is None:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.25, "Transformer ready")
 
         # 5. Encode conditioning videos (pose, face)
         pose_video = self.pad_video_frames(pose_video, num_target_frames)
@@ -446,6 +449,8 @@ class WanAnimateEngine(WanShared):
             mask_video = self.video_processor_for_mask.preprocess_video(mask_video, height=height, width=width).to(
                 device, dtype=torch.float32
             )
+        
+        safe_emit_progress(progress_callback, 0.30, "Processed conditioning videos")
 
         if self.scheduler is None:
             self.load_component_by_type("scheduler")
@@ -455,6 +460,7 @@ class WanAnimateEngine(WanShared):
             scheduler=self.scheduler,
             num_inference_steps=num_inference_steps,
         )
+        safe_emit_progress(progress_callback, 0.35, "Timesteps computed")
 
         # Get VAE-encoded latents of the reference (character) image
         reference_image_latents = self.prepare_reference_image_latents(
@@ -469,7 +475,13 @@ class WanAnimateEngine(WanShared):
         self._cond_video_frames = cond_video_frames
         out_frames = None
 
-        for _ in range(num_segments):
+        safe_emit_progress(progress_callback, 0.40, "Starting generation segments")
+        for i in range(num_segments):
+            # Calculate progress for this segment
+            segment_start_progress = 0.40 + (i / num_segments) * 0.50
+            segment_end_progress = 0.40 + ((i + 1) / num_segments) * 0.50
+            denoise_progress_callback = make_mapped_progress(progress_callback, segment_start_progress, segment_end_progress)
+
             assert start + prev_segment_conditioning_frames < cond_video_frames
 
             # Sample noisy latents from prior for the current inference segment
@@ -544,6 +556,7 @@ class WanAnimateEngine(WanShared):
                 scheduler=self.scheduler,
                 guidance_scale=guidance_scale,
                 render_on_step_callback=render_on_step_callback,
+                denoise_progress_callback=denoise_progress_callback,
                 transformer_kwargs=dict(
                     encoder_hidden_states=prompt_embeds,
                     encoder_hidden_states_image=image_embeds,
@@ -582,12 +595,14 @@ class WanAnimateEngine(WanShared):
             
         if offload: 
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
             
         if return_latents:
             return latents
 
         video = torch.cat(all_out_frames, dim=2)[:, :, :cond_video_frames]
         video = self._tensor_to_frames(video)
+        safe_emit_progress(progress_callback, 1.0, "Completed animate pipeline")
         return video
     
     def _render_step(self, latents, render_on_step_callback):
