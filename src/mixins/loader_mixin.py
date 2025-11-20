@@ -248,7 +248,10 @@ class LoaderMixin(DownloadMixin):
             extra_model_paths = component.get("extra_model_paths", [])
             if isinstance(extra_model_paths, str):
                 extra_model_paths = [extra_model_paths]
-            files_to_load.extend(extra_model_paths)
+            
+            if extra_kwargs.get("load_extra_model_paths", True):
+                files_to_load.extend(extra_model_paths)
+
  
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")

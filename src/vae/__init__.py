@@ -38,15 +38,10 @@ def _auto_register_vaes():
         module_name = f"{__name__}.{vae_dir.name}.model"
         try:
             module = importlib.import_module(module_name)
-<<<<<<< Updated upstream
         except Exception:
             print(f"\n\nError importing module {module_name} with exception {Exception}\n\n")
             import traceback
             traceback.print_exc()
-=======
-        except Exception as e:
-            logger.error(f"Error importing module {module_name}: {e}")
->>>>>>> Stashed changes
             # If import fails for any reason, skip auto-registration for this module.
             continue
 
