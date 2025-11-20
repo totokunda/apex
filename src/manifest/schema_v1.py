@@ -138,7 +138,22 @@ MANIFEST_SCHEMA_V1: dict = {
                             "model_key": {"type": "string"},
                             "extra_model_paths": {
                                 "type": "array",
-                                "items": {"type": "string"},
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "required": ["path"],
+                                            "properties": {
+                                                "path": {"type": "string"},
+                                                "variant": {"type": "string"},
+                                                "precision": {"type": "string"},
+                                            },
+                                            "additional_properties": True,
+                                        },
+                                    },
+                                ],
                             },
                             "converted_model_path": {"type": "string"},
                             "scheduler_options": {

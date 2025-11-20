@@ -32,7 +32,7 @@ from src.converters.utils import (
     strip_common_prefix,
 )
 
-from src.converters.vae_converters import LTXVAEConverter, MagiVAEConverter
+from src.converters.vae_converters import LTXVAEConverter, MagiVAEConverter, NoOpVAEConverter, MMAudioVAEConverter
 
 
 def get_transformer_converter(model_base: str):
@@ -94,7 +94,7 @@ def get_transformer_converter_by_model_name(model_name: str):
         return MagiTransformerConverter()
     elif "Flux" in model_name or "Chroma" in model_name:
         return FluxTransformerConverter()
-    return None
+    return NoOpTransformerConverter()
 
 
 def get_vae_converter(vae_type: str, **additional_kwargs):
@@ -102,8 +102,10 @@ def get_vae_converter(vae_type: str, **additional_kwargs):
         return LTXVAEConverter(**additional_kwargs)
     elif vae_type == "magi":
         return MagiVAEConverter()
+    elif vae_type == "mmaudio":
+        return MMAudioVAEConverter()
     else:
-        raise ValueError(f"VAE type {vae_type} not supported")
+        return NoOpVAEConverter()
 
 
 def load_safetensors(dir: pathlib.Path):

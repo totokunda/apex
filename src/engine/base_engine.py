@@ -1434,17 +1434,18 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         latents: torch.Tensor,
         offload: bool = False,
         dtype: torch.dtype | None = None,
+        component_name: str = "vae",
     ):
-        if self.vae is None:
-            self.load_component_by_type("vae")
-        self.to_device(self.vae)
-        denormalized_latents = self.vae.denormalize_latents(latents).to(
-            dtype=self.vae.dtype, device=self.device
+        if getattr(self, component_name, None) is None:
+            self.load_component_by_type(component_name)
+        self.to_device(getattr(self, component_name))
+        denormalized_latents = getattr(self, component_name).denormalize_latents(latents).to(
+            dtype=getattr(self, component_name).dtype, device=self.device
         )
 
-        video = self.vae.decode(denormalized_latents, return_dict=False)[0]
+        video = getattr(self, component_name).decode(denormalized_latents, return_dict=False)[0]
         if offload:
-            self._offload(self.vae)
+            self._offload(getattr(self, component_name))
         return video.to(dtype=dtype)
 
     @torch.no_grad()
@@ -1766,7 +1767,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             preprocessors_path = get_preprocessor_path()
         if postprocessors_path is None:
             postprocessors_path = get_postprocessor_path()
-
+            
+        
         os.makedirs(save_path, exist_ok=True)
         for i, component in enumerate(self.config.get("components", []) ):
             if config_path := component.get("config_path"):
@@ -1775,7 +1777,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 )
                 if downloaded_config_path:
                     component["config_path"] = downloaded_config_path
-                    
+            
+         
             component_type = component.get("type")
             component_name = component.get("name")
 
@@ -1790,9 +1793,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                
                 for scheduler_option in scheduler_options:
                     if selected_scheduler_option['name'] == scheduler_option['name']:
-                        component = selected_scheduler_option.copy()
-                        component['type'] = 'scheduler'
-                        break
+                        current_component = component.copy()
+                        del current_component['scheduler_options']
+                        selected_scheduler_option.update(current_component)
+                        component = selected_scheduler_option
                         
                 if component.get("config_path"):
                     downloaded_config_path = self.fetch_config(component["config_path"], return_path=True, config_save_path=components_path)
@@ -1814,8 +1818,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                                 component['key_map'] = model_path_item.get('key_map')
                             if isinstance(model_path_item.get('extra_kwargs'), dict):
                                 component['extra_kwargs'] = model_path_item.get('extra_kwargs')
-                                              
+                    
                     path = self.is_downloaded(component['model_path'], components_path)
+                    print(path, component['model_path'])
                     if path is None:
                         component['model_path'] = self._download(component['model_path'], components_path)
                     else:
@@ -1827,16 +1832,20 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         component["model_path"] = downloaded_model_path
                 
             if extra_model_paths := component.get("extra_model_paths"):
-                for i, extra_model_path in enumerate(extra_model_paths):
-                    downloaded_extra_model_path = self._download(
-                        extra_model_path, components_path
-                    )
+                for m_index, extra_model_path in enumerate(extra_model_paths):
+                    if isinstance(extra_model_path, dict):
+                        downloaded_extra_model_path = self._download(extra_model_path["path"], components_path)
+                    else:
+                        downloaded_extra_model_path = self._download(
+                            extra_model_path, components_path
+                        )
                     if downloaded_extra_model_path:
-                        component["extra_model_paths"][i] = downloaded_extra_model_path
+                        component["extra_model_paths"][m_index] = downloaded_extra_model_path
+            
 
             self.config["components"][i] = component
-
-                    
+            
+    
     def _get_latents(
         self,
         height: int,

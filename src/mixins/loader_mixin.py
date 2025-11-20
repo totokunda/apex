@@ -29,7 +29,7 @@ from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
-from src.converters.convert import get_transformer_converter
+from src.converters.convert import get_transformer_converter, get_vae_converter
 from contextlib import nullcontext
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
@@ -82,7 +82,6 @@ class LoaderMixin(DownloadMixin):
         # independently of BaseEngine. Only enable for PyTorch engines, since group offloading
         # relies on torch.nn.Module hooks provided by diffusers.
         mm_config = None
-        needs_memory_management = False
         engine_type = getattr(self, "engine_type", "torch")
         if engine_type == "torch":
             resolve_mm_cfg = getattr(self, "_resolve_memory_config_for_component", None)
@@ -195,11 +194,14 @@ class LoaderMixin(DownloadMixin):
                 if hasattr(model_class, "_from_config"):
                     model = model_class._from_config(config, **extra_kwargs)
                 else:
+
                     model = model_class.from_config(config, **extra_kwargs)
 
         if no_weights:
             return model
-    
+        
+
+ 
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")
@@ -247,10 +249,11 @@ class LoaderMixin(DownloadMixin):
             if isinstance(extra_model_paths, str):
                 extra_model_paths = [extra_model_paths]
             files_to_load.extend(extra_model_paths)
-
+ 
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")
-                if is_safetensors_file(file_path):
+                is_safetensors = is_safetensors_file(file_path)
+                if is_safetensors:
                     state_dict = load_safetensors(
                         file_path,
                         dtype=load_dtype,
@@ -260,9 +263,19 @@ class LoaderMixin(DownloadMixin):
                     state_dict = torch.load(
                         file_path, map_location="cpu", weights_only=True, mmap=True
                     )
-                    if load_dtype:
-                        for k, v in state_dict.items():
-                            state_dict[k] = v.to(load_dtype)
+                
+                if extra_kwargs.get("require_conversion", False):
+                    if component.get("type") == "vae":
+                        converter = get_vae_converter(model_base)
+                    elif component.get("type") == "transformer":
+                        converter = get_transformer_converter(model_base)
+                    else:
+                        raise ValueError(f"Unsupported component type: {component.get('type')}")
+                    converter.convert(state_dict)
+                
+                if load_dtype and not is_safetensors:
+                    for k, v in state_dict.items():
+                        state_dict[k] = v.to(load_dtype)
                 # remap keys if key_map is provided replace part of existing key with new key
                 if key_map:
                     new_state_dict = {}
@@ -295,7 +308,7 @@ class LoaderMixin(DownloadMixin):
                 if param.device.type == "meta":
                     self.logger.error(f"Parameter {name} is on meta device")
                     has_meta_params = True
-
+            
             if has_meta_params:
                 raise ValueError(
                     "Model has parameters on meta device, this is not supported"
