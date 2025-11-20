@@ -37,10 +37,37 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "reference_image": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/d18c320d-00a1-4cea-b55a-e7c0dd44c9f0-27534f34-0da9-4bdb-9aa9-0934ddc8ed1c_reference_image_0_5.png",
-        "control_video": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/0dde7852-95db-477d-9c53-cebbbe78781b-27534f34-0da9-4bdb-9aa9-0934ddc8ed1c_control_video_0_111_5.mp4",
-        "prompt": "A man with blonde hair and a beard hugging a tree",
-        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
+        "prompt": "a woman riding a bike and smiling \n",
+        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, {
+  "_class_name": "LucyEditPipeline",
+  "_diffusers_version": "0.35.0.dev0",
+  "boundary_ratio": null,
+  "expand_timesteps": true,
+  "scheduler": [
+    "diffusers",
+    "UniPCMultistepScheduler"
+  ],
+  "text_encoder": [
+    "transformers",
+    "UMT5EncoderModel"
+  ],
+  "tokenizer": [
+    "transformers",
+    "T5TokenizerFast"
+  ],
+  "transformer": [
+    "diffusers",
+    "WanTransformer3DModel"
+  ],
+  "transformer_2": [
+    null,
+    null
+  ],
+  "vae": [
+    "diffusers",
+    "AutoencoderKLWan"
+  ]
+}, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "resolution": 480,
         "aspect_ratio": 61,
         "num_inference_steps": 30,

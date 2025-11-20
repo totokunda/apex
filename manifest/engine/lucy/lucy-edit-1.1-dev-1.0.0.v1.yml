@@ -62,7 +62,9 @@ spec:
       fps: 24
       duration: 81
       boundary_ratio: null
-      text_encoder_kwargs: {}
+      text_encoder_kwargs: 
+        use_attention_mask: true
+        max_sequence_length: 512
       attention_kwargs: {}
   ui:
     panels:
@@ -150,12 +152,6 @@ spec:
       default: 24
       min: 1
       max: 60
-    - id: duration
-      label: Duration (Frames)
-      description: Number of frames to generate (or "Xs" for seconds).
-      type: text
-      panel: settings
-      default: '81'
     - id: seed
       label: Seed
       description: Random seed for reproducibility.
