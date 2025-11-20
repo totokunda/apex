@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import torch.nn.functional as F
 from src.helpers.wan.fun_camera import Camera
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
 from einops import rearrange
 
@@ -56,6 +57,7 @@ class WanControlEngine(WanShared):
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable | None = None,
         generator: torch.Generator | None = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -67,10 +69,14 @@ class WanControlEngine(WanShared):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting control pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -83,6 +89,8 @@ class WanControlEngine(WanShared):
         
         batch_size = prompt_embeds.shape[0]
 
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
@@ -93,8 +101,16 @@ class WanControlEngine(WanShared):
         else:
             negative_prompt_embeds = None
  
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         if start_image is not None:
             loaded_image = self._load_image(start_image)
@@ -128,7 +144,7 @@ class WanControlEngine(WanShared):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         if self.denoise_type == "moe" and start_image is not None:
             # convert start image into video 
             start_image = self._load_image(start_image)
@@ -204,6 +220,7 @@ class WanControlEngine(WanShared):
             control_latents = self._prepare_fun_control_latents(
                 control_video, dtype=torch.float32, generator=generator
             )
+
             control_camera_latents = None
         else:
             control_latents = torch.zeros_like(latents)
@@ -219,6 +236,7 @@ class WanControlEngine(WanShared):
                 mask = self.video_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
                 mask = mask.to(dtype=torch.float32)
                 mask = rearrange(mask, "(b f) c h w -> b c f h w", f=num_frames)
+
                 
             if mask is None or (mask == 1.0).all():
                 mask_latents = torch.tile(
@@ -316,6 +334,7 @@ class WanControlEngine(WanShared):
         else:
             image_embeds = None
 
+
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
 
         if negative_prompt_embeds is not None:
@@ -329,6 +348,8 @@ class WanControlEngine(WanShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
+
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
 
         scheduler = self.scheduler
         scheduler.set_timesteps(
@@ -362,6 +383,7 @@ class WanControlEngine(WanShared):
             control_latents = start_image_latents_in
         
         if mask_latents is not None and masked_video_latents is not None:
+
             mask_latents = torch.concat(
                 [
                     mask_latents,
@@ -371,6 +393,7 @@ class WanControlEngine(WanShared):
             )
 
         if mask_latents is not None and control_latents is not None:
+
             control_latents = torch.concat(
                 [
                     control_latents,
@@ -378,9 +401,18 @@ class WanControlEngine(WanShared):
                 ],
                 dim=1,
             )
+
         elif mask_latents is not None and control_latents is None:
             control_latents = mask_latents
-            
+        
+        # Set preview context for per-step rendering on the main engine when available
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
 
         latents = self.denoise(
             boundary_timestep=boundary_timestep,
@@ -431,6 +463,7 @@ class WanControlEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
         )
@@ -438,9 +471,14 @@ class WanControlEngine(WanShared):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed control pipeline")
             return postprocessed_video

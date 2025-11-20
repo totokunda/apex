@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import torch.nn.functional as F
 from src.helpers.wan.fun_camera import Camera
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
 
 
@@ -68,6 +69,7 @@ class WanFunEngine(WanShared):
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable | None = None,
         generator: torch.Generator | None = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -78,10 +80,14 @@ class WanFunEngine(WanShared):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting FUN control pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -90,6 +96,8 @@ class WanFunEngine(WanShared):
             **text_encoder_kwargs,
         )
         batch_size = prompt_embeds.shape[0]
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
 
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
@@ -101,8 +109,16 @@ class WanFunEngine(WanShared):
         else:
             negative_prompt_embeds = None
 
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         if start_image is not None:
             loaded_image = self._load_image(start_image)
@@ -369,6 +385,8 @@ class WanFunEngine(WanShared):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
 
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+
         scheduler = self.scheduler
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
@@ -398,6 +416,15 @@ class WanFunEngine(WanShared):
             )
         else:
             boundary_timestep = None
+
+        # Set preview context for per-step rendering on the main engine when available
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -453,6 +480,7 @@ class WanFunEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
         )
@@ -460,9 +488,14 @@ class WanFunEngine(WanShared):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed FUN control pipeline")
             return postprocessed_video
