@@ -17,7 +17,7 @@ spec:
   denoise_type: moe
   components:
   - type: scheduler
-    base: diffusers.FlowMatchEulerDiscreteScheduler
+
     config:
       num_train_timesteps: 1000
       shift: 5.0
