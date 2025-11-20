@@ -279,8 +279,9 @@ class DownloadMixin:
         progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
     ):
         # check if model_path is a local path
-        if os.path.exists(model_path):
-            return model_path
+        is_downloaded_path = self.is_downloaded(model_path, save_path)
+        if is_downloaded_path:
+            return is_downloaded_path
         elif "drive.google.com" in model_path:
             return self._download_from_google_drive(model_path, save_path, progress_callback)
         elif model_path.startswith("gs://"):
@@ -763,49 +764,93 @@ class DownloadMixin:
                 self.logger.info(f"Downloading from Hugging Face Hub: {repo_id}")
 
             split_path = repo_id.split("/")
-
+            
+            looks_like_path_is_dir = False
             if self._has_file_ending(repo_id):
-                # fetch the specific file via signed URL and download through URL downloader
-                self.logger.info(f"Downloading specific file from Hugging Face Hub: {repo_id}")
-                base_repo = "/".join(split_path[:2])
-                file_name = os.path.basename(repo_id)
-                subfolder = f"{'/'.join(split_path[2:-1])}" if len(split_path) > 2 else None
-                # deterministic final path based on logical repo path (not signed URL)
-                deterministic_path = os.path.join(
-                    save_path,
-                    f"{hashlib.sha256(repo_id.encode()).hexdigest()}_{file_name}",
-                )
-                if os.path.exists(deterministic_path):
-                    self.logger.info(f"File {deterministic_path} already exists, skipping download.")
-                    return deterministic_path
-                # Build resolve URL then follow redirects to signed URL
-                resolve_url = hf_hub_url(repo_id=base_repo, filename=file_name, subfolder=subfolder)
-                token = HfFolder.get_token()
-                headers = build_hf_headers(token=token)
-                with requests.Session() as sess:
-                    sess.headers.update(headers)
-                    head = sess.head(resolve_url, allow_redirects=True, timeout=20, verify=self._requests_verify())
-                    head.raise_for_status()
-                    signed_url = head.url
-                    # Download directly to deterministic path with resume support
-                    os.makedirs(os.path.dirname(deterministic_path), exist_ok=True)
-                    self._download_from_url(
-                        url=signed_url,
-                        save_path=os.path.dirname(deterministic_path),
-                        progress_callback=progress_callback,
-                        session=sess,
-                        filename=file_name,
-                        dest_path=deterministic_path,
+                try:
+                    # fetch the specific file via signed URL and download through URL downloader
+                    self.logger.info(f"Downloading specific file from Hugging Face Hub: {repo_id}")
+                    base_repo = "/".join(split_path[:2])
+                    file_name = os.path.basename(repo_id)
+                    subfolder = f"{'/'.join(split_path[2:-1])}" if len(split_path) > 2 else None
+                    # deterministic final path based on logical repo path (not signed URL)
+                    deterministic_path = os.path.join(
+                        save_path,
+                        f"{hashlib.sha256(repo_id.encode()).hexdigest()}_{file_name}",
                     )
-                self.logger.info(f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}")
-                return deterministic_path
+                    if os.path.exists(deterministic_path):
+                        self.logger.info(f"File {deterministic_path} already exists, skipping download.")
+                        return deterministic_path
+                    # Build resolve URL then follow redirects to signed URL
+                    resolve_url = hf_hub_url(repo_id=base_repo, filename=file_name, subfolder=subfolder)
+                    token = HfFolder.get_token()
+                    headers = build_hf_headers(token=token)
+                    with requests.Session() as sess:
+                        sess.headers.update(headers)
+                        head = sess.head(resolve_url, allow_redirects=True, timeout=20, verify=self._requests_verify())
+                        head.raise_for_status()
+                        signed_url = head.url
+                        # Download directly to deterministic path with resume support
+                        os.makedirs(os.path.dirname(deterministic_path), exist_ok=True)
+                        
+                        # Retry loop for single file download with verification
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                self._download_from_url(
+                                    url=signed_url,
+                                    save_path=os.path.dirname(deterministic_path),
+                                    progress_callback=progress_callback,
+                                    session=sess,
+                                    filename=file_name,
+                                    dest_path=deterministic_path,
+                                )
+                                
+                                # Verify file
+                                if not os.path.exists(deterministic_path):
+                                    raise ValueError(f"File {deterministic_path} not found after download")
+                                
+                                actual_size = os.path.getsize(deterministic_path)
+                                if actual_size == 0:
+                                    raise ValueError(f"File {deterministic_path} is empty")
+
+                                # Verify content length if available
+                                content_length = head.headers.get("content-length")
+                                if content_length:
+                                    try:
+                                        expected_size = int(content_length)
+                                        if actual_size != expected_size:
+                                            raise ValueError(f"File {deterministic_path} size mismatch: expected {expected_size}, got {actual_size}")
+                                    except (ValueError, TypeError):
+                                        pass
+
+                                break  # Success
+                            except Exception as e:
+                                self.logger.warning(f"Download failed for {file_name} (attempt {attempt+1}/{max_retries}): {e}")
+                                if os.path.exists(deterministic_path):
+                                    try:
+                                        os.remove(deterministic_path)
+                                    except Exception:
+                                        pass
+                                if attempt == max_retries - 1:
+                                    raise e
+                    self.logger.info(f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}")
+                    return deterministic_path
+                except Exception:
+                    looks_like_path_is_dir = True
+                    self.logger.warning(f"Failed to download specific file from Hugging Face Hub: {repo_id}")
 
             subfolder = (
                 [f"{'/'.join(split_path[2:])}/*"] if len(split_path) > 2 else None
             )
             repo_id = "/".join(split_path if len(split_path) <= 2 else split_path[:2])
 
-            dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
+            if not looks_like_path_is_dir:
+                dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
+            else:
+                dest_path = os.path.join(save_path)
+            
+
             # If destination already exists and is non-empty:
             # - When downloading the whole repo (no subfolder), skip re-download.
             # - When downloading a subfolder, we will merge the staged subfolder into dest at finalize.
@@ -895,19 +940,49 @@ class DownloadMixin:
                             continue
                         os.makedirs(final_dir, exist_ok=True)
                         # Each task downloads directly into staged final path with resume support
-                        def task(rel_path=rel_path, filename=filename, signed_url=signed_url, rel_dir=rel_dir, final_dir=final_dir):
+                        def task(rel_path=rel_path, filename=filename, signed_url=signed_url, rel_dir=rel_dir, final_dir=final_dir, expected_size=_size):
                             tmp_dir = os.path.join(tmp_root, "files_tmp", rel_dir) if rel_dir else os.path.join(tmp_root, "files_tmp")
                             os.makedirs(tmp_dir, exist_ok=True)
                             dest_file = os.path.join(final_dir, filename)
-                            self._download_from_url(
-                                url=signed_url,
-                                save_path=tmp_dir,
-                                progress_callback=make_cb(rel_path, _size),
-                                session=session,
-                                filename=filename,
-                                dest_path=dest_file,
-                            )
-                            return dest_file
+                            
+                            max_retries = 3
+                            for attempt in range(max_retries):
+                                try:
+                                    self._download_from_url(
+                                        url=signed_url,
+                                        save_path=tmp_dir,
+                                        progress_callback=make_cb(rel_path, expected_size),
+                                        session=session,
+                                        filename=filename,
+                                        dest_path=dest_file,
+                                    )
+
+                                    # Verification
+                                    if not os.path.exists(dest_file):
+                                        raise ValueError(f"File {dest_file} not found after download")
+                                    
+                                    actual_size = os.path.getsize(dest_file)
+                                    if actual_size == 0:
+                                        raise ValueError(f"File {dest_file} is empty")
+                                    
+                                    if expected_size is not None and actual_size != expected_size:
+                                        raise ValueError(f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}")
+                                        
+                                    return dest_file
+
+                                except Exception as e:
+                                    if attempt < max_retries - 1:
+                                        if hasattr(self, "logger"):
+                                            self.logger.warning(f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}")
+                                    
+                                    if os.path.exists(dest_file):
+                                        try:
+                                            os.remove(dest_file)
+                                        except Exception:
+                                            pass
+                                            
+                                    if attempt == max_retries - 1:
+                                        raise e
                         futures.append(ex.submit(task))
                     # ensure completion
                     for _ in as_completed(futures):

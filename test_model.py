@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from src.engine.registry import UniversalEngine
 import json 
+from diffusers.utils import export_to_video
 
 with open("inputs.json", "r") as f:
    data = json.load(f)

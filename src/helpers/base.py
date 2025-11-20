@@ -113,69 +113,7 @@ class PreprocessorType(Enum):
 class BaseHelper(LoaderMixin, ToMixin, nn.Module):
     def __init__(
         self,
-        model_path: str = None,
-        config_path: str = None,
-        save_path: str = DEFAULT_PREPROCESSOR_SAVE_PATH,
-        preprocessor_type: PreprocessorType = PreprocessorType.IMAGE,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
-        if model_path:
-            self.model_path = self._download(model_path, save_path)
-        else:
-            self.model_path = model_path
-        if config_path:
-            self.config_path = self._download(config_path, save_path)
-        else:
-            self.config_path = config_path
         self.kwargs = kwargs
-        self.preprocessor_type = preprocessor_type
-
-    def load_processor(self, processor_path: Dict[str, Any] | str) -> AutoProcessor:
-        try:
-            processor_class = find_class_recursive(
-                importlib.import_module("transformers"), self.processor_class
-            )
-            if self._is_huggingface_repo(processor_path):
-                if len(processor_path.split("/")) > 2:
-                    subfolder = "/".join(processor_path.split("/")[2:])
-                    processor_path = "/".join(processor_path.split("/")[:2])
-                    return processor_class.from_pretrained(
-                        processor_path,
-                        subfolder=subfolder,
-                        save_dir=self.config_save_path,
-                    )
-                else:
-                    return processor_class.from_pretrained(
-                        processor_path, save_dir=self.config_save_path
-                    )
-            else:
-                return processor_class.from_pretrained(processor_path)
-        except Exception as e:
-            processor_config = self.fetch_config(processor_path)
-            processor_class = find_class_recursive(
-                importlib.import_module("transformers"),
-                processor_config[self.find_key_with_type(processor_config)],
-            )
-            if not issubclass(processor_class, ImageProcessingMixin):
-                processor_class = find_class_recursive(
-                    importlib.import_module("transformers"), self.processor_class
-                )
-            return processor_class(**processor_config)
-
-    def __call__(self, *args, **kwargs):
-        raise NotImplementedError("Subclasses must implement this method")
-
-    def preprocess_bbox(self, bbox: List[float], shape: Tuple[int, int, int]):
-        """Preprocess a bounding box"""
-        x1, y1, x2, y2 = bbox
-        h, w, _ = shape
-        if isinstance(x1, float) and x1 < 1:
-            x1 = x1 * w
-        if isinstance(y1, float) and y1 < 1:
-            y1 = y1 * h
-        if isinstance(x2, float) and x2 < 1:
-            x2 = x2 * w
-        if isinstance(y2, float) and y2 < 1:
-            y2 = y2 * h
-        return x1, y1, x2, y2

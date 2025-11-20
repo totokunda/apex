@@ -120,7 +120,10 @@ class BasePreprocessor(LoaderMixin, ABC):
     def process_image(self, input_image:InputImage, **kwargs) -> OutputImage:
         target_size = self._get_image_size(input_image)
         processed = self.process(input_image, **kwargs)
-        return self._ensure_image_size(processed, target_size)
+        if kwargs.get("ensure_image_size", True):
+            return self._ensure_image_size(processed, target_size)
+        else:
+            return processed
     
     def process_video(self, input_video:InputVideo, **kwargs) -> OutputVideo:
         """Process video frames iteratively, yielding results to avoid memory overload"""
@@ -141,7 +144,8 @@ class BasePreprocessor(LoaderMixin, ABC):
             
             target_size = frame.size if isinstance(frame, Image.Image) else self._get_image_size(frame)
             anno_frame = self.process(frame, **kwargs)
-            anno_frame = self._ensure_image_size(anno_frame, target_size)
+            if kwargs.get("ensure_image_size", True):
+                anno_frame = self._ensure_image_size(anno_frame, target_size)
             yield anno_frame
             frame_idx += 1
         

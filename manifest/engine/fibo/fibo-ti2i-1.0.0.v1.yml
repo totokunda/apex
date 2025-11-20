@@ -5,7 +5,8 @@ metadata:
   model: fibo
   name: Fibo TI2I
   version: 1.0.0
-  description: Fibo is an 8B parameter model for text-to-image generation powered by Bria.
+  description: Fibo is an 8B parameter model for text-to-image generation powered
+    by Bria.
   tags:
   - fibo
   - ti2i
@@ -14,7 +15,9 @@ metadata:
   demo_path: https://bria-public.s3.us-east-1.amazonaws.com/car.001.jpeg
 spec:
   engine: fibo
-  model_type: ti2i
+  model_type:
+  - t2i
+  - i2i
   engine_type: torch
   denoise_type: base
   attention_types:
@@ -41,7 +44,7 @@ spec:
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 16
-      
+      file_size: 2818779509
   - type: text_encoder
     label: Fibo Text Encoder
     base: SmolLM3ForCausalLM
@@ -53,11 +56,11 @@ spec:
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 24
+      file_size: 6150263949
     tokenizer_class: PreTrainedTokenizerFast
     tokenizer_name: briaai/FIBO
     tokenizer_kwargs:
       subfolder: tokenizer
-  
   - type: transformer
     label: Fibo Transformer
     base: fibo.base
@@ -66,13 +69,15 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 16571862719
   - type: helper
-    name:  prompt_gen
+    name: prompt_gen
     label: Fibo JSON Prompt Generator
     base: fibo.prompt_gen
     model_path:
     - path: briaai/FIBO-vlm
       type: safetensors
+      file_size: 8891672453
   defaults:
     run:
       num_inference_steps: 40
@@ -140,7 +145,8 @@ spec:
       scale_by: resolution
     - id: prompt
       label: Prompt
-      description: The prompt to create or edit the image. This can be a string or JSON.
+      description: The prompt to create or edit the image. This can be a string or
+        JSON.
       placeholder: A beautiful woman with long brown hair and blue eyes.
       type: text
       panel: prompting
@@ -155,7 +161,8 @@ spec:
       default: ''
     - id: structured_prompt
       label: Structured Prompt
-      description: The structured prompt to edit the image. This should be a valid JSON object.
+      description: The structured prompt to edit the image. This should be a valid
+        JSON object.
       type: text
       panel: advanced_prompting
       required: false

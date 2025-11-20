@@ -62,7 +62,7 @@ class EngineRegistry:
                 module_name = f"src.engine.{engine_type}.{stem}"
                 try:
                     module = importlib.import_module(module_name)
-                except Exception:
+                except Exception as e:
                     # Best-effort discovery; failures here should not block startup
                     logger.error(f"Failed to import module {module_name}: {Exception}")
                     logger.debug("Traceback:\n" + traceback.format_exc())

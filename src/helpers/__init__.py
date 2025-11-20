@@ -9,6 +9,7 @@ from src.helpers.wan.recam import WanRecam
 from src.helpers.ltx import SymmetricPatchifier, Patchifier
 from src.helpers.hidream.llama import HidreamLlama
 from src.helpers.fibo.prompt_gen import PromptGenHelper
+from src.helpers.wan.humo_audio_processor import HuMoAudioProcessor
 
 __all__ = [
     "CLIP",
@@ -23,4 +24,5 @@ __all__ = [
     "Patchifier",
     "HidreamLlama",
     "PromptGenHelper",
+    "HuMoAudioProcessor",
 ]

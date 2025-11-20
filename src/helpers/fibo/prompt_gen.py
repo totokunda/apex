@@ -138,7 +138,6 @@ def _strip_stop_sequences(text: str, stop_sequences: Optional[List[str]]) -> str
     return cleaned.strip()
 
 
-@helpers("fibo.prompt_gen")
 class PromptGenHelper(BaseHelper, CacheMixin):
     """Inference wrapper using Hugging Face transformers."""
 
