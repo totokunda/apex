@@ -3,29 +3,31 @@ load_dotenv()
 from src.engine.registry import UniversalEngine
 import json 
 
-#with open("inputs.json", "r") as f:
-#    data = json.load(f)
-#
-#print(data)
-#engine_kwargs = data["engine_kwargs"]
-#inputs = data["inputs"]
+with open("inputs.json", "r") as f:
+   data = json.load(f)
 
-yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/hunyuanimage3/hunyuanimage-1.0.0.v1.yml"
-engine = UniversalEngine(yaml_path=yaml_path, attention_type="flash", 
-    selected_components={
-        "transformer": {
-            "path": "/home/tosin_coverquick_co/apex-diffusion/gguf/hunyuanimage3_q2.Q2_K.gguf",
-            "variant": "GGUF_Q2_K",
-            "precision": "q2_k",
-            "type": "gguf"
-        }
-    })
+
+engine_kwargs = data["engine_kwargs"]
+inputs = data["inputs"]
+
+engine = UniversalEngine(**engine_kwargs)
 
 out = engine.run(
-    prompt="The Death of Ophelia by John Everett Millais, Pre-Raphaelite painting, Ophelia floating in a river surrounded by flowers, detailed natural elements, melancholic and tragic atmosphere",
-    num_inference_steps=30,
-    height=1024,
-    width=1024,
+    **inputs
 )
 
-out[0].save("output3_q2k.png")
+# Save output based on type (list of frames/images or single image)
+if isinstance(out, list) and len(out) > 0:
+    if hasattr(out[0], 'save'):
+        # It's a list of PIL images (video frames)
+        out[0].save("output.gif", save_all=True, append_images=out[1:], duration=1000/inputs.get("fps", 16), loop=0)
+        print("Saved output.gif")
+    elif isinstance(out[0], str):
+        # It's a list of paths
+        print(f"Output paths: {out}")
+elif hasattr(out, 'save'):
+    # Single PIL image
+    out.save("output.png")
+    print("Saved output.png")
+else:
+    print("Output format not recognized for auto-saving:", type(out))

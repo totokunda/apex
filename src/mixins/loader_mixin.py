@@ -374,7 +374,7 @@ class LoaderMixin(DownloadMixin):
     def _load_scheduler(self, component: Dict[str, Any]) -> Any:
         component_base = component.get("base")
         if not component_base:
-            raise ValueError("Component base not specified.")
+            raise ValueError("Scheduler component base not specified.")
 
         component_split = component_base.split(".")
         if len(component_split) > 1:

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Type
 from diffusers.models.modeling_utils import ModelMixin
 from src.register import ClassRegister
+from loguru import logger
 VAE_REGISTRY = ClassRegister()
 
 
@@ -38,6 +39,9 @@ def _auto_register_vaes():
         try:
             module = importlib.import_module(module_name)
         except Exception:
+            print(f"\n\nError importing module {module_name} with exception {Exception}\n\n")
+            import traceback
+            traceback.print_exc()
             # If import fails for any reason, skip auto-registration for this module.
             continue
 
@@ -59,6 +63,7 @@ _auto_register_vaes()
 
 def get_vae(vae_name: str):
     key = vae_name.lower()
+
     if key in VAE_REGISTRY:
         return VAE_REGISTRY.get(key)
     raise ValueError(f"VAE {vae_name} not found")
