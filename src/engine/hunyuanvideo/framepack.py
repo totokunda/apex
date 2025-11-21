@@ -3,9 +3,9 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import math
-from .shared import HunyuanShared
+from .shared import HunyuanVideoShared
 
-class HunyuanFramepackEngine(HunyuanShared):
+class HunyuanFramepackEngine(HunyuanVideoShared):
     """Hunyuan Framepack Engine Implementation"""
     
     def _soft_append(

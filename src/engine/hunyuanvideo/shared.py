@@ -5,7 +5,7 @@ import numpy as np
 from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
 
-class HunyuanShared(BaseEngine):
+class HunyuanVideoShared(BaseEngine):
     """Base class for Hunyuan engine implementations containing common functionality"""
 
     def __init__(self, yaml_path: str, **kwargs):

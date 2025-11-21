@@ -2,10 +2,10 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
-from .shared import HunyuanShared
+from .shared import HunyuanVideoShared
 
 
-class HunyuanI2VEngine(HunyuanShared):
+class HunyuanI2VEngine(HunyuanVideoShared):
     """Hunyuan Image-to-Video Engine Implementation"""
 
     def run(

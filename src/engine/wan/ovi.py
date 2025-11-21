@@ -230,13 +230,29 @@ class OviEngine(WanShared):
         )
         seq_lens = attention_mask.sum(dim=1).long()
         
-        text_embeddings = [u[:v] for u, v in zip(raw_output.last_hidden_state, seq_lens)]
+        if hasattr(raw_output, "last_hidden_state"):
+            text_embeddings = torch.stack([u for u in raw_output.last_hidden_state])
+        else:
+            text_embeddings = raw_output
         
-        # text_embeddings is expected to be a tensor of shape (3, L, D) or list of tensors
-        if isinstance(text_embeddings, list):
-             # If list, stack them? Ovi expects them to be accessible by index
-             # Assuming they are compatible
-             pass
+        if self.text_encoder.enable_cache:
+            prompt_hash = self.text_encoder.get_prompt_hash(
+                prompts,
+                device=device,
+                dtype=target_dtype,
+                use_attention_mask=True,
+                max_sequence_length=self.text_encoder.config.get("max_sequence_length", 512),
+                pad_with_zero=False,
+                clean_text=False,
+                output_type="raw",
+                return_attention_mask=True
+            )
+            self.text_encoder.cache_prompt(prompt_hash, text_embeddings, attention_mask)
+        
+        
+        text_embeddings = [u[:v] for u, v in zip(text_embeddings, seq_lens)]
+        
+        
         
         text_embeddings_audio_pos = text_embeddings[0]
         text_embeddings_video_pos = text_embeddings[0]
