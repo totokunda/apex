@@ -306,9 +306,6 @@ class DownloadMixin:
             from huggingface_hub import repo_exists, get_token
             namespace, repo_name = model_path.split("/")[:2]
             token = get_token()
-            logger.info(f"Checking if repo exists: {namespace}/{repo_name}")
-            logger.info(f"Token: {token}")
-            logger.info(f"Repo exists: {repo_exists(f'{namespace}/{repo_name}', token=token)}")
             return repo_exists(f"{namespace}/{repo_name}", token=token)
         except Exception as e:
             return False
