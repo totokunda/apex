@@ -21,6 +21,10 @@ spec:
   engine_type: torch
   max_duration_secs: 5.0
   min_duration_secs: 5.0
+  
+  attention_types:
+  - sdpa
+  - flash
   components:
   - type: scheduler
     name: transformer_scheduler
@@ -55,7 +59,6 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
   - type: vae
     name: audio_vae
     label: Audio VAE
@@ -126,9 +129,9 @@ spec:
         "temporal_rope_scaling_factor": 0.19676 
   defaults:
     run:
-      num_inference_steps: 30
-      video_guidance_scale: 5.0
-      audio_guidance_scale: 4.0
+      num_inference_steps: 50
+      video_guidance_scale: 4.0
+      audio_guidance_scale: 3.0
       return_latents: false
       timesteps_as_indices: true
       expand_timesteps: false

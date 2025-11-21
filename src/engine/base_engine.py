@@ -495,8 +495,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         load_dtype: torch.dtype | None = None,
         no_weights: bool = False,
     ):
-
-
         component_type = component.get("type")
         component_module = None
         if component_type == "scheduler":
@@ -1454,18 +1452,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         video: torch.Tensor,
         offload: bool = False,
         sample_mode: str = "mode",
+        component_name: str = "vae",
         sample_generator: torch.Generator = None,
         dtype: torch.dtype = None,
         normalize_latents: bool = True,
         normalize_latents_dtype: torch.dtype | None = None,
     ):
-        if self.vae is None:
+        if getattr(self, component_name, None) is None:
             self.load_component_by_type("vae")
-        self.to_device(self.vae)
+        self.to_device(getattr(self, component_name))
 
-        video = video.to(dtype=self.vae.dtype, device=self.device)
+        video = video.to(dtype=getattr(self, component_name).dtype, device=self.device)
 
-        latents = self.vae.encode(video, return_dict=False)[0]
+        latents = getattr(self, component_name).encode(video, return_dict=False)[0]
         if sample_mode == "sample":
             latents = latents.sample(generator=sample_generator)
         elif sample_mode == "mode":
@@ -1474,14 +1473,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             raise ValueError(f"Invalid sample mode: {sample_mode}")
 
         if not normalize_latents_dtype:
-            normalize_latents_dtype = self.vae.dtype
+            normalize_latents_dtype = getattr(self, component_name).dtype
 
         if normalize_latents:
             latents = latents.to(dtype=normalize_latents_dtype)
-            latents = self.vae.normalize_latents(latents)
+            latents = getattr(self, component_name).normalize_latents(latents)
 
         if offload:
-            self._offload(self.vae)
+            self._offload(getattr(self, component_name))
 
         return latents.to(dtype=dtype)
 
@@ -1642,11 +1641,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     def load_component_by_type(self, component_type: str):
         for component in self.config.get("components", []):
             if component.get("type") == component_type:
+                ignore_load_dtype = component.get("extra_kwargs", {}).get("ignore_load_dtype", False)
                 component_module = self.load_component(
                     component,
                     (
                         self.component_load_dtypes.get(component.get("type"))
-                        if self.component_load_dtypes
+                        if self.component_load_dtypes and not ignore_load_dtype
                         else None
                     ),
                 )
@@ -1656,11 +1656,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     def load_component_by_name(self, component_name: str):
         for component in self.config.get("components", []):
             if component.get("name") == component_name:
+                ignore_load_dtype = component.get("extra_kwargs", {}).get("ignore_load_dtype", False)
                 component_module = self.load_component(
                     component,
                     (
                         self.component_load_dtypes.get(component.get("type"))
-                        if self.component_load_dtypes
+                        if self.component_load_dtypes and not ignore_load_dtype
                         else None
                     ),
                 )

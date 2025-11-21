@@ -20,7 +20,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         no_weights: bool = True,
         enable_cache: bool = True,
         cache_file: str = None,
-        max_cache_size: int = 100,
+        max_cache_size: int = 1000,
         device: torch.device | None = None,
         *args,
         **kwargs,
@@ -161,7 +161,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "lower_case": lower_case,
             "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
         }
-
+        
         prompt_hash = self.hash_prompt(kwargs)
 
         if self.enable_cache:
@@ -200,10 +200,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
 
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
-        # mask = mask.bool()
-
         inputs = {"input_ids": text_input_ids.to(device=self.model.device)}
-
 
         if use_position_ids:
             position_ids = torch.arange(text_input_ids.shape[1]).expand(
@@ -248,6 +245,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             raise ValueError(f"Invalid output type: {output_type}")
         
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        
 
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
@@ -290,6 +288,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         
             mask = mask.repeat(1, num_videos_per_prompt)
             mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
+        
 
         if self.enable_cache:
             self.cache_prompt(

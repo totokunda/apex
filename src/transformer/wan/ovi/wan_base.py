@@ -1,16 +1,14 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import math
-
 import torch
 import torch.amp as amp
 import torch.nn as nn
 import torch.nn.functional as F
-
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
-from src.attention import attention_register
+from .attention import flash_attention
 from torch.utils.checkpoint import checkpoint
-
+from src.attention import attention_register
 
 def gradient_checkpointing(module: nn.Module, *args, enabled: bool, **kwargs):
     if enabled:
@@ -32,7 +30,6 @@ def sinusoidal_embedding_1d(dim, position):
     return x
 
 
-@amp.autocast('cuda', enabled=False)
 def rope_params(max_seq_len, dim, theta=10000, freqs_scaling=1.0):
     assert dim % 2 == 0
     pos =  torch.arange(max_seq_len)
@@ -42,7 +39,6 @@ def rope_params(max_seq_len, dim, theta=10000, freqs_scaling=1.0):
     freqs = torch.polar(torch.ones_like(freqs), freqs)
     return freqs
 
-@amp.autocast('cuda', enabled=False)
 def rope_apply_1d(x, grid_sizes, freqs):
     n, c = x.size(2), x.size(3) // 2 ## b l h d
     c_rope = freqs.shape[1]  # number of complex dims to rotate
@@ -97,7 +93,7 @@ def rope_apply_3d(x, grid_sizes, freqs):
         output.append(x_i)
     return torch.stack(output).bfloat16()
 
-@amp.autocast('cuda', enabled=False)
+
 def rope_apply(x, grid_sizes, freqs):
     x_ndim = grid_sizes.shape[-1]
     if x_ndim == 3:
@@ -219,7 +215,8 @@ class WanSelfAttention(nn.Module):
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         # optional sequence parallelism
         # self.world_size = get_world_size()
-       
+        
+    # query, key, value function
     def qkv_fn(self, x):
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
@@ -237,13 +234,21 @@ class WanSelfAttention(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         q, k, v = self.qkv_fn(x)
-       
-        x = attention_register.call(
-            q=rope_apply(q, grid_sizes, freqs).transpose(1, 2),
-            k=rope_apply(k, grid_sizes, freqs).transpose(1, 2),
-            v=v.transpose(1, 2),
-            k_lens=seq_lens,
-            window_size=self.window_size).transpose(1, 2)
+
+        if attention_register.is_available("flash"):
+            x = flash_attention(
+                q=rope_apply(q, grid_sizes, freqs),
+                k=rope_apply(k, grid_sizes, freqs),
+                v=v,
+                k_lens=seq_lens,
+                window_size=self.window_size)
+        else:
+            x = attention_register.call(
+                q=rope_apply(q, grid_sizes, freqs).transpose(1, 2),
+                k=rope_apply(k, grid_sizes, freqs).transpose(1, 2),
+                v=v.transpose(1, 2),
+                k_lens=seq_lens,
+                window_size=self.window_size).transpose(1, 2)
        
         # output
         x = x.flatten(2)
@@ -272,12 +277,14 @@ class WanT2VCrossAttention(WanSelfAttention):
         q, k, v = self.qkv_fn(x, context)
 
         # compute attention
-        x = attention_register.call(
-            q=q.transpose(1, 2),
-            k=k.transpose(1, 2),
-            v=v.transpose(1, 2),
-            k_lens=context_lens,
-            window_size=self.window_size).transpose(1, 2)
+        if attention_register.is_available("flash"):
+            x = flash_attention(q, k, v, k_lens=context_lens)
+        else:
+            x = attention_register.call(
+                q=q.transpose(1, 2),
+                k=k.transpose(1, 2),
+                v=v.transpose(1, 2),
+                k_lens=context_lens).transpose(1, 2)
 
         # output
         x = x.flatten(2)
@@ -326,21 +333,28 @@ class WanI2VCrossAttention(WanSelfAttention):
         """
         q, k, v, k_img, v_img = self.qkv_fn(x, context)
 
-       
-        img_x = attention_register.call(
-            q=q.transpose(1, 2),
-            k=k_img.transpose(1, 2),
-            v=v_img.transpose(1, 2),
-            k_lens=None,
-            window_size=self.window_size).transpose(1, 2)
+            
+        # [B, L, H/P, C/H]
+        # k_img: [B, L, H, C/H]
+        if attention_register.is_available("flash"):
+            img_x = flash_attention(q, k_img, v_img, k_lens=None)
+        else:
+            img_x = attention_register.call(
+                q=q.transpose(1, 2),
+                k=k_img.transpose(1, 2),
+                v=v_img.transpose(1, 2),
+                k_lens=None).transpose(1, 2)
         # compute attention
-        x = attention_register.call(
-            q=q.transpose(1, 2),
-            k=k.transpose(1, 2),
-            v=v.transpose(1, 2),
-            k_lens=context_lens,
-            window_size=self.window_size).transpose(1, 2)
-        
+        if attention_register.is_available("flash"):
+            x = flash_attention(q, k, v, k_lens=context_lens)
+        else:
+            x = attention_register.call(
+                q=q.transpose(1, 2),
+                k=k.transpose(1, 2),
+                v=v.transpose(1, 2),
+                k_lens=context_lens).transpose(1, 2)
+            
+        # output
         x = x.flatten(2)
         img_x = img_x.flatten(2)
         x = x + img_x
@@ -731,9 +745,6 @@ class WanModel(ModelMixin, ConfigMixin):
             e0 = self.time_projection(e).unflatten(2, (6, self.dim)) # [1, 26784, 6, 3072] - B, seq_len, 6, dim
             assert e.dtype == torch.bfloat16 and e0.dtype == torch.bfloat16
 
-        
-        
-            
         # context
         context_lens = None
         context = self.text_embedding(
@@ -761,7 +772,6 @@ class WanModel(ModelMixin, ConfigMixin):
     def post_transformer_block_out(self, x, grid_sizes, e):
         # head
         x = self.head(x, e)
-        
         if self.is_audio_type:
             ## grid_sizes is [B 1] where 1 is L, 
             # converting grid_sizes from [B 1] -> [B]

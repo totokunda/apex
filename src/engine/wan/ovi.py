@@ -178,7 +178,7 @@ class OviEngine(WanShared):
             num_inference_steps: int = 50,
             video_guidance_scale: float = 5.0,
             audio_guidance_scale: float = 4.0,
-            slg_layer: int = 9,
+            slg_layer: int = 11,
             negative_prompt: str = "",
             audio_negative_prompt: str = "",
             offload: bool = True,
@@ -197,12 +197,14 @@ class OviEngine(WanShared):
         device = self.device
         target_dtype = torch.bfloat16 # Ovi uses bfloat16 by default
         
-
-        # 1. Text Encoding
-        if not self.text_encoder:
-            self.load_component_by_type("text_encoder")
-        self.to_device(self.text_encoder)
-
+        if not self.vae:
+             self.load_component_by_name("transformer_vae")
+        self.to_device(self.transformer_vae)
+        
+        # Audio VAE
+        if not hasattr(self, "audio_vae") or self.audio_vae is None:
+             self.load_component_by_name("audio_vae")
+    
         # Text formatting
         formatted_text_prompt = text_formatter(prompt)
         if formatted_text_prompt != prompt:
@@ -212,15 +214,23 @@ class OviEngine(WanShared):
         # Encode Prompts
         # Ovi expects: [prompt, video_neg, audio_neg]
         prompts = [prompt, negative_prompt, audio_negative_prompt]
-        
+        if not self.text_encoder:
+            self.load_component_by_type("text_encoder")
         # Use .encode() from TextEncoder
-        text_embeddings = self.text_encoder.encode(
+        raw_output, attention_mask = self.text_encoder.encode(
             prompts,
             device=device,
             dtype=target_dtype,
             use_attention_mask=True,
-            max_sequence_length=self.text_encoder.config.get("max_sequence_length", 512)
+            max_sequence_length=self.text_encoder.config.get("max_sequence_length", 512),
+            pad_with_zero=False,
+            clean_text=False,
+            output_type="raw",
+            return_attention_mask=True
         )
+        seq_lens = attention_mask.sum(dim=1).long()
+        
+        text_embeddings = [u[:v] for u, v in zip(raw_output.last_hidden_state, seq_lens)]
         
         # text_embeddings is expected to be a tensor of shape (3, L, D) or list of tensors
         if isinstance(text_embeddings, list):
@@ -232,7 +242,7 @@ class OviEngine(WanShared):
         text_embeddings_video_pos = text_embeddings[0]
         text_embeddings_video_neg = text_embeddings[1]
         text_embeddings_audio_neg = text_embeddings[2]
-
+        
         if offload:
             self._offload(self.text_encoder)
 
@@ -253,10 +263,6 @@ class OviEngine(WanShared):
                 # Add temporal dim: (1, 3, 1, H, W)
             input_tensor = first_frame.unsqueeze(2)
             latents_images = self.vae_encode(input_tensor, dtype=target_dtype)
-                # latents_images should be (B, C, T, H, W) -> (1, 16, 1, h, w)
-            latents_images = latents_images.squeeze(0).squeeze(1) # (16, h, w) ?
-
-                # If self.vae_encode returns (B, C, T, H, W), we squeeze B.
             latents_images = latents_images.squeeze(0) # (C, T, H, W)
             
             video_latent_h, video_latent_w = latents_images.shape[2], latents_images.shape[3]
@@ -293,16 +299,15 @@ class OviEngine(WanShared):
         audio_noise = randn_tensor(shape=(audio_latent_length, audio_latent_channel), device=device, dtype=target_dtype, generator=torch.Generator(device=device).manual_seed(seed))
         max_seq_len_audio = audio_noise.shape[0]
         
+
+        
         # 5. Transformer
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
         
-
         _patch_size_h, _patch_size_w = self.transformer.video_model.patch_size[1], self.transformer.video_model.patch_size[2]
         max_seq_len_video = video_noise.shape[1] * video_noise.shape[2] * video_noise.shape[3] // (_patch_size_h*_patch_size_w)
-
-        # Sampling Loop
 
         with torch.amp.autocast(device.type, enabled=target_dtype != torch.float32, dtype=target_dtype):
             for i, (t_v, t_a) in tqdm(enumerate(zip(timesteps_video, timesteps_audio)), total=len(timesteps_video)):
@@ -319,6 +324,8 @@ class OviEngine(WanShared):
                     'audio_seq_len': max_seq_len_audio,
                     'first_frame_is_clean': is_i2v
                 }
+                
+                
 
                 pred_vid_pos, pred_audio_pos = self.transformer(
                     vid=[video_noise],
@@ -343,6 +350,7 @@ class OviEngine(WanShared):
                     t=timestep_input,
                     **neg_forward_args
                 )
+                
 
                 # Guidance
                 pred_video_guided = pred_vid_neg[0] + video_guidance_scale * (pred_vid_pos[0] - pred_vid_neg[0])

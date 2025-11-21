@@ -5,6 +5,7 @@ from diffusers import ModelMixin, ConfigMixin
 from diffusers.configuration_utils import register_to_config
 from src.transformer.wan.ovi.wan_base import WanModel, WanLayerNorm, WanRMSNorm, gradient_checkpointing, rope_apply
 from src.attention import attention_register
+from .attention import flash_attention
 from typing import Dict, Any
 from loguru import logger
 
@@ -46,13 +47,11 @@ class OviModel(ModelMixin, ConfigMixin):
             vid_block.cross_attn.pre_attn_norm_fusion = WanLayerNorm(vid_block.dim, elementwise_affine=True)
             vid_block.cross_attn.norm_k_fusion = WanRMSNorm(vid_block.dim, eps=1e-6) if vid_block.qk_norm else nn.Identity()
 
-        
         for audio_block in self.audio_model.blocks:
             audio_block.cross_attn.k_fusion = nn.Linear(audio_block.dim, audio_block.dim)
             audio_block.cross_attn.v_fusion = nn.Linear(audio_block.dim, audio_block.dim)
             audio_block.cross_attn.pre_attn_norm_fusion = WanLayerNorm(audio_block.dim, elementwise_affine=True)
             audio_block.cross_attn.norm_k_fusion = WanRMSNorm(audio_block.dim, eps=1e-6) if audio_block.qk_norm else nn.Identity()
-
 
     def merge_kwargs(self, vid_kwargs, audio_kwargs):
         """
@@ -92,24 +91,36 @@ class OviModel(ModelMixin, ConfigMixin):
             q, k, v = cross_attn_block.qkv_fn(src_seq, context)
             k_img = v_img = None
 
-        
-            
-        x = attention_register.call(
-            q=q.transpose(1, 2),
-            k=k.transpose(1, 2),
-            v=v.transpose(1, 2),
-            k_lens=context_lens,
-            window_size=cross_attn_block.window_size
-        ).transpose(1, 2)
+        if attention_register.is_available("flash"):
+            x = flash_attention(
+                q=q,
+                k=k,
+                v=v,
+                k_lens=context_lens
+            )
+        else:
+            x = attention_register.call(
+                q=q.transpose(1, 2),
+                k=k.transpose(1, 2),
+                v=v.transpose(1, 2),
+                k_lens=context_lens
+            ).transpose(1, 2)
 
         if k_img is not None:
-            img_x = attention_register.call(
-                q=q.transpose(1, 2),
-                k=k_img.transpose(1, 2),
-                v=v_img.transpose(1, 2),
-                k_lens=None,
-                window_size=cross_attn_block.window_size
-            ).transpose(1, 2)
+            if attention_register.is_available("flash"):
+                img_x = flash_attention(
+                    q=q,
+                    k=k_img,
+                    v=v_img,
+                    k_lens=None,
+                )
+            else:
+                img_x = attention_register.call(
+                    q=q.transpose(1, 2),
+                    k=k_img.transpose(1, 2),
+                    v=v_img.transpose(1, 2),
+                    k_lens=None
+                ).transpose(1, 2)
             x = x + img_x
 
         is_vid = src_grid_sizes.shape[1] > 1
@@ -121,13 +132,20 @@ class OviModel(ModelMixin, ConfigMixin):
         q = rope_apply(q, src_grid_sizes, src_freqs)
         k_target = rope_apply(k_target, target_grid_sizes, target_freqs)
         
-        target_x = attention_register.call(
-            q=q.transpose(1, 2),
-            k=k_target.transpose(1, 2),
-            v=v_target.transpose(1, 2),
-            k_lens=target_seq_lens,
-            window_size=cross_attn_block.window_size
-        ).transpose(1, 2)
+        if attention_register.is_available("flash"):
+            target_x = flash_attention(
+                q=q,
+                k=k_target,
+                v=v_target,
+                k_lens=target_seq_lens
+            )
+        else:
+            target_x = attention_register.call(
+                q=q.transpose(1, 2),
+                k=k_target.transpose(1, 2),
+                v=v_target.transpose(1, 2),
+                k_lens=target_seq_lens
+            ).transpose(1, 2)
         
         x = x + target_x
         x = x.flatten(2) # [B, L/P, C]
@@ -160,7 +178,7 @@ class OviModel(ModelMixin, ConfigMixin):
                                                                        context_lens=context_lens
                                                                        )
         y = attn_block.ffn(attn_block.norm2(src_seq).bfloat16() * (1 + src_e[4].squeeze(2)) + src_e[3].squeeze(2))
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(src_seq.device.type, dtype=torch.bfloat16):
             src_seq = src_seq + y * src_e[5].squeeze(2)
         return src_seq
         
@@ -185,7 +203,7 @@ class OviModel(ModelMixin, ConfigMixin):
         ## audio modulation
         assert audio_e.dtype == torch.bfloat16
         assert len(audio_e.shape) == 4 and audio_e.size(2) == 6 and audio_e.shape[1] == audio.shape[1], f"{audio_e.shape}, {audio.shape}"
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(audio.device.type, dtype=torch.bfloat16):
             audio_e = audio_block.modulation(audio_e).chunk(6, dim=2)
         assert audio_e[0].dtype == torch.bfloat16
 
@@ -193,12 +211,12 @@ class OviModel(ModelMixin, ConfigMixin):
         audio_y = audio_block.self_attn(
             audio_block.norm1(audio).bfloat16() * (1 + audio_e[1].squeeze(2)) + audio_e[0].squeeze(2), audio_seq_lens, audio_grid_sizes,
             audio_freqs)
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(audio.device.type, dtype=torch.bfloat16):
             audio = audio + audio_y * audio_e[2].squeeze(2)
 
         ## video modulation
         assert len(vid_e.shape) == 4 and vid_e.size(2) == 6 and vid_e.shape[1] == vid.shape[1], f"{vid_e.shape}, {vid.shape}"
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(vid.device.type, dtype=torch.bfloat16):
             vid_e = vid_block.modulation(vid_e).chunk(6, dim=2)
 
         # video self-attention
@@ -206,7 +224,7 @@ class OviModel(ModelMixin, ConfigMixin):
             vid_block.norm1(vid).bfloat16() * (1 + vid_e[1].squeeze(2)) + vid_e[0].squeeze(2), vid_seq_lens, vid_grid_sizes,
             vid_freqs)
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(vid.device.type, dtype=torch.bfloat16):
             vid = vid + vid_y * vid_e[2].squeeze(2)
 
         og_audio = audio

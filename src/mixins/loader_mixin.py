@@ -200,8 +200,6 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
         
-
- 
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")

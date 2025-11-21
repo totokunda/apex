@@ -76,20 +76,22 @@ def save_video(
     return output_path
 
 yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/wan/ovi-10b-5s-1.0.0.v1.yml"
-engine = UniversalEngine(yaml_path=yaml_path, attention_type="sdpa")
-prompt = "A young man wearing a light blue hoodie, dark pants, and a white baseball cap is performing a dynamic street dance on a stone terrace. In the background, there's a stunning panoramic view of a city sprawling along a large body of water, with a long bridge and a distant statue visible under a bright, sunny sky. He begins on one knee, leaning back with one hand raised, then fluidly rises, bringing his hands to his head before dropping them down. He executes a quick succession of intricate footwork, shifting his weight rapidly and performing small hops and shuffles. His movements are sharp and precise, with a strong rhythmic quality. He bends his knees and extends his arms, then continues with more fast-paced footwork, incorporating body isolations and flowing arm movements. The dance is energetic and expressive, with the dancer's shadow stretching out behind him on the sunlit pavement. <S>Ovi diez segundos, mira cómo baila este algoritmo.<E> Audio: Upbeat, electronic dance music with a strong beat and synthesised elements, a processed, slightly robotic-sounding male voice speaking a Spanish phrase."
-negative_prompt = "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+engine = UniversalEngine(yaml_path=yaml_path, attention_type="flash")
+prompt = "A young man in the video smiles at the camera then says <S>I am so hungry right now, I could eat a horse!<E> in a deep low voice."
+image = "/home/tosin_coverquick_co/apex/IMG_7555.jpg"
+negative_prompt = "jitter, bad hands, blur, distortion"
 out_video, out_audio = engine.run(
+    image=image,
     prompt=prompt,
-    height=960,
-    width=960,
+    height=704,
+    width=1280,
     num_inference_steps=50,
     video_guidance_scale=4.0,
     audio_guidance_scale=3.0,
     negative_prompt=negative_prompt,
     audio_negative_prompt="robotic, muffled, echo, distorted",
     output_type="np",
-    seed=42
+    seed=666
     
 )
 

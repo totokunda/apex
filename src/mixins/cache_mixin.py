@@ -8,7 +8,7 @@ import torch
 from safetensors.torch import safe_open
 from safetensors.torch import save_file
 from src.utils.defaults import DEFAULT_CACHE_PATH
-
+import pickle
 
 class CacheMixin:
     enable_cache: bool = True
@@ -29,8 +29,38 @@ class CacheMixin:
             return str(item)
 
     def hash_prompt(self, kwargs: Dict[str, Any]) -> str:
-        hashes = [hashlib.sha256(self.str_encode(t).encode()).hexdigest() for t in kwargs.values()]
-        return ".".join(hashes)
+        """Return a deterministic hash for a kwargs dict.
+
+        - Ignores ordering of kwargs themselves.
+        - Also normalizes nested dicts / sets / lists so their internal ordering
+          does not affect the hash.
+        - Uses `str_encode` for tensors / ndarrays / bytes / strings so that
+          those values are represented in a stable way.
+        """
+
+        def canonicalize(obj: Any) -> Any:
+            # Normalize mappings by sorting keys and canonicalizing values
+            if isinstance(obj, dict):
+                return tuple(
+                    (k, canonicalize(v))
+                    for k, v in sorted(obj.items(), key=lambda kv: kv[0])
+                )
+            # Normalize sequences by canonicalizing each element
+            elif isinstance(obj, (list, tuple)):
+                return tuple(canonicalize(v) for v in obj)
+            # Normalize sets by sorting their canonicalized elements
+            elif isinstance(obj, set):
+                return tuple(sorted(canonicalize(v) for v in obj))
+            # Use stable string encodings for common tensor/array/byte/string types
+            elif isinstance(obj, (torch.Tensor, np.ndarray, bytes, str)):
+                return self.str_encode(obj)
+            # Primitive scalars (int, float, bool, None, etc.) are already stable
+            else:
+                return obj
+
+        canonical = canonicalize(kwargs)
+        data = pickle.dumps(canonical, protocol=5)
+        return hashlib.sha256(data).hexdigest()
 
     def get_cached_keys_for_prompt(
         self, prompt_hash: str
