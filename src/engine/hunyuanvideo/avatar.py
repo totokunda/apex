@@ -4,10 +4,10 @@ from PIL import Image
 import numpy as np
 from src.utils.models.hunyuan import get_rotary_pos_embed
 import torch.nn.functional as F
-from .shared import HunyuanShared
+from .shared import HunyuanVideoShared
 
 
-class HunyuanAvatarEngine(HunyuanShared):
+class HunyuanAvatarEngine(HunyuanVideoShared):
     """Hunyuan Avatar Engine Implementation"""
 
     def run(

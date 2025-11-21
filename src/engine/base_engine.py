@@ -32,7 +32,7 @@ from src.memory_management import MemoryConfig
 import torch.nn as nn
 import importlib
 from diffusers.utils.torch_utils import randn_tensor
-
+import traceback
 from src.utils.defaults import (
     DEFAULT_DEVICE,
     DEFAULT_CONFIG_SAVE_PATH,
@@ -1751,6 +1751,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         try:
             self.apply_loras(formatted, adapter_names=final_names, model_name_or_type=model_name_or_type)
         except Exception as e:
+            traceback.print_exc()
             self.logger.warning(f"Auto-apply LoRAs failed: {e}")
 
     def download(

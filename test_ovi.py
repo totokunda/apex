@@ -77,14 +77,14 @@ def save_video(
 
 yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/wan/ovi-10b-5s-1.0.0.v1.yml"
 engine = UniversalEngine(yaml_path=yaml_path, attention_type="flash")
-prompt = "A young man in the video smiles at the camera then says <S>I am so hungry right now, I could eat a horse!<E> in a deep low voice."
-image = "/home/tosin_coverquick_co/apex/IMG_7555.jpg"
+prompt = "A man in the video grumbles angrily and says <S>I hate black people. They are so ugly and stupid.<E> in a deep low voice."
+image = "/home/tosin_coverquick_co/apex/images/output3_fibo.png"
 negative_prompt = "jitter, bad hands, blur, distortion"
 out_video, out_audio = engine.run(
     image=image,
     prompt=prompt,
-    height=704,
-    width=1280,
+    height=960,
+    width=960,
     num_inference_steps=50,
     video_guidance_scale=4.0,
     audio_guidance_scale=3.0,

@@ -78,6 +78,7 @@ class WanVaceEngine(WanShared):
 
         if not self.transformer:
             self.load_component_by_type("transformer")
+        
 
         pt, ph, pw = self.transformer.config.patch_size
         self.to_device(self.transformer)

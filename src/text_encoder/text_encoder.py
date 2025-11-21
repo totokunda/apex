@@ -109,6 +109,46 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if lower_case:
             text = text.lower()
         return text
+    
+    def get_prompt_hash(self,
+        text: str | List[str],
+        max_sequence_length: int = 512,
+        pad_to_max_length: bool = True,
+        num_videos_per_prompt: int = 1,
+        dtype: torch.dtype | str | None = None,
+        device: torch.device | None = None,
+        add_special_tokens: bool = True,
+        return_attention_mask: bool = False,
+        use_attention_mask: bool = False,
+        use_position_ids: bool = False,
+        use_token_type_ids: bool = False,
+        arrange_attention_mask: bool = False,
+        pad_with_zero: bool = True,
+        clean_text: bool = True,
+        process_inputs_func: Callable = None,
+        output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
+        lower_case: bool = False) -> str:
+        kwargs = {
+            "text": text,
+            "max_sequence_length": max_sequence_length,
+            "pad_to_max_length": pad_to_max_length,
+            "num_videos_per_prompt": num_videos_per_prompt,
+            "dtype": dtype,
+            "device": device,
+            "add_special_tokens": add_special_tokens,
+            "return_attention_mask": return_attention_mask,
+            "use_attention_mask": use_attention_mask,
+            "arrange_attention_mask": arrange_attention_mask,
+            "use_position_ids": use_position_ids,
+            "use_token_type_ids": use_token_type_ids,
+            "pad_with_zero": pad_with_zero,
+            "clean_text": clean_text,
+            "output_type": output_type,
+            "lower_case": lower_case,
+            "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
+        }
+        
+        return self.hash_prompt(kwargs)
 
     @torch.no_grad()
     def encode(
