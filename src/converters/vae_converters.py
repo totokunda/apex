@@ -153,3 +153,42 @@ class MagiVAEConverter(VAEConverter):
             state_dict[f"{base_key}.to_q.bias"] = q_bias
             state_dict[f"{base_key}.to_k.bias"] = k_bias
             state_dict[f"{base_key}.to_v.bias"] = v_bias
+
+
+class MMAudioVAEConverter(VAEConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {}
+        self.special_keys_map = {}
+    
+    def convert(self, state_dict: Dict[str, Any]):
+        keys = list(state_dict.keys())
+        generator_state = None
+        decoder_state = None
+        
+        if len(keys) == 1 and keys[0] == "generator":
+            generator_state = state_dict["generator"]
+            for key in list(generator_state.keys()):
+                update_state_dict_(generator_state, key, f"tod.vocoder.vocoder.{key}")
+        elif "data_mean" in keys:
+            decoder_state = state_dict.copy()
+            for key in list(decoder_state.keys()):
+                update_state_dict_(decoder_state, key, f"tod.vae.{key}")
+        
+        state_dict.clear()
+        if generator_state is not None:
+            state_dict.update(generator_state)
+        elif decoder_state is not None:
+            state_dict.update(decoder_state)
+        else:
+            raise ValueError("No generator or decoder state found in the state dict")
+
+ 
+class NoOpVAEConverter(VAEConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {}
+        self.special_keys_map = {}
+
+    def convert(self, state_dict: Dict[str, Any]):
+        return None

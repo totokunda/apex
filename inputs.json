@@ -38,36 +38,7 @@
     },
     "inputs": {
         "prompt": "a woman riding a bike and smiling \n",
-        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, {
-  "_class_name": "LucyEditPipeline",
-  "_diffusers_version": "0.35.0.dev0",
-  "boundary_ratio": null,
-  "expand_timesteps": true,
-  "scheduler": [
-    "diffusers",
-    "UniPCMultistepScheduler"
-  ],
-  "text_encoder": [
-    "transformers",
-    "UMT5EncoderModel"
-  ],
-  "tokenizer": [
-    "transformers",
-    "T5TokenizerFast"
-  ],
-  "transformer": [
-    "diffusers",
-    "WanTransformer3DModel"
-  ],
-  "transformer_2": [
-    null,
-    null
-  ],
-  "vae": [
-    "diffusers",
-    "AutoencoderKLWan"
-  ]
-}, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
+        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "resolution": 480,
         "aspect_ratio": 61,
         "num_inference_steps": 30,
