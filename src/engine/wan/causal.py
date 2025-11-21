@@ -11,7 +11,6 @@ class WanCausalEngine(WanShared):
     def run(
         self,
         prompt: List[str] | str,
-        negative_prompt: List[str] | str | None = None,
         image: Union[
             Image.Image,
             List[Image.Image],
@@ -63,15 +62,6 @@ class WanCausalEngine(WanShared):
         )
         batch_size = prompt_embeds.shape[0]
 
-        if negative_prompt is not None and use_cfg_guidance:
-            negative_prompt_embeds = self.text_encoder.encode(
-                negative_prompt,
-                device=self.device,
-                num_videos_per_prompt=num_videos,
-                **text_encoder_kwargs,
-            )
-        else:
-            negative_prompt_embeds = None
 
         if offload:
             self._offload(self.text_encoder)
@@ -410,3 +400,5 @@ class WanCausalEngine(WanShared):
             video = self.vae_decode(output, offload=offload)
             postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video
+
+    
