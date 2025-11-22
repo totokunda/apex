@@ -11,13 +11,13 @@ from typing import Union, List
 from src.mixins.loader_mixin import LoaderMixin
 from src.mixins.offload_mixin import OffloadMixin
 from einops import rearrange
-from src.helpers.hunyuan.align import get_facemask, AlignImage
+from src.helpers.hunyuanvideo.align import get_facemask, AlignImage
 from torchvision.transforms import ToPILImage
 import torch.nn as nn
 from src.helpers.helpers import helpers
 
 
-@helpers("hunyuan.avatar")
+@helpers("hunyuanvideo.avatar")
 class HunyuanAvatar(nn.Module, LoaderMixin, OffloadMixin):
     def __init__(
         self,

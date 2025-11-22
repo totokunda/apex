@@ -32,11 +32,11 @@ spec:
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: transformer
-    base: hunyuan.framepack
+    base: hunyuanvideo.framepack
     model_path: lllyasviel/FramePackI2V_HY
     config_path: transformer_configs/hunyuan/hunyuan_framepack.json
   - type: helper
-    base: hunyuan.llama
+    base: hunyuanvideo.llama
     name: hunyuan/llama/t2v
     model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json

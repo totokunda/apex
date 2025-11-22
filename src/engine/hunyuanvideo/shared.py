@@ -64,7 +64,7 @@ class HunyuanVideoShared(BaseEngine):
 
         self.to_device(self.text_encoder)
 
-        self.llama_text_encoder = self.helpers["hunyuan.llama"]
+        self.llama_text_encoder = self.helpers["hunyuanvideo.llama"]
 
         if isinstance(prompt, str):
             prompt = [prompt]

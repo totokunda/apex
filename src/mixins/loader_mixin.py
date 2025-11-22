@@ -136,6 +136,32 @@ class LoaderMixin(DownloadMixin):
                 # remove all kwargs that are null 
                 extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
 
+                # Filter out any kwargs that `from_pretrained` cannot accept.
+                # If the method accepts **kwargs we keep everything.
+                try:
+                    sig = inspect.signature(model_class.from_pretrained)
+                    params = sig.parameters
+                    accepts_var_kw = any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in params.values()
+                    )
+                    if not accepts_var_kw:
+                        filtered_kwargs = {}
+                        for k, v in extra_kwargs.items():
+                            if k in params:
+                                filtered_kwargs[k] = v
+                            else:
+                                # Drop unsupported kwargs rather than failing hard.
+                                if hasattr(self, "logger"):
+                                    self.logger.debug(
+                                        f"Dropping unsupported kwarg '{k}' for "
+                                        f"{model_class.__name__}.from_pretrained"
+                                    )
+                        extra_kwargs = filtered_kwargs
+                except (TypeError, ValueError):
+                    # If inspection fails for any reason, fall back to passing all kwargs.
+                    pass
+
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
             
             if mm_config is not None and not no_weights:

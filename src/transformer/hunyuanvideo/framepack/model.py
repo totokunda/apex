@@ -31,7 +31,7 @@ from diffusers.models.embeddings import get_1d_rotary_pos_embed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
-from src.transformer.hunyuan.base.model import (
+from src.transformer.hunyuanvideo.base.model import (
     HunyuanVideoConditionEmbedding,
     HunyuanVideoPatchEmbed,
     HunyuanVideoSingleTransformerBlock,
@@ -130,7 +130,7 @@ class HunyuanVideoHistoryPatchEmbed(nn.Module):
         return latents_clean, latents_clean_2x, latents_clean_4x
 
 
-@TRANSFORMERS_REGISTRY("hunyuan.framepack")
+@TRANSFORMERS_REGISTRY("hunyuanvideo.framepack")
 class HunyuanVideoFramepackTransformer3DModel(
     ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
 ):

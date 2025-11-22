@@ -240,8 +240,8 @@ class PromptGenHelper(BaseHelper, CacheMixin):
 
         safe_emit_progress(local_progress, 0.0, "Starting prompt generation with Qwen3-VL")
 
-        prompt_hash = self.hash_prompt({k: v for k, v in locals().items() if k not in {"progress_callback", "local_progress"}})
-        cached = self.load_cached_prompt(prompt_hash)
+        prompt_hash = self.hash({k: v for k, v in locals().items() if k not in {"progress_callback", "local_progress"}})
+        cached = self.load_cached(prompt_hash)
         if cached is not None:
             cached_prompt = cached[0]
             decoded = self.processor.tokenizer.batch_decode(cached_prompt, skip_special_tokens=True)
@@ -301,7 +301,7 @@ class PromptGenHelper(BaseHelper, CacheMixin):
 
         new_token_ids = generated_ids[:, input_ids.shape[-1] :]
         if self.enable_cache:
-            self.cache_prompt(prompt_hash, new_token_ids, torch.ones_like(new_token_ids))
+            self.cache(prompt_hash, new_token_ids)
         
         decoded = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
         if not decoded:

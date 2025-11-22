@@ -79,8 +79,10 @@ class AutoLoadingHelperDict(dict):
         from src.helpers.wan.recam import WanRecam
         from src.helpers.wan.fun_camera import WanFunCamera
         from src.helpers.wan.multitalk import WanMultiTalk
-        from src.helpers.hunyuan.llama import HunyuanLlama
-        from src.helpers.hunyuan.avatar import HunyuanAvatar
+        from src.helpers.hunyuanvideo.llama import HunyuanLlama
+        from src.helpers.hunyuanvideo.avatar import HunyuanAvatar
+        from src.helpers.hunyuanvideo15.vision import HunyuanVisionEncoder
+        from src.helpers.hunyuanvideo15.text import TextEncoder as HunyuanTextEncoder
         from src.helpers.hidream.llama import HidreamLlama
         from src.helpers.stepvideo.text_encoder import StepVideoTextEncoder
         from src.helpers.ltx.patchifier import SymmetricPatchifier
@@ -104,10 +106,16 @@ class AutoLoadingHelperDict(dict):
         def __getitem__(self, key: Literal["wan.multitalk"]) -> "WanMultiTalk": ...
 
         @overload
-        def __getitem__(self, key: Literal["hunyuan.llama"]) -> "HunyuanLlama": ...
+        def __getitem__(self, key: Literal["hunyuanvideo.llama"]) -> "HunyuanLlama": ...
 
         @overload
-        def __getitem__(self, key: Literal["hunyuan.avatar"]) -> "HunyuanAvatar": ...
+        def __getitem__(self, key: Literal["hunyuanvideo.avatar"]) -> "HunyuanAvatar": ...
+
+        @overload
+        def __getitem__(self, key: Literal["hunyuanvideo15.vision"]) -> "HunyuanVisionEncoder": ...
+
+        @overload
+        def __getitem__(self, key: Literal["hunyuanvideo15.text"]) -> "HunyuanTextEncoder": ...
 
         @overload
         def __getitem__(self, key: Literal["prompt_gen"]) -> "PromptGenHelper": ...
@@ -1367,7 +1375,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if key == iterating_key:
                     found_keys.add(iterating_key)
                     break
-
+        
+        
         missing_keys = iterating_keys - found_keys
         return len(missing_keys) == 0
 
@@ -1653,6 +1662,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 setattr(self, component.get("type"), component_module)
                 break
 
+
     def load_component_by_name(self, component_name: str):
         for component in self.config.get("components", []):
             if component.get("name") == component_name:
@@ -1668,6 +1678,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 setattr(self, component.get("name"), component_module)
                 break
 
+    def get_component_by_name(self, component_name: str):
+        for component in self.config.get("components", []):
+            if component.get("name") == component_name:
+                return component
+        return None
+
+    def get_component_by_type(self, component_type: str):
+        for component in self.config.get("components", []):
+            if component.get("type") == component_type:
+                return component
+        return None
    
     def apply_lora(self, lora_path: str):
         # Backward-compat shim: allow direct single-path call

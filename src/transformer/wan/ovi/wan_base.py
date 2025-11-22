@@ -6,16 +6,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
-from .attention import flash_attention
 from torch.utils.checkpoint import checkpoint
 from src.attention import attention_register
+from .attention import flash_attention
 
 def gradient_checkpointing(module: nn.Module, *args, enabled: bool, **kwargs):
     if enabled:
         return checkpoint(module, *args, use_reentrant=False, **kwargs)
     else:
         return module(*args, **kwargs)
-
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess

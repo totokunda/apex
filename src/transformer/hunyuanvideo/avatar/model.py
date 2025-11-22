@@ -49,7 +49,7 @@ from diffusers.models.normalization import (
     FP32LayerNorm,
 )
 from src.attention import attention_register
-from src.transformer.hunyuan.base.attention import (
+from src.transformer.hunyuanvideo.base.attention import (
     HunyuanAvatarVideoAttnProcessor2_0,
 )
 from src.transformer.base import TRANSFORMERS_REGISTRY
@@ -776,7 +776,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-@TRANSFORMERS_REGISTRY("hunyuan.avatar")
+@TRANSFORMERS_REGISTRY("hunyuanvideo.avatar")
 class HunyuanAvatarVideoTransformer3DModel(
     ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
 ):

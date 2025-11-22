@@ -70,7 +70,7 @@ def _expand_input_ids_with_image_tokens(
     }
 
 
-@helpers("hunyuan.llama")
+@helpers("hunyuanvideo.llama")
 class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
     def __init__(
         self,
@@ -129,7 +129,7 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
 
         self.model = self._load_model(
             {
-                "type": "hunyuan.llama",
+                "type": "hunyuanvideo.llama",
                 "base": base_model,
                 "model_path": self.model_path,
                 "config_path": config_path,
@@ -227,10 +227,10 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
             "hyavatar": hyavatar,
         }
         
-        prompt_hash = self.hash_prompt(input_kwargs)
+        prompt_hash = self.hash(input_kwargs)
         
         if self.enable_cache:
-            cached = self.load_cached_prompt(prompt_hash)
+            cached = self.load_cached(prompt_hash)
             if cached is not None:
                 return cached
         
@@ -434,6 +434,6 @@ class HunyuanLlama(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
             )
             
         if self.enable_cache:
-            self.cache_prompt(prompt_hash, prompt_embeds, prompt_attention_mask)
+            self.cache(prompt_hash, prompt_embeds, prompt_attention_mask)
 
         return prompt_embeds, prompt_attention_mask

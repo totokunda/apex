@@ -20,17 +20,7 @@ from typing import Optional
 from loguru import logger
 import numpy as np
 import torch.nn.functional as F
-
-from hyvideo.commons.parallel_states import get_parallel_state
-from hyvideo.utils.communications import (
-    all_gather,
-    all_to_all_4D,
-)
-from hyvideo.utils.flash_attn_no_pad import (
-    flash_attn_no_pad,
-    flash_attn_no_pad_v3,
-)
-from hyvideo.commons import maybe_fallback_attn_mode
+from src.attention.functions import attention_register
 
 try:
     from torch.nn.attention.flex_attention import flex_attention
@@ -42,8 +32,83 @@ try:
 except Exception:
     logger.warning("Could not load Sliding Tile Attention of FlexAttn.")
 
-from hyvideo.models.transformers.modules.ssta_attention import ssta_3d_attention
-from hyvideo.commons.infer_state import get_infer_state
+from .ssta_attention import ssta_3d_attention
+from einops import rearrange
+
+def flash_attn_no_pad(
+    qkv, key_padding_mask, causal=False, dropout_p=0.0, softmax_scale=None, deterministic=False
+):
+    from flash_attn import flash_attn_varlen_qkvpacked_func
+    from flash_attn.bert_padding import pad_input, unpad_input
+    batch_size = qkv.shape[0]
+    seqlen = qkv.shape[1]
+    nheads = qkv.shape[-2]
+    x = rearrange(qkv, "b s three h d -> b s (three h d)")
+    x_unpad, indices, cu_seqlens, max_s, used_seqlens_in_batch = unpad_input(
+        x, key_padding_mask
+    )
+
+    x_unpad = rearrange(x_unpad, "nnz (three h d) -> nnz three h d", three=3, h=nheads)
+    output_unpad = flash_attn_varlen_qkvpacked_func(
+        x_unpad,
+        cu_seqlens,
+        max_s,
+        dropout_p,
+        softmax_scale=softmax_scale,
+        causal=causal,
+        deterministic=deterministic,
+    )
+    output = rearrange(
+        pad_input(
+            rearrange(output_unpad, "nnz h d -> nnz (h d)"), indices, batch_size, seqlen
+        ),
+        "b s (h d) -> b s h d",
+        h=nheads,
+    )
+    return output
+
+
+def flash_attn_no_pad_v3(
+    qkv, key_padding_mask, causal=False, dropout_p=0.0, softmax_scale=None, deterministic=False
+):
+    from flash_attn import flash_attn_varlen_qkvpacked_func
+    from flash_attn.bert_padding import pad_input, unpad_input
+    from flash_attn_interface import flash_attn_varlen_func as flash_attn_varlen_func_v3
+
+    if flash_attn_varlen_func_v3 is None:
+        raise ImportError("FlashAttention V3 backend not available")
+    
+    batch_size, seqlen, _, nheads, head_dim = qkv.shape
+    query, key, value = qkv.unbind(dim=2)
+    
+    query_unpad, indices, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
+        rearrange(query, "b s h d -> b s (h d)"), key_padding_mask
+    )
+    key_unpad, _, cu_seqlens_k, _, _ = unpad_input(
+        rearrange(key, "b s h d -> b s (h d)"), key_padding_mask
+    )
+    value_unpad, _, _, _, _ = unpad_input(
+        rearrange(value, "b s h d -> b s (h d)"), key_padding_mask
+    )
+    
+    query_unpad = rearrange(query_unpad, "nnz (h d) -> nnz h d", h=nheads)
+    key_unpad = rearrange(key_unpad, "nnz (h d) -> nnz h d", h=nheads)
+    value_unpad = rearrange(value_unpad, "nnz (h d) -> nnz h d", h=nheads)
+    
+    output_unpad = flash_attn_varlen_func_v3(
+        query_unpad, key_unpad, value_unpad,
+        cu_seqlens_q, cu_seqlens_k,
+        max_seqlen_q, max_seqlen_q, 
+        softmax_scale=softmax_scale,
+        causal=causal,
+        deterministic=deterministic
+    )
+    
+    output = rearrange(
+        pad_input(rearrange(output_unpad, "nnz h d -> nnz (h d)"), indices, batch_size, seqlen),
+        "b s (h d) -> b s h d", h=nheads
+    )
+    return output
 
 
 
@@ -72,9 +137,18 @@ def attention(
     Returns:
         Output tensor after attention of shape [B, L, H*D]
     """
-    attn_mode = maybe_fallback_attn_mode(attn_mode)
 
-    if attn_mode == "torch":
+    
+    if attention_register.is_available("flash") and attn_mode == "flash":
+        # flash mode (default)
+        qkv = torch.stack([q, k, v], dim=2)
+        if attn_mask is not None and attn_mask.dtype != torch.bool:
+            attn_mask = attn_mask.bool()
+        x = flash_attn_no_pad(qkv, attn_mask, causal=causal, dropout_p=drop_rate, softmax_scale=None)
+        b, s, a, d = x.shape
+        out = x.reshape(b, s, -1)
+        return out
+    else:
         # transpose q,k,v dim to fit scaled_dot_product_attention
         query = q.transpose(1, 2)  # B * H * L * D
         key = k.transpose(1, 2)    # B * H * L * D
@@ -91,20 +165,11 @@ def attention(
             attn_mask2 = einops.rearrange(attn_mask1, 'b 1 l 1 -> b 1 1 l')
             attn_mask = attn_mask1 & attn_mask2
         
-        x = F.scaled_dot_product_attention(query, key, value, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal)
+        x = attention_register.call(query, key, value, attn_mask=attn_mask, dropout_p=drop_rate, is_causal=causal)
         
         # transpose back
         x = x.transpose(1, 2)  # B * L * H * D
         b, s, h, d = x.shape
-        out = x.reshape(b, s, -1)
-        return out
-    else:
-        # flash mode (default)
-        qkv = torch.stack([q, k, v], dim=2)
-        if attn_mask is not None and attn_mask.dtype != torch.bool:
-            attn_mask = attn_mask.bool()
-        x = flash_attn_no_pad(qkv, attn_mask, causal=causal, dropout_p=drop_rate, softmax_scale=None)
-        b, s, a, d = x.shape
         out = x.reshape(b, s, -1)
         return out
 
@@ -129,36 +194,13 @@ def sequence_parallel_attention(q, k, v,
     key, encoder_key = k
     value, encoder_value = v
 
-    parallel_dims = get_parallel_state()
-    enable_sp = parallel_dims.sp_enabled
 
-    if enable_sp:
-        sp_group = parallel_dims.sp_group
-        sp_size = parallel_dims.sp
-        sp_rank = parallel_dims.sp_rank
-    
-    if enable_sp:
-        # batch_size, seq_len, attn_heads, head_dim
-        query = all_to_all_4D(query, sp_group, scatter_dim=2, gather_dim=1)
-        key = all_to_all_4D(key, sp_group, scatter_dim=2, gather_dim=1)
-        value = all_to_all_4D(value, sp_group, scatter_dim=2, gather_dim=1)
-
-        def shrink_head(encoder_state, dim):
-            local_heads = encoder_state.shape[dim] // sp_size
-            return encoder_state.narrow(
-                dim, sp_rank * local_heads, local_heads
-            )
-
-        encoder_query = shrink_head(encoder_query, dim=2)
-        encoder_key = shrink_head(encoder_key, dim=2)
-        encoder_value = shrink_head(encoder_value, dim=2)
 
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
 
-    attn_mode = maybe_fallback_attn_mode(attn_mode, get_infer_state(), block_idx)
     
-    if attn_mode == "sageattn":
+    if attention_register.is_available("sage") and attn_mode == "sageattn":
         from sageattention import sageattn
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
@@ -194,7 +236,7 @@ def sequence_parallel_attention(q, k, v,
         # transpose back
         hidden_states = hidden_states.transpose(1, 2)
         
-    elif attn_mode == "flash2":
+    elif attention_register.is_available("flash") and attn_mode == "flash":
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
@@ -204,7 +246,7 @@ def sequence_parallel_attention(q, k, v,
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
         
-    elif attn_mode == "flash3":
+    elif attention_register.is_available("flash3") and attn_mode == "flash3":
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
@@ -213,7 +255,7 @@ def sequence_parallel_attention(q, k, v,
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
         hidden_states = flash_attn_no_pad_v3(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
 
-    elif attn_mode == "flex-block-attn":
+    elif attention_register.is_available("flex-block-attn") and attn_mode == "flex-block-attn":
         sparse_type = attn_param["attn_sparse_type"]  # sta/block_attn/ssta
         ssta_threshold = attn_param["ssta_threshold"]
         ssta_lambda = attn_param["ssta_lambda"]
@@ -283,15 +325,6 @@ def sequence_parallel_attention(q, k, v,
         raise NotImplementedError(
             f'Unsupported attention mode: {attn_mode}. Only torch, flash, flash3, sageattn and flex-block-attn are supported.'
         )
-
-
-    if enable_sp:
-        hidden_states, encoder_hidden_states = hidden_states.split_with_sizes((sequence_length, encoder_sequence_length), dim=1)
-        hidden_states = all_to_all_4D(hidden_states, sp_group, scatter_dim=1, gather_dim=2)
-        encoder_hidden_states = all_gather(encoder_hidden_states, dim=2, group=sp_group).contiguous()
-        hidden_states = hidden_states.to(query.dtype)
-        encoder_hidden_states = encoder_hidden_states.to(query.dtype)
-        hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
 
     b, s, a, d = hidden_states.shape
     hidden_states = hidden_states.reshape(b, s, -1)

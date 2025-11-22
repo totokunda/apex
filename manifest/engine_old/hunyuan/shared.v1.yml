@@ -7,7 +7,7 @@ spec:
   components:
   - type: vae
     name: hunyuan/vae
-    base: hunyuan
+    base: hunyuanvideo
     model_path: hunyuanvideo-community/HunyuanVideo/vae
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/vae/config.json
   - type: text_encoder
@@ -20,7 +20,7 @@ spec:
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: helper
-    base: hunyuan.llama
+    base: hunyuanvideo.llama
     name: hunyuan/llama/i2v
     base_model: LlavaForConditionalGeneration
     model_path: hunyuanvideo-community/HunyuanVideo-I2V/text_encoder
@@ -31,7 +31,7 @@ spec:
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: helper
-    base: hunyuan.llama
+    base: hunyuanvideo.llama
     name: hunyuan/llama/t2v
     model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json

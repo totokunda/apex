@@ -315,6 +315,7 @@ def _attention_label_description_maps() -> tuple[Dict[str, str], Dict[str, str]]
         "xformers": "xFormers",
         "flex": "Flex Attention",
         "xla_flash": "XLA Flash Attention",
+        "flex-block-attn": "Flex Block Attention",
     }
 
     description_map = {
@@ -327,6 +328,7 @@ def _attention_label_description_maps() -> tuple[Dict[str, str], Dict[str, str]]
         "xformers": "xFormers memory-efficient attention implementation.",
         "flex": "PyTorch Flex Attention (experimental flexible masks).",
         "xla_flash": "XLA/TPU Flash Attention kernel.",
+        "flex-block-attn": "Flex Block Attention kernel.",
     }
 
     return label_map, description_map
