@@ -270,8 +270,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             ),
         )
 
+
         if output_type == "hidden_states" and hasattr(result, "last_hidden_state"):
             prompt_embeds = result.last_hidden_state
+        if output_type == "hidden_states" and hasattr(result, "hidden_states"):
+            prompt_embeds = result.hidden_states[-1]
         elif output_type == "pooler_output" and hasattr(result, "pooler_output"):
             prompt_embeds = result.pooler_output
         elif output_type == "text_embeds" and hasattr(result, "text_embeds"):

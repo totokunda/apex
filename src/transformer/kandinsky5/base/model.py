@@ -32,7 +32,8 @@ from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from src.attention import attention_register
-
+from torch.nn.attention.flex_attention import BlockMask
+from diffusers.models.attention_dispatch import _CAN_USE_FLEX_ATTN, dispatch_attention_fn
 logger = logging.get_logger(__name__)
 
 
@@ -307,7 +308,7 @@ class Kandinsky5AttnProcessor:
         # query, key = self.norm_qk(query, key)
         query = attn.query_norm(query.float()).type_as(query)
         key = attn.key_norm(key.float()).type_as(key)
-
+        
         def apply_rotary(x, rope):
             x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
             x_out = (rope * x_).sum(dim=-1)
@@ -328,13 +329,15 @@ class Kandinsky5AttnProcessor:
         else:
             attn_mask = None
 
-        hidden_states = attention_register.call(
-            query.transpose(1, 2),
-            key.transpose(1, 2),
-            value.transpose(1, 2),
-            attn_mask=attn_mask
-        ).transpose(1, 2)
-
+        hidden_states = dispatch_attention_fn(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            backend=self._attention_backend,
+            parallel_config=self._parallel_config,
+        )
+        
         hidden_states = hidden_states.flatten(-2, -1)
 
         attn_out = attn.out_layer(hidden_states)

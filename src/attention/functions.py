@@ -170,8 +170,8 @@ def flex_block_attn(
     block_mask,
     **kwargs,
 ):
-    return flex_block_attn_func(q, k, v, block_size, block_stride, block_mask)
-
+    out = flex_block_attn_func(q, k, v, block_size, block_stride, block_mask)
+    return out
 
 @attention_register("sdpa")
 def sdpa(
@@ -668,9 +668,8 @@ def xla_flash_attention(q, k, v, attention_mask, softmax_scale, **kwargs):
 
 @attention_register("flex", available=flex_attention is not None)
 def flex_attention_func(q, k, v, attn_mask=None, softmax_scale=None, **kwargs):
-    if flex_attention is None:
-        raise ImportError("flex_attention is not installed")
-    return flex_attention(q, k, v, block_mask=attn_mask, scale=softmax_scale, **kwargs)
+    out = flex_attention(q, k, v, block_mask=attn_mask, scale=softmax_scale, **kwargs)
+    return out
 
 
 @attention_register("xformers", available=xformers is not None)
