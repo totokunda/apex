@@ -148,7 +148,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
         }
         
-        return self.hash_prompt(kwargs)
+        return self.hash(kwargs)
 
     @torch.no_grad()
     def encode(
@@ -202,10 +202,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
         }
         
-        prompt_hash = self.hash_prompt(kwargs)
+        prompt_hash = self.hash(kwargs)
 
         if self.enable_cache:
-            cached = self.load_cached_prompt(prompt_hash)
+            cached = self.load_cached(prompt_hash)
             if cached is not None:
                 cached_embeds, cached_mask = cached
 
@@ -331,7 +331,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         
 
         if self.enable_cache:
-            self.cache_prompt(
+            self.cache(
                 prompt_hash,
                 prompt_embeds,
                 mask,

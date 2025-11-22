@@ -45,7 +45,7 @@ class HunyuanAvatarEngine(HunyuanVideoShared):
         **kwargs,
     ):
 
-        hyavatar = self.helpers["hunyuan.avatar"]
+        hyavatar = self.helpers["hunyuanvideo.avatar"]
 
         if not self.vae:
             self.load_component_by_type("vae")

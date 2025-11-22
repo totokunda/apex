@@ -22,7 +22,7 @@ spec:
       solver: euler
   - type: vae
     name: hunyuan/vae
-    base: hunyuan
+    base: hunyuanvideo
     model_path: hunyuanvideo-community/HunyuanVideo/vae
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/vae/config.json
   - type: text_encoder
@@ -33,12 +33,12 @@ spec:
     tokenizer_kwargs:
       subfolder: ckpts/text_encoder_2
   - type: transformer
-    base: hunyuan.avatar
+    base: hunyuanvideo.avatar
     model_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt
     config_path: transformer_configs/hunyuan/hunyuan_avatar.json
     
   - type: helper
-    base: hunyuan.llama
+    base: hunyuanvideo.llama
     base_model: LlavaForConditionalGeneration
     model_path: tencent/HunyuanVideo-Avatar/ckpts/llava_llama_image
     image_processor_path: tencent/HunyuanVideo-Avatar/ckpts/llava_llama_image
@@ -48,7 +48,7 @@ spec:
     tokenizer_kwargs:
       subfolder: ckpts/llava_llama_image
   - type: helper
-    base: hunyuan.avatar
+    base: hunyuanvideo.avatar
     model_path: tencent/HunyuanVideo-Avatar/ckpts/whisper-tiny
     align_pt_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/det_align/detface.pt
   defaults:

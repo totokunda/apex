@@ -42,6 +42,11 @@ except ImportError:
     xformers = None
 
 
+try:
+    from flex_block_attn import flex_block_attn_func
+except ImportError:
+    flex_block_attn_func = None
+
 attention_register = FunctionRegister()
 
 
@@ -153,6 +158,19 @@ def sdpa_streaming(
         out[:, qs:qe, :] = out_i / l_i.clamp_min(1e-20).unsqueeze(-1).to(out_i.dtype)
 
     return out.reshape(Bq, Hq, S_q, Dq)
+
+
+@attention_register("flex-block-attn", available=flex_block_attn_func is not None)
+def flex_block_attn(
+    q,
+    k,
+    v,
+    block_size, 
+    block_stride, 
+    block_mask,
+    **kwargs,
+):
+    return flex_block_attn_func(q, k, v, block_size, block_stride, block_mask)
 
 
 @attention_register("sdpa")
@@ -281,7 +299,7 @@ def sdpa_varlen(
     return torch.cat(packed_out, dim=0)
 
 
-@attention_register("flash_padded")
+@attention_register("flash_padded", available=flash_attn_func is not None)
 def flash_attention_padded(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -373,7 +391,7 @@ def flash_attention_padded(
     # Back to (B, H, Sq, D) and caller’s dtype
     return out.permute(0, 2, 1, 3).to(q.dtype)
 
-@attention_register("flash_varlen")
+@attention_register("flash_varlen", available=flash_attn_varlen_func is not None)
 def flash_attention_varlen(
     q: torch.Tensor,
     k: torch.Tensor,

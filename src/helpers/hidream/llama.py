@@ -74,7 +74,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         prompt_hash = self.hash_prompt(kwargs)
         
         if self.enable_cache:
-            cached = self.load_cached_prompt(prompt_hash)
+            cached = self.load_cached(prompt_hash)
             if cached is not None:
                 prompt_embeds = cached[0]
                 prompt_embeds = prompt_embeds.to(device).to(dtype)
@@ -114,6 +114,6 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         prompt_embeds = prompt_embeds.view(-1, num_images_per_prompt, seq_len, dim)
         
         if self.enable_cache:
-            self.cache_prompt(prompt_hash, prompt_embeds, attention_mask)
+            self.cache(prompt_hash, prompt_embeds, attention_mask)
             
         return prompt_embeds

@@ -247,7 +247,7 @@ class OviEngine(WanShared):
                 output_type="raw",
                 return_attention_mask=True
             )
-            self.text_encoder.cache_prompt(prompt_hash, text_embeddings, attention_mask)
+            self.text_encoder.cache(prompt_hash, text_embeddings, attention_mask)
         
         
         text_embeddings = [u[:v] for u, v in zip(text_embeddings, seq_lens)]

@@ -727,10 +727,10 @@ class StepVideoTextEncoder(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
         if type(prompts) is str:
             prompts = [prompts]
 
-        prompt_hash = self.hash_prompt(prompts)
+        prompt_hash = self.hash(prompts)
 
         if self.enable_cache:
-            cached = self.load_cached_prompt(prompt_hash)
+            cached = self.load_cached(prompt_hash)
             if cached is not None:
                 cached_embeds, cached_mask = cached
                 cached_embeds = cached_embeds.to(device=self.device)
@@ -755,5 +755,5 @@ class StepVideoTextEncoder(nn.Module, LoaderMixin, OffloadMixin, CacheMixin):
         y_mask = txt_tokens.attention_mask
         y_out = y.transpose(0, 1)
         if self.enable_cache:
-            self.cache_prompt(prompt_hash, y_out, y_mask)
+            self.cache(prompt_hash, y_out, y_mask)
         return y_out, y_mask

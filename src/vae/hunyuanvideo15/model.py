@@ -14,11 +14,9 @@
 # of rights and permissions under this agreement.
 # See the License for the specific language governing permissions and limitations under the License.
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
-import loguru
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -786,3 +784,17 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         z = posterior.sample() if sample_posterior else posterior.mode()
         dec = self.decode(z).sample
         return DecoderOutput(sample=dec, posterior=posterior) if return_dict else (dec, posterior)
+    
+    def denormalize_latents(self, latents: torch.Tensor):
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = latents / self.config.scaling_factor + self.config.shift_factor
+        else:
+            latents = latents / self.config.scaling_factor
+        return latents
+    
+    def normalize_latents(self, latents: torch.Tensor):
+        if hasattr(self.config, "shift_factor") and self.config.shift_factor:
+            latents = (latents - self.config.shift_factor) * self.config.scaling_factor
+        else:
+            latents = latents * self.config.scaling_factor
+        return latents

@@ -49,9 +49,9 @@ def get_transformer_converter(model_base: str):
         return WanMultiTalkTransformerConverter()
     elif model_base == "cogvideox.base":
         return CogVideoXTransformerConverter()
-    elif model_base == "hunyuan.base":
+    elif model_base == "hunyuanvideo.base":
         return HunyuanTransformerConverter()
-    elif model_base == "hunyuan.avatar":
+    elif model_base == "hunyuanvideo.avatar":
         return HunyuanAvatarTransformerConverter()
     elif model_base == "mochi.base":
         return MochiTransformerConverter()

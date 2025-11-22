@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from diffusers import ModelMixin, ConfigMixin
 from diffusers.configuration_utils import register_to_config
-from src.transformer.wan.ovi.wan_base import WanModel, WanLayerNorm, WanRMSNorm, gradient_checkpointing, rope_apply
+from .wan_base import WanModel, WanLayerNorm, WanRMSNorm, gradient_checkpointing, rope_apply
 from src.attention import attention_register
 from .attention import flash_attention
 from typing import Dict, Any

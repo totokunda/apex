@@ -26,7 +26,7 @@ from torch import Tensor
 from diffusers.models import ModelMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
-from hyvideo.models.autoencoders.hunyuanvideo_15_vae import (
+from src.vae.hunyuanvideo15.model import (
     CausalConv3d,
     ResnetBlock,
     RMS_norm,

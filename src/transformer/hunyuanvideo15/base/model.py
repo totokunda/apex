@@ -32,7 +32,7 @@ from .modules.posemb_layers import apply_rotary_emb, get_nd_rotary_pos_embed
 from .modules.mlp_layers import MLP, MLPEmbedder, FinalLayer, LinearWarpforSingle
 from .modules.modulate_layers import ModulateDiT, modulate, apply_gate
 from .modules.token_refiner import SingleTokenRefiner
-
+from src.attention import attention_register
 
 class ByT5Mapper(nn.Module):
     """
@@ -434,7 +434,10 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
-        self.attn_mode = attn_mode
+        self.attn_mode = attention_register._default or attn_mode 
+        if self.attn_mode == 'sdpa' or self.attn_mode is None:
+            self.attn_mode = 'torch'
+
         self.text_pool_type = text_pool_type
         self.text_states_dim = text_states_dim
         self.text_states_dim_2 = text_states_dim_2

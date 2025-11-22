@@ -18,7 +18,7 @@ import math
 import torch
 import torch.nn as nn
 
-from hyvideo.commons import to_2tuple
+from .utils import to_2tuple
 
 class PatchEmbed(nn.Module):
     """2D Image to Patch Embedding
