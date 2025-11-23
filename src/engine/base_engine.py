@@ -1842,6 +1842,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         width: int,
         duration: int | str,
         fps: int = 16,
+        num_frames: int = None,
         batch_size: int = 1,
         num_channels_latents: int = None,
         vae_scale_factor_spatial: int = None,
@@ -1855,13 +1856,19 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         order: Literal["BCF", "BFC"] = "BCF",
     ):
         if parse_frames or isinstance(duration, str):
-            num_frames = self._parse_num_frames(duration, fps)
+            if num_frames is not None:
+                num_frames = num_frames
+            else:       
+                num_frames = self._parse_num_frames(duration, fps)
+
             latent_num_frames = (num_frames - 1) // (
                 vae_scale_factor_temporal or self.vae_scale_factor_temporal
             ) + 1
         else:
-            latent_num_frames = duration
-
+            if num_frames is not None:
+                latent_num_frames = num_frames
+            else:
+                latent_num_frames = duration
         latent_height = height // (
             vae_scale_factor_spatial or self.vae_scale_factor_spatial
         )
@@ -2064,7 +2071,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         mu = image_seq_len * m + b
         return mu
 
-    def _parse_num_frames(self, duration: int | str, fps: int = 16):
+    def _parse_num_frames(self, duration: int | str, fps: int = 16, min_frames: int | None = None):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
 
         Args:
@@ -2077,6 +2084,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if isinstance(duration, str):
             if duration.endswith("s"):
                 duration = int(float(duration[:-1]) * fps) + 1
+
             elif duration.endswith("f"):
                 duration = int(duration[:-1])
             else:
@@ -2088,8 +2096,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 * self.vae_scale_factor_temporal
                 + 1
             )
-        duration = max(duration, 1)
-        return duration
+        if min_frames is not None:
+            min_frames = ((min_frames // 4) * 4) + 1
+            duration = min(duration, min_frames)
+            
+
+        return max(duration, 1)
 
     if TYPE_CHECKING:
         # Hint to type-checkers/IDEs: unknown attributes accessed on engines

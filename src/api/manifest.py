@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_config_path, get_lora_path
 from src.utils.compute import get_compute_capability, validate_compute_requirements, ComputeCapability
+from loguru import logger
 
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 

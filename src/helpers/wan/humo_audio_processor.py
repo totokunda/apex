@@ -11,7 +11,7 @@ import subprocess
 import librosa
 import numpy as np
 import torch
-from audio_separator.separator import Separator
+# from audio_separator.separator import Separator
 from transformers import WhisperModel, AutoFeatureExtractor
 import torch.nn.functional as F
 from src.helpers.helpers import helpers

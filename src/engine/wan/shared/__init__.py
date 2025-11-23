@@ -249,6 +249,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
+
+
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
