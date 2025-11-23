@@ -178,7 +178,7 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: ' '
+      default: 'blurry, low quality, distorted, artifacts'
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image

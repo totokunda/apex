@@ -515,6 +515,8 @@ class WanFunTransformer3DModel(
         enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
 
+
+
         if enhance_kwargs is not None:
             enhance_weight = enhance_kwargs.get("enhance_weight", None)
             num_frames = enhance_kwargs.get("num_frames", None)
@@ -549,6 +551,7 @@ class WanFunTransformer3DModel(
         hidden_states_shape = list(hidden_states.shape)
 
         hidden_states = self.patch_embedding(hidden_states)
+
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         seq_len = math.ceil((height * width) / (p_h * p_w) * num_frames)

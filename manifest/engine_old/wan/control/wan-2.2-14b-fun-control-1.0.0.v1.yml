@@ -17,7 +17,6 @@ spec:
   denoise_type: moe
   components:
   - type: scheduler
-
     config:
       num_train_timesteps: 1000
       shift: 5.0
@@ -61,5 +60,5 @@ spec:
       boundary_ratio: 0.9
       return_latents: false
       text_encoder_kwargs: 
-        use_attention_mask: true
+      use_attention_mask: true
       attention_kwargs: {}

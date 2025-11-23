@@ -41,7 +41,7 @@ class Wav2Vec2ModelMultitalk(Wav2Vec2Model):
         output_hidden_states=None,
         return_dict=None,
     ):
-        self.config.output_attentions = True
+        self.config.output_attentions = False
 
         output_hidden_states = (
             output_hidden_states
@@ -165,7 +165,7 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
         device: str = "cuda",
         **kwargs,
     ):
-        super().__init__(model_path, save_path)
+        super().__init__()
         self.model_path = model_path
         self.save_path = save_path
         self.device = device

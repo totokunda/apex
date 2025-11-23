@@ -50,7 +50,7 @@ class WanControlEngine(WanShared):
         num_inference_steps: int = 30,
         num_videos: int = 1,
         seed: int | None = None,
-        fps: int = 81,
+        fps: int = 16,
         guidance_scale: float = 5.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
@@ -84,8 +84,18 @@ class WanControlEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
+
+        loaded_video = self._load_video(video, fps=fps) if video is not None else None
+        control_loaded_video = self._load_video(control_video, fps=fps) if control_video is not None else None
+
+        frame_counts = [
+            len(v) for v in (loaded_video, control_loaded_video)
+            if v is not None
+        ]
+
+        min_num_frames = min(frame_counts) if frame_counts else None
         
-        num_frames = self._parse_num_frames(duration, fps)
+        num_frames = self._parse_num_frames(duration, fps, min_num_frames)
         
         batch_size = prompt_embeds.shape[0]
 
@@ -130,6 +140,8 @@ class WanControlEngine(WanShared):
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
 
+
+        
         transformer_config = self.load_config_by_type("transformer")
         
         transformer_dtype = self.component_dtypes["transformer"]
@@ -138,12 +150,14 @@ class WanControlEngine(WanShared):
             height,
             width,
             duration,
+            num_frames=num_frames,
             fps=fps,
             batch_size=batch_size,
             seed=seed,
             dtype=torch.float32,
             generator=generator,
         )
+
 
         if self.denoise_type == "moe" and start_image is not None:
             # convert start image into video 
@@ -192,11 +206,11 @@ class WanControlEngine(WanShared):
 
         elif control_video is not None:
             pt, ph, pw = transformer_config.get("patch_size", (1, 2, 2))
-            loaded_video = self._load_video(control_video, fps=fps)
             video_height, video_width = self.video_processor.get_default_height_width(
                 loaded_video[0]
             )
             base = self.vae_scale_factor_spatial * ph
+
             if video_height * video_width > height * width:
                 scale = min(width / video_width, height / video_height)
                 video_height, video_width = int(video_height * scale), int(
@@ -210,6 +224,7 @@ class WanControlEngine(WanShared):
             assert video_height * video_width <= height * width
             
             control_video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+
             control_video = control_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
             
             video_length = control_video.shape[2]
@@ -220,6 +235,7 @@ class WanControlEngine(WanShared):
             control_latents = self._prepare_fun_control_latents(
                 control_video, dtype=torch.float32, generator=generator
             )
+
 
             control_camera_latents = None
         else:

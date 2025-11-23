@@ -19,6 +19,8 @@ class WanMultitalkEngine(WanShared):
         image: Union[Image.Image, str, np.ndarray, torch.Tensor] | None = None,
         video: Union[List[Image.Image], str, np.ndarray, torch.Tensor, None] = None,
         audio_paths: Optional[Dict[str, str]] = None,
+        person_1_audio: Optional[str] = None,
+        person_2_audio: Optional[str] = None,
         audio_type: str = "para",
         negative_prompt: List[str] | str = None,
         height: int = 480,
@@ -116,8 +118,20 @@ class WanMultitalkEngine(WanShared):
 
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
+        
+        if audio_paths is None and person_1_audio is not None and person_2_audio is None:
+            audio_paths = {
+                "person1": person_1_audio,
+            }
+        elif audio_paths is None and person_1_audio is not None and person_2_audio is not None:
+            audio_paths = {
+                "person1": person_1_audio,
+                "person2": person_2_audio,
+            }
+
 
         preprocessor = self.helpers["wan.multitalk"]
+
         processed_inputs = preprocessor(
             image=image,
             audio_paths=audio_paths,
