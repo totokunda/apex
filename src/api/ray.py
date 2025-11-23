@@ -15,8 +15,23 @@ def _job_summary(job_id: str) -> Dict[str, Any]:
 
     The unified job store already returns a dict with at least:
       { "job_id": ..., "status": ... }
-    We simply forward that through so API callers always see a `status`.
+    We augment that with:
+      - `category`: one of {"download", "processor", "engine", "other"}
+      - `latest`: last websocket update (includes progress/message/metadata) if available
+      - `progress`: convenience top-level 0..1 progress hint when running/processing
+      - queued detection: jobs that have no websocket updates yet are exposed as `status="queued"`
     """
+    # Inspect underlying job record (if present) to derive type/category
+    job_record = unified_job_store.get(job_id) or {}
+    job_type = job_record.get("type")
+    category = "other"
+    if job_type in {"preprocessor", "postprocessor"}:
+        category = "processor"
+    elif job_type in {"download", "components"}:
+        category = "download"
+    elif job_type == "engine":
+        category = "engine"
+
     data = unified_job_store.status(job_id)
 
     # Attach latest websocket update (includes progress/message/metadata)
@@ -32,10 +47,30 @@ def _job_summary(job_id: str) -> Dict[str, Any]:
             data.setdefault("progress", latest.get("progress"))
             # Prefer latest message if not already present
             data.setdefault("message", latest.get("message"))
+        # If we have no category yet, attempt to infer from websocket metadata
+        try:
+            meta = latest.get("metadata") or {}
+            bucket = (meta.get("bucket") or "").lower()
+            stage = (meta.get("stage") or "").lower()
+            if category == "other":
+                if bucket in {"component", "lora", "preprocessor"}:
+                    category = "download"
+                elif stage in {"preprocessor", "postprocessor"}:
+                    category = "processor"
+                elif stage == "engine":
+                    category = "engine"
+        except Exception:
+            pass
+    else:
+        # If the Ray task is not yet running (no websocket events) but Ray reports "running",
+        # treat this as "queued" so the UI can distinguish and hide progress bars.
+        if data.get("status") == "running":
+            data["status"] = "queued"
 
-    # Ensure job_id and status are always present and consistent
+    # Ensure job_id, status, and category are always present and consistent
     data.setdefault("job_id", job_id)
     data.setdefault("status", "unknown")
+    data.setdefault("category", category)
     return data
 
 

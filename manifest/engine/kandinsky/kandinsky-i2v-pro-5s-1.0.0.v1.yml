@@ -25,7 +25,7 @@ spec:
       extra_kwargs:
         attention_backend: flex
       model_path:
-        - path: /home/tosin_coverquick_co/apex-diffusion/components/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers/transformer
+        - path: kandinskylab/Kandinsky-5.0-I2V-Pro-sft-5s-Diffusers/transformer
           variant: default
           precision: bf16
           type: safetensors

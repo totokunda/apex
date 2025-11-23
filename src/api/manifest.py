@@ -128,8 +128,23 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
                 model_path["is_downloaded"] = False
             
             component["model_path"][index] = model_path
+            
+        any_extra_path_downloaded = False
+        for index, model_path in enumerate(component.get("extra_model_paths", [])):
+            path = model_path.get("path") if isinstance(model_path, dict) else model_path
+            out_model_path = {}
+            is_downloaded = DownloadMixin.is_downloaded(path, get_components_path())
+            if is_downloaded is not None:
+                out_model_path["is_downloaded"] = True
+                out_model_path["path"] = is_downloaded
+                any_extra_path_downloaded = True
+            else:
+                out_model_path["is_downloaded"] = False
+                out_model_path["path"] = path
+            
+            component["extra_model_paths"][index] = out_model_path
 
-        if not any_path_downloaded and len(component.get("model_path", [])) > 0:
+        if (not any_path_downloaded and len(component.get("model_path", [])) > 0) or (not any_extra_path_downloaded and len(component.get("extra_model_paths", [])) > 0):
             is_component_downloaded = False
 
         component['is_downloaded'] = is_component_downloaded

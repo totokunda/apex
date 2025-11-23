@@ -80,7 +80,12 @@ spec:
   - type: helper
     base: clip
     name: wan/clip
-    model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
+    model_path:
+    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
+      variant: default
+      precision: fp16
+      type: safetensors
+      file_size: 1264218342
     preprocessor_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/image_processor/preprocessor_config.json
     processor_class: CLIPImageProcessor
     model_class: CLIPVisionModel
