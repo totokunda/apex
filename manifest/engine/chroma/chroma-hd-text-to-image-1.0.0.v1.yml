@@ -13,6 +13,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://i.redd.it/pushing-the-limits-of-chroma1-hd-v0-rhokmhle7zkf1.png?width=1536&format=png&auto=webp&s=b9001441ff09f38150458fda1c9765302479f9ba
+  categories:
+  - text-to-image
 spec:
   engine: chroma
   model_type: t2i
@@ -144,22 +146,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 969
+      default: "16:9"
       options:
       - name: Wide
-        value: 969
+        value: "16:9"
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: 556
+        value: "9:16"
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: 61
+        value: "1:1"
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: 184
+        value: "4:3"
         ratio_w: 4
         ratio_h: 3
       - name: Custom

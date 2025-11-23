@@ -43,7 +43,7 @@ spec:
     config: 
       _class_name: WanFunTransformer3DModel
       qk_norm: rms_norm_across_heads
-  - type: transformer
+  - type: transformer       # 1.0.0 v1.0.0                
     name: transformer
     base: wan.fun
     model_path: alibaba-pai/Wan2.2-Fun-A14B-Control/high_noise_model

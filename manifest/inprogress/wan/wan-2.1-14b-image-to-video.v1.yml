@@ -180,16 +180,16 @@ spec:
       description: Select the aspect ratio of the output video
       panel: generation
       type: select
-      default: 969
+      default: "16:9"
       options:
       - name: Wide (16:9)
-        value: 969
+        value: "16:9"
       - name: Vertical (9:16)
-        value: 556
+        value: "9:16"
       - name: Square (1:1)
-        value: 61
+        value: "1:1"
       - name: Classic (3:4)
-        value: 184
+        value: "4:3"
       floating_panel: true
     - id: num_inference_steps
       label: Inference Steps

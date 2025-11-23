@@ -47,6 +47,7 @@ class WanMultitalkEngine(WanShared):
         face_scale: float = 0.05,
         color_correction_strength: float = 1.0,
         bbox: Optional[Dict[str, List[float]]] = None,
+        render_on_step_interval: int = 1,
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
@@ -152,6 +153,12 @@ class WanMultitalkEngine(WanShared):
         arrive_last_frame = False
         audio_end_idx = audio_start_idx + clip_length
         gen_video_list = []
+        self._preview_video_list = []
+        self._preview_max_num_frames = max_num_frames
+        self._preview_num_frames = num_frames
+        self._preview_using_video_input = video is not None
+        self._preview_full_audio_embs = full_audio_embs
+        self._preview_miss_lengths = []
         gen_latents_list = []
         is_first_clip = True
 
@@ -484,9 +491,10 @@ class WanMultitalkEngine(WanShared):
 
             if is_first_clip:
                 gen_video_list.append(videos)
+                self._preview_video_list.append(videos)
             else:
                 gen_video_list.append(videos[:, :, cur_motion_frames_num:])
-
+                self._preview_video_list.append(videos[:, :, cur_motion_frames_num:])
             # decide whether is done
             if arrive_last_frame:
                 break
@@ -564,3 +572,12 @@ class WanMultitalkEngine(WanShared):
 
             postprocessed_video = self._tensor_to_frames(gen_video_samples)
             return postprocessed_video
+    
+    def _render_step(self, latents, render_on_step_callback):
+        video = self.vae_decode(latents)
+        gen_video_list = self._preview_video_list + [video]
+        gen_video_samples = torch.cat(gen_video_list, dim=2)[
+                :, :, : int(self._preview_max_num_frames)
+            ]
+        rendered_video = self._tensor_to_frames(gen_video_samples)
+        render_on_step_callback(rendered_video[0])

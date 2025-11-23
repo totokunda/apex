@@ -163,11 +163,11 @@ class QwenImageShared(BaseEngine):
                 "output_hidden_states": True,
                 }
         
-        prompt_hash = self.text_encoder.hash_prompt(input_kwargs)
+        prompt_hash = self.text_encoder.hash(input_kwargs)
 
         cached = None
         if self.text_encoder.enable_cache:
-            cached = self.text_encoder.load_cached_prompt(prompt_hash)
+            cached = self.text_encoder.load_cached(prompt_hash)
             
         if cached is not None:
             prompt_embeds, prompt_embeds_mask = cached
@@ -220,7 +220,7 @@ class QwenImageShared(BaseEngine):
             
     
             if self.text_encoder.enable_cache:
-                self.text_encoder.cache_prompt(
+                self.text_encoder.cache(
                     prompt_hash,
                     prompt_embeds,
                     prompt_embeds_mask,

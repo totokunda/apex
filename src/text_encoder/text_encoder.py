@@ -20,7 +20,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         no_weights: bool = True,
         enable_cache: bool = True,
         cache_file: str = None,
-        max_cache_size: int = 100,
+        max_cache_size: int = 1000,
         device: torch.device | None = None,
         *args,
         **kwargs,
@@ -109,6 +109,46 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if lower_case:
             text = text.lower()
         return text
+    
+    def get_prompt_hash(self,
+        text: str | List[str],
+        max_sequence_length: int = 512,
+        pad_to_max_length: bool = True,
+        num_videos_per_prompt: int = 1,
+        dtype: torch.dtype | str | None = None,
+        device: torch.device | None = None,
+        add_special_tokens: bool = True,
+        return_attention_mask: bool = False,
+        use_attention_mask: bool = False,
+        use_position_ids: bool = False,
+        use_token_type_ids: bool = False,
+        arrange_attention_mask: bool = False,
+        pad_with_zero: bool = True,
+        clean_text: bool = True,
+        process_inputs_func: Callable = None,
+        output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
+        lower_case: bool = False) -> str:
+        kwargs = {
+            "text": text,
+            "max_sequence_length": max_sequence_length,
+            "pad_to_max_length": pad_to_max_length,
+            "num_videos_per_prompt": num_videos_per_prompt,
+            "dtype": dtype,
+            "device": device,
+            "add_special_tokens": add_special_tokens,
+            "return_attention_mask": return_attention_mask,
+            "use_attention_mask": use_attention_mask,
+            "arrange_attention_mask": arrange_attention_mask,
+            "use_position_ids": use_position_ids,
+            "use_token_type_ids": use_token_type_ids,
+            "pad_with_zero": pad_with_zero,
+            "clean_text": clean_text,
+            "output_type": output_type,
+            "lower_case": lower_case,
+            "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
+        }
+        
+        return self.hash(kwargs)
 
     @torch.no_grad()
     def encode(
@@ -161,11 +201,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "lower_case": lower_case,
             "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
         }
-
-        prompt_hash = self.hash_prompt(kwargs)
+        
+        prompt_hash = self.hash(kwargs)
 
         if self.enable_cache:
-            cached = self.load_cached_prompt(prompt_hash)
+            cached = self.load_cached(prompt_hash)
             if cached is not None:
                 cached_embeds, cached_mask = cached
 
@@ -200,8 +240,6 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
 
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
         seq_lens = mask.gt(0).sum(dim=1).long()
-        # mask = mask.bool()
-
         inputs = {"input_ids": text_input_ids.to(device=self.model.device)}
 
         if use_position_ids:
@@ -232,8 +270,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             ),
         )
 
+
         if output_type == "hidden_states" and hasattr(result, "last_hidden_state"):
             prompt_embeds = result.last_hidden_state
+        if output_type == "hidden_states" and hasattr(result, "hidden_states"):
+            prompt_embeds = result.hidden_states[-1]
         elif output_type == "pooler_output" and hasattr(result, "pooler_output"):
             prompt_embeds = result.pooler_output
         elif output_type == "text_embeds" and hasattr(result, "text_embeds"):
@@ -247,6 +288,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             raise ValueError(f"Invalid output type: {output_type}")
         
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+        
 
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
@@ -289,9 +331,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         
             mask = mask.repeat(1, num_videos_per_prompt)
             mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
+        
 
         if self.enable_cache:
-            self.cache_prompt(
+            self.cache(
                 prompt_hash,
                 prompt_embeds,
                 mask,

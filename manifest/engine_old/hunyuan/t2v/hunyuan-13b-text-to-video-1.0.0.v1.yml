@@ -19,7 +19,7 @@ spec:
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/scheduler/scheduler_config.json
   - type: vae
     name: hunyuan/vae
-    base: hunyuan
+    base: hunyuanvideo
     model_path: hunyuanvideo-community/HunyuanVideo/vae
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/vae/config.json
   - type: text_encoder
@@ -32,11 +32,11 @@ spec:
     tokenizer_kwargs:
       subfolder: tokenizer_2
   - type: transformer
-    base: hunyuan.base
+    base: hunyuanvideo.base
     model_path: hunyuanvideo-community/HunyuanVideo/transformer
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/transformer/config.json
   - type: helper
-    base: hunyuan.llama
+    base: hunyuanvideo.llama
     name: hunyuan/llama/t2v
     model_path: hunyuanvideo-community/HunyuanVideo/text_encoder
     config_path: https://huggingface.co/hunyuanvideo-community/HunyuanVideo/resolve/main/text_encoder/config.json

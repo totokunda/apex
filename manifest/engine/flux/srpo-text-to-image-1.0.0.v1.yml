@@ -13,6 +13,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://storage.googleapis.com/falserverless/example_outputs/flux-srpo-output.jpeg
+  categories:
+  - text-to-image
 spec:
   engine: flux
   model_type: t2i
@@ -163,22 +165,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 969
+      default: "16:9"
       options:
       - name: Wide
-        value: 969
+        value: "16:9"
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: 556
+        value: "9:16"
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: 61
+        value: "1:1"
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: 184
+        value: "4:3"
         ratio_w: 4
         ratio_h: 3
       - name: Custom

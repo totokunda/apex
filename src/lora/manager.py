@@ -34,6 +34,61 @@ class LoraManager(DownloadMixin):
 
     def _hash(self, text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
+    
+    def _replace_up_down_to_AB_keys(self, state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # Replace all keys that end with _up or _down with _A or _B
+        # and make sure the LoRA rank is on the **second** dimension for lora_B
+        # to match how diffusers / PEFT infer rank (see `peft.py` around rank[f"^{key}"] = val.shape[1]).
+        new_state_dict: Dict[str, torch.Tensor] = {}
+
+        # First, normalize key names `.lora_up` / `.lora_down` -> `.lora_A` / `.lora_B`
+        for key, value in state_dict.items():
+            if ".lora_up" in key:
+                new_key = key.replace(".lora_up", ".lora_A")
+            elif ".lora_down" in key:
+                new_key = key.replace(".lora_down", ".lora_B")
+            else:
+                new_key = key
+            new_state_dict[new_key] = value
+
+        # Heuristic: some LoRAs store matrices with rank on the **first** dim for `lora_B`
+        # (shape `[r, out]`) instead of the second dim (`[out, r]`).
+        # Since PEFT determines rank from `val.shape[1]` for `lora_B`, we transpose both
+        # `lora_A` and `lora_B` for a pair when we detect that the smaller dimension of
+        # `lora_B` is the first one.
+        lora_pairs: Dict[str, Dict[str, str]] = {}
+        for key in list(new_state_dict.keys()):
+            if ".lora_A" in key:
+                base = key.split(".lora_A", 1)[0]
+                lora_pairs.setdefault(base, {})["A"] = key
+            elif ".lora_B" in key:
+                base = key.split(".lora_B", 1)[0]
+                lora_pairs.setdefault(base, {})["B"] = key
+
+        for base, pair in lora_pairs.items():
+            a_key = pair.get("A")
+            b_key = pair.get("B")
+            if a_key is None or b_key is None:
+                continue
+
+            a_val = new_state_dict.get(a_key)
+            b_val = new_state_dict.get(b_key)
+            if not isinstance(a_val, torch.Tensor) or not isinstance(b_val, torch.Tensor):
+                continue
+
+            # Only handle simple linear-style LoRA weights
+            if a_val.ndim != 2 or b_val.ndim != 2:
+                continue
+
+            b0, b1 = b_val.shape
+            # If the smaller dimension (candidate rank) is on dim 0 for lora_B,
+            # transpose both A and B so that rank becomes the second dim for lora_B.
+            if b0 < b1:
+                new_state_dict[a_key] = a_val.t()
+                new_state_dict[b_key] = b_val.t()
+
+        del state_dict
+        return new_state_dict
 
     def resolve(self, source: str, prefer_name: Optional[str] = None) -> LoraItem:
         """
@@ -203,15 +258,31 @@ class LoraManager(DownloadMixin):
                         local_path, model.config._class_name
                     )
 
-                    local_path_state_dict = strip_common_prefix(local_path_state_dict, model.state_dict())
+                    local_path_state_dict = strip_common_prefix(
+                        local_path_state_dict, model.state_dict()
+                    )
 
+                    # Normalize keys that include an embedded adapter name, e.g.:
+                    # "vace_blocks.0.attn2.to_k.lora_B.default.weight"
+                    # becomes "vace_blocks.0.attn2.to_k.lora_B.weight"
+                    local_path_state_dict = self._strip_adapter_name_from_keys(
+                        local_path_state_dict
+                    )
+                    
+                    local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
                     keys = list(local_path_state_dict.keys())
+
                     prefix = None
-                    if keys[0].startswith("transformer") and keys[-1].startswith("transformer"):
+                    if keys[0].startswith("transformer") and keys[-1].startswith(
+                        "transformer"
+                    ):
                         prefix = "transformer"
+                    elif keys[0].startswith("diffusion_model") and keys[-1].startswith("diffusion_model"):
+                        prefix = "diffusion_model"
+                        
 
                     model.load_lora_adapter(
-                        local_path_state_dict, adapter_name=adapter_name, prefix=prefix,
+                        local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
 
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
@@ -284,3 +355,31 @@ class LoraManager(DownloadMixin):
             return load_file(local_path)
         else:
             torch.load(local_path)
+
+    def _strip_adapter_name_from_keys(
+        self, state_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Some PEFT exports include the adapter name in the key, e.g.:
+          "vace_blocks.0.attn2.to_k.lora_B.default.weight"
+        where "default" (or any other string) is the adapter name.
+        This method removes that adapter-name segment so the key becomes:
+          "vace_blocks.0.attn2.to_k.lora_B.weight".
+        """
+        new_state: Dict[str, torch.Tensor] = {}
+        for key, value in state_dict.items():
+            parts = key.split(".")
+            # Look for the specific pattern: ... lora_A|lora_B.<adapter_name>.weight|bias|alpha
+            if (
+                len(parts) >= 3
+                and parts[-3] in ("lora_A", "lora_B")
+                and parts[-1] in ("weight", "bias", "alpha")
+                and parts[-2] not in ("lora_A", "lora_B")
+            ):
+                # Drop the adapter name (the penultimate component)
+                parts.pop(-2)
+                key = ".".join(parts)
+            new_state[key] = value
+        
+        del state_dict
+        return new_state

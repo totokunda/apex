@@ -8,7 +8,7 @@ import torch
 from safetensors.torch import safe_open
 from safetensors.torch import save_file
 from src.utils.defaults import DEFAULT_CACHE_PATH
-
+import pickle
 
 class CacheMixin:
     enable_cache: bool = True
@@ -27,21 +27,54 @@ class CacheMixin:
             return item
         else:
             return str(item)
-
+        
     def hash_prompt(self, kwargs: Dict[str, Any]) -> str:
-        hashes = [hashlib.sha256(self.str_encode(t).encode()).hexdigest() for t in kwargs.values()]
-        return ".".join(hashes)
+        #Compatibility with old hash_prompt
+        return self.hash(kwargs)
 
-    def get_cached_keys_for_prompt(
-        self, prompt_hash: str
-    ) -> Tuple[str | None, str | None]:
-        """Return the most recent cache keys for given prompt hash.
+    def hash(self, kwargs: Dict[str, Any]) -> str:
+        """Return a deterministic hash for a kwargs dict.
 
-        Returns a tuple: (prompt_embeds_key, attention_mask_key). Either may be None.
-        Recognizes both timestamped and legacy formats.
+        - Ignores ordering of kwargs themselves.
+        - Also normalizes nested dicts / sets / lists so their internal ordering
+          does not affect the hash.
+        - Uses `str_encode` for tensors / ndarrays / bytes / strings so that
+          those values are represented in a stable way.
+        """
+
+        def canonicalize(obj: Any) -> Any:
+            # Normalize mappings by sorting keys and canonicalizing values
+            if isinstance(obj, dict):
+                return tuple(
+                    (k, canonicalize(v))
+                    for k, v in sorted(obj.items(), key=lambda kv: kv[0])
+                )
+            # Normalize sequences by canonicalizing each element
+            elif isinstance(obj, (list, tuple)):
+                return tuple(canonicalize(v) for v in obj)
+            # Normalize sets by sorting their canonicalized elements
+            elif isinstance(obj, set):
+                return tuple(sorted(canonicalize(v) for v in obj))
+            # Use stable string encodings for common tensor/array/byte/string types
+            elif isinstance(obj, (torch.Tensor, np.ndarray, bytes, str)):
+                return self.str_encode(obj)
+            # Primitive scalars (int, float, bool, None, etc.) are already stable
+            else:
+                return obj
+
+        canonical = canonicalize(kwargs)
+        data = pickle.dumps(canonical, protocol=5)
+        return hashlib.sha256(data).hexdigest()
+
+    def get_cached_keys_for_prompt(self, hash: str) -> List[str]:
+        """Return the most recent cache keys for a given hash.
+
+        - Supports an arbitrary number of tensors per hash.
+        - Keys are indexed positionally so that tensors can be returned
+          in the same order they were cached.
         """
         if not self.enable_cache:
-            return None, None
+            return []
 
         if self.cache_file is None:
             self.cache_file = os.path.join(
@@ -50,22 +83,24 @@ class CacheMixin:
             )
 
         if not os.path.exists(self.cache_file):
-            return None, None
+            return []
 
+        # Key format (new, generic):
+        #   "{timestamp_ms}_{prompt_hash}_{index}"
         key_pattern = re.compile(
-            r"^(?:(?P<ts>\d{13,})_)?(?P<hash>[a-f0-9\.]+)_(?P<kind>prompt_embeds|attention_mask)$"
+            r"^(?:(?P<ts>\d{13,})_)?(?P<hash>[a-f0-9\.]+)_(?P<index>\d+)$"
         )
 
-        def parse_entry_key(key: str) -> Tuple[int, str, str] | None:
+        def parse_entry_key(key: str) -> Tuple[int, str, int] | None:
             match = key_pattern.match(key)
             if not match:
                 return None
             ts_str = match.group("ts")
             ts = int(ts_str) if ts_str is not None else 0
-            return ts, match.group("hash"), match.group("kind")
+            index = int(match.group("index"))
+            return ts, match.group("hash"), index
 
-        latest_embed: Tuple[int, str] | None = None
-        latest_mask: Tuple[int, str] | None = None
+        latest_by_index: Dict[int, Tuple[int, str]] = {}
 
         try:
             with safe_open(self.cache_file, framework="pt", device="cpu") as f:
@@ -73,64 +108,57 @@ class CacheMixin:
                     parsed = parse_entry_key(key)
                     if parsed is None:
                         continue
-                    ts, hsh, kind = parsed
-                    if hsh != prompt_hash:
+                    ts, hsh, index = parsed
+                    if hsh != hash:
                         continue
-                    if kind == "prompt_embeds":
-                        if latest_embed is None or ts >= latest_embed[0]:
-                            latest_embed = (ts, key)
-                    elif kind == "attention_mask":
-                        if latest_mask is None or ts >= latest_mask[0]:
-                            latest_mask = (ts, key)
+                    current = latest_by_index.get(index)
+                    if current is None or ts >= current[0]:
+                        latest_by_index[index] = (ts, key)
         except Exception:
-            return None, None
+            return []
 
-        return (
-            latest_embed[1] if latest_embed is not None else None,
-            latest_mask[1] if latest_mask is not None else None,
-        )
+        # Return keys ordered by their positional index
+        return [latest_by_index[i][1] for i in sorted(latest_by_index.keys())]
 
-    def load_cached_prompt(
-        self, prompt_hash: str
-    ) -> Tuple[torch.Tensor, torch.Tensor] | None:
+    def load_cached(
+        self, hash: str
+    ) -> Tuple[torch.Tensor, ...] | None:
         """Load cached tensors for the given prompt hash if present.
 
-        Returns (prompt_embeds, attention_mask) on hit; otherwise None.
+        Returns a tuple of tensors in the same order they were cached,
+        or None if no valid cached entry exists.
         """
-        embed_key, mask_key = self.get_cached_keys_for_prompt(prompt_hash)
-        if embed_key is None:
+        keys = self.get_cached_keys_for_prompt(hash)
+        if not keys:
             return None
         try:
             with safe_open(self.cache_file, framework="pt", device="cpu") as f:
-                prompt_embeds = f.get_tensor(embed_key)
-                attention_mask = (
-                    f.get_tensor(mask_key) if mask_key is not None else None
-                )
-            return prompt_embeds, attention_mask
+                tensors: List[torch.Tensor] = []
+                for key in keys:
+                    tensors.append(f.get_tensor(key))
+            return tuple(tensors)
         except Exception:
             return None
 
-    def cache_prompt(
+    def cache(
         self,
-        prompt_hash: str,
-        prompt_embeds: torch.Tensor,
-        attention_mask: torch.Tensor,
+        hash: str,
+        *tensors: torch.Tensor,
     ) -> None:
-        """Persist prompt embeddings and attention mask with LRU-style eviction.
+        """Persist an arbitrary number of tensors with LRU-style eviction.
 
+        - Accepts any number of positional tensors (`*tensors`).
         - Stores tensors in a single safetensors file under timestamped keys to track recency.
-        - Removes any pre-existing entries for the same prompt hash (acts like an update/move-to-front).
+        - Removes any pre-existing entries for the same hash (acts like an update/move-to-front).
         - If the number of unique cached prompts exceeds `max_cache_size`, evicts the oldest prompts first.
 
-        Key format (new):
-            "{timestamp_ms}_{prompt_hash}_prompt_embeds"
-            "{timestamp_ms}_{prompt_hash}_attention_mask"
-
-        Backward compatibility:
-            Also recognizes legacy keys without timestamps like
-            "{prompt_hash}_prompt_embeds" and "{prompt_hash}_attention_mask".
+        Key format (new, generic):
+            "{timestamp_ms}_{hash}_{index}"
         """
         if not self.enable_cache:
+            return
+
+        if not tensors:
             return
 
         # Ensure cache path exists
@@ -154,49 +182,49 @@ class CacheMixin:
                 existing_tensors = {}
 
         # Build index of entries by hash with their latest timestamp
-        # Recognize both timestamped and legacy key formats
+        # Recognize only the new generic key format
         key_pattern = re.compile(
-            r"^(?:(?P<ts>\d{13,})_)?(?P<hash>[a-f0-9\.]+)_(?P<kind>prompt_embeds|attention_mask)$"
+            r"^(?:(?P<ts>\d{13,})_)?(?P<hash>[a-f0-9\.]+)_(?P<index>\d+)$"
         )
 
-        def parse_entry_key(key: str) -> Tuple[int, str, str] | None:
+        def parse_entry_key(key: str) -> Tuple[int, str, int] | None:
             match = key_pattern.match(key)
             if not match:
                 return None
             ts_str = match.group("ts")
             ts = int(ts_str) if ts_str is not None else 0
-            return ts, match.group("hash"), match.group("kind")
+            index = int(match.group("index"))
+            return ts, match.group("hash"), index
 
-        entries_by_hash: Dict[str, Dict[str, Tuple[int, str]]] = {}
-        # maps: prompt_hash -> { "prompt_embeds": (ts, key), "attention_mask": (ts, key) }
+        entries_by_hash: Dict[str, Dict[int, Tuple[int, str]]] = {}
+        # maps: prompt_hash -> { index: (ts, key) }
         for key in list(existing_tensors.keys()):
             parsed = parse_entry_key(key)
             if parsed is None:
                 continue
-            ts, hsh, kind = parsed
-            kinds = entries_by_hash.setdefault(hsh, {})
-            # Keep the most recent key per kind for that hash
-            if kind not in kinds or ts >= kinds[kind][0]:
-                kinds[kind] = (ts, key)
+            ts, hsh, index = parsed
+            indices = entries_by_hash.setdefault(hsh, {})
+            # Keep the most recent key per index for that hash
+            if index not in indices or ts >= indices[index][0]:
+                indices[index] = (ts, key)
 
-        # Remove previous entries for this prompt hash (any timestamp or legacy)
-        if prompt_hash in entries_by_hash:
-            for kind, (_ts, key) in list(entries_by_hash[prompt_hash].items()):
+        # Remove previous entries for this prompt hash
+        if hash in entries_by_hash:
+            for _index, (_ts, key) in list(entries_by_hash[hash].items()):
                 existing_tensors.pop(key, None)
-            entries_by_hash.pop(prompt_hash, None)
+            entries_by_hash.pop(hash, None)
 
         # Insert the new entry with a fresh timestamp
         timestamp_ms = int(time.time() * 1000)
-        embed_key = f"{timestamp_ms}_{prompt_hash}_prompt_embeds"
-        mask_key = f"{timestamp_ms}_{prompt_hash}_attention_mask"
-        existing_tensors[embed_key] = prompt_embeds.detach().to("cpu")
-        existing_tensors[mask_key] = attention_mask.detach().to("cpu")
+        # Insert the new entries with fresh timestamps and positional indices
+        new_indices: Dict[int, Tuple[int, str]] = {}
+        for idx, tensor in enumerate(tensors):
+            key = f"{timestamp_ms}_{hash}_{idx}"
+            existing_tensors[key] = tensor.detach().to("cpu")
+            new_indices[idx] = (timestamp_ms, key)
 
         # Update index with the new entries
-        entries_by_hash[prompt_hash] = {
-            "prompt_embeds": (timestamp_ms, embed_key),
-            "attention_mask": (timestamp_ms, mask_key),
-        }
+        entries_by_hash[hash] = new_indices
 
         # Enforce max_cache_size (unique prompt hashes)
         unique_hashes = list(entries_by_hash.keys())
@@ -208,17 +236,17 @@ class CacheMixin:
         ):
             # Compute recency per hash (latest timestamp across kinds)
             hash_to_latest_ts = {
-                hsh: max(ts_kind[0] for ts_kind in kinds.values())
-                for hsh, kinds in entries_by_hash.items()
+                hsh: max(ts_index[0] for ts_index in indices.values())
+                for hsh, indices in entries_by_hash.items()
             }
             # Sort hashes by recency ascending (oldest first)
             eviction_order = sorted(hash_to_latest_ts.items(), key=lambda x: x[1])
             # Do not evict the newly added prompt; prioritize evicting others first
-            eviction_candidates = [h for h, _ in eviction_order if h != prompt_hash]
+            eviction_candidates = [h for h, _ in eviction_order if h != hash]
             num_to_evict = num_prompts - self.max_cache_size
             for hsh in eviction_candidates[:num_to_evict]:
-                kinds = entries_by_hash.pop(hsh, {})
-                for _kind, (_ts, key) in kinds.items():
+                indices = entries_by_hash.pop(hsh, {})
+                for _index, (_ts, key) in indices.items():
                     existing_tensors.pop(key, None)
 
         # Rewrite cache file atomically
@@ -227,3 +255,11 @@ class CacheMixin:
         except Exception:
             # As a fallback, avoid crashing the caller; drop caching if write fails
             pass
+        
+    def load_cached_prompt(self, hash: str) -> Tuple[torch.Tensor, ...] | None:
+        return self.load_cached(hash)
+
+    def cache_prompt(self, hash: str, *tensors: torch.Tensor) -> None:
+        return self.cache(hash, *tensors)
+    
+    
