@@ -136,20 +136,72 @@ def download_unified(
         class ProgressAggregator:
             def __init__(self, total_items: int):
                 self.total_items = max(1, int(total_items))
+                # Per-item fractional progress (0..1) for fallback aggregation
                 self.per_index_progress: Dict[int, float] = {}
+                # Per-item byte accounting for more accurate aggregation on multi-path/folder downloads
+                self.bytes_downloaded: Dict[int, int] = {}
+                self.bytes_total: Dict[int, int] = {}
                 self.last_overall: float = 0.0
             
-            def update(self, index: int, frac: float, label: str, downloaded: Optional[int] = None, total: Optional[int] = None, filename: Optional[str] = None, message: Optional[str] = None):
+            def update(
+                self,
+                index: int,
+                frac: float,
+                label: str,
+                downloaded: Optional[int] = None,
+                total: Optional[int] = None,
+                filename: Optional[str] = None,
+                message: Optional[str] = None,
+            ):
+                # Clamp per-item fraction
                 frac = max(0.0, min(1.0, float(frac)))
                 self.per_index_progress[index] = frac
-                overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
-                overall_progress = max(self.last_overall, min(1.0, overall_progress))
+
+                # Track byte-level progress when we know the total size
+                if downloaded is not None and total is not None and total > 0:
+                    try:
+                        d = max(0, int(downloaded))
+                        t = max(1, int(total))
+                        # Ensure we never exceed the total for safety
+                        self.bytes_downloaded[index] = min(d, t)
+                        self.bytes_total[index] = t
+                    except Exception:
+                        # Best-effort only; fall back to fractional aggregation if anything goes wrong
+                        pass
+
+                # Prefer aggregate byte-based progress when we have enough information,
+                # otherwise fall back to simple average of per-item fractions.
+                overall_progress: float
+                try:
+                    total_bytes = sum(self.bytes_total.values())
+                    if total_bytes > 0:
+                        done_bytes = 0
+                        for idx, t in self.bytes_total.items():
+                            d = self.bytes_downloaded.get(idx, 0)
+                            if d < 0:
+                                d = 0
+                            if d > t:
+                                d = t
+                            done_bytes += d
+                        overall_progress = max(0.0, min(1.0, done_bytes / float(total_bytes)))
+                    else:
+                        # Fallback: average of known item fractions
+                        overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+                except Exception:
+                    overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+
+                # Clamp to [0, 1]; allow progress to move down slightly when a new file
+                # in a multi-file/folder download starts (so we reflect aggregate progress
+                # across all bytes, not just the current file).
+                overall_progress = max(0.0, min(1.0, overall_progress))
                 self.last_overall = overall_progress
+
                 if filename:
                     filename_parts = filename.split("_")
                     if len(filename_parts) > 1:
                         filename_parts = filename_parts[1:]
                     filename = "_".join(filename_parts)
+
                 meta = {"label": label, "bucket": norm_type}
                 if downloaded is not None:
                     meta["downloaded"] = int(downloaded)
