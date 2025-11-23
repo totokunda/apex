@@ -242,6 +242,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self._validate_compute_requirements()
 
         self.save_path = kwargs.get("save_path", None)
+        should_download = kwargs.get("should_download", True)
 
         for key, value in kwargs.items():
             if key not in [
@@ -259,7 +260,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         if not hasattr(self, "selected_components") or self.selected_components is None:
             self.selected_components = {}
         
-        self.download(self.save_path)
+        if should_download:
+            self.download(self.save_path)
         
 
         # Normalize optional memory management mapping.
@@ -277,8 +279,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
-        self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        if kwargs.get("auto_apply_loras", True):
+        if should_download:
+            self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
+        if should_download and kwargs.get("auto_apply_loras", True):
             self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
 
     def post_init(self):
@@ -1868,7 +1871,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
             self.config["components"][i] = component
             
-    
     def _get_latents(
         self,
         height: int,
@@ -2135,3 +2137,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
     def __repr__(self):
         return self.__str__()
+
+    def validate_model_path(self, component: Dict[str, Any]):
+        component = self.load_component(component, no_weights=True)
+        del component
+        empty_cache()
+        return True

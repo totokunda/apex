@@ -6,7 +6,7 @@ convention implemented in ``src.engine.registry.EngineRegistry``. New engines
 do not need to be imported or re-exported here; they are picked up via
 autodiscovery.
 """
-
+from .base_engine import BaseEngine
 from .registry import (
     EngineRegistry,
     UniversalEngine,
@@ -21,4 +21,5 @@ __all__ = [
     "get_engine_registry",
     "create_engine",
     "list_available_engines",
+    "BaseEngine",
 ]

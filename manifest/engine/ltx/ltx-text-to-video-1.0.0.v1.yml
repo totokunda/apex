@@ -13,6 +13,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/create-stunning-image-to-video-motion-pictures-with-ltx-v0-375l5s3bec6e1.png?width=1080&crop=smart&auto=webp&s=0f7782e66ca66ab086c29099ae29bb7fefc598ed
+  categories:
+  - text-to-video
 spec:
   engine: ltx
   model_type: x2v
@@ -28,7 +30,6 @@ spec:
       description: The FlowMatch Euler Discrete Scheduler is used for LTX Text to Video.
       base: diffusers.FlowMatchEulerDiscreteScheduler
       config_path: Lightricks/LTX-Video/scheduler/scheduler_config.json
-
   - type: vae
     name: ltx/vae
     label: LTX VAE

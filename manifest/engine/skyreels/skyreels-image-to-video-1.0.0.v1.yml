@@ -12,6 +12,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/bad-terms-of-service-v0-3bh6e401kmqe1.jpeg?width=1080&crop=smart&auto=webp&s=e649038a01ebdf9d8440de54119c1f979d2e7278
+  categories:
+  - image-to-video
 spec:
   engine: skyreels
   model_type: i2v

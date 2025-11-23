@@ -14,6 +14,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://cdn.prod.website-files.com/650c3b59079d92475f37b68f/673f828bcc8490e83dc7791c_673f8284e07dee522e1c92f5_Canny%2520image%2520example%2520transparent%2520-%2520Canny%2520(3).png
+  categories:
+  - control
 spec:
   engine: flux
   model_type: control

@@ -12,12 +12,13 @@ metadata:
   - ti2i
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://bria-public.s3.us-east-1.amazonaws.com/car.001.jpeg
+  demo_path: https://cdn.shopify.com/s/files/1/0093/8541/0645/files/untitled_first_abstract_watercolor_by_wassily_kandinsky_c.jpg?v=1639393508
+  categories:
+  - text-to-image 
+  - image-edit
 spec:
   engine: fibo
-  model_type:
-  - t2i
-  - i2i
+  model_type: ti2i
   engine_type: torch
   denoise_type: base
   attention_types:

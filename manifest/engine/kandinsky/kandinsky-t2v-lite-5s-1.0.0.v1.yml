@@ -6,7 +6,13 @@ metadata:
   name: Kandinsky 5.0 Lite Text to Video (5s)
   version: 1.0.0
   description: Kandinsky 5.0 Pro text-to-video (5s) diffusers model
-  tags: [text-to-video, kandinsky5, lite]
+  tags: 
+  - text-to-video
+  - kandinsky5
+  - lite
+  categories:
+  - text-to-video
+  demo_path: https://cdn.shopify.com/s/files/1/0093/8541/0645/files/untitled_first_abstract_watercolor_by_wassily_kandinsky_c.jpg
 spec:
   engine: kandinsky5
   model_type: t2v

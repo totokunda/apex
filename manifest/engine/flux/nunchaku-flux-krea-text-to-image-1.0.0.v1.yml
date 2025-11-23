@@ -18,6 +18,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://i.redd.it/flux-krea-is-quite-good-for-photographic-gens-relative-to-v0-ipkhisrye9gf1.png?width=1040&format=png&auto=webp&s=8382540768722e585b43195ea2ba868967a87f3d
+  categories:
+  - text-to-image
 spec:
   engine: flux
   model_type: t2i

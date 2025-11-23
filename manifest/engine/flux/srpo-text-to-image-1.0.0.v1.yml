@@ -13,6 +13,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://storage.googleapis.com/falserverless/example_outputs/flux-srpo-output.jpeg
+  categories:
+  - text-to-image
 spec:
   engine: flux
   model_type: t2i

@@ -12,6 +12,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://miro.medium.com/v2/resize:fit:1400/0*E8anr2J8q4wbfdd0
+  categories:
+  - image-edit
 spec:
   engine: hidream
   model_type: edit

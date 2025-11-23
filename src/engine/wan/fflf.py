@@ -119,15 +119,13 @@ class WanFFLFEngine(WanShared):
         self.to_device(self.scheduler)
 
         scheduler = self.scheduler
-        scheduler.set_timesteps(
-            num_inference_steps if timesteps is None else 1000, device=self.device
-        )
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
+        
         num_frames = self._parse_num_frames(duration, fps)
 
         vae_config = self.load_config_by_type("vae")
