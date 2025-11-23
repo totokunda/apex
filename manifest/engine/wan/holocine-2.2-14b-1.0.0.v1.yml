@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-2-a14b-text-to-video
+  id: holocine-2.2-14b
   model: wan
-  name: Wan 2.2 A14B Holocine
+  name: Holocine 2.2 14B
   version: 1.0.0
-  description: Wan 2.2 A14B is a 14B parameter model for text-to-video
+  description: Holocine 2.2 14B is a 14B parameter model for text-to-video
   tags:
   - wan
   - holocine
@@ -14,6 +14,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
+  categories:
+  - text-to-video
 spec:
   engine: wan
   model_type: holocine

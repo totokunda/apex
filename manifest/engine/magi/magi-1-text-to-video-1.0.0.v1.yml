@@ -12,6 +12,8 @@ metadata:
   - autoregressive
   author: Apex AI
   license: Apache-2.0
+  categories:
+  - text-to-video
 spec:
   engine: magi
   model_type: t2v

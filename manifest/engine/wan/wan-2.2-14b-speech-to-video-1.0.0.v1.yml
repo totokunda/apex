@@ -14,6 +14,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
+  categories:
+  - audio-to-video
 spec:
   fps: 16
   engine: wan

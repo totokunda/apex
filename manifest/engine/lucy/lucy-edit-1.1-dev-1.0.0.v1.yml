@@ -12,6 +12,9 @@ metadata:
   - video-to-video
   author: Decart AI
   license: Apache-2.0
+  categories:
+  - video-edit
+  demo_path: https://bluelightningtv.com/wp-content/uploads/2025/09/woman-leather-jacket-crop-top-smiles-art-studio-paintings-sunset.png
 spec:
   engine: lucy
   model_type: edit

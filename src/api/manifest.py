@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_config_path, get_lora_path
 from src.utils.compute import get_compute_capability, validate_compute_requirements, ComputeCapability
-
+from src.engine import UniversalEngine
+import traceback
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
 # Base path to manifest directory
@@ -29,18 +30,11 @@ class ModelTypeInfo(BaseModel):
     key: str
     label: str
     description: str
+    
 
+class ModelCategoryInfo(ModelTypeInfo):
+    pass
 
-MODEL_TYPE_MAPPING = {
-    "vace": "control",
-    "fill": "inpaint",
-    "kontext": "edit",
-    "edit_plus": "edit",
-    "dreamomni2": "edit",
-    "humo": "a2v",
-    "s2v": "a2v",
-    "animate": "control"
-}
 
 def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     """Load a manifest by relative path and enrich it with runtime info."""
@@ -147,13 +141,8 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     content["id"] = metadata.get("id", "")
     content["name"] = metadata.get("name", "")
     content["model"] = metadata.get("model", "")
-    # Model type mapping
-    model_type_field = spec.get("model_type", [])
-    if isinstance(model_type_field, list):
-        mapped_model_type = [MODEL_TYPE_MAPPING.get(t, t) for t in model_type_field]
-    else:
-        mapped_model_type = MODEL_TYPE_MAPPING.get(model_type_field, model_type_field)
-    content["model_type"] = mapped_model_type
+    content["model_type"] = spec.get("model_type", [])
+    content["categories"] = metadata.get("categories", [])
     # Other top-level convenience fields
     content["version"] = str(metadata.get("version", ""))
     content["description"] = metadata.get("description", "")
@@ -300,6 +289,26 @@ def load_yaml_content(file_path: Path) -> Dict[Any, Any]:
         raise HTTPException(status_code=500, detail=f"Error parsing YAML file: {str(e)}")
 
 
+def _sizeof_local_path(path_str: str) -> int:
+    """
+    Compute the total size in bytes of a local file or directory.
+    """
+    p = Path(path_str)
+    if p.is_file():
+        return p.stat().st_size
+    if p.is_dir():
+        total = 0
+        for root, _dirs, files in os.walk(p):
+            for f in files:
+                try:
+                    total += (Path(root) / f).stat().st_size
+                except Exception:
+                    # Best-effort; ignore unreadable files
+                    pass
+        return total
+    return 0
+
+
 # ----------------------------- Attention Helpers ----------------------------- #
 def _attention_label_description_maps() -> tuple[Dict[str, str], Dict[str, str]]:
     """
@@ -374,39 +383,49 @@ def _build_attention_options(allowed: Optional[List[str]] = None) -> List[Dict[s
 
 @router.get("/types", response_model=List[ModelTypeInfo])
 def list_model_types() -> List[ModelTypeInfo]:
-    """List distinct spec.model_type values across manifests with label and description.
+    """List distinct metadata.categories values across manifests with label and description.
 
-    Scans all YAML files under ``manifest_updated`` and aggregates the unique
-    values found in ``spec.model_type`` (supports both string and list values).
+    Scans all YAML files under ``MANIFEST_BASE_PATH`` and aggregates the unique
+    values found in ``metadata.categories`` (supports both string and list values).
     """
     if not MANIFEST_BASE_PATH.exists():
         return []
 
-    # Friendly labels and short descriptions per known type
+    # Friendly labels and short descriptions per known category.
+    # This covers all categories currently present under MANIFEST_BASE_PATH
+    # (see the YAML manifests), but the code below still gracefully handles
+    # any new categories that may be added in the future.
     label_map = {
-        "t2v": "Text to Video",
-        "i2v": "Image to Video",
-        "v2v": "Video to Video",
-        "x2v": "Any to Video ",
-        "edit": "Edit",
-        "control": "Control",
-        "t2i": "Text to Image",
+        "text-to-video": "Text to Video",
+        "image-to-video": "Image to Video",
+        "video-to-video": "Video to Video",
+        "text-to-image": "Text to Image",
+        "audio-to-video": "Audio to Video",
+        "reference-image-to-video": "Reference Image to Video",
+        "video-edit": "Video Edit",
+        "image-edit": "Image Edit",
+        "image-to-image": "Image to Image",
         "inpaint": "Inpaint",
-        "a2v": "Audio to Video",
+        "control": "Control / Animation",
+        "edit": "Edit",
     }
+    
     description_map = {
-        "t2v": "Generate videos from text prompts.",
-        "i2v": "Animate a single image into a video.",
-        "t2i": "Generate images from text prompts.",
-        "v2v": "Transform an input video with a new style or prompt.",
-        "x2v": "Flexible any-to-video generation.",
-        "edit": "Edit or modify images using prompts and tools.",
-        "control": "Guide generation with control signals (e.g., canny, pose).",
-        "inpaint": "Inpaint images using prompts and masks.",
-        "a2v": "Generate videos from audio and images.",
+        "text-to-video": "Generate videos from text prompts.",
+        "image-to-video": "Animate or transform images into videos.",
+        "video-to-video": "Transform an input video with a new style or prompt.",
+        "text-to-image": "Generate images from text prompts.",
+        "audio-to-video": "Generate videos from audio (and optionally images or video).",
+        "reference-image-to-video": "Generate videos guided by a reference image.",
+        "video-edit": "Edit or transform existing videos using prompts and tools.",
+        "image-edit": "Edit or transform existing images using prompts and tools.",
+        "image-to-image": "Transform an input image into a new one while preserving structure.",
+        "inpaint": "Fill in or replace regions of an image using prompts and masks.",
+        "control": "Control or animate content using additional inputs such as pose, masks, or reference videos.",
+        "edit": "General-purpose editing of images or videos.",
     }
 
-    discovered_types = set()
+    discovered_categories = set()
 
     for root, _, files in os.walk(MANIFEST_BASE_PATH):
         for file in files:
@@ -419,26 +438,41 @@ def list_model_types() -> List[ModelTypeInfo]:
                 # Skip invalid YAMLs
                 continue
 
-            spec = data.get("spec", {}) if isinstance(data, dict) else {}
-            model_type_field = spec.get("model_type")
-            if isinstance(model_type_field, list):
-                for t in model_type_field:
-                    if isinstance(t, str) and t.strip():
-                        model_type = MODEL_TYPE_MAPPING.get(t.strip(), t.strip())
-                        discovered_types.add(model_type)
-            elif isinstance(model_type_field, str) and model_type_field.strip():
-                model_type = MODEL_TYPE_MAPPING.get(model_type_field.strip(), model_type_field.strip())
-                discovered_types.add(model_type)
+            if not isinstance(data, dict):
+                continue
+
+            metadata = data.get("metadata", {}) or {}
+            categories_field = metadata.get("categories")
+
+            if isinstance(categories_field, list):
+                for c in categories_field:
+                    if isinstance(c, str) and c.strip():
+                        discovered_categories.add(c.strip())
+            elif isinstance(categories_field, str) and categories_field.strip():
+                discovered_categories.add(categories_field.strip())
 
     results: List[ModelTypeInfo] = []
-    for key in sorted(discovered_types):
-        label = label_map.get(key, key.replace('_', ' ').replace('-', ' ').upper())
-        description = description_map.get(key, f"Models with '{key}' capability.")
+    for key in sorted(discovered_categories):
+        # Ensure every discovered category has a label and description, even if not pre-defined above
+        label = label_map.get(key)
+        if not label:
+            # Generate a human-friendly label from the key
+            label = key.replace("_", " ").replace("-", " ").title()
+
+        description = description_map.get(key)
+        if not description:
+            description = f"Models in the '{label}' category."
+
         results.append(ModelTypeInfo(key=key, label=label, description=description))
 
     return results
 
 
+@router.get("/categories", response_model=List[ModelCategoryInfo])
+def list_model_categories() -> List[ModelCategoryInfo]:
+    """List distinct metadata.categories values across manifests with label and description.
+    """
+    return list_model_types()
 
 @router.get("/system/compute")
 def get_system_compute_info():
@@ -578,3 +612,306 @@ def get_manifest_part(manifest_id: str, path: Optional[str] = None):
             raise HTTPException(status_code=404, detail=f"Path not traversable at segment '{token}'")
 
     return value
+
+
+class CustomModelPathRequest(BaseModel):
+    manifest_id: str
+    component_index: int
+    path: str
+    name: Optional[str] = None
+
+
+class DeleteCustomModelPathRequest(BaseModel):
+    manifest_id: str
+    component_index: int
+    path: str
+
+
+@router.post("/custom-model-path")
+def validate_and_register_custom_model_path(req: CustomModelPathRequest) -> Dict[str, Any]:
+    """
+    Validate a local model path and, if valid, register it in the manifest as a
+    custom component model_path entry.
+
+    Behaviour:
+      - validates that `req.path` exists (file or directory),
+      - attempts to load the model via `BaseEngine.validate_model_path`,
+      - and, if successful, appends a new entry to the component's `model_path`
+        list in the underlying YAML manifest, including a computed `file_size`
+        and a `custom: true` flag.
+    """
+   
+    if not req.manifest_id:
+        raise HTTPException(status_code=400, detail="manifest_id is required")
+    if req.component_index < 0:
+        raise HTTPException(
+            status_code=400, detail="component_index must be non-negative"
+        )
+    if not req.path:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    # Basic filesystem validation – local file or directory
+    if not os.path.exists(req.path):
+        raise HTTPException(
+            status_code=400, detail=f"Model path does not exist: {req.path}"
+        )
+    if not os.path.isfile(req.path) and not os.path.isdir(req.path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model path is not a file or directory: {req.path}",
+        )
+
+    # Load enriched manifest to locate the backing YAML path
+    manifest = get_manifest(req.manifest_id)
+    if not manifest:
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {req.manifest_id}"
+        )
+
+    relative_path = manifest.get("full_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest missing full_path metadata; cannot locate YAML.",
+        )
+    yaml_path = MANIFEST_BASE_PATH / relative_path
+    if not yaml_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Manifest YAML not found on disk: {yaml_path}",
+        )
+
+    # Load the raw YAML document for mutation
+    doc = load_yaml_content(yaml_path)
+    if not isinstance(doc, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest YAML is not a mapping; cannot update.",
+        )
+
+    spec = doc.get("spec") or {}
+    components = spec.get("components") or []
+    if not isinstance(components, list) or req.component_index >= len(components):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Component not found at index {req.component_index}",
+        )
+
+    # Ensure this path (normalized via DownloadMixin.is_downloaded) is not already
+    # registered on any component in the manifest. We compare against the "real"
+    # on-disk path if the model has already been downloaded, not just the raw
+    # manifest string, since that may be a remote URL or outdated location.
+    components_base = get_components_path()
+
+    def _canonical_model_path(path_str: str) -> str:
+        try:
+            resolved = DownloadMixin.is_downloaded(path_str, components_base)
+            return resolved or path_str
+        except Exception:
+            return path_str
+
+    requested_path_canonical = _canonical_model_path(req.path)
+    for idx, comp in enumerate(components):
+        if not isinstance(comp, dict):
+            continue
+        existing_mp = comp.get("model_path")
+
+        # Normalize and iterate over existing paths for this component
+        candidate_paths: List[str] = []
+        if isinstance(existing_mp, str):
+            candidate_paths.append(existing_mp)
+        elif isinstance(existing_mp, list):
+            for item in existing_mp:
+                if isinstance(item, str):
+                    candidate_paths.append(item)
+                elif isinstance(item, dict):
+                    p = item.get("path")
+                    if isinstance(p, str):
+                        candidate_paths.append(p)
+        elif isinstance(existing_mp, dict):
+            p = existing_mp.get("path")
+            if isinstance(p, str):
+                candidate_paths.append(p)
+
+        for raw_path in candidate_paths:
+            canonical = _canonical_model_path(raw_path)
+            if canonical == requested_path_canonical:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Model path is already registered for this manifest "
+                        f"(component index {idx}): {req.path}"
+                    ),
+                )
+
+    component_doc = components[req.component_index]
+    if not isinstance(component_doc, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Component at index {req.component_index} is not a mapping",
+        )
+
+    # First, validate that the engine can load this component with the new path
+    # without mutating the on-disk YAML.
+    component_for_validation: Dict[str, Any] = dict(component_doc)
+    component_for_validation["model_path"] = req.path
+
+    engine = UniversalEngine(yaml_path=str(yaml_path), should_download=False).engine
+
+    try:
+        engine.validate_model_path(component_for_validation)
+    except Exception as e:
+        
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=400, detail=f"Failed to validate model path: {e}"
+        )
+
+    # Compute file size for the new path
+    size_bytes = _sizeof_local_path(req.path)
+
+    # Build new model_path entry for YAML
+    variant_name = req.name or "custom"
+    new_item: Dict[str, Any] = {
+        "path": req.path,
+        "variant": variant_name,
+        "custom": True,
+    }
+    if size_bytes > 0:
+        new_item["file_size"] = int(size_bytes)
+
+    # Normalize existing model_path into list[dict]
+    mp = component_doc.get("model_path")
+    if mp is None:
+        mp_items: List[Any] = []
+    elif isinstance(mp, str):
+        mp_items = [{"path": mp}]
+    elif isinstance(mp, list):
+        mp_items = mp
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported model_path format on component; expected string or list.",
+        )
+
+    mp_items.append(new_item)
+    component_doc["model_path"] = mp_items
+    components[req.component_index] = component_doc
+    doc.setdefault("spec", {})["components"] = components
+
+    # Persist updated YAML back to disk
+    try:
+        yaml_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write updated manifest: {e}"
+        )
+
+    return {
+        "success": True,
+        "message": "Model path validated and registered successfully.",
+    }
+
+
+@router.delete("/custom-model-path")
+def delete_custom_model_path(req: DeleteCustomModelPathRequest) -> Dict[str, Any]:
+    """
+    Remove a *custom* model_path entry from a component in the manifest YAML,
+    without deleting any underlying model files from disk.
+    """
+    if not req.manifest_id:
+        raise HTTPException(status_code=400, detail="manifest_id is required")
+    if req.component_index < 0:
+        raise HTTPException(
+            status_code=400, detail="component_index must be non-negative"
+        )
+    if not req.path:
+        raise HTTPException(status_code=400, detail="path is required")
+
+    manifest = get_manifest(req.manifest_id)
+    if not manifest:
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {req.manifest_id}"
+        )
+
+    relative_path = manifest.get("full_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest missing full_path metadata; cannot locate YAML.",
+        )
+    yaml_path = MANIFEST_BASE_PATH / relative_path
+    if not yaml_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Manifest YAML not found on disk: {yaml_path}",
+        )
+
+    doc = load_yaml_content(yaml_path)
+    if not isinstance(doc, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest YAML is not a mapping; cannot update.",
+        )
+
+    spec = doc.get("spec") or {}
+    components = spec.get("components") or []
+    if not isinstance(components, list) or req.component_index >= len(components):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Component not found at index {req.component_index}",
+        )
+
+    component_doc = components[req.component_index]
+    if not isinstance(component_doc, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Component at index {req.component_index} is not a mapping",
+        )
+
+    mp = component_doc.get("model_path")
+    removed = False
+
+    # Only remove entries that are explicitly marked as custom and match the path.
+    if isinstance(mp, list):
+        new_items: List[Any] = []
+        for item in mp:
+            if isinstance(item, dict):
+                p = item.get("path")
+                is_custom = item.get("custom") is True
+                if is_custom and isinstance(p, str) and p == req.path:
+                    removed = True
+                    continue
+            new_items.append(item)
+        if removed:
+            if new_items:
+                component_doc["model_path"] = new_items
+            else:
+                component_doc.pop("model_path", None)
+    elif isinstance(mp, dict):
+        p = mp.get("path")
+        is_custom = mp.get("custom") is True
+        if is_custom and isinstance(p, str) and p == req.path:
+            removed = True
+            component_doc.pop("model_path", None)
+
+    if not removed:
+        raise HTTPException(
+            status_code=404,
+            detail="Custom model path not found on component; nothing to delete.",
+        )
+
+    components[req.component_index] = component_doc
+    doc.setdefault("spec", {})["components"] = components
+
+    try:
+        yaml_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write updated manifest: {e}"
+        )
+
+    return {
+        "success": True,
+        "message": "Custom model path removed successfully.",
+    }

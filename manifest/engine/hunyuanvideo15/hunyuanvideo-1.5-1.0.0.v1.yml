@@ -14,6 +14,9 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://github.com/Tencent-Hunyuan/HunyuanImage-3.0/raw/main/assets/banner.png
+  categories:
+  - text-to-video
+  - image-to-video
 spec:
   engine: hunyuanvideo15
   model_type: ti2v

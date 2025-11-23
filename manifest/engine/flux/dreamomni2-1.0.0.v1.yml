@@ -11,6 +11,8 @@ metadata:
   author: Apex AI, xiabs
   license: Apache-2.0
   demo_path: https://pbihao.github.io/projects/DreamOmni2/multi_2_ref/7/ref_0.jpg
+  categories:
+  - image-edit
 spec:
   engine: flux
   model_type: dreamomni2

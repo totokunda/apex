@@ -12,6 +12,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://alizila.oss-us-west-1.aliyuncs.com/uploads/2025/08/Qwen-Image-cover.jpg
+  categories:
+  - image-edit
 spec:
   engine: qwenimage
   model_type: edit
@@ -244,22 +246,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

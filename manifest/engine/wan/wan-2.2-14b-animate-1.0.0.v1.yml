@@ -14,6 +14,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://resp.wananimate.art/wananimate/images/Wan-Animate-Generalizable-Arbitrary-Character-Animation-3.webp
+  categories:
+  - control
 spec:
   fps: 30
   engine: wan
