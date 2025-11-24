@@ -22,7 +22,7 @@ class DownloadProgressTracker:
         self.last_update = 0
         self.update_interval = 0.5  # Update every 0.5 seconds
     
-    def update_progress(self, filename: str, current: int, total: int):
+    def update_progress(self, current: int, total: int, filename: str):
         """
         Update progress for a specific file
         
@@ -40,8 +40,8 @@ class DownloadProgressTracker:
         self.files[filename] = {"current": current, "total": total}
         
         # Calculate overall progress
-        total_downloaded = sum(f["current"] for f in self.files.values())
-        total_size = sum(f["total"] for f in self.files.values())
+        total_downloaded = sum((f["current"] or 0) for f in self.files.values())
+        total_size = sum((f["total"] or 0) for f in self.files.values())
         
         if total_size > 0:
             progress = total_downloaded / total_size

@@ -3,6 +3,7 @@ Ray tasks for preprocessor operations
 """
 from typing import Dict, Any, Optional, Callable, List
 from pathlib import Path
+from urllib.parse import urlparse
 import ray
 import traceback
 from loguru import logger
@@ -11,23 +12,341 @@ import importlib
 import os
 import torch
 import inspect
+import yaml
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
     get_preprocessor_info
 )
+from src.engine.registry import UniversalEngine 
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_lora_path, get_preprocessor_path
 from diffusers.utils import export_to_video
-import time
+from src.lora.manager import LoraManager
+from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 
 
-@ray.remote
+
+def _derive_lora_name_from_source(source: str) -> str:
+    """
+    Derive a human-readable LoRA name/label from an arbitrary source string
+    (local path, HF repo path, or URL).
+    """
+    try:
+        src = (source or "").strip()
+        parsed = urlparse(src)
+        path = parsed.path if parsed.scheme else src
+        path = path.rstrip("/") or src
+        base = os.path.basename(path) or path
+        # Drop query fragments if they somehow slipped through
+        if "?" in base:
+            base = base.split("?", 1)[0]
+        if "#" in base:
+            base = base.split("#", 1)[0]
+        # Trim extension, keep stem only
+        if "." in base:
+            base = base.split(".", 1)[0]
+        return base or src
+    except Exception:
+        return source
+
+
+
+def _load_manifest_yaml(yaml_path: Path) -> Optional[Dict[str, Any]]:
+    """Best-effort YAML loader that never raises; logs and returns None on failure."""
+    try:
+        if not yaml_path.exists():
+            logger.warning(f"Manifest YAML not found at {yaml_path}")
+            return None
+        with yaml_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            logger.warning(f"Manifest YAML at {yaml_path} is not a mapping")
+            return None
+        return data
+    except Exception as e:
+        logger.error(f"Failed to load manifest YAML {yaml_path}: {e}")
+        return None
+
+
+def _save_manifest_yaml(yaml_path: Path, doc: Dict[str, Any]) -> None:
+    """Best-effort YAML dumper; logs on failure and keeps existing file untouched."""
+    try:
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_text = yaml.safe_dump(doc, sort_keys=False)
+        yaml_path.write_text(yaml_text, encoding="utf-8")
+    except Exception as e:
+        logger.error(f"Failed to write updated manifest YAML {yaml_path}: {e}")
+
+
+def _remove_lora_from_manifest(source: str, manifest_id: Optional[str] = None) -> bool:
+    """
+    Remove any LoRA entries whose source/remote_source (or raw string entry)
+    matches `source` from the given manifest.
+
+    Returns True if at least one entry was removed, otherwise False.
+    """
+    try:
+        manifest = get_manifest(manifest_id)
+        manifest_path = MANIFEST_BASE_PATH / Path(manifest.get("full_path"))
+        doc = _load_manifest_yaml(manifest_path)
+        if doc is None:
+            return False
+
+        spec = doc.get("spec") or {}
+        loras = spec.get("loras") or []
+        if not isinstance(loras, list):
+            return False
+
+        new_loras: List[Any] = []
+        removed = False
+        for entry in loras:
+            if isinstance(entry, str):
+                entry_source = entry
+            elif isinstance(entry, dict):
+                entry_source = entry.get("source") or entry.get("remote_source")
+            else:
+                entry_source = None
+
+            if entry_source == source:
+                removed = True
+                continue
+            new_loras.append(entry)
+
+        if not removed:
+            return False
+
+        spec["loras"] = new_loras
+        doc["spec"] = spec
+        _save_manifest_yaml(manifest_path, doc)
+        logger.info(f"Removed LoRA '{source}' from manifest {manifest_path.name}")
+        return True
+    except Exception as e:
+        traceback.print_exc()
+        logger.warning(f"Failed to remove LoRA '{source}' from manifest: {e}")
+        return False
+
+
+def _ensure_lora_registered_in_manifests(source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Ensure that a LoRA entry for `source` exists in all engine manifests.
+
+    Behaviour:
+      - For each manifest YAML:
+          - Ensures `spec.loras` exists as a list.
+          - If an entry with matching `source` is absent, appends:
+                - source: <source>
+                - scale: 1.0
+                - name: <derived name>
+                - label: <derived name>
+                - verified: false   (verification happens after download)
+          - If entry already exists, leaves the rest of its fields untouched.
+    """
+    try:
+        manifest = get_manifest(manifest_id)
+        manifest_path = MANIFEST_BASE_PATH / Path(manifest.get("full_path"))
+        doc = _load_manifest_yaml(manifest_path)
+        if doc is None:
+            return
+
+        spec = doc.setdefault("spec", {})
+        loras = spec.setdefault("loras", [])
+        if not isinstance(loras, list):
+            logger.warning(f"spec.loras is not a list in manifest {manifest_id}; leaving unchanged")
+            return
+        # Skip if already registered in this manifest
+        already_present = False
+        for entry in loras:
+            if isinstance(entry, dict) and (entry.get("source") == source or entry.get("remote_source") == source):
+                already_present = True
+                break
+            if isinstance(entry, str) and entry == source:
+                already_present = True
+                break
+        if already_present:
+            return entry
+        name = lora_name or _derive_lora_name_from_source(source)
+        new_entry: Dict[str, Any] = {
+            "scale": 1.0,
+            "name": name,
+            "label": name,
+            "verified": False,
+        }
+        loader = DownloadMixin()
+        is_downloaded = loader.is_downloaded(source, get_lora_path())
+        if is_downloaded:
+            new_entry["source"] = is_downloaded
+        else:
+            new_entry["remote_source"] = source
+        
+        loras.append(new_entry)
+        spec["loras"] = loras
+        doc["spec"] = spec
+        _save_manifest_yaml(manifest_path, doc)
+        logger.info(f"Registered new LoRA '{source}' in manifest {doc.get('full_path')}")
+        return new_entry
+    except Exception as e: 
+        traceback.print_exc()
+        logger.warning(f"Failed to register LoRA '{source}' in manifests: {e}")
+        return None
+
+
+def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Return the transformer component dict for this manifest with `model_path`
+    set to a concrete local string path if any transformer weights are already
+    downloaded.
+
+    If nothing is downloaded or no transformer component is present, returns None.
+    """
+    try:
+        spec = doc.get("spec") or {}
+        components = spec.get("components") or []
+        if not isinstance(components, list):
+            return None
+
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            if component.get("type") != "transformer":
+                continue
+
+            raw_model_paths = component.get("model_path")
+            candidate_paths: List[str] = []
+            if isinstance(raw_model_paths, str):
+                candidate_paths.append(raw_model_paths)
+            elif isinstance(raw_model_paths, dict):
+                path_val = raw_model_paths.get("path")
+                if isinstance(path_val, str):
+                    candidate_paths.append(path_val)
+            elif isinstance(raw_model_paths, list):
+                for item in raw_model_paths:
+                    if isinstance(item, str):
+                        candidate_paths.append(item)
+                    elif isinstance(item, dict):
+                        path_val = item.get("path")
+                        if isinstance(path_val, str):
+                            candidate_paths.append(path_val)
+
+            base_dir = get_components_path()
+            for p in candidate_paths:
+                local = DownloadMixin.is_downloaded(str(p), base_dir)
+                if local:
+                    # Return a shallow copy so callers can safely mutate model_path
+                    comp_copy: Dict[str, Any] = dict(component)
+                    comp_copy["model_path"] = local
+                    return comp_copy
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to determine transformer download status for manifest: {e}")
+        return None
+
+
+def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = None) -> Optional[bool]:
+    """
+    Update manifest entries for `source` with a `verified` flag.
+
+    - For each manifest that contains a matching LoRA `source` and whose transformer
+      is already downloaded, set `verified: true` on that LoRA entry.
+
+    Returns:
+        - True  -> LoRA verified and kept
+        - False -> LoRA determined invalid and removed from manifest
+        - None  -> No changes made (e.g. transformer not available / no matching entries)
+    """
+    try:
+        manifest = get_manifest(manifest_id)
+        manifest_path = MANIFEST_BASE_PATH / Path(manifest.get("full_path"))
+        doc = _load_manifest_yaml(manifest_path)
+        if doc is None:
+            return None
+        spec = doc.get("spec") or {}
+        loras = spec.get("loras") or []
+        if not isinstance(loras, list):
+            return None
+        # Only attempt verification if the manifest's transformer is present locally
+        transformer_component = _is_transformer_downloaded_for_manifest(doc)
+        if not transformer_component:
+            return None
+        # Build engine once per manifest for validation
+        try:
+            engine = UniversalEngine(yaml_path=str(manifest_path), should_download=False).engine
+        except Exception as e:
+            logger.warning(f"Failed to create engine for manifest during LoRA validation: {e}")
+            return None
+        updated = False
+        any_verified = False
+        any_removed = False
+        new_loras: List[Any] = []
+        for entry in loras:
+            # Determine this entry's source (if any)
+            if isinstance(entry, str):
+                entry_source = entry
+            elif isinstance(entry, dict):
+                entry_source = entry.get("source") or entry.get("remote_source")
+            else:
+                new_loras.append(entry)
+                continue
+            if entry_source != source:
+                new_loras.append(entry)
+                continue
+            # Validate this LoRA against the transformer
+            is_valid = False
+            try:
+                is_valid = bool(engine.validate_lora_path(entry_source, transformer_component))
+            except Exception as ve:
+                logger.warning(f"LoRA validation failed for '{entry_source}' in manifest {manifest_path}: {ve}")
+                is_valid = False
+            if not is_valid:
+                # Drop invalid LoRAs from this manifest entirely
+                logger.warning(f"Removing invalid LoRA '{entry_source}' from manifest {manifest_path}")
+                updated = True
+                any_removed = True
+                # Do not append this entry to new_loras -> effectively remove it
+                continue
+            # Valid LoRA → normalize to dict with verified=True
+            name = _derive_lora_name_from_source(entry_source)
+            if isinstance(entry, str):
+                entry = {
+                    "source": entry_source,
+                    "scale": 1.0,
+                    "name": name,
+                    "label": name,
+                    "verified": True,
+                }
+            elif isinstance(entry, dict):
+                entry = dict(entry)
+                entry.setdefault("name", name)
+                entry.setdefault("label", name)
+                entry["verified"] = True
+                entry["source"] = DownloadMixin.is_downloaded(entry_source, get_lora_path()) or entry.get("source")
+            new_loras.append(entry)
+            updated = True
+        if not updated:
+            return None
+        spec["loras"] = new_loras
+        doc["spec"] = spec
+        _save_manifest_yaml(manifest_path, doc)
+        if any_verified:
+            logger.info(f"Updated LoRA '{source}' verification state in manifest {manifest_path.name}")
+            return True
+        if any_removed:
+            logger.info(f"Removed invalid LoRA '{source}' from manifest {manifest_path.name}")
+            return False
+        return None
+    except Exception as e:
+        traceback.print_exc()
+        logger.warning(f"Failed to update LoRA verification state for '{source}': {e}")
+        return None
+
+@ray.remote(num_cpus=0.1)
 def download_unified(
     item_type: str,
     source: Any,
     job_id: str,
     ws_bridge,
     save_path: Optional[str] = None,
+    manifest_id: Optional[str] = None,
+    lora_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Unified downloader for components, LoRAs, and preprocessors.
@@ -44,8 +363,11 @@ def download_unified(
         job_id: Job ID for progress tracking.
         ws_bridge: Ray actor bridge to forward websocket updates.
         save_path: Optional override directory to save into; otherwise inferred from item_type.
+        manifest_id: Optional manifest ID to use for LoRA verification.
+        lora_name: Optional name to use for the LoRA.
     """
     # Helper to send progress
+    logger.info(f"Downloading {item_type} {source} for job {job_id} with manifest {manifest_id} and lora name {lora_name}")
     def send_progress(progress: Optional[float], message: str, metadata: Optional[Dict[str, Any]] = None):
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
@@ -76,22 +398,15 @@ def download_unified(
         if norm_type == "preprocessor" and isinstance(source, str):
             try:
                 preprocessor_info = get_preprocessor_info(source)
-                # If lookup succeeds, treat source as a preprocessor id
-                def send_pp_progress(local_progress: float, message: str, metadata: Optional[Dict] = None):
-                    try:
-                        ray.get(ws_bridge.send_update.remote(job_id, local_progress, message, metadata))
-                        logger.info(f"[{job_id}] Progress: {local_progress*100:.1f}% - {message}")
-                    except Exception as e:
-                        logger.error(f"Failed to send progress update to websocket: {e}")
-                
+
                 # Force CPU in worker to avoid MPS/CUDA fork issues
                 os.environ['CUDA_VISIBLE_DEVICES'] = ''
                 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
                 if hasattr(torch, 'set_default_device'):
                     torch.set_default_device('cpu')
                 
-                send_pp_progress(0.0, f"Starting download of preprocessor '{source}'")
-                send_pp_progress(0.1, "Loading preprocessor module")
+                send_progress(0.0, f"Starting download of preprocessor '{source}'")
+                send_progress(0.1, "Loading preprocessor module")
                 
                 module = importlib.import_module(preprocessor_info["module"])
                 preprocessor_class = getattr(module, preprocessor_info["class"])
@@ -99,17 +414,17 @@ def download_unified(
                 # Wire download progress into util
                 from src.preprocess.download_tracker import DownloadProgressTracker
                 from src.preprocess import util as util_module
-                tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_pp_progress(p, m, md))
+                tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(p, m, md))
                 util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
                 try:
-                    preprocessor = preprocessor_class.from_pretrained()
+                    preprocessor_class.from_pretrained()
                     from src.preprocess.base_preprocessor import BasePreprocessor
                     BasePreprocessor._mark_as_downloaded(source)
                 finally:
                     util_module.DOWNLOAD_PROGRESS_CALLBACK = None
                 
-                send_pp_progress(1.0, "Download complete")
-                send_pp_progress(1.0, "Complete", {"status": "complete"})
+                send_progress(1.0, "Download complete")
+                send_progress(1.0, "Complete", {"status": "complete"})
                 return {
                     "job_id": job_id,
                     "status": "complete",
@@ -121,6 +436,190 @@ def download_unified(
                 # Not a registered preprocessor id; fall through to generic downloader
                 logger.info(f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}")
                 # continue to generic path-based downloading below
+        
+        elif norm_type == "lora" and isinstance(source, str):
+            try:
+                from src.preprocess.download_tracker import DownloadProgressTracker
+                lora_manager = LoraManager()
+
+                # 1) Immediately register the LoRA in manifests (if not already present)
+                entry = _ensure_lora_registered_in_manifests(source, manifest_id, lora_name)
+                
+                logger.info(f"Registered LoRA '{source}' in manifests: {entry}")
+
+                # 2) Start the actual download using the LoRA manager with progress tracking
+                def _lora_download_progress_adapter(
+                    p: Optional[float],
+                    message: str,
+                    metadata: Optional[Dict[str, Any]] = None,
+                ):
+                    """
+                    Map raw download progress (0..1) into the 0..0.75 range of the
+                    unified job progress, reserving the remaining 0.25 for LoRA
+                    verification.
+                    """
+                    if p is None:
+                        send_progress(None, message, metadata)
+                        return
+                    try:
+                        frac = max(0.0, min(1.0, float(p)))
+                    except Exception:
+                        frac = 0.0
+                    scaled = 0.75 * frac
+                    send_progress(scaled, message, metadata)
+
+                tracker = DownloadProgressTracker(job_id, _lora_download_progress_adapter)
+                if entry is not None:
+                    if "source" in entry and entry.get("verified"):
+                        # No resolve needed
+                        send_progress(
+                            1.0,
+                            "LoRA already downloaded and verified",
+                            {
+                                "status": "complete",
+                                "bucket": norm_type,
+                                "stage": "lora_download",
+                            },
+                        )
+                        return {
+                            "job_id": job_id,
+                            "status": "complete",
+                            "type": "lora",
+                            "id": source,
+                            "message": "LoRA already downloaded and verified",
+                        }
+                    else:
+                        lora_item = lora_manager.resolve(
+                            source,
+                            prefer_name=lora_name,
+                            progress_callback=tracker.update_progress,
+                        )
+                        if not getattr(lora_item, "local_paths", None) or len(lora_item.local_paths) == 0:
+                            # Resolved but no actual files -> treat as failure and clean up manifest
+                            logger.error(
+                                f"No LoRA files were found for source '{source}'. "
+                                "Removing LoRA entry from manifest."
+                            )
+                            _remove_lora_from_manifest(source, manifest_id)
+                            send_progress(
+                                0.0,
+                                f"LoRA download failed for '{source}' (no files found)",
+                                {
+                                    "status": "error",
+                                    "bucket": norm_type,
+                                    "stage": "lora_download",
+                                    "error": "No LoRA files found for source",
+                                },
+                            )
+                            return {
+                                "job_id": job_id,
+                                "status": "error",
+                                "type": "lora",
+                                "id": source,
+                                "message": "LoRA download failed: no files found for source; removed from manifest",
+                            }
+                else:
+                    logger.error(f"LoRA entry is not registered in manifests: {entry}")
+                    send_progress(0.0, f"LoRA entry is not registered in manifests: {entry}", {"status": "error", "bucket": norm_type, "stage": "lora_download", "error": f"LoRA entry is not registered in manifests: {entry}"})
+                    return {
+                        "job_id": job_id,
+                        "status": "error",
+                        "type": "lora",
+                        "id": source,
+                        "message": f"LoRA entry is not registered in manifests: {entry}",
+                    }
+                # Explicitly mark the end of the download phase at 75%
+                try:
+                    send_progress(
+                        0.75,
+                        "LoRA download complete",
+                        {"status": "processing", "bucket": norm_type, "stage": "lora_download"},
+                    )
+                except Exception:
+                    pass
+
+                # 3) Verification phase: use the remaining 25% of progress
+                try:
+                    send_progress(
+                        0.80,
+                        "Verifying LoRA",
+                        {"status": "processing", "bucket": norm_type, "stage": "lora_verification"},
+                    )
+                except Exception:
+                    pass
+
+                verified = _mark_lora_verified_in_manifests(lora_item.source, manifest_id)
+
+                # If verification explicitly failed, surface an error and remove the LoRA
+                if verified is False:
+                    _remove_lora_from_manifest(lora_item.source, manifest_id)
+                    send_progress(
+                        0.0,
+                        "LoRA verification failed; removed from manifest",
+                        {
+                            "status": "error",
+                            "bucket": norm_type,
+                            "stage": "lora_verification",
+                            "verified": False,
+                        },
+                    )
+                    return {
+                        "job_id": job_id,
+                        "status": "error",
+                        "type": "lora",
+                        "id": source,
+                        "message": "LoRA verification failed; removed from manifest",
+                    }
+
+                try:
+                    send_progress(
+                        1.0,
+                        "LoRA verification complete",
+                        {
+                            "status": "complete",
+                            "bucket": norm_type,
+                            "stage": "lora_verification",
+                            "verified": bool(verified) if verified is not None else False,
+                        },
+                    )
+                except Exception:
+                    pass
+
+                result: Dict[str, Any] = {
+                    "job_id": job_id,
+                    "status": "complete",
+                    "type": "lora",
+                    "id": source,
+                    "message": "LoRA downloaded and initialized",
+                    "local_paths": lora_item.local_paths,
+                }
+                if verified is not None:
+                    result["verified"] = bool(verified)
+                return result
+            except Exception as maybe_not_lora:
+                # Not a valid LoRA source or failed to download; clean up manifest and surface error
+                logger.warning(
+                    f"LoRA download/resolve failed for '{source}'. "
+                    f"Removing LoRA from manifest. Reason: {maybe_not_lora}"
+                )
+                _remove_lora_from_manifest(source, manifest_id)
+                send_progress(
+                    0.0,
+                    f"LoRA download failed for '{source}'",
+                    {
+                        "status": "error",
+                        "bucket": norm_type,
+                        "stage": "lora_download",
+                        "error": str(maybe_not_lora),
+                    },
+                )
+                return {
+                    "job_id": job_id,
+                    "status": "error",
+                    "type": "lora",
+                    "id": source,
+                    "message": f"LoRA download failed; removed from manifest: {maybe_not_lora}",
+                }
         
         # Case 2: Generic path/url/hf download(s) using DownloadMixin
         # Normalize sources to a list

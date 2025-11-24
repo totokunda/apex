@@ -276,7 +276,7 @@ def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
     def _progress_cb(downloaded: int, total: int, _label: str = None):
         if DOWNLOAD_PROGRESS_CALLBACK:
             try:
-                DOWNLOAD_PROGRESS_CALLBACK(filename, int(downloaded or 0), int(total or 0))
+                DOWNLOAD_PROGRESS_CALLBACK(int(downloaded or 0), int(total or 0), filename)
             except Exception:
                 pass
     try:
@@ -337,7 +337,7 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
             if DOWNLOAD_PROGRESS_CALLBACK:
                 try:
                     # total can be None; use 0 to keep signature stable
-                    DOWNLOAD_PROGRESS_CALLBACK(filename, int(downloaded or 0), int(total or 0))
+                    DOWNLOAD_PROGRESS_CALLBACK(int(downloaded or 0), int(total or 0), filename)
                 except Exception:
                     pass
 

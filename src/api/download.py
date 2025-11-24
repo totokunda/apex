@@ -96,6 +96,8 @@ class UnifiedDownloadRequest(BaseModel):
     source: Union[str, List[str]]
     save_path: Optional[str] = None
     job_id: Optional[str] = None
+    manifest_id: Optional[str] = None
+    lora_name: Optional[str] = None
 
     @validator("item_type")
     def _valid_item_type(cls, v: str) -> str:
@@ -147,7 +149,8 @@ class DeleteRequest(BaseModel):
     item_type: Optional[str] = None  # Optional: 'component' | 'lora' | 'preprocessor'
     source: Optional[Union[str, List[str]]] = None  # Optional: to unmark preprocessor and clear mappings
     save_path: Optional[str] = None  # Optional: used to target mapping cleanup
-
+    lora_name: Optional[str] = None  # Optional: used to target mapping cleanup
+    
     @validator("item_type")
     def _valid_item_type(cls, v: Optional[str]) -> Optional[str]:
         return _normalize_item_type(v) if v else v
@@ -174,7 +177,7 @@ def start_unified_download(request: UnifiedDownloadRequest):
         req_key = _request_key(request.item_type, request.source, request.save_path)
         # If a job with this request key was already started, return existing job id
         existing_job_id = _request_key_to_job_id.get(req_key)
-        if existing_job_id:
+        if existing_job_id and request.item_type != "lora":
             status_info = unified_job_store.status(existing_job_id)
             status = status_info.get("status", "unknown")
             if status in {"running", "queued"}:
@@ -187,7 +190,7 @@ def start_unified_download(request: UnifiedDownloadRequest):
 
         # If already downloaded and no need to start a job
         downloaded, _ = _already_downloaded(request.item_type, request.source, request.save_path)
-        if downloaded:
+        if downloaded and request.item_type != "lora":
             # Cache the deterministic id mapping even when not starting a Ray job
             _request_key_to_job_id[req_key] = job_id
             return JobResponse(job_id=job_id, status="complete", message="Already downloaded")
@@ -205,12 +208,15 @@ def start_unified_download(request: UnifiedDownloadRequest):
             ray.get(bridge.clear_updates.remote(job_id))
         except Exception:
             pass
+    
         ref = download_unified.remote(
             request.item_type,
             request.source,
             job_id,
             bridge,
             request.save_path,
+            request.manifest_id,
+            request.lora_name,
         )
         register_job(job_id, ref, "download", {
             "item_type": request.item_type,

@@ -2155,3 +2155,21 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         del component
         empty_cache()
         return True
+    
+    def validate_lora_path(self, lora_path: str, transformer_component: Dict[str, Any]):
+        transformer = self.load_component(transformer_component, no_weights=True)
+        
+        try:
+            lora_manager = self.lora_manager or LoraManager()
+            loaded_items = lora_manager.load_into(transformer, [lora_path])
+            if len(loaded_items) > 0:
+                return True
+            else:
+                return False
+        except Exception as e:
+            traceback.print_exc()
+            self.logger.warning(f"Failed to validate LoRA path {lora_path}: {e}")
+            return False
+        finally:
+            del transformer
+            empty_cache()
