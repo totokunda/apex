@@ -642,6 +642,316 @@ class DeleteCustomModelPathRequest(BaseModel):
     path: str
 
 
+class UpdateLoraScaleRequest(BaseModel):
+    """
+    Request body for updating a single LoRA entry's scale inside a manifest YAML.
+
+    LoRAs are stored under spec.loras as either strings or mappings. This endpoint
+    normalizes the targeted entry to a mapping (dict) and writes a `scale` field.
+    """
+    manifest_id: str
+    lora_index: int
+    scale: float
+
+
+@router.post("/lora/scale")
+def update_lora_scale(req: UpdateLoraScaleRequest) -> Dict[str, Any]:
+    """
+    Update the `scale` value for a LoRA entry inside a manifest's YAML file.
+
+    The LoRA is addressed by its index in ``spec.loras`` for the given manifest.
+    If the entry is a plain string, it will be normalized into a mapping with a
+    ``source`` field and the provided ``scale``.
+    """
+    if not req.manifest_id:
+        raise HTTPException(status_code=400, detail="manifest_id is required")
+    if req.lora_index < 0:
+        raise HTTPException(status_code=400, detail="lora_index must be non-negative")
+
+    # Clamp scale to a reasonable range [0, 1] but allow minor overshoot before clamping
+    try:
+        scale = float(req.scale)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="scale must be a number")
+    if not (scale >= 0.0 and scale <= 1.0):
+        # Clamp into [0, 1] instead of rejecting outright so UI sliders can't break it
+        scale = max(0.0, min(1.0, scale))
+
+    # Load enriched manifest to locate backing YAML path
+    manifest = get_manifest(req.manifest_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+
+    relative_path = manifest.get("full_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest missing full_path metadata; cannot locate YAML.",
+        )
+    yaml_path = MANIFEST_BASE_PATH / relative_path
+    if not yaml_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Manifest YAML not found on disk: {yaml_path}",
+        )
+
+    # Load the raw YAML document for mutation
+    doc = load_yaml_content(yaml_path)
+    if not isinstance(doc, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest YAML is not a mapping; cannot update.",
+        )
+
+    spec = doc.get("spec") or {}
+    loras = spec.get("loras") or []
+    if not isinstance(loras, list) or req.lora_index >= len(loras):
+        raise HTTPException(
+            status_code=400,
+            detail=f"LoRA entry not found at index {req.lora_index}",
+        )
+
+    entry = loras[req.lora_index]
+    if isinstance(entry, dict):
+        entry["scale"] = float(scale)
+    elif isinstance(entry, str):
+        # Normalize legacy string entry into a mapping with a source and scale
+        entry = {
+            "source": entry,
+            "scale": float(scale),
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported LoRA entry type at index {req.lora_index}; expected string or mapping.",
+        )
+
+    loras[req.lora_index] = entry
+    doc.setdefault("spec", {})["loras"] = loras
+
+    try:
+        yaml_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write updated manifest: {e}"
+        )
+
+    return {
+        "success": True,
+        "manifest_id": req.manifest_id,
+        "lora_index": req.lora_index,
+        "scale": float(scale),
+    }
+
+
+class UpdateLoraNameRequest(BaseModel):
+    """
+    Request body for updating a single LoRA entry's name/label inside a manifest YAML.
+
+    This normalizes the target entry to a mapping (dict) and writes both `name` and `label`.
+    """
+    manifest_id: str
+    lora_index: int
+    name: str
+
+
+@router.post("/lora/name")
+def update_lora_name(req: UpdateLoraNameRequest) -> Dict[str, Any]:
+    """
+    Update the `name` / `label` fields for a LoRA entry inside a manifest's YAML file.
+
+    Behaviour:
+      - Normalizes legacy string entries into dicts with a `source` field.
+      - Writes `name` and `label` to the entry.
+    """
+    if not req.manifest_id:
+        raise HTTPException(status_code=400, detail="manifest_id is required")
+    if req.lora_index < 0:
+        raise HTTPException(status_code=400, detail="lora_index must be non-negative")
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    manifest = get_manifest(req.manifest_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+
+    relative_path = manifest.get("full_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest missing full_path metadata; cannot locate YAML.",
+        )
+    yaml_path = MANIFEST_BASE_PATH / relative_path
+    if not yaml_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Manifest YAML not found on disk: {yaml_path}",
+        )
+
+    doc = load_yaml_content(yaml_path)
+    if not isinstance(doc, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest YAML is not a mapping; cannot update.",
+        )
+
+    spec = doc.get("spec") or {}
+    loras = spec.get("loras") or []
+    if not isinstance(loras, list) or req.lora_index >= len(loras):
+        raise HTTPException(
+            status_code=400,
+            detail=f"LoRA entry not found at index {req.lora_index}",
+        )
+
+    entry = loras[req.lora_index]
+    if isinstance(entry, str):
+        entry = {"source": entry}
+    if not isinstance(entry, dict):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported LoRA entry type at index {req.lora_index}; expected string or mapping.",
+        )
+
+    entry["name"] = name
+    entry["label"] = name
+    loras[req.lora_index] = entry
+    doc.setdefault("spec", {})["loras"] = loras
+
+    try:
+        yaml_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write updated manifest: {e}"
+        )
+
+    return {
+        "success": True,
+        "manifest_id": req.manifest_id,
+        "lora_index": req.lora_index,
+        "name": name,
+    }
+
+
+class DeleteLoraRequest(BaseModel):
+    """
+    Request body for deleting a LoRA entry from a manifest YAML.
+
+    If the entry contains a `source` that points into the local LoRA directory and/or a
+    `remote_source` value, the associated local path may also be removed depending on how
+    it was resolved.
+    """
+    manifest_id: str
+    lora_index: int
+
+
+@router.delete("/lora")
+def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
+    """
+    Delete a LoRA entry from a manifest's YAML file.
+
+    Behaviour:
+      - Removes the entry at `spec.loras[req.lora_index]`.
+      - Attempts to delete any associated local LoRA file/folder if the entry has a
+        concrete `source` path inside the lora directory.
+    """
+    if not req.manifest_id:
+        raise HTTPException(status_code=400, detail="manifest_id is required")
+    if req.lora_index < 0:
+        raise HTTPException(status_code=400, detail="lora_index must be non-negative")
+
+    manifest = get_manifest(req.manifest_id)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+
+    relative_path = manifest.get("full_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest missing full_path metadata; cannot locate YAML.",
+        )
+    yaml_path = MANIFEST_BASE_PATH / relative_path
+    if not yaml_path.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Manifest YAML not found on disk: {yaml_path}",
+        )
+
+    doc = load_yaml_content(yaml_path)
+    if not isinstance(doc, dict):
+        raise HTTPException(
+            status_code=500,
+            detail="Manifest YAML is not a mapping; cannot update.",
+        )
+
+    spec = doc.get("spec") or {}
+    loras = spec.get("loras") or []
+    if not isinstance(loras, list) or req.lora_index >= len(loras):
+        raise HTTPException(
+            status_code=400,
+            detail=f"LoRA entry not found at index {req.lora_index}",
+        )
+
+    entry = loras[req.lora_index]
+    local_path: Optional[str] = None
+
+    if isinstance(entry, str):
+        local_path = entry
+    elif isinstance(entry, dict):
+        # Prefer concrete local source path, but if only a remote_source is present,
+        # resolve it into a local path using the LoRA base directory.
+        src = entry.get("source")
+        remote_src = entry.get("remote_source")
+        if isinstance(src, str) and src:
+            local_path = src
+        elif isinstance(remote_src, str) and remote_src:
+            try:
+                resolved = DownloadMixin.is_downloaded(remote_src, get_lora_path())
+            except Exception:
+                resolved = None
+            if isinstance(resolved, str) and resolved:
+                local_path = resolved
+
+    # Remove entry from list and write back to YAML
+    del loras[req.lora_index]
+    doc.setdefault("spec", {})["loras"] = loras
+
+    try:
+        yaml_path.write_text(yaml.safe_dump(doc, sort_keys=False))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write updated manifest: {e}"
+        )
+
+    # Best-effort local file/folder removal if path is under the LoRA base directory
+    removed_local = False
+    if isinstance(local_path, str) and local_path:
+        try:
+            base = Path(get_lora_path()).resolve()
+            target = Path(local_path).expanduser()
+            if not target.is_absolute():
+                target = base / target
+            target = target.resolve()
+            if str(target).startswith(str(base)):
+                if target.is_file() or target.is_symlink():
+                    target.unlink(missing_ok=True)
+                    removed_local = True
+                elif target.is_dir():
+                    import shutil
+                    shutil.rmtree(target, ignore_errors=True)
+                    removed_local = True
+        except Exception:
+            # Best-effort; ignore filesystem errors
+            removed_local = False
+
+    return {
+        "success": True,
+        "manifest_id": req.manifest_id,
+        "lora_index": req.lora_index,
+        "removed_local": removed_local,
+    }
+
+
 @router.post("/custom-model-path")
 def validate_and_register_custom_model_path(req: CustomModelPathRequest) -> Dict[str, Any]:
     """

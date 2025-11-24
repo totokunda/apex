@@ -133,7 +133,6 @@ spec:
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 24
-    
     extra_model_paths: 
       - path: multimodalart/glyph-sdxl-v2-byt5-small/pytorch_model.bin  
         variant: default

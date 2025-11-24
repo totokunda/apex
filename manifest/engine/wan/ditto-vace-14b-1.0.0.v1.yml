@@ -27,6 +27,7 @@ spec:
     scale: 1.0
     name: ditto_global
     label: Ditto Global 
+    verified: true
   components:
   - type: scheduler
     label: Scheduler

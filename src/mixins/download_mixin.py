@@ -8,6 +8,7 @@ from loguru import logger
 import hashlib
 from typing import Dict, Any
 import tempfile
+import traceback
 
 class DownloadMixin:
     logger: Logger = logger
@@ -1230,12 +1231,12 @@ class DownloadMixin:
                 if head_resp.ok:
                     try:
                         remote_size = int(head_resp.headers.get("content-length", "0")) or None
-                    except Exception:
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get content length from {url}: {e}")
                         remote_size = None
                     accept_ranges = head_resp.headers.get("accept-ranges", "").lower() == "bytes"
-            except Exception:
-                # If HEAD fails, we'll still try GET (some servers don't support HEAD)
-                pass
+            except Exception as e:
+                self.logger.warning(f"Failed to get content length from {url}: {e}")
 
             # If partial already equals remote size, finalize without downloading
             if resume_size and remote_size and resume_size >= remote_size:
@@ -1321,6 +1322,7 @@ class DownloadMixin:
                         try:
                             progress_callback(downloaded_so_far, total_size or None, os.path.basename(file_path))
                         except Exception:
+                            traceback.print_exc()
                             pass
                     
                     # Reading strategy: fixed-size via iter_content, or adaptive via response.raw.read
@@ -1382,6 +1384,7 @@ class DownloadMixin:
             os.replace(part_path, file_path)
             self.logger.info(f"Successfully downloaded {log_name} to {file_path}")
         except Exception as e:
+            traceback.print_exc()
             self.logger.error(f"Failed to download from URL: {url}. Error: {e}")
         finally:
             return file_path

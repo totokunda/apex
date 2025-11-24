@@ -2,7 +2,7 @@ import os
 import re
 import hashlib
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 from src.converters.convert import get_transformer_converter_by_model_name, strip_common_prefix
 import torch
 from loguru import logger
@@ -90,7 +90,7 @@ class LoraManager(DownloadMixin):
         del state_dict
         return new_state_dict
 
-    def resolve(self, source: str, prefer_name: Optional[str] = None) -> LoraItem:
+    def resolve(self, source: str, prefer_name: Optional[str] = None, progress_callback: Optional[Callable] = None) -> LoraItem:
         """
         Resolve and download a LoRA from any supported source:
         - HuggingFace repo or file path
@@ -118,7 +118,7 @@ class LoraManager(DownloadMixin):
             if source.startswith("civitai:"):
                 local_path = self._download_from_civitai_spec(source)
             else:
-                local_path = self._download_from_url(source, self.save_dir)
+                local_path = self._download_from_url(source, self.save_dir, progress_callback=progress_callback)
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -130,7 +130,7 @@ class LoraManager(DownloadMixin):
 
         # HuggingFace: repo id or specific file
         if self._is_huggingface_repo(source) or self._looks_like_hf_file(source):
-            local_path = self._download(source, self.save_dir)
+            local_path = self._download(source, self.save_dir, progress_callback=progress_callback)
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -142,7 +142,7 @@ class LoraManager(DownloadMixin):
 
         # Fallback: generic URL
         if self._is_url(source):
-            local_path = self._download_from_url(source, self.save_dir)
+            local_path = self._download_from_url(source, self.save_dir, progress_callback=progress_callback)
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -218,6 +218,7 @@ class LoraManager(DownloadMixin):
         resolved: List[LoraItem] = []
         final_names: List[str] = []
         final_scales: List[float] = []
+        loaded_resolved: List[LoraItem] = []
         for idx, entry in enumerate(loras):
             scale: float = 1.0
             if isinstance(entry, tuple):
@@ -290,11 +291,12 @@ class LoraManager(DownloadMixin):
             # Activate all adapters with their weights in one call
             try:
                 model.set_adapters(final_names, weights=final_scales)
+                loaded_resolved.append(resolved[i])
             except Exception as e:
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
-        return resolved
+        return loaded_resolved
 
     def maybe_convert_state_dict(self, local_path: str, model_name: str) -> str:
         state_dict = self.load_file(local_path)
@@ -305,7 +307,7 @@ class LoraManager(DownloadMixin):
             converted = True
         return state_dict, converted
 
-    def _download_from_civitai_spec(self, spec: str) -> str:
+    def _download_from_civitai_spec(self, spec: str, progress_callback: Optional[Callable] = None) -> str:
         """
         Support strings like:
           - "civitai:MODEL_ID" -> fetch model metadata, pick first LoRA SafeTensor file
@@ -321,7 +323,7 @@ class LoraManager(DownloadMixin):
 
         def download_file_id(file_id: Union[int, str]) -> str:
             url = f"https://civitai.com/api/download/models/{file_id}"
-            return self._download_from_url(url, self.save_dir)
+            return self._download_from_url(url, self.save_dir, progress_callback=progress_callback)
 
         if spec.startswith("civitai-file:"):
             file_id = spec.split(":", 1)[1]
@@ -330,7 +332,7 @@ class LoraManager(DownloadMixin):
         # civitai:MODEL_ID
         model_id = spec.split(":", 1)[1]
         meta_url = f"https://civitai.com/api/v1/models/{model_id}"
-        resp = requests.get(meta_url, headers=headers, timeout=20)
+        resp = requests.get(meta_url, headers=headers, timeout=20, progress_callback=progress_callback)
         resp.raise_for_status()
         data = resp.json()
         # Find a file that looks like a LoRA in SafeTensor format
