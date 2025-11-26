@@ -335,6 +335,8 @@ class LoaderMixin(DownloadMixin):
                 if param.device.type == "meta":
                     self.logger.error(f"Parameter {name} is on meta device")
                     has_meta_params = True
+
+        
             
             if has_meta_params:
                 raise ValueError(
@@ -415,9 +417,15 @@ class LoaderMixin(DownloadMixin):
 
     def _load_scheduler(self, component: Dict[str, Any]) -> Any:
 
-        component_base = component.get("base")
-        if not component_base:
-            raise ValueError("Scheduler component base not specified.")
+        if "scheduler_options" in component:
+
+            component_base = component["scheduler_options"][0].get("base")
+            if not component_base:
+                raise ValueError("Scheduler component base not specified.")
+        else:
+            component_base = component.get("base")
+            if not component_base:
+                raise ValueError("Scheduler component base not specified.")
 
         component_split = component_base.split(".")
         if len(component_split) > 1:
