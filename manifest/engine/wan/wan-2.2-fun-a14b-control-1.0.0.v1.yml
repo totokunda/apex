@@ -175,12 +175,18 @@ spec:
       type: image
       panel: input_images
       required: false
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: start_image
       label: Start Image
       description: The start image to use for the generation.
       type: image
       panel: extra_inputs
       required: false
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: control_video
       label: Control Video
       description: The control video to use for the generation.

@@ -34,15 +34,15 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "reference_images": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/087d7145-219f-4a60-b22a-3eceac71e6c4-16e68449-3996-42a5-a7f2-10b1cec7b3ab_reference_images_0.png",
-        "prompt": "A man running down an open field ",
+        "reference_images": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/6b78304c-f932-4c57-9f6b-634e8e2d0eec-346ccf10-c062-42ef-8042-63eac3a001da_reference_images_0_1.png",
+        "prompt": "A man walking down a new york street laughing and smiling ",
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "resolution": 480,
-        "aspect_ratio": "16:9",
+        "aspect_ratio": "custom",
         "num_inference_steps": 30,
         "height": 512,
-        "width": 896,
-        "seed": 1756829852,
+        "width": 512,
+        "seed": 921201154,
         "guidance_scale": 5,
         "conditioning_scale": 1,
         "duration": "5s"
