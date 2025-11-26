@@ -127,7 +127,14 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         normalized["denoise_type"] = spec["denoiseType"]
     if spec.get("engine_kwargs"):
         normalized["engine_kwargs"] = spec["engine_kwargs"]
-
+        
+    if spec.get("sub_engines"):
+        normalized["sub_engines"] = spec["sub_engines"]
+    elif spec.get("subEngines"):
+        normalized["sub_engines"] = spec["subEngines"]
+    elif spec.get("subengines"):
+        normalized["sub_engines"] = spec["subengines"]
+        
     # components and stages
     for key in (
         "components",

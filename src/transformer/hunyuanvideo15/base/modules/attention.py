@@ -199,7 +199,6 @@ def sequence_parallel_attention(q, k, v,
     sequence_length = query.size(1)
     encoder_sequence_length = encoder_query.size(1)
 
-    
     if attention_register.is_available("sage") and attn_mode == "sageattn":
         from sageattention import sageattn
         query = torch.cat([query, encoder_query], dim=1)
@@ -227,11 +226,11 @@ def sequence_parallel_attention(q, k, v,
         query = query.transpose(1, 2)  # B * Head_num * length * dim
         key = key.transpose(1, 2)      # B * Head_num * length * dim
         value = value.transpose(1, 2)  # B * Head_num * length * dim
-        if attn_mask is not None:
-            attn_mask1 = einops.rearrange(attn_mask, 'b l -> b 1 l 1')
-            attn_mask2 = einops.rearrange(attn_mask1, 'b 1 l 1 -> b 1 1 l')
-            attn_mask = attn_mask1 & attn_mask2
-        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return torch.where(attn_mask[b, q_idx] & attn_mask[b, kv_idx], score, float('-inf'))
+
+        hidden_states = flex_attention(query, key, value, score_mod=score_mod)
         
         # transpose back
         hidden_states = hidden_states.transpose(1, 2)
@@ -245,6 +244,8 @@ def sequence_parallel_attention(q, k, v,
 
         attn_mask = F.pad(text_mask, (sequence_length, 0), value=True)
         hidden_states = flash_attn_no_pad(qkv, attn_mask, causal=False, dropout_p=0.0, softmax_scale=None)
+        
+
         
     elif attention_register.is_available("flash3") and attn_mode == "flash3":
         query = torch.cat([query, encoder_query], dim=1)

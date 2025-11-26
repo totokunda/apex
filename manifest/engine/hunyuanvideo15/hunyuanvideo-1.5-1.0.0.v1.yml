@@ -58,7 +58,7 @@ spec:
     label: HunyuanVideo Transformer
     base: hunyuanvideo15.base
     model_path:
-    - path: tencent/HunyuanVideo-1.5/transformer/720p_t2v
+    - path: /home/tosin_coverquick_co/apex/HunyuanVideo-1.5/ckpts/transformer/480p_t2v
       variant: default
       precision: fp16
       type: safetensors

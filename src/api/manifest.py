@@ -36,6 +36,29 @@ class ModelCategoryInfo(ModelTypeInfo):
     pass
 
 
+
+def _normalize_subengine_relative_path(yaml_path: str) -> Optional[str]:
+    """
+    Normalise a sub-engine YAML reference into a path relative to MANIFEST_BASE_PATH.
+
+    Expected common forms:
+    - 'manifest/engine/longcat/longcat-13b-text-to-video-1.0.0.v1.yml'
+    - 'longcat/longcat-13b-text-to-video-1.0.0.v1.yml'
+
+    Returns a string suitable to pass as `relative_path` into `_load_and_enrich_manifest`,
+    or None if the path cannot be interpreted.
+    """
+    if not isinstance(yaml_path, str) or not yaml_path.strip():
+        return None
+
+    yaml_path = yaml_path.strip()
+    prefix = "manifest/engine/"
+    if yaml_path.startswith(prefix):
+        return yaml_path[len(prefix) :]
+
+    # If it already looks like a path relative to manifest/engine, just return it
+    return yaml_path
+
 def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     """Load a manifest by relative path and enrich it with runtime info."""
     file_path = MANIFEST_BASE_PATH / relative_path
@@ -44,6 +67,98 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     # ----------------- Attention backends enrichment (name/label/desc) ----------------- #
     spec = content.get("spec", {}) if isinstance(content, dict) else {}
     metadata = content.get("metadata", {}) if isinstance(content, dict) else {}
+
+    # ----------------- Sub-engine components merge (for composite manifests) ----------------- #
+    # Some manifests (e.g. interactive variants) define `spec.sub_engines` pointing at other
+    # engine YAMLs. For those, we want the enriched document to expose a merged view of all
+    # components from the sub-engines (plus any locally defined ones), with duplicates removed.
+    sub_engines = spec.get("sub_engines")
+    if isinstance(sub_engines, list):
+        merged_components: list[Dict[str, Any]] = []
+        seen_keys: set[tuple] = set()
+        merged_loras: list[Dict[str, Any]] = []
+        seen_loras: set[tuple] = set()
+
+        def _component_key(component: Dict[str, Any]) -> tuple:
+            """
+            Build a lightweight identity key for de-duplicating components.
+            This intentionally only uses a subset of fields that should be stable
+            across manifests for the same logical component.
+            """
+            if not isinstance(component, dict):
+                return ("__invalid__", id(component))
+            return (
+                component.get("type"),
+                component.get("name"),
+                component.get("base"),
+                component.get("label"),
+            )
+
+        def _add_components(components: Any) -> None:
+            if not isinstance(components, list):
+                return
+            for comp in components:
+                if not isinstance(comp, dict):
+                    continue
+                key = _component_key(comp)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged_components.append(comp)
+                
+        def _lora_key(lora: Dict[str, Any]) -> tuple:
+            return (
+                lora.get("source"),
+                lora.get("name"),
+                lora.get("label"),
+            )
+                
+        def _add_loras(loras: Any) -> None:
+            if not isinstance(loras, list):
+                return
+            
+            for lora in loras:
+                if not isinstance(lora, dict):
+                    continue
+                key = _lora_key(lora)
+                if key in seen_loras:
+                    continue
+                seen_loras.add(key)
+                merged_loras.append(lora)
+
+        # Start with any components already defined on the parent manifest
+        _add_components(spec.get("components") or [])
+        _add_loras(spec.get("loras") or [])
+        # Then merge in components from each sub-engine manifest
+        for sub in sub_engines:
+            if not isinstance(sub, dict):
+                continue
+            sub_yaml = sub.get("yaml")
+            rel = _normalize_subengine_relative_path(sub_yaml)
+            if not rel:
+                continue
+            try:
+                sub_doc = _load_and_enrich_manifest(rel)
+            except HTTPException:
+                # If a sub-engine cannot be loaded, skip it instead of failing the parent
+                continue
+            if not isinstance(sub_doc, dict):
+                continue
+            sub_spec = sub_doc.get("spec", {})
+            if not isinstance(sub_spec, dict):
+                continue
+            _add_components(sub_spec.get("components") or [])
+            _add_loras(sub_spec.get("loras") or [])
+        # If we collected anything, overwrite components on the parent spec
+        if merged_components:
+            if "spec" not in content or not isinstance(content["spec"], dict):
+                content["spec"] = {}
+            content["spec"]["components"] = merged_components
+        if merged_loras:
+            if "spec" not in content or not isinstance(content["spec"], dict):
+                content["spec"] = {}
+            content["spec"]["loras"] = merged_loras
+
     configured_attention = spec.get("support_attention")
     if configured_attention is None:
         configured_attention = spec.get("attention_types")
@@ -149,6 +264,16 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
 
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
+        
+    loras = content.get("spec", {}).get("loras", [])
+    all_loras_downloaded = True
+    for lora_index, lora in enumerate(loras):
+        if isinstance(lora, dict) and lora.get("required", False):
+            is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
+            if is_downloaded is None:
+                all_loras_downloaded = False
+                break
+            
 
     # Convenience fields for filtering and compatibility with previous ManifestInfo
     # Normalize and expose common metadata at the top level
@@ -171,7 +296,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     components_list = content.get("spec", {}).get("components", []) or []
     content["downloaded"] = bool(components_list) and all(
         isinstance(c, dict) and c.get("is_downloaded", False) for c in components_list
-    )
+    ) and all_loras_downloaded
     
     # Compute compatibility check
     compute_requirements = spec.get("compute_requirements")
@@ -221,7 +346,7 @@ def _get_all_manifest_files_uncached() -> List[Dict[str, Any]]:
                 enriched = _load_and_enrich_manifest(str(relative_path))
                 
                 # Only include manifests that are compatible with the current system
-                if enriched.get("compute_compatible", True):
+                if enriched.get("compute_compatible", True) and enriched.get("spec", {}).get("ui", None) is not None:
                     manifests.append(enriched)
                 
     return manifests
