@@ -27,10 +27,12 @@ spec:
     scale: 1.0
     name: gen
     label: Generation LoRA
+    required: true
   - source: https://huggingface.co/xiabs/DreamOmni2/resolve/main/edit_lora/pytorch_lora_weights.safetensors
     scale: 1.0
     name: edit
     label: Editing LoRA
+    required: true
   components:
   - type: scheduler
     label: Scheduler
@@ -142,10 +144,7 @@ spec:
       layout:
         flow: column
         rows:
-        - - image_1
-          - image_2
-        - - image_3
-          - image_4
+        - - image_list
     - name: prompting
       label: Prompting
       collapsible: true
@@ -196,33 +195,14 @@ spec:
         value: generation
       - name: Editing
         value: editing
-    - id: image_1
-      label: First Image
-      description: The input image to condition on.
-      type: image
+    - id: image_list
+      label: Image List
+      description: Select the images to use for the generation.
       panel: input
-      map_h: height
-      map_w: width
-      scale_by: resolution
-      required: true
-    - id: image_2
-      label: Second Image
-      description: The input image to condition on.
-      type: image
-      panel: input
+      type: image_list
       required: false
-    - id: image_3
-      label: Third Image
-      description: The input image to condition on.
-      type: image
-      panel: input
-      required: false
-    - id: image_4
-      label: Fourth Image
-      description: The input image to condition on.
-      type: image
-      panel: input
-      required: false
+      min: 1
+      max: 5
     - id: prompt
       label: Prompt
       description: The text prompt describing desired output.
