@@ -160,7 +160,7 @@ class TextEncoder(BaseHelper, CacheMixin):
         self,
         text_encoder_type: str,
         max_length: int = 1000,
-        text_encoder_precision: Optional[str] = None,
+        text_encoder_precision: Optional[str] = "fp16",
         model_path: Optional[str] = None,
         tokenizer_type: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
@@ -208,7 +208,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                 get_cache_path(),
                 f"hunyuanvideo15_text_encoder_{self.model_path.replace('/', '_')}.safetensors",
             )
-        os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+            os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         
         self.use_template = self.prompt_template is not None
         if self.use_template:
@@ -505,12 +505,14 @@ class TextEncoder(BaseHelper, CacheMixin):
         attention_mask = (
             batch_encoding["attention_mask"].to(device) if use_attention_mask else None
         )
+        
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
             attention_mask=attention_mask,
             output_hidden_states=output_hidden_states
             or hidden_state_skip_layer is not None,
         )
+
         if hidden_state_skip_layer is not None:
             last_hidden_state = outputs.hidden_states[-(hidden_state_skip_layer + 1)]
             # Real last hidden state already has layer norm applied. So here we only apply it

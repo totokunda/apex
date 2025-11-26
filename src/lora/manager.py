@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import traceback
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Union
 from src.converters.convert import get_transformer_converter_by_model_name, strip_common_prefix
@@ -56,6 +57,7 @@ class LoraManager(DownloadMixin):
         # Since PEFT determines rank from `val.shape[1]` for `lora_B`, we transpose both
         # `lora_A` and `lora_B` for a pair when we detect that the smaller dimension of
         # `lora_B` is the first one.
+
         lora_pairs: Dict[str, Dict[str, str]] = {}
         for key in list(new_state_dict.keys()):
             if ".lora_A" in key:
@@ -118,7 +120,7 @@ class LoraManager(DownloadMixin):
             if source.startswith("civitai:"):
                 local_path = self._download_from_civitai_spec(source)
             else:
-                local_path = self._download_from_url(source, self.save_dir, progress_callback=progress_callback)
+                local_path = self._download(source, self.save_dir)
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -128,9 +130,8 @@ class LoraManager(DownloadMixin):
             self._cache[source] = item
             return item
 
-        # HuggingFace: repo id or specific file
-        if self._is_huggingface_repo(source) or self._looks_like_hf_file(source):
-            local_path = self._download(source, self.save_dir, progress_callback=progress_callback)
+        else:
+            local_path = self._download(source, self.save_dir)
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -139,28 +140,6 @@ class LoraManager(DownloadMixin):
             )
             self._cache[source] = item
             return item
-
-        # Fallback: generic URL
-        if self._is_url(source):
-            local_path = self._download_from_url(source, self.save_dir, progress_callback=progress_callback)
-            paths = self._collect_lora_files(local_path)
-            item = LoraItem(
-                source=source,
-                local_paths=paths,
-                name=prefer_name or self._infer_name(source, local_path),
-            )
-            self._cache[source] = item
-            return item
-
-        # As a last resort, try to treat as local path string
-        paths = self._collect_lora_files(source)
-        item = LoraItem(
-            source=source,
-            local_paths=paths,
-            name=prefer_name or os.path.basename(source),
-        )
-        self._cache[source] = item
-        return item
 
     def _looks_like_hf_file(self, text: str) -> bool:
         # matches org/repo/…/file.safetensors or similar
@@ -199,6 +178,7 @@ class LoraManager(DownloadMixin):
         loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
         adapter_names: Optional[List[str]] = None,
         scales: Optional[List[float]] = None,
+        replace_keys: bool = True,
     ) -> List[LoraItem]:
         """
         Load multiple LoRAs into a PEFT-enabled model. Supports per-adapter scaling.
@@ -236,6 +216,7 @@ class LoraManager(DownloadMixin):
                 scale = float(scales[idx])
             item.scale = float(scale)
             resolved.append(item)
+            
         
         if hasattr(model, "update_lora_params") and compose_lora is not None:
             composed_lora = []
@@ -270,7 +251,8 @@ class LoraManager(DownloadMixin):
                         local_path_state_dict
                     )
                     
-                    local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
+                    if replace_keys:
+                        local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
                     keys = list(local_path_state_dict.keys())
 
                     prefix = None
@@ -281,7 +263,6 @@ class LoraManager(DownloadMixin):
                     elif keys[0].startswith("diffusion_model") and keys[-1].startswith("diffusion_model"):
                         prefix = "diffusion_model"
                         
-
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
@@ -293,6 +274,7 @@ class LoraManager(DownloadMixin):
                 model.set_adapters(final_names, weights=final_scales)
                 loaded_resolved.append(resolved[i])
             except Exception as e:
+                raise e # For now 
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
@@ -323,7 +305,7 @@ class LoraManager(DownloadMixin):
 
         def download_file_id(file_id: Union[int, str]) -> str:
             url = f"https://civitai.com/api/download/models/{file_id}"
-            return self._download_from_url(url, self.save_dir, progress_callback=progress_callback)
+            return self._download(url, self.save_dir)
 
         if spec.startswith("civitai-file:"):
             file_id = spec.split(":", 1)[1]

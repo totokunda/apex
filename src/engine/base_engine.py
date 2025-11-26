@@ -190,6 +190,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     vae_slicing: bool = False
     lora_manager: LoraManager | None = None
     loaded_loras: Dict[str, LoraItem] = {}
+    preloaded_loras: Dict[str, LoraItem] = {}
+    sub_engines: Dict[str, "BaseEngine"] = {}
     _memory_management_map: Dict[str, MemoryConfig] | None = None
     selected_components: Dict[str, Any] | None = None
     
@@ -279,10 +281,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
-        if should_download:
-            self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        if should_download and kwargs.get("auto_apply_loras", True):
-            self._auto_apply_loras(kwargs.get("lora_model_name_or_type", "transformer"))
+        self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
+        loaded_loras, loaded_loras_names = self._load_loras(kwargs.get("lora_model_name_or_type", "transformer"), auto_apply=kwargs.get("auto_apply_loras", True))
+        for i, lora_item in enumerate(loaded_loras):
+            self.preloaded_loras[loaded_loras_names[i]] = lora_item
 
     def post_init(self):
         """
@@ -329,6 +331,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             
             self.logger.error(error_detail)
             raise RuntimeError(error_detail)
+        
+    
+    
 
     def _aspect_ratio_resize(
         self,
@@ -440,6 +445,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         self.logger.info(f"Loading model {config['name']}")
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
+
         self.engine_type = config.get("engine_type", "torch")
 
         if config.get("denoise_type", None):
@@ -478,8 +484,56 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self.logger.info(f"Loading {len(components_to_load)} components")
 
         self.load_components(components, components_to_load)
-        
+        sub_engines = config.get("sub_engines", [])
+        self.load_sub_engines(sub_engines)
 
+    def load_sub_engines(self, sub_engines: List[Dict[str, Any]]):
+        """
+        Instantiate and register any sub‑engines declared in the config.
+
+        Each entry in ``sub_engines`` is expected to be a mapping with:
+        - ``name``: logical name used as the key in ``self.sub_engines``
+        - ``yaml``: path or manifest reference for the child engine
+        """
+        for sub_engine in sub_engines:
+            yaml = sub_engine.get("yaml")
+            name = sub_engine.get("name")
+            if not yaml or not name:
+                continue
+            self.sub_engines[name] = self._load_engine(yaml)
+
+    # Class‑level guard to prevent infinite recursion when mis‑configured
+    # manifests point to each other in a cycle.
+    _active_sub_engine_yamls: set[str] = set()
+
+    def _load_engine(self, yaml: str) -> "BaseEngine":
+        """
+        Lazily create a sub‑engine using the global EngineRegistry.
+
+        A small re‑entrancy guard is used to turn configuration cycles
+        into a clear error instead of a hard RecursionError coming from
+        EngineRegistry / engine construction.
+        """
+        from src.engine.registry import create_engine
+
+        if yaml in BaseEngine._active_sub_engine_yamls:
+            raise RuntimeError(
+                f"Detected recursive sub‑engine configuration involving '{yaml}'. "
+                "Please check the 'sub_engines' section of your manifests."
+            )
+
+        BaseEngine._active_sub_engine_yamls.add(yaml)
+        try:
+            # Delegate to the high‑level helper which in turn uses the
+            # global EngineRegistry instance; this avoids creating nested
+            # registries and keeps engine discovery centralized.
+            return create_engine(yaml_path=yaml, device=self.device)
+        except Exception as e:
+            self.logger.error(f"Error loading sub-engine {yaml}: {e}")
+            raise e
+        finally:
+            BaseEngine._active_sub_engine_yamls.discard(yaml)
+    
     @contextmanager
     def _progress_bar(self, total: int, desc: str | None = None, **kwargs):
         with tqdm(total=total, desc=desc, **kwargs) as pbar:
@@ -725,7 +779,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         with accelerate.init_empty_weights():
             # check if the component is already loaded
             if getattr(self, component_type, None) is not None:
-                return getattr(self, component_type).config
+                if component_type == "text_encoder":
+                    model = getattr(self, component_type).load_model(no_weights=True)
+                    config = getattr(model, "config", {})
+                else:
+                    config = getattr(getattr(self, component_type), "config", {})
+                return config
             for component in self.config.get("components", []):
                 if component.get("type") == component_type:
                     component = self.load_component(
@@ -738,7 +797,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         no_weights=True,
                     )
                     
-                    config = getattr(component, "config", {})
+                    if component_type == "text_encoder":
+                        model = component.load_model(no_weights=True)
+                        config = getattr(model, "config", {})
+                    else:
+                        config = getattr(component, "config", {})
 
                     if config:
                         return config
@@ -1445,14 +1508,18 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         offload: bool = False,
         dtype: torch.dtype | None = None,
         component_name: str = "vae",
+        denormalize_latents: bool = True,
     ):
         if getattr(self, component_name, None) is None:
             self.load_component_by_type(component_name)
         self.to_device(getattr(self, component_name))
-        denormalized_latents = getattr(self, component_name).denormalize_latents(latents).to(
-            dtype=getattr(self, component_name).dtype, device=self.device
-        )
-
+        if denormalize_latents:
+            denormalized_latents = getattr(self, component_name).denormalize_latents(latents).to(
+                dtype=getattr(self, component_name).dtype, device=self.device
+            )
+        else:
+            denormalized_latents = latents
+        
         video = getattr(self, component_name).decode(denormalized_latents, return_dict=False)[0]
         if offload:
             self._offload(getattr(self, component_name))
@@ -1712,6 +1779,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         adapter_names: List[str] | None = None,
         scales: List[float] | None = None,
         model_name_or_type: str  = "transformer",
+        replace_keys: bool = True,
     ):
         """
         Apply one or multiple LoRAs to the current transformer using PEFT backend.
@@ -1732,7 +1800,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             raise RuntimeError("LoraManager is not available")
         
         resolved = self.lora_manager.load_into(
-            model, loras, adapter_names=adapter_names, scales=scales
+            model, loras, adapter_names=adapter_names, scales=scales, replace_keys=replace_keys
         )
         # Track by adapter name
         for i, item in enumerate(resolved):
@@ -1743,8 +1811,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
             self.loaded_loras[name] = item
         self.logger.info(f"Applied {len(resolved)} LoRA(s) to transformer")
-
-    def _auto_apply_loras(self, model_name_or_type: str = "transformer"):
+    
+    def _load_loras(self, model_name_or_type: str = "transformer", auto_apply: bool = True):
         """If the YAML config includes a top-level `loras` list, apply them on init.
         Supported formats:
         - ["source1", "source2"]
@@ -1752,7 +1820,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         """
         loras_cfg = self.config.get("loras", None)
         if not loras_cfg:
-            return
+            return [], []
         formatted: List[Union[str, LoraItem, tuple]] = []
         adapter_names: List[str] = []
         for entry in loras_cfg:
@@ -1772,11 +1840,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         final_names = (
             adapter_names if any(n is not None for n in adapter_names) else None
         )
-        try:
-            self.apply_loras(formatted, adapter_names=final_names, model_name_or_type=model_name_or_type)
-        except Exception as e:
-            traceback.print_exc()
-            self.logger.warning(f"Auto-apply LoRAs failed: {e}")
+        if auto_apply:
+            try:
+                self.apply_loras(formatted, adapter_names=final_names, model_name_or_type=model_name_or_type)
+            except Exception as e:
+                traceback.print_exc()
+                self.logger.warning(f"Auto-apply LoRAs failed: {e}")
+        return formatted, final_names
 
     def download(
         self,
@@ -2092,6 +2162,21 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             f"No denoise implementation found for type '{denoise_key}' "
             f"(expected method '{method_name}' or a class-defined 'denoise')"
         )
+        
+    def offload_engine(self, engine: "BaseEngine"):
+        components = engine.config.get("components", [])
+        self.logger.info(f"Offloading engine: {engine.config.get('metadata', {}).get('name')}")
+        for component in components:
+            name = component.get("name")
+            type_ = component.get("type")
+            comp = getattr(engine, name, getattr(engine, type_, None))
+            if comp is not None:
+                try:
+                    self._offload(comp)
+                except Exception:
+                    pass
+                del comp
+                empty_cache()
     
     @staticmethod
     def calculate_shift(

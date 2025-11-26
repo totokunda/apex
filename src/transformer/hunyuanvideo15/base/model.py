@@ -849,6 +849,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 block_idx=index,
             )
 
+
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
@@ -879,6 +880,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 if output_features and index % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
         img = x[:, :img_seq_len, ...]
+        
 
         # Final Layer
         img = self.final_layer(img, vec)

@@ -7,6 +7,7 @@ from diffusers.video_processor import VideoProcessor
 from loguru import logger
 from src.engine.hunyuanvideo15.shared import HunyuanVideo15Shared
 from src.types.media import InputImage
+from src.helpers.hunyuanvideo15.cache import CacheHelper
 
 class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
     """HunyuanVideo 1.5 Text/Image-to-Video Engine Implementation"""
@@ -179,8 +180,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        if prompt_embeds is None:
-
+        if prompt_embeds is None: 
             text_inputs = text_encoder.text2tokens(prompt, data_type=data_type, max_length=text_encoder.max_length)
             if clip_skip is None:
                 prompt_outputs = text_encoder.encode(text_inputs, data_type=data_type, device=device)
@@ -527,6 +527,11 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         num_videos: int = 1,
         resolution: str = "720p", # or 480p or #1080p
         sparse_attn: bool = False,
+        enable_cache: bool = True,
+        cache_start_step: int = 11,
+        cache_end_step: int = 45,
+        total_steps: int = 50,
+        cache_step_interval: int = 4,
         seed: Optional[int] = None,
         flow_shift: Optional[float] = None,
         reference_image: InputImage = None,
@@ -681,6 +686,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.set_timesteps, {"n_tokens": n_tokens}
         )
+        
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=self.scheduler,
             num_inference_steps=num_inference_steps,
@@ -698,7 +704,6 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             device,
             generator,
         )
-        
 
         self.load_component_by_type("vae")
         self.to_device(self.vae)
@@ -716,6 +721,18 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
         
+        
+        if enable_cache:
+            no_cache_steps = list(range(0, cache_start_step)) + list(range(cache_start_step, cache_end_step, cache_step_interval)) + list(range(cache_end_step, total_steps))
+            cache_helper = CacheHelper(
+                model=self.transformer,
+                no_cache_steps=no_cache_steps, 
+                no_cache_block_id={"double":[53]} # Added single block to skip caching
+            )
+            cache_helper.enable()
+        else:
+            cache_helper = None
+        
         if sparse_attn:
             if not self.is_sparse_attn_supported():
                 raise RuntimeError(f"Current GPU is {torch.cuda.get_device_properties(0).name}, which does not support sparse attention.")
@@ -726,9 +743,18 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 )
             self.transformer.set_attn_mode('flex-block-attn')
 
+        if cache_helper is not None:
+            cache_helper.clear_cache()
+            assert num_inference_steps == total_steps
+            
+        
         with self._progress_bar(total=num_inference_steps, desc="Denoising HunyuanVideo1.5") as progress_bar:
             for i, t in enumerate(timesteps):
+                if cache_helper is not None:
+                    cache_helper.cur_timestep = i
                 latents_concat = torch.concat([latents, cond_latents], dim=1)
+                
+
                 latent_model_input = (
                     torch.cat([latents_concat] * 2) if self.do_classifier_free_guidance else latents_concat
                 )

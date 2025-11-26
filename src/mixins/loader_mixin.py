@@ -403,6 +403,7 @@ class LoaderMixin(DownloadMixin):
 
         # --- PASS 2: real load with !include expansion ---
         loaded = yaml.load(text, Loader=LoaderWithInclude)
+        
 
         # Validate and normalize if this is a v1 manifest
         try:

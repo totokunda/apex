@@ -49,7 +49,6 @@ except ImportError:
 
 attention_register = FunctionRegister()
 
-
 @attention_register("sdpa_streaming")
 def sdpa_streaming(
     q,
