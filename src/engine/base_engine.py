@@ -1779,6 +1779,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         adapter_names: List[str] | None = None,
         scales: List[float] | None = None,
         model_name_or_type: str  = "transformer",
+        replace_keys: bool = True,
     ):
         """
         Apply one or multiple LoRAs to the current transformer using PEFT backend.
@@ -1799,7 +1800,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             raise RuntimeError("LoraManager is not available")
         
         resolved = self.lora_manager.load_into(
-            model, loras, adapter_names=adapter_names, scales=scales
+            model, loras, adapter_names=adapter_names, scales=scales, replace_keys=replace_keys
         )
         # Track by adapter name
         for i, item in enumerate(resolved):

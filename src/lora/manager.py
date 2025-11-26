@@ -178,6 +178,7 @@ class LoraManager(DownloadMixin):
         loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
         adapter_names: Optional[List[str]] = None,
         scales: Optional[List[float]] = None,
+        replace_keys: bool = True,
     ) -> List[LoraItem]:
         """
         Load multiple LoRAs into a PEFT-enabled model. Supports per-adapter scaling.
@@ -250,7 +251,8 @@ class LoraManager(DownloadMixin):
                         local_path_state_dict
                     )
                     
-                    #local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
+                    if replace_keys:
+                        local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
                     keys = list(local_path_state_dict.keys())
 
                     prefix = None

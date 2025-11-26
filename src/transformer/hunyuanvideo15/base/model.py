@@ -848,9 +848,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 is_flash=force_full_attn,
                 block_idx=index,
             )
-        print(img, "img")
-        exit()
-        
+
 
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]

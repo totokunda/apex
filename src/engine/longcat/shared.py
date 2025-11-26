@@ -144,16 +144,17 @@ class LongCatShared(BaseEngine):
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-            
+
         cfg_step_lora = self.preloaded_loras.get("cfg_step_lora", None)
+        self.logger.info(f"Applying cfg_step_lora: {cfg_step_lora}")
         if cfg_step_lora:
-            self.apply_loras([cfg_step_lora], adapter_names=["cfg_step_lora"])
+            self.apply_loras([cfg_step_lora], adapter_names=["cfg_step_lora"], replace_keys=False)
             
     def apply_refinement_lora(self):
         refinement_lora = self.preloaded_loras.get("refinement_lora", None)
-        print(f"Applying refinement lora: {refinement_lora}")
+        self.logger.info(f"Applying refinement lora: {refinement_lora}")
         if refinement_lora:
-            self.apply_loras([refinement_lora], adapter_names=["refinement_lora"])
+            self.apply_loras([refinement_lora], adapter_names=["refinement_lora"], replace_keys=False)
     
     def _get_t5_prompt_embeds(
         self,
