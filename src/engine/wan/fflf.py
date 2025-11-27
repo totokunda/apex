@@ -75,11 +75,12 @@ class WanFFLFEngine(WanShared):
         loaded_first_frame = self._load_image(first_frame)
         loaded_last_frame = self._load_image(last_frame)
 
+
         loaded_first_frame, height, width = self._aspect_ratio_resize(
             loaded_first_frame, max_area=height * width
         )
-        loaded_last_frame, height, width = self._center_crop_resize(
-            loaded_last_frame, height, width
+        loaded_last_frame, height, width = self._aspect_ratio_resize(
+            loaded_last_frame, max_area=height * width
         )
 
         preprocessed_first_frame = self.video_processor.preprocess(
@@ -202,6 +203,7 @@ class WanFFLFEngine(WanShared):
         latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
 
         if boundary_ratio is not None:
+
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )

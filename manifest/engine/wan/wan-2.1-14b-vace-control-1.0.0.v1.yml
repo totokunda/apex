@@ -1,40 +1,43 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-2-fun-a14b-inp
+  id: wan-2.1-14b-vace-control
   model: wan
-  name: Wan 2.2 Fun A14B Inp
+  name: Wan 2.1 14B VACE Control
   version: 1.0.0
-  description: Wan 2.2 A14B Fun is a 14B parameter model for controllable video generation.
+  description: Wan 2.1 14B VACE is a 14B parameter model for video editing.
   tags:
   - wan
-  - fun
-  - inp
-  - '2.2'
+  - vace
+  - 14b
+  - '2.1'
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
+  demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
   categories:
-  - inpaint
+  - control
 spec:
   engine: wan
-  model_type: inp
+  model_type: vace
   engine_type: torch
-  denoise_type: moe
+  denoise_type: base
   components:
   - type: scheduler
     label: Scheduler
-    name: FlowMatchScheduler  
-    base: src.scheduler.FlowMatchScheduler
-    config:
-      shift: 3.0
-      sigma_min: 0.0
-      extra_one_step: true
+    default: UniPCMultistepScheduler
+    scheduler_options:
+    - name: UniPCMultistepScheduler
+      label: UniPC Multistep Scheduler
+      description: The UniPC Multistep Scheduler is used for WAN 2.1 14B T2I.
+      base: diffusers.UniPCMultistepScheduler
+      config:
+        flow_shift: 5.0
+      config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/scheduler/scheduler_config.json
   - type: vae
-    label: WAN VAE
     name: wan/vae
+    label: Wan VAE
     base: wan
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
       variant: default
       precision: fp16
@@ -42,85 +45,52 @@ spec:
       file_size: 507592616
     config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
   - type: text_encoder
-    label: WAN Text Encoder
+    name: wan/text_encoder
     base: UMT5EncoderModel
+    label: UMT5 Text Encoder
     model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
       variant: default
       precision: fp16
       type: safetensors
       file_size: 22723695074
-    config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
+    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
   - type: transformer
-    label: High Noise Transformer
-    name: transformer
-    base: wan.fun
+    base: wan.vace
+    label: Wan Transformer
     model_path:
-    - path: alibaba-pai/Wan2.2-Fun-A14B-Inp/high_noise_model
+    - path: Wan-AI/Wan2.1-VACE-14B-diffusers/transformer
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 28654175562
-    config_path: alibaba-pai/Wan2.2-Fun-A14B-Inp/high_noise_model/config.json
-    config:
-      _class_name: WanFunTransformer3DModel
-      qk_norm: rms_norm_across_heads
-  - type: transformer
-    label: Low Noise Transformer
-    name: transformer_2
-    base: wan.fun
-    model_path:
-    - path: alibaba-pai/Wan2.2-Fun-A14B-Inp/low_noise_model
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 28654175562
-    config_path: alibaba-pai/Wan2.2-Fun-A14B-Inp/low_noise_model/config.json
-    config:
-      _class_name: WanFunTransformer3DModel
-      qk_norm: rms_norm_across_heads
-  - type: helper
-    base: clip
-    name: wan/clip
-    model_path: 
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 1264218342
-    preprocessor_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/image_processor/preprocessor_config.json
-    processor_class: CLIPImageProcessor
-    model_class: CLIPVisionModel
-  - type: helper
-    base: camera
+      file_size: 63252425327
   defaults:
     run:
       num_inference_steps: 30
       guidance_scale: 5.0
-      boundary_ratio: 0.9
       return_latents: false
+      timesteps_as_indices: true
+      expand_timesteps: false
       text_encoder_kwargs: {}
-      use_attention_mask: true
       attention_kwargs: {}
   ui:
     panels:
-    - name: reference_image
-      label: Reference Image
+    - name: input_image
+      label: Input Image
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
-        - - reference_image
-    - name: video_input
-      label: Video Input
+        - - reference_images
+    - name: input_video
+      label: Input Video
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
-        - - video 
-        - - mask
+        - - video
     - name: prompting
       label: Prompting
       collapsible: true
@@ -137,6 +107,16 @@ spec:
         flow: column
         rows:
         - - negative_prompt
+    - name: extra_inputs
+      label: Extra Inputs
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - reference_images
+        - - reference_images
+        - - mask
     - name: size
       label: Size
       collapsible: true
@@ -156,48 +136,34 @@ spec:
         flow: column
         rows:
         - - num_inference_steps
-        - - high_noise_guidance_scale
-        - - low_noise_guidance_scale
+        - - conditioning_scale
+        - - guidance_scale
         - - seed
-        - - boundary_ratio
-
     inputs:
-    - id: reference_image
+    - id: video
+      label: Video
+      description: The control video to be used for the generation.
+      type: video
+      panel: input_video
+      required: true
+    - id: reference_images
       label: Reference Image
-      description: The reference image to use for the generation.
+      description: A reference image to use within the generation.
       type: image
-      panel: reference_image
+      panel: input_image
+      required: true
       map_h: height
       map_w: width
       scale_by: resolution
-      required: false
-    - id: start_image
-      label: Start Image
-      description: The start image to use for the generation.
-      type: image
-      panel: extra_inputs
-      required: false
-    - id: control_video
-      label: Control Video
-      description: The control video to use for the generation.
-      type: video
-      panel: input_videos
-      required: false
-    - id: video
-      label: Video
-      description: The control video to use for the generation.
-      type: video
-      panel: video_input
-      required: false
     - id: mask
       label: Mask Video
       description: A mask video where white/opaque regions will be filled; black/transparent are kept.
       type: video+mask
-      panel: video_input
+      panel: extra_inputs
       required: false
     - id: prompt
       label: Prompt
-      description: Describe the video you want to generate.
+      description: Describe the video you want to edit.
       placeholder: A beautiful landscape at golden hour.
       type: text
       panel: prompting
@@ -217,17 +183,17 @@ spec:
         legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
-      description: Select the resolution of the output video
+      description: Select the resolution of the output image
       panel: size
       type: select
-      default: 480
+      default: 1024
       options:
-      - name: Ultra HD
-        value: 1024
-        height: 1024
       - name: HD
         value: 720
         height: 720
+      - name: Full HD
+        value: 1024
+        height: 1024
       - name: SD
         value: 480
         height: 480
@@ -235,25 +201,25 @@ spec:
         value: custom
     - id: aspect_ratio
       label: Aspect Ratio
-      description: Select the aspect ratio of the output video
+      description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 61
+      default: "1:1"
       options:
       - name: Square
-        value: 61
+        value: "1:1"
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: 969
+        value: "16:9"
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: 556
+        value: "9:16"
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: 184
+        value: "4:3"
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -298,36 +264,23 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: high_noise_guidance_scale
-      label: High Noise Guidance Scale
-      type: number
-      value_type: float
-      panel: sampling
-      required: false
-      default: 4.0
-      min: 1.0
-      max: 15.0
-      step: 0.1
-    - id: low_noise_guidance_scale
-      label: Low Noise Guidance Scale
-      type: number
-      value_type: float
-      panel: sampling
-      required: false
-      default: 3.0
-      min: 1.0
-      max: 15.0
-      step: 0.1
-    - id: boundary_ratio
-      label: Boundary Ratio
-      description: The ratio of the boundary of the image
+    - id: guidance_scale
+      label: Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 0.875
+      default: 5.0
+      min: 1.0
+      max: 15.0
+      step: 0.5
+    - id: conditioning_scale
+      label: Conditioning Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1.0
       min: 0.0
-      max: 1.0
-      step: 0.01
-
-
+      max: 15.0
+      step: 0.1
