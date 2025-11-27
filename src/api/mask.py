@@ -194,6 +194,7 @@ def save_debug_visualizations(
         # Load the image/frame
         if frame_number is not None:
             # Load specific frame from video
+            logger.info(f"Loading frame {frame_number} from video {input_path}")
             cap = cv2.VideoCapture(str(input_path))
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
             ret, image = cap.read()
@@ -203,6 +204,7 @@ def save_debug_visualizations(
                 return
         else:
             # Load image
+            logger.info(f"Loading image from {input_path}")
             image = cv2.imread(str(input_path))
             if image is None:
                 logger.error(f"Failed to load image from {input_path}")

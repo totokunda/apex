@@ -1,7 +1,7 @@
 from sam2.build_sam import build_sam2_video_predictor
 from sam2.sam2_video_predictor import SAM2VideoPredictor
 from src.mixins import LoaderMixin
-from PIL import Image
+from PIL import Image, ImageOps
 import torch
 import cv2
 import numpy as np
@@ -779,9 +779,14 @@ class LazyFrameLoader:
         else:
             # For images, treat as single frame
             self.num_frames = 1
-            pil_image = Image.open(input_path).convert('RGB')
+            pil_image = Image.open(input_path)
+            pil_image = ImageOps.exif_transpose(pil_image)
+            pil_image = pil_image.convert('RGB')
             self.video_width, self.video_height = pil_image.size
+            logger.info(f"Image size: {self.video_width}x{self.video_height}")
+            logger.info(f"Image path: {input_path}")
             self._cached_image = np.array(pil_image)
+            logger.info(f"Cached image: {self._cached_image.shape}")
     
     def __len__(self):
         return self.num_frames

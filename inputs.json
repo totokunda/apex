@@ -1,55 +1,54 @@
 {
     "engine_kwargs": {
-        "engine_type": "wan",
-        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan-2.2-fun-a14b-inp-1.0.0.v1.yml",
-        "model_type": "inp",
+        "engine_type": "qwenimage",
+        "yaml_path": "/Users/tosinkuye/apex-workspace/apex/manifest/engine/qwenimage/qwenimage-edit-1.0.0.v1.yml",
+        "model_type": "edit",
         "selected_components": {
             "scheduler": {
-                "name": "UniPCMultistepScheduler",
-                "base": "diffusers.UniPCMultistepScheduler"
+                "name": "scheduler",
+                "base": "diffusers.FlowMatchEulerDiscreteScheduler",
+                "config_path": "/Users/tosinkuye/apex-diffusion/components/ddad6fcc41e8f75ee9d69bc659fc405da69b4c0cb68c25286a5bbb23cba6fa2c_scheduler_config.json",
+                "type": "scheduler",
+                "label": "Scheduler",
+                "default": "FlowMatchEulerDiscreteScheduler",
+                "is_downloaded": true
             },
-            "wan/vae": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/vae",
+            "vae": {
+                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/alibaba-pai_Wan2.2-Fun-A14B-Inp/high_noise_model",
-                "variant": "default",
-                "precision": "fp16",
-                "type": "safetensors"
+                "path": "/Users/tosinkuye/apex-diffusion/components/5a8b98fe06bd8d6f489f98dbdc2e4d901ce8e0aac640b7250d0f942d8d90bf9c_Qwen_Image_Edit-Q2_K.gguf",
+                "variant": "GGUF_Q2_K",
+                "precision": "q2_k",
+                "type": "gguf"
             },
-            "transformer_2": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/alibaba-pai_Wan2.2-Fun-A14B-Inp/low_noise_model",
-                "variant": "default",
-                "precision": "fp16",
+            "image.processor": {
+                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image-Edit/processor",
                 "type": "safetensors"
             }
         },
         "attention_type": "sdpa"
     },
     "inputs": {
-        "reference_image": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/9310181b-6357-4d3e-8dbe-33c86e482396-5df17553-4875-4a1c-a6f4-4cd6ab86dfc9_reference_image_0_8.png",
-        "video": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/f18c7716-2663-43e0-a95e-b5656e9b043c-5df17553-4875-4a1c-a6f4-4cd6ab86dfc9_video_0_72_8.mp4",
-        "mask": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/44d4320f-c9e1-4ea4-bf04-6283950ca131-5df17553-4875-4a1c-a6f4-4cd6ab86dfc9_mask_0_73_7.mp4",
-        "prompt": "A blonde woman smiling looking off to the side and the side and then back into the camera ",
-        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
-        "resolution": 480,
-        "aspect_ratio": 61,
-        "num_inference_steps": 50,
-        "height": 512,
-        "width": 512,
-        "seed": 418628274,
-        "high_noise_guidance_scale": 4,
-        "low_noise_guidance_scale": 3,
-        "boundary_ratio": 0.875,
-        "duration": "2.7916666666666665s"
+        "image": "/Users/tosinkuye/Library/Application Support/apex-studio/media/previews/5d56efa8-9dd6-43fe-8e43-38db9fc8e567_image_0_4.png",
+        "prompt": "ll;ml;m",
+        "negative_prompt": " ",
+        "resolution": "custom",
+        "aspect_ratio": "custom",
+        "num_inference_steps": 40,
+        "height": 736,
+        "width": 736,
+        "seed": 3939454035,
+        "true_cfg_scale": 4,
+        "duration": "5s"
     }
 }
