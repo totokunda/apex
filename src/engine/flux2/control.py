@@ -1,15 +1,13 @@
-from src.engine.base_engine import BaseEngine
-from diffusers.pipelines.flux2.image_processor import Flux2ImageProcessor
-from src.types import InputImage
-from typing import Union, List, Dict, Any
-import torch
-from typing import Optional, Tuple
-from diffusers.utils.torch_utils import randn_tensor
+from src.engine.flux2.shared import Flux2Shared
+from typing import Union, List, Optional, Dict, Any, Callable
+from PIL import Image
 import numpy as np
+import torch
+from src.types import InputImage
+from typing import Tuple
+from torch.nn import functional as F
 
-class Flux2T2IEngine(BaseEngine):
-    """Flux2 Text-to-Image Image-to-Image Engine Implementation"""
-    
+class Flux2Control(Flux2Shared):
     
     @property
     def guidance_scale(self):
@@ -30,16 +28,60 @@ class Flux2T2IEngine(BaseEngine):
     @property
     def interrupt(self):
         return self._interrupt
+    
+    def _padding_image(self, images, new_width, new_height):
+        new_image = Image.new('RGB', (new_width, new_height), (255, 255, 255))
+
+        aspect_ratio = images.width / images.height
+        if new_width / new_height > 1:
+            if aspect_ratio > new_width / new_height:
+                new_img_width = new_width
+                new_img_height = int(new_img_width / aspect_ratio)
+            else:
+                new_img_height = new_height
+                new_img_width = int(new_img_height * aspect_ratio)
+        else:
+            if aspect_ratio > new_width / new_height:
+                new_img_width = new_width
+                new_img_height = int(new_img_width / aspect_ratio)
+            else:
+                new_img_height = new_height
+                new_img_width = int(new_img_height * aspect_ratio)
+
+        resized_img = images.resize((new_img_width, new_img_height))
+
+        paste_x = (new_width - new_img_width) // 2
+        paste_y = (new_height - new_img_height) // 2
+
+        new_image.paste(resized_img, (paste_x, paste_y))
+
+        return new_image
+    
+    def prepare_image(self, ref_image, sample_size: Tuple[int, int], padding=False): 
+        ref_image = self._load_image(ref_image)
+        if padding:
+            ref_image = self._padding_image(ref_image, sample_size[1], sample_size[0])
+        ref_image = ref_image.resize((sample_size[1], sample_size[0]))
+        ref_image = torch.from_numpy(np.array(ref_image))
+        ref_image = ref_image.unsqueeze(0).permute([3, 0, 1, 2]).unsqueeze(0) / 255
         
-    def run(self,
-        image: InputImage | List[InputImage] = None,
+        return ref_image
+
+    def run( 
+        self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
+        image: Optional[InputImage] = None,
+        inpaint_image: Optional[InputImage] = None,
+        mask_image: Optional[InputImage] = None,
+        control_image: Optional[InputImage] = None,
+        control_context_scale: float = 1.0,
         num_inference_steps: int = 50,
         sigmas: Optional[List[float]] = None,
         guidance_scale: Optional[float] = 4.0,
         num_images_per_prompt: int = 1,
+        seed: int = None,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.Tensor] = None,
         prompt_embeds: Optional[torch.Tensor] = None,
@@ -48,9 +90,8 @@ class Flux2T2IEngine(BaseEngine):
         max_sequence_length: int = 512,
         text_encoder_out_layers: Tuple[int] = (10, 20, 30),
         offload: bool = True,
-        seed: int = None,
-        **kwargs
-        ):
+        **kwargs,
+    ):
         
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -59,8 +100,6 @@ class Flux2T2IEngine(BaseEngine):
         self._attention_kwargs = attention_kwargs
         self._current_timestep = None
         self._interrupt = False
-
-        # 2. Define call parameters
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -69,6 +108,65 @@ class Flux2T2IEngine(BaseEngine):
             batch_size = prompt_embeds.shape[0]
 
         device = self.device
+        weight_dtype = self.component_dtypes.get("text_encoder", None)
+
+        height = height or self.default_sample_size * self.vae_scale_factor
+        width = width or self.default_sample_size * self.vae_scale_factor
+        transformer_config = self.load_config_by_type("transformer")
+        num_channels_latents = transformer_config.in_channels // 4
+        
+        if not self.vae: 
+            self.load_component_by_type("vae")
+        self.to_device(self.vae)
+        
+        # Prepare mask latent variables
+        if mask_image is not None:
+            mask_image = self.prepare_image(mask_image, (height, width))[:, :1, 0]
+        else:
+            mask_image = torch.ones([1, 1, height, width]) * 255
+            
+        mask_condition = self.mask_processor.preprocess(mask_image, height=height, width=width) 
+        mask_condition = torch.tile(mask_condition, [1, 3, 1, 1]).to(dtype=weight_dtype, device=device)
+
+        if inpaint_image is not None:
+            inpaint_image = self.prepare_image(inpaint_image, (height, width))[:, :, 0]
+        else:
+            inpaint_image = torch.zeros([1, 3, height, width])
+        init_image = self.diffusers_image_processor.preprocess(inpaint_image, height=height, width=width)
+        init_image = init_image.to(dtype=weight_dtype, device=device) * (mask_condition < 0.5)
+        inpaint_latent = self.vae.encode(init_image)[0].mode()
+
+        if control_image is not None:
+            control_image = self.prepare_image(control_image, (height, width))[:, :, 0]
+            control_image = self.diffusers_image_processor.preprocess(control_image, height=height, width=width) 
+            control_image = control_image.to(dtype=weight_dtype, device=device)
+            control_latents = self.vae.encode(control_image)[0].mode()
+        else:
+            control_latents = torch.zeros_like(inpaint_latent)
+
+        mask_condition = F.interpolate(1 - mask_condition[:, :1], size=control_latents.size()[-2:], mode='nearest').to(device, weight_dtype)
+        mask_condition = self._patchify_latents(mask_condition)
+        mask_condition = self._pack_latents(mask_condition)
+
+        if inpaint_image is not None:
+            inpaint_latent = self._patchify_latents(inpaint_latent)
+            inpaint_latent = self.vae.normalize_latents(inpaint_latent)
+            inpaint_latent = self._pack_latents(inpaint_latent)
+        else:
+            inpaint_latent = self._patchify_latents(inpaint_latent)
+            inpaint_latent = self._pack_latents(inpaint_latent)
+
+        if control_image is not None:
+            control_latents = self._patchify_latents(control_latents)
+            control_latents = self.vae.normalize_latents(control_latents)
+            control_latents = self._pack_latents(control_latents)
+        else:
+            control_latents = self._patchify_latents(control_latents)
+            control_latents = self._pack_latents(control_latents)
+        control_context = torch.concat([control_latents, mask_condition, inpaint_latent], dim=2)
+        
+        if offload:
+            self._offload(self.vae)
 
         # 3. prepare text embeddings
         prompt_embeds, text_ids = self.encode_prompt(
@@ -86,10 +184,7 @@ class Flux2T2IEngine(BaseEngine):
         # 4. process images
         if image is not None and not isinstance(image, list):
             image = [image]
-        
-        if image is not None:
-            image = [self._load_image(img) for img in image]
-            
+
         condition_images = None
         if image is not None:
             for img in image:
@@ -110,12 +205,7 @@ class Flux2T2IEngine(BaseEngine):
                 height = height or image_height
                 width = width or image_width
 
-        height = height or self.default_sample_size * self.vae_scale_factor
-        width = width or self.default_sample_size * self.vae_scale_factor
-
         # 5. prepare latent variables
-        transformer_config = self.load_config_by_type("transformer")
-        num_channels_latents = transformer_config.in_channels // 4
         latents, latent_ids = self.prepare_latents(
             batch_size=batch_size * num_images_per_prompt,
             num_latents_channels=num_channels_latents,
@@ -135,19 +225,18 @@ class Flux2T2IEngine(BaseEngine):
                 batch_size=batch_size * num_images_per_prompt,
                 generator=generator,
                 device=device,
-                dtype=self.component_dtypes["vae"],
+                dtype=self.vae.dtype,
             )
-            
-        
+
+        # 6. Prepare timesteps
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-            
+        
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-
-        # 6. Prepare timesteps
+        
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
         if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
             sigmas = None
@@ -180,11 +269,26 @@ class Flux2T2IEngine(BaseEngine):
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
                 latent_model_input = latents.to(self.transformer.dtype)
+                control_context_input = control_context.to(self.transformer.dtype)
                 latent_image_ids = latent_ids
 
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1).to(self.transformer.dtype)
                     latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
+
+                    local_bs, local_length, local_c = control_context.size()
+                    control_context_input = torch.cat(
+                        [
+                            control_context,
+                            torch.zeros(
+                                [
+                                    local_bs, 
+                                    image_latents.size()[1], 
+                                    local_c
+                                ]
+                            ).to(control_context.device, control_context.dtype)], 
+                        dim=1
+                    ).to(self.transformer.dtype)
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,  # (B, image_seq_len, C)
@@ -194,6 +298,8 @@ class Flux2T2IEngine(BaseEngine):
                     txt_ids=text_ids,  # B, text_seq_len, 4
                     img_ids=latent_image_ids,  # B, image_seq_len, 4
                     joint_attention_kwargs=self._attention_kwargs,
+                    control_context=control_context_input,
+                    control_context_scale=control_context_scale,
                     return_dict=False,
                 )[0]
 
@@ -208,10 +314,10 @@ class Flux2T2IEngine(BaseEngine):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-
+                # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-                    
+
         self._current_timestep = None
         
         if offload:

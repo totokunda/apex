@@ -1,11 +1,12 @@
 from typing import Union, List, Optional, Callable, Dict, Any, Tuple
 import torch
-import numpy as np
-from PIL import Image
-
 from .shared import ZImageShared
-class ZImageT2IEngine(ZImageShared):
+from PIL import Image
+import numpy as np
 
+class ZImageControlEngine(ZImageShared):
+    """ZImage Control Engine Implementation"""
+    
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -26,14 +27,53 @@ class ZImageT2IEngine(ZImageShared):
     def interrupt(self):
         return self._interrupt
     
+    def _padding_image(self, images, new_width, new_height):
+        new_image = Image.new('RGB', (new_width, new_height), (255, 255, 255))
 
+        aspect_ratio = images.width / images.height
+        if new_width / new_height > 1:
+            if aspect_ratio > new_width / new_height:
+                new_img_width = new_width
+                new_img_height = int(new_img_width / aspect_ratio)
+            else:
+                new_img_height = new_height
+                new_img_width = int(new_img_height * aspect_ratio)
+        else:
+            if aspect_ratio > new_width / new_height:
+                new_img_width = new_width
+                new_img_height = int(new_img_width / aspect_ratio)
+            else:
+                new_img_height = new_height
+                new_img_width = int(new_img_height * aspect_ratio)
 
-    def run(self,
+        resized_img = images.resize((new_img_width, new_img_height))
+
+        paste_x = (new_width - new_img_width) // 2
+        paste_y = (new_height - new_img_height) // 2
+
+        new_image.paste(resized_img, (paste_x, paste_y))
+
+        return new_image
+    
+    def prepare_image(self, ref_image, sample_size: Tuple[int, int], padding=False): 
+        ref_image = self._load_image(ref_image)
+        if padding:
+            ref_image = self._padding_image(ref_image, sample_size[1], sample_size[0])
+        ref_image = ref_image.resize((sample_size[1], sample_size[0]))
+        ref_image = torch.from_numpy(np.array(ref_image))
+        ref_image = ref_image.unsqueeze(0).permute([3, 0, 1, 2]).unsqueeze(0) / 255
+        
+        return ref_image
+
+    def run(
+        self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
-        sigmas: Optional[List[float]] = None,
+        control_image: Union[torch.FloatTensor] = None,
+        control_context_scale: float = 1.0,
         num_inference_steps: int = 50,
+        sigmas: Optional[List[float]] = None,
         guidance_scale: float = 5.0,
         cfg_normalization: bool = False,
         cfg_truncation: float = 1.0,
@@ -55,12 +95,11 @@ class ZImageT2IEngine(ZImageShared):
         render_on_step_interval: int = 3,
         **kwargs,
     ):
-    
-        if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(seed)
-
         height = height or 1024
         width = width or 1024
+        
+        if seed is not None:
+            generator = torch.Generator(device=self.device).manual_seed(seed)
 
         vae_scale = self.vae_scale_factor * 2
         if height % vae_scale != 0:
@@ -74,8 +113,6 @@ class ZImageT2IEngine(ZImageShared):
                 f"Please adjust the width to a multiple of {vae_scale}."
             )
 
-        device = self.device  
-
         self._guidance_scale = guidance_scale
         self._joint_attention_kwargs = joint_attention_kwargs
         self._interrupt = False
@@ -88,6 +125,18 @@ class ZImageT2IEngine(ZImageShared):
             batch_size = len(prompt)
         else:
             batch_size = len(prompt_embeds)
+
+        device = self.device
+        weight_dtype = self.component_dtypes.get("transformer", None)
+        
+
+        if control_image is not None:
+            control_image = self.prepare_image(control_image, (height, width))[:, :, 0]
+            control_image = self.image_processor.preprocess(control_image, height=height, width=width) 
+            control_image = control_image.to(dtype=weight_dtype, device=device)
+            control_latents = self.vae_encode(control_image, offload=offload)
+
+        control_context = control_latents.unsqueeze(2)
 
         # If prompt_embeds is provided and prompt is None, skip encoding
         if prompt_embeds is not None and prompt is None:
@@ -112,15 +161,15 @@ class ZImageT2IEngine(ZImageShared):
             
         if offload:
             self._offload(self.text_encoder)
-            
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-
-        # 4. Prepare latent variables
+            
+        
         num_channels_latents = self.transformer.in_channels
 
+        # 4. Prepare latent variables
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
             num_channels_latents,
@@ -166,6 +215,7 @@ class ZImageT2IEngine(ZImageShared):
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
         
+        
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -204,7 +254,11 @@ class ZImageT2IEngine(ZImageShared):
                 latent_model_input_list = list(latent_model_input.unbind(dim=0))
 
                 model_out_list = self.transformer(
-                    latent_model_input_list, timestep_model_input, prompt_embeds_model_input, return_dict=False
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                    control_context=control_context,
+                    control_context_scale=control_context_scale,
                 )[0]
 
                 if apply_cfg:
@@ -249,7 +303,7 @@ class ZImageT2IEngine(ZImageShared):
         
         if offload:
             self._offload(self.transformer)
-            
+        
         if return_latents:
             return latents
         else:
