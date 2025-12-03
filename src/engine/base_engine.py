@@ -1509,6 +1509,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         dtype: torch.dtype | None = None,
         component_name: str = "vae",
         denormalize_latents: bool = True,
+        timestep: Optional[torch.Tensor] = None,
     ):
         if getattr(self, component_name, None) is None:
             self.load_component_by_type(component_name)
@@ -1960,6 +1961,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         parse_frames: bool = True,
         order: Literal["BCF", "BFC"] = "BCF",
     ):
+
         if parse_frames or isinstance(duration, str):
             if num_frames is not None:
                 num_frames = num_frames
@@ -1969,6 +1971,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             latent_num_frames = (num_frames - 1) // (
                 vae_scale_factor_temporal or self.vae_scale_factor_temporal
             ) + 1
+
         else:
             if num_frames is not None:
                 latent_num_frames = num_frames
@@ -2024,9 +2027,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             return noise, generator
         else:
             return noise
+    def get_height_width(self, height, width, resolution, aspect_ratio):
+        height = (height // 2) * 2
+        width = (width // 2) * 2
+        return height, width
 
-    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
-        video = self.vae_decode(latents)
+    
+    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable, timestep: Optional[torch.Tensor] = None):
+        video = self.vae_decode(latents, timestep=timestep)
         rendered_video = self._tensor_to_frames(video)
         render_on_step_callback(rendered_video[0])
 
@@ -2037,6 +2045,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         return postprocessed_video
 
     def _tensor_to_frame(self, image: torch.Tensor, output_type: str = "pil", **kwargs):
+        if image.dim() == 5:
+            b, c, f, h, w = image.shape
+            if f != 1:
+                raise ValueError(f"Expected 1 frame, got {f} frames with shape {image.shape}")
+            # take the single frame: (B, C, H, W)
+            image = image[:, :, 0, ...]
+        
         if hasattr(self, "image_processor"):
             postprocessed_frame = self.image_processor.postprocess(
                 image, output_type=output_type, **kwargs
@@ -2205,6 +2220,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if duration.endswith("s"):
                 duration = int(float(duration[:-1]) * fps) + 1
 
+
             elif duration.endswith("f"):
                 duration = int(duration[:-1])
             else:
@@ -2216,10 +2232,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 * self.vae_scale_factor_temporal
                 + 1
             )
+
+
         if min_frames is not None:
             min_frames = ((min_frames // 4) * 4) + 1
             duration = min(duration, min_frames)
             
+
 
         return max(duration, 1)
 

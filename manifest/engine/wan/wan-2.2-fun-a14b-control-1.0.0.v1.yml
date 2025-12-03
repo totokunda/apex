@@ -25,12 +25,12 @@ spec:
   components:
   - type: scheduler
     label: Scheduler
-    default: UniPCMultistepScheduler
+    default: FlowMatchScheduler
     scheduler_options:
-    - name: UniPCMultistepScheduler
-      label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN 2.2 A14B Fun Control.
-      base: diffusers.UniPCMultistepScheduler
+    - name: FlowMatchScheduler
+      label: FlowMatch Scheduler
+      description: The FlowMatch Scheduler is used for WAN 2.2 A14B Fun Control.
+      base: src.scheduler.FlowMatchScheduler
       config:
         num_train_timesteps: 1000
         shift: 5.0
@@ -134,14 +134,22 @@ spec:
         flow: column
         rows:
         - - negative_prompt
-    - name: extra_inputs
+    - name: extra_input_images
       label: Extra Inputs
       collapsible: true
       default_open: false
       layout:
         flow: column
         rows:
+        - - subject_reference_images
         - - start_image
+    - name: masking_inputs
+      label: Mask Inputs
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
         - - video
         - - mask
     - name: size
@@ -182,7 +190,7 @@ spec:
       label: Start Image
       description: The start image to use for the generation.
       type: image
-      panel: extra_inputs
+      panel: extra_input_images
       required: false
       map_h: height
       map_w: width
@@ -192,19 +200,27 @@ spec:
       description: The control video to use for the generation.
       type: video
       panel: input_videos
-      required: false
+      required: true
     - id: video
       label: Video
       description: The control video to use for the generation.
       type: video
-      panel: extra_inputs
+      panel: masking_inputs
       required: false
     - id: mask
       label: Mask
       description: The masked video to use for the generation.
       type: image
-      panel: extra_inputs
+      panel: masking_inputs
       required: false
+
+    - id: subject_reference_images
+      label: Subject Reference Images
+      description: The subject reference images to use for the generation.
+      type: image_list
+      panel: extra_input_images
+      required: false
+      max_images: 3
     - id: prompt
       label: Prompt
       description: Describe the video you want to generate.

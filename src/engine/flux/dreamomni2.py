@@ -39,12 +39,8 @@ class DreamOmni2Engine(FluxShared):
 
     def run(
         self,
-        image_1: InputImage,
         prompt: List[str] | str,
-        image_2: Optional[InputImage] = None,
-        image_3: Optional[InputImage] = None,
-        image_4: Optional[InputImage] = None,
-        images: Optional[List[InputImage]] = None,
+        image_list: List[InputImage],
         task: str = "generation",
         prompt_2: List[str] | str = None,
         negative_prompt: List[str] | str = None,
@@ -82,15 +78,7 @@ class DreamOmni2Engine(FluxShared):
         if task not in ["generation", "editing"]:
             raise ValueError(f"Invalid task: {task}")
     
-        images = images or []
-        if image_1 is not None:
-            images.append(image_1)
-        if image_2 is not None:
-            images.append(image_2)
-        if image_3 is not None:
-            images.append(image_3)
-        if image_4 is not None:
-            images.append(image_4)
+        images = image_list or None
         
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor

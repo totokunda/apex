@@ -1,98 +1,106 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: srpo-text-to-image
-  model: flux
-  name: SRPO Text to Image
+  id: ltx-text-to-video-13b-0.9.8-distilled-1.0.0
+  model: ltx
+  name: LTX Text to Video 13B 0.9.8 Distilled 1.0.0
   version: 1.0.0
-  description: SRPO is a 12B parameter model for text-to-image generation.
+  description: LTX-Video is a text-to-video generation model developed by Lightricks.
   tags:
-  - flux
-  - srpo
-  - t2i
+  - ltx
+  - 13b
+  - 0.9.8
+  - distilled
+  - t2v
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://storage.googleapis.com/falserverless/example_outputs/flux-srpo-output.jpeg
+  demo_path: https://preview.redd.it/create-stunning-image-to-video-motion-pictures-with-ltx-v0-375l5s3bec6e1.png?width=1080&crop=smart&auto=webp&s=0f7782e66ca66ab086c29099ae29bb7fefc598ed
   categories:
-  - text-to-image
+  - text-to-video
 spec:
-  engine: flux
-  model_type: t2i
+  engine: ltx
+  model_type: x2v
   engine_type: torch
   denoise_type: base
-  attention_types:
-  - sdpa
   components:
   - type: scheduler
     label: Scheduler
-    default: FlowMatchEulerDiscreteScheduler
+    default: RectifiedFlowScheduler
     scheduler_options:
-    - name: FlowMatchEulerDiscreteScheduler
-      label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is used for Flux Dev.
-      base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: black-forest-labs/FLUX.1-dev/scheduler/scheduler_config.json
+    - name: RectifiedFlowScheduler
+      label: Rectified Flow Scheduler
+      description: The Rectified Flow Scheduler is a scheduler for the LTX Text to Video model.
+      base: src.scheduler.rf.RectifiedFlowScheduler
+      config:
+        num_train_timesteps: 1000
+        base_resolution: null
+        target_shift_terminal: null
+        sampler: "LinearQuadratic"
+        shifting: null
+        shift: null
   - type: vae
-    label: Flux VAE
-    base: auto
-    model_path:
-    - path: black-forest-labs/FLUX.1-dev/vae
-      variant: default
-      file_size: 167667722
-  - type: text_encoder
-    name: text_encoder
-    label: CLIP Text Encoder
-    base: CLIPTextModel
-    model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder
-      variant: default
-      file_size: 246144965
-    tokenizer_class: CLIPTokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
-    tokenizer_kwargs:
-      subfolder: tokenizer
-  - type: text_encoder
-    name: text_encoder_2
-    label: T5 Text Encoder
-    base: T5EncoderModel
-    model_path:
-    - path: black-forest-labs/FLUX.1-dev/text_encoder_2
-      variant: default
-      file_size: 9524669251
-    tokenizer_class: T5Tokenizer
-    tokenizer_name: black-forest-labs/FLUX.1-dev
-    tokenizer_kwargs:
-      subfolder: tokenizer_2
-  - type: transformer
-    label: Flux Transformer
-    base: flux.base
-    config_path: black-forest-labs/FLUX.1-dev/transformer/config.json
-    model_path:
-    - path: tencent/SRPO
+    base: ltx
+    label: LTX VAE
+    model_path: 
+    - path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled.safetensors
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 44310221804
+      file_size: 28610000000
+  - type: text_encoder
+    name: ltx/text_encoder
+    label: LTX Text Encoder
+    base: T5EncoderModel
+    model_path: 
+    - path: PixArt-alpha/PixArt-XL-2-1024-MS/text_encoder
+      variant: default
+      precision: fp16
+      type: safetensors
+      file_size: 19053695074
+    config_path: https://huggingface.co/PixArt-alpha/PixArt-XL-2-1024-MS/resolve/main/text_encoder/config.json
+    tokenizer_class: T5Tokenizer
+    tokenizer_name: PixArt-alpha/PixArt-XL-2-1024-MS
+    tokenizer_kwargs:
+      subfolder: tokenizer
+  - type: transformer
+    base: ltx.base
+    label: LTX Transformer
+    model_path: 
+    - path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled.safetensors
+      variant: default
+      precision: fp16
+      type: safetensors
+      file_size: 28610000000
+    - path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled-fp8.safetensors
+      variant: fp8
+      precision: fp8
+      type: safetensors
+      file_size: 15710000000
+  - type: helper
+    base: ltx.patchifier
+    patch_size: 1
+  
   defaults:
     run:
-      num_inference_steps: 40
-      guidance_scale: 5.0
-      true_cfg_scale: 4.0
+      num_inference_steps: 30
+      guidance_scale: 1
+      guidance_scale_stg: 0
+      guidance_rescale: 1
+      timesteps: [1.0000, 0.9937, 0.9875, 0.9812, 0.9750, 0.9094, 0.7250]
       return_latents: false
       text_encoder_kwargs:
-        clean_text: false
-        max_sequence_length: 77
+        max_sequence_length: 256
+        use_attention_mask: true
         pad_with_zero: false
-      text_encoder_2_kwargs:
         clean_text: false
-        pad_with_zero: false
-        max_sequence_length: 512
-      joint_attention_kwargs: {}
+      offload: true
+      render_on_step: false
   ui:
     panels:
     - name: prompting
       label: Prompting
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -108,7 +116,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
-      default_open: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -125,34 +133,40 @@ spec:
         rows:
         - - num_inference_steps
         - - guidance_scale
-        - - true_cfg_scale
+        - - stg_scale
         - - seed
     inputs:
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
+      description: Describe the video you want to generate.
       placeholder: A beautiful landscape at golden hour.
       type: text
       panel: prompting
       required: true
     - id: negative_prompt
       label: Negative Prompt
-      description: Describe what you want to avoid in the generation.
+      description: Describe what to avoid in the generation.
       placeholder: blurry, low quality, distorted, artifacts
       type: text
       panel: advanced_prompting
       required: false
+      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
+        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
+        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
+        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
+        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
+        legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
-      description: Select the resolution of the output image
+      description: Select the resolution of the output video
       panel: size
       type: select
-      default: 720
+      default: 480
       options:
       - name: HD
         value: 720
         height: 720
-      - name: Ultra HD
+      - name: Full HD
         value: 1024
         height: 1024
       - name: SD
@@ -162,11 +176,15 @@ spec:
         value: custom
     - id: aspect_ratio
       label: Aspect Ratio
-      description: Select the aspect ratio of the output image
+      description: Select the aspect ratio of the output video
       panel: size
       type: select
-      default: "16:9"
+      default: "1:1"
       options:
+      - name: Square
+        value: "1:1"
+        ratio_w: 1
+        ratio_h: 1
       - name: Wide
         value: "16:9"
         ratio_w: 16
@@ -175,10 +193,6 @@ spec:
         value: "9:16"
         ratio_w: 9
         ratio_h: 16
-      - name: Square
-        value: "1:1"
-        ratio_w: 1
-        ratio_h: 1
       - name: Classic
         value: "4:3"
         ratio_w: 4
@@ -191,7 +205,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 7
       min: 1
       max: 100
       step: 1
@@ -201,7 +215,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 720
       min: 256
       max: 8192
       step: 64
@@ -211,7 +225,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 1280
       min: 256
       max: 8192
       step: 64
@@ -225,23 +239,30 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: true_cfg_scale
-      label: True CFG Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 1.0
-      min: 1.0
-      max: 15.0
-      step: 0.5
     - id: guidance_scale
       label: Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 3.5
+      default: 3
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: stg_scale
+      label: STG Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1
+      min: 0.1
+      max: 15.0
+      step: 0.5
+
+
+
+
+
+
+

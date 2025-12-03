@@ -1,126 +1,102 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: humo-17b
-  model: wan
-  name: HuMo 17B
+  id: ltx-text-to-video-13b-0.9.7-dev-1.0.0-depth-control
+  model: ltx
+  name: LTX Text to Video 13B 0.9.7 Depth Control 1.0.0
   version: 1.0.0
-  description: "HuMo is a unified, human-centric video generation framework designed\
-    \ to produce high-quality, fine-grained, and controllable human videos from multimodal\
-    \ inputs\u2014including text, images, and audio. It supports strong text prompt\
-    \ following, consistent subject preservation, synchronized audio-driven motion."
+  description: LTX-Video is a text-to-video generation model developed by Lightricks.
   tags:
-  - humo
+  - ltx
+  - 13b
+  - 0.9.7
+  - dev
   - t2v
-  - i2v
-  - 17b
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
+  demo_path: https://preview.redd.it/create-stunning-image-to-video-motion-pictures-with-ltx-v0-375l5s3bec6e1.png?width=1080&crop=smart&auto=webp&s=0f7782e66ca66ab086c29099ae29bb7fefc598ed
   categories:
-  - audio-to-video
+  - control
 spec:
-  max_duration_secs: 6.44
-  fps: 25
-  engine: wan
-  model_type: humo
+  engine: ltx
+  model_type: x2v
   engine_type: torch
+  denoise_type: base
   components:
   - type: scheduler
     label: Scheduler
-    default: UniPCMultistepScheduler
+    default: RectifiedFlowScheduler
     scheduler_options:
-    - name: UniPCMultistepScheduler
-      label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to
-        Video.
-      base: src.scheduler.unipc.UniPCMultistepScheduler
+    - name: RectifiedFlowScheduler
+      label: Rectified Flow Scheduler
+      description: The Rectified Flow Scheduler is a scheduler for the LTX Text to Video model.
+      base: src.scheduler.rf.RectifiedFlowScheduler
       config:
-        shift: 5.0
         num_train_timesteps: 1000
+        base_resolution: null
+        target_shift_terminal: null
+        sampler: "LinearQuadratic"
+        shifting: null
+        shift: null
   - type: vae
-    name: wan/vae
-    label: Wan VAE
-    base: wan
-    model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
+    base: ltx
+    model_path: 
+    - path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-dev.safetensors
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 507592616
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
+      file_size: 28610000000
   - type: text_encoder
-    name: wan/text_encoder
-    base: UMT5EncoderModel
-    label: UMT5 Text Encoder
-    model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
+    name: ltx/text_encoder
+    base: T5EncoderModel
+    model_path: 
+    - path: PixArt-alpha/PixArt-XL-2-1024-MS/text_encoder
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 22723695074
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
+      file_size: 19053695074
+    tokenizer_class: T5Tokenizer
+    tokenizer_name: PixArt-alpha/PixArt-XL-2-1024-MS
+    tokenizer_kwargs:
+      subfolder: tokenizer
   - type: transformer
-    base: wan.humo
-    label: HuMo Transformer
-    config:
-      text_len: 512
-      patch_size:
-      - 1
-      - 2
-      - 2
-      dim: 5120
-      ffn_dim: 13824
-      freq_dim: 256
-      in_dim: 36
-      model_type: i2v
-      num_heads: 40
-      num_layers: 40
-      window_size:
-      - -1
-      - -1
-      qk_norm: true
-      cross_attn_norm: true
-      eps: 1.0e-06
-      insert_audio: true
-    model_path:
-    - path: bytedance-research/HuMo/HuMo-17B
+    base: ltx.base
+    model_path: 
+    - path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-dev.safetensors
       variant: default
       precision: fp16
       type: safetensors
-      extra_kwargs:
-        load_from_config: true
-      file_size: 68224002820
+      file_size: 28610000000
   - type: helper
-    base: wan.humo_audio_processor
-    label: HuMo Audio Processor
-    name: wan.humo_audio_processor
-    sample_rate: 16000
-    fps: 25
-    model_path:
-    - path: openai/whisper-large-v3
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 24701695487
+    base: ltx.patchifier
+    patch_size: 1
+
+  loras:
+  - source: https://huggingface.co/Lightricks/LTX-Video-ICLoRA-depth-13b-0.9.7/resolve/main/ltxv-097-ic-lora-depth-control-comfyui.safetensors
+    scale: 1.0
+    verified: true
+    name: ic_depth_lora
+    label: ICLoRA depth
+    required: true
+    
   defaults:
     run:
-      num_inference_steps: 50
+      num_inference_steps: 30
+      guidance_scale: 3
+      stg_scale: 1
       return_latents: false
+      timesteps_as_indices: true
       text_encoder_kwargs: {}
-      attention_kwargs: {}
   ui:
     panels:
-    - name: media
-      label: Media
+    - name: control_video
+      label: Control Video
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
-        - - image
-        - - audio
-        - - sampling_rate
+        - - control_video
     - name: prompting
       label: Prompting
       collapsible: true
@@ -157,35 +133,22 @@ spec:
         rows:
         - - num_inference_steps
         - - guidance_scale
+        - - stg_scale
         - - seed
     inputs:
-    - id: audio
-      label: Audio
-      description: The audio to condition on.
-      type: audio
-      panel: media
+    - id: control_video
+      label: Control Video
+      description: A depth map control video to guide the generation.
+      type: video+preprocessor
+      panel: control_video
+      preprocessor_ref: depth_anything_v2
       required: true
-    - id: image
-      label: Image
-      description: The image to condition on.
-      type: image
-      panel: media
-      required: true
-      map_h: height
-      map_w: width
-    - id: sampling_rate
-      label: Sampling Rate
-      description: The sampling rate of the audio.
-      type: number
-      panel: audio
-      required: true
-      default: 16000
-      min: 8000
-      max: 48000
-      step: 1000
+      map_h: "height"
+      map_w: "width"
+      scale_by: "resolution"
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
+      description: Describe the video you want to generate.
       placeholder: A beautiful landscape at golden hour.
       type: text
       panel: prompting
@@ -205,40 +168,43 @@ spec:
         legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
-      description: Select the resolution of the output image
+      description: Select the resolution of the output video
       panel: size
       type: select
       default: 480
       options:
-      - name: SD
-        value: 480
-        height: 480
       - name: HD
         value: 720
         height: 720
+      - name: Full HD
+        value: 1024
+        height: 1024
+      - name: SD
+        value: 480
+        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
       label: Aspect Ratio
-      description: Select the aspect ratio of the output image
+      description: Select the aspect ratio of the output video
       panel: size
       type: select
-      default: wide
+      default: "1:1"
       options:
-      - name: Wide
-        value: wide
-        ratio_w: 26
-        ratio_h: 15
-      - name: Vertical
-        value: vertical
-        ratio_w: 15
-        ratio_h: 26
       - name: Square
-        value: square
+        value: "1:1"
         ratio_w: 1
         ratio_h: 1
+      - name: Wide
+        value: "16:9"
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: "9:16"
+        ratio_w: 9
+        ratio_h: 16
       - name: Classic
-        value: classic
+        value: "4:3"
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -249,17 +215,17 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 30
       min: 1
       max: 100
-      step: 64
+      step: 1
     - id: height
       label: Height
       description: Explicit height override
       type: number
       value_type: integer
       panel: size
-      default: 480
+      default: 720
       min: 256
       max: 8192
       step: 64
@@ -269,7 +235,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 832
+      default: 1280
       min: 256
       max: 8192
       step: 64
@@ -289,7 +255,24 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      default: 5.0
+      default: 3
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: stg_scale
+      label: STG Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1
+      min: 0.1
+      max: 15.0
+      step: 0.5
+
+
+
+
+
+
+

@@ -480,8 +480,8 @@ class WanHoloCineEngine(WanShared):
         """
         Run the inference pipeline.
         """
-        num_frames = None
-        shot_cut_frames = None
+        # num_frames = None
+        # shot_cut_frames = None
 
         if global_caption and shot_captions:
             inputs = self.prepare_multishot_inputs(global_caption, shot_captions, duration, shot_cut_frames, fps)
@@ -491,6 +491,7 @@ class WanHoloCineEngine(WanShared):
         elif prompt:
             num_frames = self._parse_num_frames(duration, fps)
             shot_cut_frames = [self._parse_num_frames(frame, fps) for frame in shot_cut_frames]
+
         
 
         shot_indices = self._process_shot_cut_frames(shot_cut_frames, num_frames)

@@ -73,13 +73,29 @@ spec:
   - type: transformer
     label: Flux Transformer
     base: flux.base
-    config_path: https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/resolve/main/transformer/config.json
+    config_path: black-forest-labs/FLUX.1-Kontext-dev/transformer/config.json
     model_path:
     - path: black-forest-labs/FLUX.1-Kontext-dev/transformer
       variant: default
       precision: fp16
       type: safetensors
       file_size: 23803075754
+    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 4
+        recommended_vram_gb: 6
+      file_size: 4318499552
+    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 8
+      file_size: 7284772512
     - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_1.gguf
       variant: GGUF_Q4_1
       precision: q4_1
@@ -88,7 +104,7 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 10
       file_size: 7536977184
-    - path: https://huggingface.co/bullerwins/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q6_K.gguf
+    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf

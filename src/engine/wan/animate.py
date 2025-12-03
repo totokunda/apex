@@ -73,6 +73,7 @@ class WanAnimateEngine(WanShared):
             image = image.unsqueeze(2)
 
         _, _, _, height, width = image.shape
+
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
 
@@ -126,6 +127,7 @@ class WanAnimateEngine(WanShared):
                 prev_segment_cond_video = background_video[:, :, :prev_segment_cond_frames].to(dtype)
             else:
                 cond_frames_shape = (batch_size, 3, prev_segment_cond_frames, height, width)  # In pixel space
+
                 prev_segment_cond_video = torch.zeros(cond_frames_shape, dtype=dtype, device=device)
 
         data_batch_size, channels, _, segment_height, segment_width = prev_segment_cond_video.shape
@@ -275,6 +277,7 @@ class WanAnimateEngine(WanShared):
         latents: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
 
@@ -345,6 +348,8 @@ class WanAnimateEngine(WanShared):
         
         image = self._load_image(image)
         image, height, width = self._aspect_ratio_resize(image, max_area=height*width)
+
+
         pose_video = self._load_video(pose_video)
         face_video = self._load_video(face_video)
         if background_video is not None:
@@ -367,6 +372,7 @@ class WanAnimateEngine(WanShared):
         # As we generate in segments of `segment_frame_length`, set the target frame length to be the least multiple
         # of the effective segment length greater than or equal to the length of `pose_video`.
         cond_video_frames = len(pose_video)
+
         effective_segment_length = segment_frame_length - prev_segment_conditioning_frames
         last_segment_frames = (cond_video_frames - prev_segment_conditioning_frames) % effective_segment_length
         if last_segment_frames == 0:
@@ -375,6 +381,7 @@ class WanAnimateEngine(WanShared):
             num_padding_frames = effective_segment_length - last_segment_frames
         num_target_frames = cond_video_frames + num_padding_frames
         num_segments = num_target_frames // effective_segment_length
+
 
         # 3. Encode input prompt
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
@@ -497,6 +504,8 @@ class WanAnimateEngine(WanShared):
                 latents=latents if start == 0 else None,  # Only use pre-calculated latents for first segment
             )
 
+
+
             pose_video_segment = pose_video[:, :, start:end]
             face_video_segment = face_video[:, :, start:end]
 
@@ -577,6 +586,8 @@ class WanAnimateEngine(WanShared):
                 use_cfg_guidance=use_cfg_guidance,
                 render_on_step=render_on_step
             )
+
+
             
             out_frames = self.vae_decode(latents[:, :, 1:], offload=offload)
             if start > 0:
@@ -600,13 +611,18 @@ class WanAnimateEngine(WanShared):
         if return_latents:
             return latents
 
+
+
         video = torch.cat(all_out_frames, dim=2)[:, :, :cond_video_frames]
+
         video = self._tensor_to_frames(video)
         safe_emit_progress(progress_callback, 1.0, "Completed animate pipeline")
+  
         return video
     
     def _render_step(self, latents, render_on_step_callback):
         video = self.vae_decode(latents)
         total_video = torch.cat(self._preview_all_out_frames + [video], dim=2)[:, :, :self._cond_video_frames]
+
         rendered_video = self._tensor_to_frames(total_video)
         render_on_step_callback(rendered_video[0])

@@ -1,11 +1,12 @@
 from src.engine.base_engine import BaseEngine
 from diffusers.pipelines.flux2.image_processor import Flux2ImageProcessor
 from src.types import InputImage
-from typing import Union, List, Dict, Any
+from typing import Union, List, Dict, Any, Callable
 import torch
 from typing import Optional, Tuple
 from diffusers.utils.torch_utils import randn_tensor
 import numpy as np
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 class Flux2T2IEngine(BaseEngine):
     """Flux2 Text-to-Image Image-to-Image Engine Implementation"""
@@ -95,6 +96,7 @@ class Flux2T2IEngine(BaseEngine):
         out = out.to(dtype=dtype, device=device)
 
         batch_size, num_channels, seq_len, hidden_dim = out.shape
+
         prompt_embeds = out.permute(0, 2, 1, 3).reshape(batch_size, seq_len, num_channels * hidden_dim)
         
         if self.text_encoder.enable_cache and hash is not None:
@@ -281,6 +283,13 @@ class Flux2T2IEngine(BaseEngine):
                 hidden_states_layers=text_encoder_out_layers,
             )
 
+        if prompt_embeds.ndim == 4:
+            B, V, L, D = prompt_embeds.shape  # 1, 3, 512, 5120
+
+            # Move V next to D: [B, L, V, D] then flatten V*D
+            prompt_embeds = prompt_embeds.permute(0, 2, 1, 3).contiguous()
+            prompt_embeds = prompt_embeds.view(B, L, V * D)  # [1, 512, 15360]      
+
         batch_size, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
         prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
@@ -445,8 +454,11 @@ class Flux2T2IEngine(BaseEngine):
         text_encoder_out_layers: Tuple[int] = (10, 20, 30),
         offload: bool = True,
         seed: int = None,
+        progress_callback: Callable = None,
         **kwargs
         ):
+        safe_emit_progress(progress_callback, 0.0, "Starting ti2i pipeline")
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -474,9 +486,11 @@ class Flux2T2IEngine(BaseEngine):
             max_sequence_length=max_sequence_length,
             text_encoder_out_layers=text_encoder_out_layers,
         )
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
         
         if offload:
             self._offload(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
 
         # 4. process images
         if image is not None and not isinstance(image, list):
@@ -521,6 +535,7 @@ class Flux2T2IEngine(BaseEngine):
             generator=generator,
             latents=latents,
         )
+        safe_emit_progress(progress_callback, 0.38, "Initialized latent noise")
 
         image_latents = None
         image_latent_ids = None
@@ -542,6 +557,8 @@ class Flux2T2IEngine(BaseEngine):
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.45, "Scheduler prepared")
+
         # 6. Prepare timesteps
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
         if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
@@ -557,6 +574,8 @@ class Flux2T2IEngine(BaseEngine):
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
 
+        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+
         # handle guidance
         guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
         guidance = guidance.expand(latents.shape[0])
@@ -565,6 +584,10 @@ class Flux2T2IEngine(BaseEngine):
         # We set the index here to remove DtoH sync, helpful especially during compilation.
         # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
         self.scheduler.set_begin_index(0)
+
+        # Reserve a progress gap for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -608,11 +631,14 @@ class Flux2T2IEngine(BaseEngine):
                     progress_bar.update()
                     
         self._current_timestep = None
+
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
         if offload:
             self._offload(self.transformer)
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             image = latents
         else:
             latents = self._unpack_latents_with_ids(latents, latent_ids)
@@ -626,5 +652,6 @@ class Flux2T2IEngine(BaseEngine):
 
             image = self.vae_decode(latents, offload=offload, denormalize_latents=False)
             image = self._tensor_to_frame(image)
+            safe_emit_progress(progress_callback, 1.0, "Completed ti2i pipeline")
         
         return image

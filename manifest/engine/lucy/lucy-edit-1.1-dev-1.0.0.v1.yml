@@ -95,8 +95,19 @@ spec:
         flow: column
         rows:
         - - negative_prompt
-    - name: settings
-      label: Settings
+    - name: size
+      label: Size
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - resolution
+        - - aspect_ratio
+        - - height
+          - width
+    - name: sampling
+      label: Sampling
       collapsible: true
       default_open: true
       layout:
@@ -104,8 +115,6 @@ spec:
         rows:
         - - num_inference_steps
         - - guidance_scale
-        - - fps
-        - - duration
         - - seed
     inputs:
     - id: video
@@ -113,6 +122,9 @@ spec:
       description: The video to edit.
       type: video
       panel: input
+      map_h: height
+      map_w: width  
+      scale_by: resolution
       required: true
     - id: prompt
       label: Prompt
@@ -127,16 +139,79 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output image
+      panel: size
+      type: select
+      default: 720
+      options:
+      - name: Ultra HD
+        value: 1024
+        height: 1024
+      - name: HD
+        value: 720
+        height: 720
+      - name: SD
+        value: 480
+        height: 480
+      - name: Custom
+        value: custom
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output image
+      panel: size
+      type: select
+      default: 61
+      options:
+      - name: Square
+        value: 61
+        ratio_w: 1
+        ratio_h: 1
+      - name: Wide
+        value: 969
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: 556
+        ratio_w: 9
+        ratio_h: 16
+      - name: Classic
+        value: 184
+        ratio_w: 4
+        ratio_h: 3
+      - name: Custom
+        value: custom
     - id: num_inference_steps
       label: Inference Steps
-      description: Number of denoising steps.
+      description: Number of denoising steps
       type: number+slider
       value_type: integer
-      panel: settings
-      default: 50
+      panel: sampling
+      default: 30
       min: 1
       max: 100
       step: 1
+    - id: height
+      label: Height
+      description: Explicit height override
+      type: number
+      value_type: integer
+      panel: size
+      default: 1024
+      min: 256
+      max: 8192
+      step: 64
+    - id: width
+      label: Width
+      description: Explicit width override
+      type: number
+      value_type: integer
+      panel: size
+      default: 1024
+      min: 256
+      max: 8192
+      step: 64
     - id: guidance_scale
       label: Guidance Scale
       type: number+slider
@@ -146,15 +221,6 @@ spec:
       min: 1.0
       max: 20.0
       step: 0.5
-    - id: fps
-      label: FPS
-      description: Frames per second for the output video.
-      type: number
-      value_type: integer
-      panel: settings
-      default: 24
-      min: 1
-      max: 60
     - id: seed
       label: Seed
       description: Random seed for reproducibility.
@@ -163,5 +229,5 @@ spec:
       min: 0
       max: 4294967295
       value_type: integer
-      panel: settings
+      panel: sampling
       required: false

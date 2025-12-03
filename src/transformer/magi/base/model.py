@@ -109,6 +109,9 @@ class MagiTransformer3DModel(
         cross_attention_dim = num_query_groups * attention_head_dim
         self.half_channel_vae = half_channel_vae
 
+
+
+
         self.patch_embedding = nn.Conv3d(
             in_channels,
             hidden_dim,

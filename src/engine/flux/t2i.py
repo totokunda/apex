@@ -64,7 +64,6 @@ class FluxT2IEngine(FluxShared):
             num_images,
             text_encoder_kwargs,
             text_encoder_2_kwargs,
-            render_on_step_interval=render_on_step_interval,
         )
 
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")

@@ -103,17 +103,23 @@ class LucyEditEngine(WanShared):
         # Preprocess video
         video_tensor = self.video_processor.preprocess_video(video, height=height, width=width)
         video_tensor = video_tensor.to(self.device, dtype=torch.float32)
-        num_frames = self._parse_num_frames(duration, fps)  
+        num_frames = self._parse_num_frames(duration, fps)
+
         if num_frames < video_tensor.shape[2]:
             video_tensor = video_tensor[:, :, :num_frames, :, :]
         elif num_frames > video_tensor.shape[2]:
-            num_frames = video_tensor.shape[2]
-    
-    
+            if video_tensor.shape[2] % 4 == 0:
+                num_frames = (video_tensor.shape[2] // 4) * 4 - 3
+            else:
+                num_frames = (video_tensor.shape[2] // 4) * 4 + 1
+            video_tensor = video_tensor[:, :, :num_frames, :, :]
+
+
         # Prepare noise latents
         latents = self._get_latents(
             height,
             width,
+            num_frames=num_frames,
             duration=duration,
             fps=fps,
             num_channels_latents=self.num_channels_latents,
@@ -123,7 +129,10 @@ class LucyEditEngine(WanShared):
             generator=generator
         )
 
+
         safe_emit_progress(progress_callback, 0.35, "Initialized latent noise")
+
+
 
         # Prepare condition latents
         condition_latents_list = []
@@ -132,9 +141,11 @@ class LucyEditEngine(WanShared):
             cond = self.vae_encode(vid, offload=False)
             condition_latents_list.append(cond)
 
+
         condition_latents = torch.cat(condition_latents_list, dim=0).to(torch.float32)
         if offload:
             self._offload(self.vae)
+
         
         # 5. Boundary timestep
         if boundary_ratio is not None:
