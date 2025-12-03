@@ -14,6 +14,7 @@ from PIL import Image, ImageOps
 from torchvision.transforms import Compose, Normalize, ToTensor
 from tqdm import tqdm
 import torch.amp as amp
+from loguru import logger
 
 class HuMoEngine(WanShared):
     def __init__(self, yaml_path: str, **kwargs):
@@ -252,6 +253,7 @@ class HuMoEngine(WanShared):
         
         return sum(p.numel() for p in model.parameters())
     
+
     def run(self,
             prompt: List[str] | str,
             audio: InputAudio | None,
@@ -279,6 +281,8 @@ class HuMoEngine(WanShared):
             aspect_ratio: str | None = None,
             **kwargs
             ):
+
+        height, width = self.get_height_width(height, width, resolution, aspect_ratio)
 
 
         transformer_dtype = self.component_dtypes["transformer"]

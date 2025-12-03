@@ -69,6 +69,38 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 28654175562
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/HighNoise/Wan2.2-Fun-A14B-InP_HighNoise-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 8
+      file_size: 5707862016
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/HighNoise/Wan2.2-Fun-A14B-InP_HighNoise-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 9
+        recommended_vram_gb: 12
+      file_size: 9395240960
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/HighNoise/Wan2.2-Fun-A14B-InP_HighNoise-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 16
+      file_size: 12884901888
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/HighNoise/Wan2.2-Fun-A14B-InP_HighNoise-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 20
+      file_size: 16540475392
     config_path: alibaba-pai/Wan2.2-Fun-A14B-Inp/high_noise_model/config.json
     config:
       _class_name: WanFunTransformer3DModel
@@ -83,6 +115,38 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 28654175562
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/LowNoise/Wan2.2-Fun-A14B-InP_LowNoise-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 8
+      file_size: 5707862016
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/LowNoise/Wan2.2-Fun-A14B-InP_LowNoise-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 9
+        recommended_vram_gb: 12
+      file_size: 9395240960
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/LowNoise/Wan2.2-Fun-A14B-InP_LowNoise-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 16
+      file_size: 12884901888
+    - path: https://huggingface.co/QuantStack/Wan2.2-Fun-A14B-InP-GGUF/resolve/main/LowNoise/Wan2.2-Fun-A14B-InP_LowNoise-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 20
+      file_size: 16540475392
     config_path: alibaba-pai/Wan2.2-Fun-A14B-Inp/low_noise_model/config.json
     config:
       _class_name: WanFunTransformer3DModel
@@ -169,6 +233,8 @@ spec:
       type: image
       panel: input
       required: true
+      map_h: height
+      map_w: width
       scale_by: resolution
     - id: last_frame
       label: Last Frame
@@ -176,7 +242,7 @@ spec:
       type: image
       panel: input
       required: true
-      scale_by: resolution
+
     - id: prompt
       label: Prompt
       description: Describe the image you want to generate.

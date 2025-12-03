@@ -189,7 +189,7 @@ spec:
       label: Task
       description: Select the task to perform.
       panel: task
-      default: generation
+      default: editing
       options:
       - name: Generation
         value: generation

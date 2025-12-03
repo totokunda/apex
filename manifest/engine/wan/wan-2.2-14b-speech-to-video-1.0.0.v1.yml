@@ -103,7 +103,7 @@ spec:
         rows:
         - - audio
         - - sampling_rate
-    - name: media
+    - name: image_input
       label: Media
       collapsible: true
       default_open: true
@@ -111,8 +111,14 @@ spec:
         flow: column
         rows:
         - - image
+    - name: pose_video
+      label: Control Video
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
         - - pose_video
-        - - resolution
     - name: prompting
       label: Prompting
       collapsible: true
@@ -129,6 +135,17 @@ spec:
         flow: column
         rows:
         - - negative_prompt
+    - name: size
+      label: Size
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - resolution
+        - - aspect_ratio
+        - - height
+          - width
     - name: sampling
       label: Sampling
       collapsible: true
@@ -160,7 +177,7 @@ spec:
       label: Image
       description: The image to condition on.
       type: image
-      panel: media
+      panel: image_input
       required: true
       map_h: height
       map_w: width
@@ -170,7 +187,7 @@ spec:
       description: The pose video to condition on.
       preprocessor_ref: dwpose
       type: video+preprocessor
-      panel: media
+      panel: pose_video
       required: false
     - id: prompt
       label: Prompt
@@ -207,16 +224,42 @@ spec:
         height: 720
       - name: Custom
         value: custom
+
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output image
+      panel: size
+      type: select
+      default: "1:1"
+      options:
+      - name: Square
+        value: "1:1"
+        ratio_w: 1
+        ratio_h: 1
+      - name: Wide
+        value: "16:9"
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: "9:16"
+        ratio_w: 9
+        ratio_h: 16
+      - name: Classic
+        value: "4:3"
+        ratio_w: 4
+        ratio_h: 3
+      - name: Custom
+        value: custom
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 30
       min: 1
       max: 100
-      step: 64
+      step: 1
     - id: height
       label: Height
       description: Explicit height override

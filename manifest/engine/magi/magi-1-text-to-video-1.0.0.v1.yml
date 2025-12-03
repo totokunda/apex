@@ -61,6 +61,11 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 8945217553
+    - path: tolgacangoz/MAGI-1-T2V-24B-Diffusers/transformer
+      variant: variant_24b
+      precision: fp16
+      type: safetensors
+      file_size: 47861217553
     config_path: tolgacangoz/MAGI-1-T2V-4.5B-Diffusers/transformer/config.json
   defaults:
     run:

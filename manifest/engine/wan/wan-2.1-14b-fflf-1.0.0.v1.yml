@@ -45,6 +45,7 @@ spec:
     config_path: https://huggingface.co/Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/resolve/main/vae/config.json
   - type: text_encoder
     name: wan/text_encoder
+    label: Wan Text Encoder
     base: UMT5EncoderModel
     model_path: 
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
@@ -54,6 +55,7 @@ spec:
       file_size: 22723695074
     config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
   - type: transformer
+    label: Wan Transformer
     base: wan.base
     model_path: 
     - path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/transformer
@@ -61,10 +63,43 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 65580593943
+    - path: https://huggingface.co/city96/Wan2.1-FLF2V-14B-720P-gguf/resolve/main/wan2.1-flf2v-14b-720p-Q3_K_S.gguf
+      variant: GGUF_Q3_K_S
+      precision: q3_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 8519458944
+    - path: https://huggingface.co/city96/Wan2.1-FLF2V-14B-720P-gguf/resolve/main/wan2.1-flf2v-14b-720p-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 10
+        recommended_vram_gb: 14
+      file_size: 11172175872
+    - path: https://huggingface.co/city96/Wan2.1-FLF2V-14B-720P-gguf/resolve/main/wan2.1-flf2v-14b-720p-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 14
+        recommended_vram_gb: 18
+      file_size: 15245959168
+    - path: https://huggingface.co/city96/Wan2.1-FLF2V-14B-720P-gguf/resolve/main/wan2.1-flf2v-14b-720p-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 18
+        recommended_vram_gb: 24
+      file_size: 19442384896
     config_path: https://huggingface.co/Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/resolve/main/transformer/config.json
   - type: helper
     base: clip
     name: wan/clip_fflf
+    label: Wan CLIP
     model_path: 
     - path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/image_encoder
       variant: default
@@ -141,7 +176,9 @@ spec:
       type: image
       panel: input
       required: true
-
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: last_frame
       label: Last Frame
       description: The last frame of the video to generate.

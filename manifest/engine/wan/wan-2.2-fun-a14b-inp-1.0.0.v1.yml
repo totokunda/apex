@@ -112,8 +112,8 @@ spec:
         flow: column
         rows:
         - - reference_image
-    - name: video_input
-      label: Video Input
+    - name: masking_inputs
+      label: Masking Inputs
       collapsible: true
       default_open: true
       layout:
@@ -187,13 +187,13 @@ spec:
       label: Video
       description: The control video to use for the generation.
       type: video
-      panel: video_input
+      panel: masking_inputs
       required: false
     - id: mask
       label: Mask Video
       description: A mask video where white/opaque regions will be filled; black/transparent are kept.
       type: video+mask
-      panel: video_input
+      panel: masking_inputs
       required: false
     - id: prompt
       label: Prompt

@@ -142,6 +142,14 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
+    - name: image
+      label: Image
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - image
     - name: prompting
       label: Prompting
       collapsible: true
@@ -182,10 +190,19 @@ spec:
         - - audio_guidance_scale
         - - seed
     inputs:
+    - id: image
+      label: Image
+      description: The input image to generate a video from.
+      type: image
+      panel: image
+      required: true
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
-      placeholder: A beautiful landscape at golden hour.
+      description: Describe the image you want to generate using the <S> and <E> tags for start and end of the text.
+      placeholder: A man in the video grumbles angrily and says <S>I love open source. I can goon to whatever I want.<E> in a deep low voice.
       type: text
       panel: prompting
       required: true

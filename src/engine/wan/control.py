@@ -203,11 +203,11 @@ class WanControlEngine(WanShared):
                 .view(b, f // 4, c * 4, h, w)
                 .transpose(1, 2)
             )
-
+        
         elif control_video is not None:
             pt, ph, pw = transformer_config.get("patch_size", (1, 2, 2))
             video_height, video_width = self.video_processor.get_default_height_width(
-                loaded_video[0]
+                control_loaded_video[0]
             )
             base = self.vae_scale_factor_spatial * ph
 
@@ -223,7 +223,7 @@ class WanControlEngine(WanShared):
 
             assert video_height * video_width <= height * width
             
-            control_video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+            control_video = torch.from_numpy(np.array([np.array(frame) for frame in control_loaded_video]))[:num_frames]
 
             control_video = control_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
             
@@ -429,6 +429,7 @@ class WanControlEngine(WanShared):
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+
 
         latents = self.denoise(
             boundary_timestep=boundary_timestep,

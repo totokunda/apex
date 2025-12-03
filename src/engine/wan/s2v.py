@@ -74,6 +74,8 @@ class WanS2VEngine(WanShared):
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
 
+
+
         shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
         dtype = self.component_dtypes["vae"]
         device = device or self.device
@@ -107,6 +109,7 @@ class WanS2VEngine(WanShared):
             pose_condition = self.load_pose_condition(
                 pose_video, num_chunks, num_frames_per_chunk, height, width
             )
+
             # Encode motion latents
             videos_last_pixels = motion_pixels.detach()
             if init_first_frame:
@@ -114,7 +117,9 @@ class WanS2VEngine(WanShared):
                 motion_pixels[:, :, -6:] = video_condition
             motion_latents = self.vae_encode(motion_pixels, offload=offload)
 
+
             return latents, latent_condition, videos_last_pixels, motion_latents, pose_condition
+
         else:
             return latents
     
@@ -171,7 +176,9 @@ class WanS2VEngine(WanShared):
         device = device or self.device
         video_rate = 30
         audio_sample_m = 0
-        
+
+
+
         audio = self._load_audio(audio, sampling_rate)
 
         input_values = self.helpers["audio_processor"](audio, sampling_rate=sampling_rate, return_tensors="pt").input_values
@@ -184,7 +191,9 @@ class WanS2VEngine(WanShared):
 
         audio_embed = feat.to(torch.float32)  # Encoding for the motion
 
+
         num_layers, audio_frame_num, audio_dim = audio_embed.shape
+
 
         if num_layers > 1:
             return_all_layers = True
@@ -193,10 +202,19 @@ class WanS2VEngine(WanShared):
 
         scale = video_rate / fps
 
+        print(num_frames)
+        print(audio_frame_num)
+        print(scale)
+        
+
         num_repeat = int(audio_frame_num / (num_frames * scale)) + 1
+        print(num_repeat)
 
         bucket_num = num_repeat * num_frames
         padd_audio_num = math.ceil(num_repeat * num_frames / fps * video_rate) - audio_frame_num
+        print(padd_audio_num)
+
+
         batch_idx = self.get_sample_indices(
             original_fps=video_rate,
             total_frames=audio_frame_num + padd_audio_num,
@@ -240,6 +258,8 @@ class WanS2VEngine(WanShared):
             
         if offload:
             self._offload(self.helpers["audio_encoder"])
+        
+
             
         return audio_embed_bucket, num_repeat
     
@@ -312,8 +332,7 @@ class WanS2VEngine(WanShared):
 
         audio_embeds, num_chunks_audio = self.encode_audio(
                 audio, sampling_rate, num_frames_per_chunk, fps, offload=offload
-            )
-    
+            )    
         if num_chunks is None or num_chunks > num_chunks_audio:
             num_chunks = num_chunks_audio
         audio_embeds = audio_embeds.to(transformer_dtype)
@@ -457,6 +476,8 @@ class WanS2VEngine(WanShared):
                 decode_latents = torch.cat([condition, latents], dim=2)
 
             decode_latents = decode_latents.to(self.vae.dtype)
+
+
             video = self.vae_decode(decode_latents, offload=offload)
             video = video[:, :, -(num_frames_per_chunk):]
 
@@ -464,15 +485,18 @@ class WanS2VEngine(WanShared):
                 video = video[:, :, 3:]
 
             num_overlap_frames = min(self.motion_frames, video.shape[2])
+
             videos_last_pixels = torch.cat(
                 [videos_last_pixels[:, :, num_overlap_frames:], video[:, :, -num_overlap_frames:]], dim=2
             )
 
-            # Update motion_latents for next iteration
+             # Update motion_latents for next iteration
             motion_latents = self.vae_encode(videos_last_pixels, sample_mode="mode", offload=offload)
 
             video_chunks.append(video)
             self._preview_video_chunks.append(video)
+
+
             break
 
         if offload:

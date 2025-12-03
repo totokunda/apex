@@ -107,15 +107,13 @@ spec:
         flow: column
         rows:
         - - negative_prompt
-    - name: extra_inputs
-      label: Extra Inputs
+    - name: mask
+      label: Mask Video
       collapsible: true
       default_open: false
       layout:
         flow: column
         rows:
-        - - reference_images
-        - - reference_images
         - - mask
     - name: size
       label: Size
@@ -142,24 +140,26 @@ spec:
     inputs:
     - id: video
       label: Video
-      description: The control video to be used for the generation.
+      description: The video to be used for the generation.
       type: video
       panel: input_video
-      required: true
+      required: false
+      scale_by: resolution
     - id: reference_images
-      label: Reference Image
+      label: Reference Images
       description: A reference image to use within the generation.
-      type: image
+      type: image_list
       panel: input_image
-      required: true
+      required: false
       map_h: height
       map_w: width
       scale_by: resolution
+      max_images: 3
     - id: mask
       label: Mask Video
       description: A mask video where white/opaque regions will be filled; black/transparent are kept.
       type: video+mask
-      panel: extra_inputs
+      panel: mask
       required: false
     - id: prompt
       label: Prompt
