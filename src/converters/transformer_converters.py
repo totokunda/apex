@@ -790,6 +790,7 @@ class FluxTransformerConverter(TransformerConverter):
         
 
         # time_text_embed.timestep_embedder <- time_in
+
         converted_state_dict[
             "time_text_embed.timestep_embedder.linear_1.weight"
         ] = original_state_dict.pop("time_in.in_layer.weight")

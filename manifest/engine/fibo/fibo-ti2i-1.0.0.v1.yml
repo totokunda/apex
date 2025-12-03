@@ -5,7 +5,7 @@ metadata:
   model: fibo
   name: Fibo TI2I
   version: 1.0.0
-  description: Fibo is an 8B parameter model for text-to-image generation powered
+  description: Fibo is an 8B parameter model for text-to-image and image edit generation powered
     by Bria.
   tags:
   - fibo

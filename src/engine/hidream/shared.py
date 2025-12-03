@@ -231,6 +231,8 @@ class HidreamShared(BaseEngine):
         if offload:
             self._offload(llama_encoder)
 
+
+
         return (
             prompt_embeds,
             negative_prompt_embeds,

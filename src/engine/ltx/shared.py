@@ -110,6 +110,7 @@ class LTXVideoCondition(LoaderMixin):
             1 if isinstance(self._media_item, Image.Image) else len(self._media_item)
         )
 
+
         num_frames = self.trim_conditioning_sequence(
             self.frame_number, num_frames, target_frames or num_frames
         )

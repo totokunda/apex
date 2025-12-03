@@ -13,6 +13,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://i.ytimg.com/vi/baS0ZIkt3gM/maxresdefault.jpg
+  categories:
+  - text-to-video
 spec:
   model_type: continuation  
   sub_engines:

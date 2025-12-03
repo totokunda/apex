@@ -54,7 +54,7 @@ class HidreamT2IEngine(HidreamShared):
         
         batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images   
 
-        use_cfg_guidance = guidance_scale > 1.0
+        use_cfg_guidance = guidance_scale >= 1.0
 
         division = self.vae_scale_factor * 2
         S_max = (self.default_sample_size * self.vae_scale_factor) ** 2
