@@ -292,7 +292,8 @@ class WanAnimateEngine(WanShared):
 
         return latents
     
-    def run(self,image: InputImage,
+    def run(self,
+        image: InputImage,
         pose_video: Optional[InputVideo] = None,
         face_video: Optional[InputVideo] = None,
         background_video: Optional[InputVideo] = None,
