@@ -168,7 +168,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         pad_with_zero: bool = True,
         clean_text: bool = True,
         process_inputs_func: Callable = None,
-        output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
+        output_type: Literal["hidden_states", "hidden_states_all", "pooler_output", "text_embeds", "raw"] = "hidden_states",
         lower_case: bool = False,
     ):
         if isinstance(text, str):
@@ -266,14 +266,16 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         result = self.model(
             **inputs,
             output_hidden_states=(
-                output_type == "hidden_states" or output_type == "raw"
+                output_type == "hidden_states" or output_type == "raw" or output_type == "hidden_states_all"
             ),
         )
 
-
-        if output_type == "hidden_states" and hasattr(result, "last_hidden_state"):
+        if output_type == "hidden_states_all" and hasattr(result, "hidden_states"):
+            prompt_embeds = result.hidden_states
+            prompt_embeds = torch.stack(prompt_embeds, dim=0)
+        elif output_type == "hidden_states" and hasattr(result, "last_hidden_state"):
             prompt_embeds = result.last_hidden_state
-        if output_type == "hidden_states" and hasattr(result, "hidden_states"):
+        elif output_type == "hidden_states" and hasattr(result, "hidden_states"):
             prompt_embeds = result.hidden_states[-1]
         elif output_type == "pooler_output" and hasattr(result, "pooler_output"):
             prompt_embeds = result.pooler_output
@@ -321,7 +323,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         elif output_type == "text_embeds":
             prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
             mask = mask.repeat(num_videos_per_prompt, 1)
-        else:
+        elif output_type == "hidden_states":
             _, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
 
