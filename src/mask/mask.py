@@ -12,6 +12,7 @@ from loguru import logger
 import traceback
 from datetime import datetime
 import gc
+import time
 # get the default device
 from src.utils.defaults import get_torch_device, DEFAULT_PREPROCESSOR_SAVE_PATH
 
@@ -1022,9 +1023,13 @@ class UnifiedSAM2Predictor:
         self._predictor = None
         
         # Cache inference states by input hash
-        # Format: {(input_path, frame_number): inference_state}
+        # Format: {(input_path, frame_number, id): inference_state}
         self._inference_states = {}
         self._max_cached_states = 5  # Increased from 3 for better caching
+        # Track last access time per cached state for idle eviction
+        self._state_last_used = {}
+        # Time-to-live (seconds) for idle inference states
+        self._state_ttl_seconds = 180.0
         
         self.logger.info(f"UnifiedSAM2Predictor initialized with config: {config_name}, "
                    f"device: {self.device}, compile: {use_compile}")
@@ -1094,10 +1099,43 @@ class UnifiedSAM2Predictor:
     def _cleanup_oldest_state(self):
         """Remove the oldest cached inference state to manage memory."""
         if len(self._inference_states) >= self._max_cached_states:
-            # Remove oldest entry (FIFO)
+            # Prefer removing any stale entries before arbitrary eviction
+            self._cleanup_stale_states()
+        if len(self._inference_states) >= self._max_cached_states:
+            # Remove oldest entry (FIFO) as a fallback
             oldest_key = next(iter(self._inference_states))
-            del self._inference_states[oldest_key]
+            self._inference_states.pop(oldest_key, None)
+            self._state_last_used.pop(oldest_key, None)
             self.logger.debug(f"Evicted oldest inference state: {oldest_key}")
+
+    def _cleanup_stale_states(self) -> None:
+        """Evict any cached inference states that have been idle longer than the TTL."""
+        try:
+            if not self._state_last_used:
+                return
+            now = time.monotonic()
+            ttl = getattr(self, "_state_ttl_seconds", 180.0)
+            stale_keys = [
+                key for key, last in list(self._state_last_used.items())
+                if now - last > ttl
+            ]
+            for key in stale_keys:
+                self._inference_states.pop(key, None)
+                self._state_last_used.pop(key, None)
+            if stale_keys:
+                self.logger.info(
+                    f"Evicted {len(stale_keys)} stale SAM2 inference state(s) idle > {ttl}s"
+                )
+        except Exception as e:
+            self.logger.warning(f"Failed idle-state cleanup: {e}")
+
+    def _touch_state(self, cache_key) -> None:
+        """Mark a cached state as recently used."""
+        try:
+            self._state_last_used[cache_key] = time.monotonic()
+        except Exception:
+            # Best-effort only; do not fail inference on bookkeeping issues
+            pass
     
     def _get_or_create_inference_state(self, input_path: str, frame_number: Optional[int] = None, id: Optional[str] = None):
         """Get cached inference state or create new one."""
@@ -1105,9 +1143,11 @@ class UnifiedSAM2Predictor:
         
         if cache_key in self._inference_states:
             self.logger.debug(f"Using cached inference state for {cache_key}")
+            self._touch_state(cache_key)
             return self._inference_states[cache_key]
         
         # Cleanup old states if needed
+        self._cleanup_stale_states()
         self._cleanup_oldest_state()
         
         # Initialize inference state using our custom init_state (no temp dir needed!)
@@ -1122,7 +1162,8 @@ class UnifiedSAM2Predictor:
         
         # Cache it
         self._inference_states[cache_key] = inference_state
-        
+        self._touch_state(cache_key)
+
         return inference_state
     
     def _cache_inference_state(
@@ -1142,6 +1183,7 @@ class UnifiedSAM2Predictor:
             
 
         self._inference_states[cache_key] = inference_state
+        self._touch_state(cache_key)
 
     def _maybe_restore_state(
         self,
@@ -1150,10 +1192,13 @@ class UnifiedSAM2Predictor:
         id: Optional[str],
     ):
         cache_key = self._get_cache_key(input_path, frame_start, id)
+        # Drop any stale entries before attempting to reuse state
+        self._cleanup_stale_states()
         if cache_key not in self._inference_states:
             return self._get_or_create_inference_state(input_path, frame_start, id)
 
         inference_state = self._inference_states[cache_key]
+        self._touch_state(cache_key)
         # Prompts are already embedded in cached inference state; nothing additional needed.
 
         return inference_state
@@ -1584,6 +1629,27 @@ class UnifiedSAM2Predictor:
             logger.error(traceback.format_exc())
             raise e
 
+    def clear_states_for_id(self, id: Optional[str]) -> None:
+        """
+        Drop any cached inference state entries associated with the given logical mask id.
+
+        This is a lightweight alternative to full cleanup(), allowing us to free RAM
+        for finished tracking sessions without unloading the model or affecting
+        other concurrent ids.
+        """
+        if not id:
+            return
+        try:
+            # Keys are (input_path, frame_number, id)
+            dead_keys = [k for k in list(self._inference_states.keys()) if k[2] == id]
+            for k in dead_keys:
+                self._inference_states.pop(k, None)
+                self._state_last_used.pop(k, None)
+            if dead_keys:
+                self.logger.info(f"Cleared {len(dead_keys)} SAM2 inference state(s) for id={id}")
+        except Exception as e:
+            self.logger.warning(f"Failed to clear inference states for id={id}: {e}")
+
     def cleanup(self, hard: bool = True):
         """Clean up cached states/readers and optionally unload model and free GPU memory.
 
@@ -1593,6 +1659,10 @@ class UnifiedSAM2Predictor:
         """
         try:
             self._inference_states.clear()
+        except Exception:
+            pass
+        try:
+            self._state_last_used.clear()
         except Exception:
             pass
         try:

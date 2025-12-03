@@ -1,8 +1,11 @@
 import torch
 import os
+import json
 from pathlib import Path
 
 HOME_DIR = Path(os.getenv("APEX_HOME_DIR", Path.home()))
+
+CONFIG_STORE_PATH = HOME_DIR / "apex-diffusion" / "apex-config.json"
 
 DEFAULT_CONFIG_SAVE_PATH = os.getenv(
     "APEX_CONFIG_SAVE_PATH", str(HOME_DIR / "apex-diffusion" / "configs")
@@ -35,6 +38,37 @@ DEFAULT_OFFLOAD_PATH = os.getenv(
     "APEX_OFFLOAD_PATH", str(HOME_DIR / "apex-diffusion" / "offload")
 )
 
+
+def _load_persisted_config() -> dict:
+  try:
+      if CONFIG_STORE_PATH.exists():
+          with CONFIG_STORE_PATH.open("r", encoding="utf-8") as f:
+              data = json.load(f)
+              if isinstance(data, dict):
+                  return data
+  except Exception:
+      # Swallow errors; fall back to env/defaults
+      pass
+  return {}
+
+
+_persisted = _load_persisted_config()
+
+if isinstance(_persisted, dict):
+    DEFAULT_CACHE_PATH = _persisted.get("cache_path", DEFAULT_CACHE_PATH)
+    DEFAULT_COMPONENTS_PATH = _persisted.get("components_path", DEFAULT_COMPONENTS_PATH)
+    DEFAULT_CONFIG_SAVE_PATH = _persisted.get("config_path", DEFAULT_CONFIG_SAVE_PATH)
+    DEFAULT_LORA_SAVE_PATH = _persisted.get("lora_path", DEFAULT_LORA_SAVE_PATH)
+    DEFAULT_PREPROCESSOR_SAVE_PATH = _persisted.get(
+        "preprocessor_path", DEFAULT_PREPROCESSOR_SAVE_PATH
+    )
+    DEFAULT_POSTPROCESSOR_SAVE_PATH = _persisted.get(
+        "postprocessor_path", DEFAULT_POSTPROCESSOR_SAVE_PATH
+    )
+    # HF token persistence for backend process
+    _hf_token = _persisted.get("hf_token")
+    if isinstance(_hf_token, str) and _hf_token.strip():
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf_token.strip()
 
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)

@@ -1,10 +1,26 @@
 import os
+import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import torch
-from src.utils.defaults import set_torch_device, get_torch_device, HOME_DIR,  set_cache_path, get_cache_path as get_cache_path_default, set_components_path, get_components_path as get_components_path_default
+from src.utils.defaults import (
+    set_torch_device,
+    get_torch_device,
+    HOME_DIR,
+    CONFIG_STORE_PATH,
+    set_cache_path,
+    get_cache_path as get_cache_path_default,
+    set_components_path,
+    get_components_path as get_components_path_default,
+    get_config_path,
+    get_lora_path,
+    get_preprocessor_path,
+    set_preprocessor_path,
+    get_postprocessor_path,
+    set_postprocessor_path,
+)
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -31,6 +47,38 @@ class ComponentsPathRequest(BaseModel):
 
 class ComponentsPathResponse(BaseModel):
     components_path: str
+
+
+class ConfigPathRequest(BaseModel):
+    config_path: str
+
+
+class ConfigPathResponse(BaseModel):
+    config_path: str
+
+
+class LoraPathRequest(BaseModel):
+    lora_path: str
+
+
+class LoraPathResponse(BaseModel):
+    lora_path: str
+
+
+class PreprocessorPathRequest(BaseModel):
+    preprocessor_path: str
+
+
+class PreprocessorPathResponse(BaseModel):
+    preprocessor_path: str
+
+
+class PostprocessorPathRequest(BaseModel):
+    postprocessor_path: str
+
+
+class PostprocessorPathResponse(BaseModel):
+    postprocessor_path: str
 
 class HuggingFaceTokenRequest(BaseModel):
     token: str
@@ -103,8 +151,9 @@ def set_cache_path(request: CachePathRequest):
     try:
         cache_path = Path(request.cache_path).expanduser().resolve()
         cache_path.mkdir(parents=True, exist_ok=True)
-        
+
         set_cache_path(str(cache_path))
+        _update_persisted_config(cache_path=str(cache_path))
         return CachePathResponse(cache_path=str(cache_path))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set cache path: {str(e)}")
@@ -122,9 +171,86 @@ def set_components_path(request: ComponentsPathRequest):
         components_path = Path(request.components_path).expanduser().resolve()
         components_path.mkdir(parents=True, exist_ok=True)
         set_components_path(str(components_path))
+        _update_persisted_config(components_path=str(components_path))
         return ComponentsPathResponse(components_path=str(components_path))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set components path: {str(e)}")
+
+
+@router.get("/config-path", response_model=ConfigPathResponse)
+def get_config_path_api():
+    """Get the current config path"""
+    return ConfigPathResponse(config_path=str(get_config_path()))
+
+
+@router.post("/config-path", response_model=ConfigPathResponse)
+def set_config_path_api(request: ConfigPathRequest):
+    """Set the config path"""
+    try:
+        config_path = Path(request.config_path).expanduser().resolve()
+        config_path.mkdir(parents=True, exist_ok=True)
+        os.environ["APEX_CONFIG_SAVE_PATH"] = str(config_path)
+        _update_persisted_config(config_path=str(config_path))
+        return ConfigPathResponse(config_path=str(config_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set config path: {str(e)}")
+
+
+@router.get("/lora-path", response_model=LoraPathResponse)
+def get_lora_path_api():
+    """Get the current LoRA path"""
+    return LoraPathResponse(lora_path=str(get_lora_path()))
+
+
+@router.post("/lora-path", response_model=LoraPathResponse)
+def set_lora_path_api(request: LoraPathRequest):
+    """Set the LoRA path"""
+    try:
+        lora_path = Path(request.lora_path).expanduser().resolve()
+        lora_path.mkdir(parents=True, exist_ok=True)
+        os.environ["APEX_LORA_SAVE_PATH"] = str(lora_path)
+        _update_persisted_config(lora_path=str(lora_path))
+        return LoraPathResponse(lora_path=str(lora_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set LoRA path: {str(e)}")
+
+
+@router.get("/preprocessor-path", response_model=PreprocessorPathResponse)
+def get_preprocessor_path_api():
+    """Get the current preprocessor path"""
+    return PreprocessorPathResponse(preprocessor_path=str(get_preprocessor_path()))
+
+
+@router.post("/preprocessor-path", response_model=PreprocessorPathResponse)
+def set_preprocessor_path_api(request: PreprocessorPathRequest):
+    """Set the preprocessor path"""
+    try:
+        pre_path = Path(request.preprocessor_path).expanduser().resolve()
+        pre_path.mkdir(parents=True, exist_ok=True)
+        set_preprocessor_path(str(pre_path))
+        _update_persisted_config(preprocessor_path=str(pre_path))
+        return PreprocessorPathResponse(preprocessor_path=str(pre_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set preprocessor path: {str(e)}")
+
+
+@router.get("/postprocessor-path", response_model=PostprocessorPathResponse)
+def get_postprocessor_path_api():
+    """Get the current postprocessor path"""
+    return PostprocessorPathResponse(postprocessor_path=str(get_postprocessor_path()))
+
+
+@router.post("/postprocessor-path", response_model=PostprocessorPathResponse)
+def set_postprocessor_path_api(request: PostprocessorPathRequest):
+    """Set the postprocessor path"""
+    try:
+        post_path = Path(request.postprocessor_path).expanduser().resolve()
+        post_path.mkdir(parents=True, exist_ok=True)
+        set_postprocessor_path(str(post_path))
+        _update_persisted_config(postprocessor_path=str(post_path))
+        return PostprocessorPathResponse(postprocessor_path=str(post_path))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set postprocessor path: {str(e)}")
 
 @router.get("/hf-token", response_model=HuggingFaceTokenResponse)
 def get_huggingface_token():
@@ -143,9 +269,38 @@ def set_huggingface_token(request: HuggingFaceTokenRequest):
         if not token:
             raise HTTPException(status_code=400, detail="Token cannot be empty")
         os.environ["HUGGING_FACE_HUB_TOKEN"] = token
+        _update_persisted_config(hf_token=token)
         masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
         return HuggingFaceTokenResponse(is_set=True, masked_token=masked)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set HUGGING_FACE_HUB_TOKEN: {str(e)}")
+
+
+def _update_persisted_config(**updates: str) -> None:
+    """
+    Persist config-related values (paths, hf_token, etc.) so they survive backend restarts.
+    """
+    try:
+        data = {}
+        if CONFIG_STORE_PATH.exists():
+            try:
+                with CONFIG_STORE_PATH.open("r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                    if isinstance(existing, dict):
+                        data = existing
+            except Exception:
+                data = {}
+
+        for key, value in updates.items():
+            if value is not None:
+                data[key] = value
+
+        CONFIG_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with CONFIG_STORE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        # Silently ignore persistence errors; API behavior should not depend on disk writes.
+        # For debugging, you may want to log this error.
+        print(f"Warning: failed to persist config settings: {e}")
