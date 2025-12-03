@@ -6,10 +6,10 @@ import torch
 from typing import Optional, Tuple
 from diffusers.utils.torch_utils import randn_tensor
 import numpy as np
+from src.engine.flux2.shared import Flux2Shared
 
-class Flux2T2IEngine(BaseEngine):
+class Flux2T2IEngine(Flux2Shared):
     """Flux2 Text-to-Image Image-to-Image Engine Implementation"""
-    
     
     @property
     def guidance_scale(self):
