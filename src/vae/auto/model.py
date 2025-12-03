@@ -11,36 +11,33 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Dict, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
-from diffusers.models.autoencoders.autoencoder_kl import ConfigMixin, register_to_config
+from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import PeftAdapterMixin
 from diffusers.loaders.single_file_model import FromOriginalModelMixin
 from diffusers.utils import deprecate
 from diffusers.utils.accelerate_utils import apply_forward_hook
+from diffusers.models.attention import AttentionMixin
 from diffusers.models.attention_processor import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
     Attention,
-    AttentionProcessor,
     AttnAddedKVProcessor,
     AttnProcessor,
     FusedAttnProcessor2_0,
 )
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.autoencoders.autoencoder_kl import (
-    Decoder,
-    DecoderOutput,
-    DiagonalGaussianDistribution,
-    Encoder,
-)
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderMixin, Decoder, DecoderOutput, DiagonalGaussianDistribution, Encoder
 
 
-class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):
+class AutoencoderKL(
+    ModelMixin, AttentionMixin, AutoencoderMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin
+):
     r"""
     A VAE model with KL loss for encoding images into latents and decoding latent representations into images.
 
@@ -83,9 +80,9 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         self,
         in_channels: int = 3,
         out_channels: int = 3,
-        down_block_types: Tuple[str] = ("DownEncoderBlock2D",),
-        up_block_types: Tuple[str] = ("UpDecoderBlock2D",),
-        block_out_channels: Tuple[int] = (64,),
+        down_block_types: Tuple[str, ...] = ("DownEncoderBlock2D",),
+        up_block_types: Tuple[str, ...] = ("UpDecoderBlock2D",),
+        block_out_channels: Tuple[int, ...] = (64,),
         layers_per_block: int = 1,
         act_fn: str = "silu",
         latent_channels: int = 4,
@@ -127,16 +124,8 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
             mid_block_add_attention=mid_block_add_attention,
         )
 
-        self.quant_conv = (
-            nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1)
-            if use_quant_conv
-            else None
-        )
-        self.post_quant_conv = (
-            nn.Conv2d(latent_channels, latent_channels, 1)
-            if use_post_quant_conv
-            else None
-        )
+        self.quant_conv = nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1) if use_quant_conv else None
+        self.post_quant_conv = nn.Conv2d(latent_channels, latent_channels, 1) if use_post_quant_conv else None
 
         self.use_slicing = False
         self.use_tiling = False
@@ -148,120 +137,17 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
             if isinstance(self.config.sample_size, (list, tuple))
             else self.config.sample_size
         )
-        self.tile_latent_min_size = int(
-            sample_size / (2 ** (len(self.config.block_out_channels) - 1))
-        )
+        self.tile_latent_min_size = int(sample_size / (2 ** (len(self.config.block_out_channels) - 1)))
         self.tile_overlap_factor = 0.25
-
-    def enable_tiling(self, use_tiling: bool = True):
-        r"""
-        Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
-        compute decoding and encoding in several steps. This is useful for saving a large amount of memory and to allow
-        processing larger images.
-        """
-        self.use_tiling = use_tiling
-
-    def disable_tiling(self):
-        r"""
-        Disable tiled VAE decoding. If `enable_tiling` was previously enabled, this method will go back to computing
-        decoding in one step.
-        """
-        self.enable_tiling(False)
-
-    def enable_slicing(self):
-        r"""
-        Enable sliced VAE decoding. When this option is enabled, the VAE will split the input tensor in slices to
-        compute decoding in several steps. This is useful to save some memory and allow larger batch sizes.
-        """
-        self.use_slicing = True
-
-    def disable_slicing(self):
-        r"""
-        Disable sliced VAE decoding. If `enable_slicing` was previously enabled, this method will go back to computing
-        decoding in one step.
-        """
-        self.use_slicing = False
-
-    @property
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors
-    def attn_processors(self) -> Dict[str, AttentionProcessor]:
-        r"""
-        Returns:
-            `dict` of attention processors: A dictionary containing all attention processors used in the model with
-            indexed by its weight name.
-        """
-        # set recursively
-        processors = {}
-
-        def fn_recursive_add_processors(
-            name: str,
-            module: torch.nn.Module,
-            processors: Dict[str, AttentionProcessor],
-        ):
-            if hasattr(module, "get_processor"):
-                processors[f"{name}.processor"] = module.get_processor()
-
-            for sub_name, child in module.named_children():
-                fn_recursive_add_processors(f"{name}.{sub_name}", child, processors)
-
-            return processors
-
-        for name, module in self.named_children():
-            fn_recursive_add_processors(name, module, processors)
-
-        return processors
-
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(
-        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
-    ):
-        r"""
-        Sets the attention processor to use to compute attention.
-
-        Parameters:
-            processor (`dict` of `AttentionProcessor` or only `AttentionProcessor`):
-                The instantiated processor class or a dictionary of processor classes that will be set as the processor
-                for **all** `Attention` layers.
-
-                If `processor` is a dict, the key needs to define the path to the corresponding cross attention
-                processor. This is strongly recommended when setting trainable attention processors.
-
-        """
-        count = len(self.attn_processors.keys())
-
-        if isinstance(processor, dict) and len(processor) != count:
-            raise ValueError(
-                f"A dict of processors was passed, but the number of processors {len(processor)} does not match the"
-                f" number of attention layers: {count}. Please make sure to pass {count} processor classes."
-            )
-
-        def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
-            if hasattr(module, "set_processor"):
-                if not isinstance(processor, dict):
-                    module.set_processor(processor)
-                else:
-                    module.set_processor(processor.pop(f"{name}.processor"))
-
-            for sub_name, child in module.named_children():
-                fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
-
-        for name, module in self.named_children():
-            fn_recursive_attn_processor(name, module, processor)
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_default_attn_processor
     def set_default_attn_processor(self):
         """
         Disables custom attention processors and sets the default attention implementation.
         """
-        if all(
-            proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS
-            for proc in self.attn_processors.values()
-        ):
+        if all(proc.__class__ in ADDED_KV_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
             processor = AttnAddedKVProcessor()
-        elif all(
-            proc.__class__ in CROSS_ATTENTION_PROCESSORS
-            for proc in self.attn_processors.values()
-        ):
+        elif all(proc.__class__ in CROSS_ATTENTION_PROCESSORS for proc in self.attn_processors.values()):
             processor = AttnProcessor()
         else:
             raise ValueError(
@@ -273,9 +159,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
     def _encode(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = x.shape
 
-        if self.use_tiling and (
-            width > self.tile_sample_min_size or height > self.tile_sample_min_size
-        ):
+        if self.use_tiling and (width > self.tile_sample_min_size or height > self.tile_sample_min_size):
             return self._tiled_encode(x)
 
         enc = self.encoder(x)
@@ -313,13 +197,8 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def _decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
-        if self.use_tiling and (
-            z.shape[-1] > self.tile_latent_min_size
-            or z.shape[-2] > self.tile_latent_min_size
-        ):
+    def _decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
+        if self.use_tiling and (z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size):
             return self.tiled_decode(z, return_dict=return_dict)
 
         if self.post_quant_conv is not None:
@@ -361,24 +240,16 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
 
         return DecoderOutput(sample=decoded)
 
-    def blend_v(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[2], b.shape[2], blend_extent)
         for y in range(blend_extent):
-            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[
-                :, :, y, :
-            ] * (y / blend_extent)
+            b[:, :, y, :] = a[:, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, y, :] * (y / blend_extent)
         return b
 
-    def blend_h(
-        self, a: torch.Tensor, b: torch.Tensor, blend_extent: int
-    ) -> torch.Tensor:
+    def blend_h(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
         blend_extent = min(a.shape[3], b.shape[3], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[
-                :, :, :, x
-            ] * (x / blend_extent)
+            b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, x] * (x / blend_extent)
         return b
 
     def _tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -407,12 +278,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         for i in range(0, x.shape[2], overlap_size):
             row = []
             for j in range(0, x.shape[3], overlap_size):
-                tile = x[
-                    :,
-                    :,
-                    i : i + self.tile_sample_min_size,
-                    j : j + self.tile_sample_min_size,
-                ]
+                tile = x[:, :, i : i + self.tile_sample_min_size, j : j + self.tile_sample_min_size]
                 tile = self.encoder(tile)
                 if self.config.use_quant_conv:
                     tile = self.quant_conv(tile)
@@ -434,9 +300,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         enc = torch.cat(result_rows, dim=2)
         return enc
 
-    def tiled_encode(
-        self, x: torch.Tensor, return_dict: bool = True
-    ) -> AutoencoderKLOutput:
+    def tiled_encode(self, x: torch.Tensor, return_dict: bool = True) -> AutoencoderKLOutput:
         r"""Encode a batch of images using a tiled encoder.
 
         When this option is enabled, the VAE will split the input tensor into tiles to compute encoding in several
@@ -471,12 +335,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         for i in range(0, x.shape[2], overlap_size):
             row = []
             for j in range(0, x.shape[3], overlap_size):
-                tile = x[
-                    :,
-                    :,
-                    i : i + self.tile_sample_min_size,
-                    j : j + self.tile_sample_min_size,
-                ]
+                tile = x[:, :, i : i + self.tile_sample_min_size, j : j + self.tile_sample_min_size]
                 tile = self.encoder(tile)
                 if self.config.use_quant_conv:
                     tile = self.quant_conv(tile)
@@ -503,9 +362,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def tiled_decode(
-        self, z: torch.Tensor, return_dict: bool = True
-    ) -> Union[DecoderOutput, torch.Tensor]:
+    def tiled_decode(self, z: torch.Tensor, return_dict: bool = True) -> Union[DecoderOutput, torch.Tensor]:
         r"""
         Decode a batch of images using a tiled decoder.
 
@@ -529,12 +386,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         for i in range(0, z.shape[2], overlap_size):
             row = []
             for j in range(0, z.shape[3], overlap_size):
-                tile = z[
-                    :,
-                    :,
-                    i : i + self.tile_latent_min_size,
-                    j : j + self.tile_latent_min_size,
-                ]
+                tile = z[:, :, i : i + self.tile_latent_min_size, j : j + self.tile_latent_min_size]
                 if self.config.use_post_quant_conv:
                     tile = self.post_quant_conv(tile)
                 decoded = self.decoder(tile)
@@ -593,19 +445,13 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         Enables fused QKV projections. For self-attention modules, all projection matrices (i.e., query, key, value)
         are fused. For cross-attention modules, key and value projection matrices are fused.
 
-        <Tip warning={true}>
-
-        This API is 🧪 experimental.
-
-        </Tip>
+        > [!WARNING] > This API is 🧪 experimental.
         """
         self.original_attn_processors = None
 
         for _, attn_processor in self.attn_processors.items():
             if "Added" in str(attn_processor.__class__.__name__):
-                raise ValueError(
-                    "`fuse_qkv_projections()` is not supported for models having added KV projections."
-                )
+                raise ValueError("`fuse_qkv_projections()` is not supported for models having added KV projections.")
 
         self.original_attn_processors = self.attn_processors
 
@@ -619,18 +465,14 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
     def unfuse_qkv_projections(self):
         """Disables the fused QKV projection if enabled.
 
-        <Tip warning={true}>
-
-        This API is 🧪 experimental.
-
-        </Tip>
+        > [!WARNING] > This API is 🧪 experimental.
 
         """
         if self.original_attn_processors is not None:
             self.set_attn_processor(self.original_attn_processors)
 
     def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
-        return (latents - self.config.shift_factor) * self.config.scaling_factor
-
+        return latents * self.config.scaling_factor if not hasattr(self.config, "shift_factor") or not self.config.shift_factor else (latents - self.config.shift_factor) * self.config.scaling_factor
+    
     def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
-        return latents / (self.config.scaling_factor) + self.config.shift_factor
+        return latents / self.config.scaling_factor if not hasattr(self.config, "shift_factor") or not self.config.shift_factor else (latents / self.config.scaling_factor) + self.config.shift_factor
