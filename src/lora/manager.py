@@ -85,12 +85,11 @@ class LoraManager(DownloadMixin):
             b0, b1 = b_val.shape
             # If the smaller dimension (candidate rank) is on dim 0 for lora_B,
             # transpose both A and B so that rank becomes the second dim for lora_B.
-            if b0 < b1:
-                new_state_dict[a_key] = a_val.t()
-                new_state_dict[b_key] = b_val.t()
+            
 
         del state_dict
         return new_state_dict
+
 
     def resolve(self, source: str, prefer_name: Optional[str] = None, progress_callback: Optional[Callable] = None) -> LoraItem:
         """
@@ -171,6 +170,13 @@ class LoraManager(DownloadMixin):
     def _is_lora_file(self, filename: str) -> bool:
         lower = filename.lower()
         return lower.endswith((".safetensors", ".bin", ".pt", ".pth"))
+    
+    def _clean_adapter_name(self, name: str) -> str:
+        if len(name) > 64:
+            name = name[:64]
+        if "." in name or "/" in name:
+            name = name.replace(".", "_").replace("/", "_")
+        return name
 
     def load_into(
         self,
@@ -251,8 +257,6 @@ class LoraManager(DownloadMixin):
                         local_path_state_dict
                     )
                     
-                    if replace_keys:
-                        local_path_state_dict = self._replace_up_down_to_AB_keys(local_path_state_dict)
                     keys = list(local_path_state_dict.keys())
 
                     prefix = None
@@ -262,7 +266,9 @@ class LoraManager(DownloadMixin):
                         prefix = "transformer"
                     elif keys[0].startswith("diffusion_model") and keys[-1].startswith("diffusion_model"):
                         prefix = "diffusion_model"
-                        
+                    
+                    # ensure adapter name is not too long and does not have . or / in it if so remove it
+                    adapter_name = self._clean_adapter_name(adapter_name)
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )

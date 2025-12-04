@@ -21,7 +21,6 @@ class WanT2VEngine(WanShared):
         seed: int | None = None,
         fps: int = 16,
         guidance_scale: float = 5.0,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -29,6 +28,7 @@ class WanT2VEngine(WanShared):
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
+        render_on_step_interval: int = 1,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
@@ -39,6 +39,7 @@ class WanT2VEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
+        use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -168,6 +169,7 @@ class WanT2VEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            render_on_step_interval=render_on_step_interval,
             denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
