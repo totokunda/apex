@@ -80,10 +80,21 @@ class PostprocessorPathRequest(BaseModel):
 class PostprocessorPathResponse(BaseModel):
     postprocessor_path: str
 
+
 class HuggingFaceTokenRequest(BaseModel):
     token: str
 
+
 class HuggingFaceTokenResponse(BaseModel):
+    is_set: bool
+    masked_token: Optional[str] = None
+
+
+class CivitaiApiKeyRequest(BaseModel):
+    token: str
+
+
+class CivitaiApiKeyResponse(BaseModel):
     is_set: bool
     masked_token: Optional[str] = None
 
@@ -276,6 +287,33 @@ def set_huggingface_token(request: HuggingFaceTokenRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set HUGGING_FACE_HUB_TOKEN: {str(e)}")
+
+
+@router.get("/civitai-api-key", response_model=CivitaiApiKeyResponse)
+def get_civitai_api_key():
+    """Check if CIVITAI_API_KEY is set; returns masked key if available"""
+    token = os.environ.get("CIVITAI_API_KEY")
+    if token:
+        masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
+        return CivitaiApiKeyResponse(is_set=True, masked_token=masked)
+    return CivitaiApiKeyResponse(is_set=False, masked_token=None)
+
+
+@router.post("/civitai-api-key", response_model=CivitaiApiKeyResponse)
+def set_civitai_api_key(request: CivitaiApiKeyRequest):
+    """Set CIVITAI_API_KEY for the running process"""
+    try:
+        token = (request.token or "").strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="Token cannot be empty")
+        os.environ["CIVITAI_API_KEY"] = token
+        _update_persisted_config(civitai_api_key=token)
+        masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
+        return CivitaiApiKeyResponse(is_set=True, masked_token=masked)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set CIVITAI_API_KEY: {str(e)}")
 
 
 def _update_persisted_config(**updates: str) -> None:
