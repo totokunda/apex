@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import socket
 import torch
 from src.utils.defaults import (
     set_torch_device,
@@ -342,3 +343,13 @@ def _update_persisted_config(**updates: str) -> None:
         # Silently ignore persistence errors; API behavior should not depend on disk writes.
         # For debugging, you may want to log this error.
         print(f"Warning: failed to persist config settings: {e}")
+
+
+class HostnameResponse(BaseModel):
+    hostname: str
+
+
+@router.get("/hostname", response_model=HostnameResponse)
+def get_hostname():
+    """Get the hostname of the current server machine"""
+    return HostnameResponse(hostname=socket.gethostname())

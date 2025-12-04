@@ -1186,6 +1186,19 @@ class DownloadMixin:
         import time
         parsed_url = urlparse(url)
         relative_path_from_url = parsed_url.path.lstrip("/")
+        # Build base headers (may be extended for specific providers like CivitAI)
+        base_headers = dict(DEFAULT_HEADERS)
+        try:
+            # If this is a CivitAI URL and an API key is configured, attach it
+            netloc = (parsed_url.netloc or "").lower()
+            if "civitai.com" in netloc:
+                api_key = os.getenv("CIVITAI_API_KEY")
+                if api_key:
+                    # Do not overwrite an existing Authorization header if one is already set
+                    base_headers.setdefault("Authorization", f"Bearer {api_key}")
+        except Exception:
+            # Best-effort only; downloading should still work without CivitAI-specific headers
+            pass
         # Compute deterministic destination
         if dest_path:
             file_path = dest_path
@@ -1225,7 +1238,7 @@ class DownloadMixin:
                     url,
                     timeout=10,
                     verify=self._requests_verify(),
-                    headers=DEFAULT_HEADERS,
+                    headers=base_headers,
                     allow_redirects=True,
                 )
                 if head_resp.ok:
@@ -1251,7 +1264,7 @@ class DownloadMixin:
                     pass
 
             # Build headers; attempt Range resume if we have partial bytes
-            headers = dict(DEFAULT_HEADERS)
+            headers = dict(base_headers)
             if resume_size > 0:
                 headers["Range"] = f"bytes={resume_size}-"
 

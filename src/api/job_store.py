@@ -30,23 +30,84 @@ class UnifiedJobStore:
         return set(self._jobs.keys())
 
     def status(self, job_id: str) -> Dict[str, Any]:
-        data = self._jobs.get(job_id)
-        if not data:
-            from .ws_manager import websocket_manager
-            latest = websocket_manager.get_latest_update(job_id)
-            if latest:
-                return { 'job_id': job_id, 'status': latest.get('status', 'unknown'), 'latest': latest }
-            return { 'job_id': job_id, 'status': 'unknown', 'message': 'Job not found' }
+        """
+        Unified status lookup for any registered job.
 
-        ref = data['ref']
+        Behaviour:
+        - Always merges in the latest websocket update (progress / previews / metadata)
+          if available, so callers can inspect render-step and preview information.
+        - If the Ray task has completed, returns its final result as before, with any
+          websocket "latest" data attached for additional context.
+        """
+        # Best-effort fetch of the latest websocket-published update for this job
+        latest = None
+        try:
+            from .ws_manager import websocket_manager
+
+            latest = websocket_manager.get_latest_update(job_id)
+        except Exception:
+            latest = None
+
+        data = self._jobs.get(job_id)
+
+        # No registered Ray ref – fall back entirely to websocket state if present
+        if not data:
+            if latest:
+                response: Dict[str, Any] = {
+                    "job_id": job_id,
+                    "status": latest.get("status", "unknown"),
+                    "latest": latest,
+                }
+                # Promote commonly used fields for easier polling
+                if "progress" in latest:
+                    response["progress"] = latest.get("progress")
+                if "message" in latest:
+                    response["message"] = latest.get("message")
+                if "metadata" in latest and latest.get("metadata") is not None:
+                    response["metadata"] = latest.get("metadata")
+                return response
+
+            return {"job_id": job_id, "status": "unknown", "message": "Job not found"}
+
+        # We have a registered Ray task; check if it's finished
+        ref = data["ref"]
         ready, _ = ray.wait([ref], timeout=0)
         if ready:
             try:
                 result = ray.get(ready[0])
-                return { 'job_id': job_id, 'status': result.get('status', 'complete'), 'result': result }
+                response = {
+                    "job_id": job_id,
+                    "status": result.get("status", "complete"),
+                    "result": result,
+                }
+                if latest:
+                    response["latest"] = latest
+                    if "progress" in latest:
+                        response["progress"] = latest.get("progress")
+                    if "message" in latest:
+                        response["message"] = latest.get("message")
+                    if "metadata" in latest and latest.get("metadata") is not None:
+                        response["metadata"] = latest.get("metadata")
+                return response
             except Exception as e:
-                return { 'job_id': job_id, 'status': 'error', 'error': str(e) }
-        return { 'job_id': job_id, 'status': 'running' }
+                response = {"job_id": job_id, "status": "error", "error": str(e)}
+                if latest:
+                    response["latest"] = latest
+                return response
+
+        # Still running – surface live websocket-driven progress/preview data
+        response = {"job_id": job_id, "status": "running"}
+        if latest:
+            response["latest"] = latest
+            # Prefer websocket's notion of status if present (e.g. "preview", "processing")
+            response["status"] = latest.get("status", response["status"])
+            if "progress" in latest:
+                response["progress"] = latest.get("progress")
+            if "message" in latest:
+                response["message"] = latest.get("message")
+            if "metadata" in latest and latest.get("metadata") is not None:
+                response["metadata"] = latest.get("metadata")
+        return response
 
     def cancel(self, job_id: str) -> Dict[str, Any]:
         data = self._jobs.get(job_id)

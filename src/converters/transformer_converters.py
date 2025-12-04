@@ -11,6 +11,10 @@ class TransformerConverter:
         self.special_keys_map = {}
         self.pre_special_keys_map = {}
 
+    @staticmethod
+    def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
+        state_dict.pop(key, None)
+
     def _sort_rename_dict(self):
         """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
         self.rename_dict = dict(
@@ -26,8 +30,7 @@ class TransformerConverter:
             for pre_special_key, handler_fn_inplace in self.pre_special_keys_map.items():
                 if pre_special_key in key:
                     handler_fn_inplace(key, state_dict)
-                    
-                    
+
         for key in list(state_dict.keys()):
             new_key = key[:]
             for replace_key, rename_key in self.rename_dict.items():
@@ -41,7 +44,35 @@ class TransformerConverter:
                 handler_fn_inplace(key, state_dict)
 
 
-class WanTransformerConverter(TransformerConverter):
+class KohyaToPeftTransformerConverter(TransformerConverter):
+    """
+    Base converter that performs a generic Kohya-style LoRA -> PEFT-style LoRA key normalization
+    before running the usual `TransformerConverter.convert` logic.
+
+    It converts:
+      - `*.lora_down.weight` / `*.lora_down.bias` -> `*.lora_A.weight` / `*.lora_A.bias`
+      - `*.lora_up.weight`   / `*.lora_up.bias`   -> `*.lora_B.weight` / `*.lora_B.bias`
+    """
+
+    def convert(self, state_dict: Dict[str, Any]):
+        # First, normalize Kohya-style LoRA keys to PEFT-style keys.
+        for key in list(state_dict.keys()):
+            new_key = key
+
+            if ".lora_down." in new_key:
+                new_key = new_key.replace(".lora_down.", ".lora_A.")
+
+            if ".lora_up." in new_key:
+                new_key = new_key.replace(".lora_up.", ".lora_B.")
+
+            if new_key != key:
+                update_state_dict_(state_dict, key, new_key)
+
+        # Then run the standard transformer conversion logic.
+        super().convert(state_dict)
+
+
+class WanTransformerConverter(KohyaToPeftTransformerConverter):
     def __init__(self):
         self.rename_dict = {
             "time_embedding.0": "condition_embedder.time_embedder.linear_1",
@@ -90,7 +121,14 @@ class WanTransformerConverter(TransformerConverter):
             "cross_attn.norm_k_img": "attn2.norm_added_k",
         }
         self.special_keys_map = {}
-        self.pre_special_keys_map = {}
+        # Drop auxiliary diff-bias / diff vectors that don't have a counterpart in the target Wan model.
+        # Example keys:
+        #   diffusion_model.blocks.0.cross_attn.k.diff_b
+        #   diffusion_model.blocks.0.cross_attn.norm_k.diff
+        self.pre_special_keys_map = {
+            ".diff_b": self.remove_keys_inplace,
+            ".diff": self.remove_keys_inplace,
+        }
 
 
 class SkyReelsTransformerConverter(WanTransformerConverter):

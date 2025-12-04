@@ -10,6 +10,7 @@ from loguru import logger
 from src.preprocess.aux_cache import AuxillaryCache
 import importlib
 import os
+import shutil
 import torch
 import inspect
 import yaml
@@ -78,7 +79,7 @@ def _save_manifest_yaml(yaml_path: Path, doc: Dict[str, Any]) -> None:
         logger.error(f"Failed to write updated manifest YAML {yaml_path}: {e}")
 
 
-def _remove_lora_from_manifest(source: str, manifest_id: Optional[str] = None) -> bool:
+def _remove_lora_from_manifest(lora_name: str, manifest_id: Optional[str] = None) -> bool:
     """
     Remove any LoRA entries whose source/remote_source (or raw string entry)
     matches `source` from the given manifest.
@@ -107,7 +108,7 @@ def _remove_lora_from_manifest(source: str, manifest_id: Optional[str] = None) -
             else:
                 entry_source = None
 
-            if entry_source == source:
+            if entry_source == lora_name:
                 removed = True
                 continue
             new_loras.append(entry)
@@ -118,12 +119,77 @@ def _remove_lora_from_manifest(source: str, manifest_id: Optional[str] = None) -
         spec["loras"] = new_loras
         doc["spec"] = spec
         _save_manifest_yaml(manifest_path, doc)
-        logger.info(f"Removed LoRA '{source}' from manifest {manifest_path.name}")
+        logger.info(f"Removed LoRA '{lora_name}' from manifest {manifest_path.name}")
         return True
     except Exception as e:
         traceback.print_exc()
-        logger.warning(f"Failed to remove LoRA '{source}' from manifest: {e}")
+        logger.warning(f"Failed to remove LoRA '{lora_name}' from manifest: {e}")
         return False
+
+
+
+def _cleanup_lora_artifacts_if_remote(lora_item: Any) -> None:
+    """
+    Best-effort cleanup of downloaded LoRA artifacts when verification fails.
+
+    Only removes files that:
+      - belong to the given `lora_item.local_paths`
+      - live under our configured LoRA directory
+      - and the original `lora_item.source` looks like a remote URL (not a local path).
+    """
+    try:
+        source = getattr(lora_item, "source", None)
+        local_paths = getattr(lora_item, "local_paths", None)
+        if not source or not isinstance(local_paths, list) or not local_paths:
+            return
+
+        dm = DownloadMixin()
+        source_str = str(source)
+        # Treat non-URL sources as user-managed local paths; never delete them here
+        if not dm._is_url(source_str):
+            return
+
+        base_dir = Path(get_lora_path()).resolve()
+
+        for path_str in list(local_paths):
+            try:
+                p = Path(path_str).resolve()
+            except Exception:
+                continue
+
+            # Only operate inside our managed LoRA directory
+            try:
+                common = os.path.commonpath([str(base_dir), str(p)])
+            except Exception:
+                continue
+            if common != str(base_dir):
+                continue
+
+            try:
+                if p.is_file():
+                    try:
+                        p.unlink()
+                    except FileNotFoundError:
+                        pass
+                elif p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Failed to delete LoRA path '{p}': {e}")
+
+            # Try to prune now-empty parents up to (but not including) base_dir
+            parent = p.parent
+            while True:
+                try:
+                    if parent == base_dir:
+                        break
+                    if not parent.exists() or any(parent.iterdir()):
+                        break
+                    parent.rmdir()
+                except Exception:
+                    break
+                parent = parent.parent
+    except Exception as e:
+        logger.warning(f"LoRA cleanup failed: {e}")
 
 
 def _ensure_lora_registered_in_manifests(source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -265,11 +331,12 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
             return None
         # Only attempt verification if the manifest's transformer is present locally
         transformer_component = _is_transformer_downloaded_for_manifest(doc)
+        logger.info(f"Transformer component for validation before engine creation: {transformer_component}")
         if not transformer_component:
             return None
         # Build engine once per manifest for validation
         try:
-            engine = UniversalEngine(yaml_path=str(manifest_path), should_download=False).engine
+            engine = UniversalEngine(yaml_path=str(manifest_path), should_download=False, auto_apply_loras=False).engine
         except Exception as e:
             logger.warning(f"Failed to create engine for manifest during LoRA validation: {e}")
             return None
@@ -277,6 +344,7 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
         any_verified = False
         any_removed = False
         new_loras: List[Any] = []
+        logger.info(f"Loras to validate: {loras}")
         for entry in loras:
             # Determine this entry's source (if any)
             if isinstance(entry, str):
@@ -286,14 +354,12 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
             else:
                 new_loras.append(entry)
                 continue
-            if entry_source != source:
-                new_loras.append(entry)
-                continue
             # Validate this LoRA against the transformer
             is_valid = False
             try:
                 is_valid = bool(engine.validate_lora_path(entry_source, transformer_component))
             except Exception as ve:
+                logger.error(traceback.format_exc())
                 logger.warning(f"LoRA validation failed for '{entry_source}' in manifest {manifest_path}: {ve}")
                 is_valid = False
             if not is_valid:
@@ -320,6 +386,8 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
                 entry["verified"] = True
                 entry["source"] = DownloadMixin.is_downloaded(entry_source, get_lora_path()) or entry.get("source")
             new_loras.append(entry)
+            logger.info(f"New LoRA entry: {entry}")
+            logger.info(f"New LoRA entries: {new_loras}")
             updated = True
         if not updated:
             return None
@@ -500,7 +568,7 @@ def download_unified(
                                 f"No LoRA files were found for source '{source}'. "
                                 "Removing LoRA entry from manifest."
                             )
-                            _remove_lora_from_manifest(source, manifest_id)
+                            _remove_lora_from_manifest(lora_name, manifest_id)
                             send_progress(
                                 0.0,
                                 f"LoRA download failed for '{source}' (no files found)",
@@ -553,6 +621,7 @@ def download_unified(
                 # If verification explicitly failed, surface an error and remove the LoRA
                 if verified is False:
                     _remove_lora_from_manifest(lora_item.source, manifest_id)
+                    _cleanup_lora_artifacts_if_remote(lora_item)
                     send_progress(
                         0.0,
                         "LoRA verification failed; removed from manifest",
