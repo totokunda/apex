@@ -69,6 +69,10 @@ if isinstance(_persisted, dict):
     _hf_token = _persisted.get("hf_token")
     if isinstance(_hf_token, str) and _hf_token.strip():
         os.environ["HUGGING_FACE_HUB_TOKEN"] = _hf_token.strip()
+    # CivitAI API key persistence for backend process
+    _civitai_key = _persisted.get("civitai_api_key")
+    if isinstance(_civitai_key, str) and _civitai_key.strip():
+        os.environ["CIVITAI_API_KEY"] = _civitai_key.strip()
 
 os.makedirs(DEFAULT_CONFIG_SAVE_PATH, exist_ok=True)
 os.makedirs(DEFAULT_SAVE_PATH, exist_ok=True)
