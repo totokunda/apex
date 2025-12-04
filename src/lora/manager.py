@@ -91,7 +91,12 @@ class LoraManager(DownloadMixin):
         return new_state_dict
 
 
-    def resolve(self, source: str, prefer_name: Optional[str] = None, progress_callback: Optional[Callable] = None) -> LoraItem:
+    def resolve(
+        self,
+        source: str,
+        prefer_name: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+    ) -> LoraItem:
         """
         Resolve and download a LoRA from any supported source:
         - HuggingFace repo or file path
@@ -103,7 +108,7 @@ class LoraManager(DownloadMixin):
         if source in self._cache:
             return self._cache[source]
 
-        # Local path
+        # Local path – nothing to download, so no progress_callback needed
         if os.path.exists(source):
             paths = self._collect_lora_files(source)
             item = LoraItem(
@@ -117,9 +122,18 @@ class LoraManager(DownloadMixin):
         # CivitAI integration: support plain download links and model/file ids
         if self._is_civitai(source):
             if source.startswith("civitai:"):
-                local_path = self._download_from_civitai_spec(source)
+                # Model-id style spec, delegate to helper with progress
+                local_path = self._download_from_civitai_spec(
+                    source,
+                    progress_callback=progress_callback,
+                )
             else:
-                local_path = self._download(source, self.save_dir)
+                # Direct CivitAI download URL
+                local_path = self._download(
+                    source,
+                    self.save_dir,
+                    progress_callback=progress_callback,
+                )
             paths = self._collect_lora_files(local_path)
             item = LoraItem(
                 source=source,
@@ -129,16 +143,20 @@ class LoraManager(DownloadMixin):
             self._cache[source] = item
             return item
 
-        else:
-            local_path = self._download(source, self.save_dir)
-            paths = self._collect_lora_files(local_path)
-            item = LoraItem(
-                source=source,
-                local_paths=paths,
-                name=prefer_name or self._infer_name(source, local_path),
-            )
-            self._cache[source] = item
-            return item
+        # Generic URL / HF / cloud / path handled by DownloadMixin with progress
+        local_path = self._download(
+            source,
+            self.save_dir,
+            progress_callback=progress_callback,
+        )
+        paths = self._collect_lora_files(local_path)
+        item = LoraItem(
+            source=source,
+            local_paths=paths,
+            name=prefer_name or self._infer_name(source, local_path),
+        )
+        self._cache[source] = item
+        return item
 
     def _looks_like_hf_file(self, text: str) -> bool:
         # matches org/repo/…/file.safetensors or similar
@@ -295,7 +313,11 @@ class LoraManager(DownloadMixin):
             converted = True
         return state_dict, converted
 
-    def _download_from_civitai_spec(self, spec: str, progress_callback: Optional[Callable] = None) -> str:
+    def _download_from_civitai_spec(
+        self,
+        spec: str,
+        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+    ) -> str:
         """
         Support strings like:
           - "civitai:MODEL_ID" -> fetch model metadata, pick first LoRA SafeTensor file
@@ -311,7 +333,8 @@ class LoraManager(DownloadMixin):
 
         def download_file_id(file_id: Union[int, str]) -> str:
             url = f"https://civitai.com/api/download/models/{file_id}"
-            return self._download(url, self.save_dir)
+            # Use the unified downloader so websocket progress is reported
+            return self._download(url, self.save_dir, progress_callback=progress_callback)
 
         if spec.startswith("civitai-file:"):
             file_id = spec.split(":", 1)[1]
@@ -320,7 +343,8 @@ class LoraManager(DownloadMixin):
         # civitai:MODEL_ID
         model_id = spec.split(":", 1)[1]
         meta_url = f"https://civitai.com/api/v1/models/{model_id}"
-        resp = requests.get(meta_url, headers=headers, timeout=20, progress_callback=progress_callback)
+        # Metadata fetch is typically small; no need to wire byte-level progress here.
+        resp = requests.get(meta_url, headers=headers, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         # Find a file that looks like a LoRA in SafeTensor format
