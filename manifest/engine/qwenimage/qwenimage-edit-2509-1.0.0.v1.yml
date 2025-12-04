@@ -76,6 +76,38 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227514
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 7683715616
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 18
+      file_size: 13107200000
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 18015297536
+    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 20
+        recommended_vram_gb: 30
+      file_size: 23426031616
   - type: helper
     name: image.processor
     label: Image Processor
@@ -95,16 +127,14 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
-    - name: input
+    - name: Image
       label: Input
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
-        - - image_1
-        - - image_2
-        - - image_3
+        - - image_list
     - name: prompting
       label: Prompting
       collapsible: true
@@ -143,27 +173,14 @@ spec:
         - - true_cfg_scale
         - - seed
     inputs:
-    - id: image_1
-      label: First Image
-      description: The first input image to use.
-      type: image
-      panel: input
+    - id: image_list
+      label: Image List
+      description: Select the images to use for the generation.
+      panel: Image
+      type: image_list
       required: true
-      map_h: height
-      map_w: width
-      scale_by: resolution
-    - id: image_2
-      label: Second Image
-      description: The second input image to use.
-      type: image
-      panel: input
-      required: false
-    - id: image_3
-      label: Third Image
-      description: The third input image to use.
-      type: image
-      panel: input
-      required: false
+      min: 1
+      max: 3
     - id: prompt
       label: Prompt
       description: The prompt to edit the image.

@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
 import torch.nn.functional as F
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
 
 
@@ -33,6 +34,7 @@ class WanVaceEngine(WanShared):
         num_videos: int = 1,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
+        progress_callback: Callable | None = None,
         render_on_step_callback: Callable = None,
         offload: bool = True,
         render_on_step: bool = False,
@@ -45,10 +47,13 @@ class WanVaceEngine(WanShared):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting VACE video generation pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
 
         num_frames = self._parse_num_frames(duration, fps=fps)
@@ -60,7 +65,11 @@ class WanVaceEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
+
+
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -73,8 +82,16 @@ class WanVaceEngine(WanShared):
         else:
             negative_prompt_embeds = None
 
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -98,6 +115,9 @@ class WanVaceEngine(WanShared):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
+
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+
         if mask:
             loaded_mask = self._load_video(mask, fps=fps)
             if num_frames < len(loaded_mask):
@@ -173,6 +193,7 @@ class WanVaceEngine(WanShared):
             reference_images = [
                 [reference_images] for _ in range(preprocessed_video.shape[0])
             ]
+
         elif isinstance(reference_images, (list, tuple)) and isinstance(
             next(iter(reference_images)), list
         ):
@@ -335,7 +356,11 @@ class WanVaceEngine(WanShared):
             self.logger.warning(
                 "The number of frames in the conditioning latents does not match the number of frames to be generated. Generation quality may be affected."
             )
-            
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+
         latents = self.denoise(
             timesteps=timesteps,
             latents=latents,
@@ -361,6 +386,7 @@ class WanVaceEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
@@ -369,10 +395,15 @@ class WanVaceEngine(WanShared):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             latents = latents[:, :, num_reference_images:]
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed VACE video generation pipeline")
             return postprocessed_video

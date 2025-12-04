@@ -14,6 +14,8 @@ metadata:
   author: Apex AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
+  categories:
+  - inpaint
 spec:
   engine: wan
   model_type: inp
@@ -80,7 +82,7 @@ spec:
   - type: helper
     base: clip
     name: wan/clip
-    model_path:
+    model_path: 
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
       variant: default
       precision: fp16
@@ -110,8 +112,8 @@ spec:
         flow: column
         rows:
         - - reference_image
-    - name: video_input
-      label: Video Input
+    - name: masking_inputs
+      label: Masking Inputs
       collapsible: true
       default_open: true
       layout:
@@ -165,6 +167,9 @@ spec:
       description: The reference image to use for the generation.
       type: image
       panel: reference_image
+      map_h: height
+      map_w: width
+      scale_by: resolution
       required: false
     - id: start_image
       label: Start Image
@@ -182,13 +187,13 @@ spec:
       label: Video
       description: The control video to use for the generation.
       type: video
-      panel: video_input
+      panel: masking_inputs
       required: false
     - id: mask
       label: Mask Video
       description: A mask video where white/opaque regions will be filled; black/transparent are kept.
       type: video+mask
-      panel: video_input
+      panel: masking_inputs
       required: false
     - id: prompt
       label: Prompt

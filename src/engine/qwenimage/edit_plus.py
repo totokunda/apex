@@ -12,10 +12,8 @@ class QwenImageEditPlusEngine(QwenImageShared):
     """QwenImage Edit Plus Engine Implementation"""
     def run(
         self,
-        image_1: InputImage | None = None,
-        image_2: InputImage | None = None,
-        image_3: InputImage | None = None,
-        images: List[InputImage] | None = None,
+
+        image_list: List[InputImage] | None = None,
         prompt: List[str] | str | None = None,
         negative_prompt: List[str] | str = None,
         height: int | None = None,
@@ -39,20 +37,13 @@ class QwenImageEditPlusEngine(QwenImageShared):
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):  
+        if image_list is None:
+            raise ValueError("At least one image is required")
         
-        if images is not None and (image_1 is not None or image_2 is not None or image_3 is not None):
-            raise ValueError("images and image_1, image_2, image_3 cannot be used together")
+        images = image_list
         
-        if images is None: 
-            images: List[InputImage] = []
-            if image_1 is not None:
-                images.append(image_1)
-            if image_2 is not None:
-                images.append(image_2)
-            if image_3 is not None:
-                images.append(image_3)
-            # reverse the images
-            images.reverse()
+        # reverse the images
+        images.reverse()
                 
         if len(images) == 0:
             raise ValueError("At least one image is required")

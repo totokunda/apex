@@ -2,6 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List, Union, Optional
 from PIL import Image
 import numpy as np
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
 
 
@@ -31,6 +32,7 @@ class WanFFLFEngine(WanShared):
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
+        progress_callback: Callable | None = None,
         offload: bool = True,
         render_on_step: bool = False,
         generator: torch.Generator | None = None,
@@ -46,10 +48,14 @@ class WanFFLFEngine(WanShared):
         Generates video content conditioned on both first and last frames.
         """
 
+        safe_emit_progress(progress_callback, 0.0, "Starting FFLF pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -58,6 +64,8 @@ class WanFFLFEngine(WanShared):
             **text_encoder_kwargs,
         )
         batch_size = prompt_embeds.shape[0]
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
 
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
@@ -69,17 +77,26 @@ class WanFFLFEngine(WanShared):
         else:
             negative_prompt_embeds = None
 
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         loaded_first_frame = self._load_image(first_frame)
         loaded_last_frame = self._load_image(last_frame)
 
+
         loaded_first_frame, height, width = self._aspect_ratio_resize(
             loaded_first_frame, max_area=height * width
         )
-        loaded_last_frame, height, width = self._center_crop_resize(
-            loaded_last_frame, height, width
+        loaded_last_frame, height, width = self._aspect_ratio_resize(
+            loaded_last_frame, max_area=height * width
         )
 
         preprocessed_first_frame = self.video_processor.preprocess(
@@ -117,6 +134,8 @@ class WanFFLFEngine(WanShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
+
+        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
 
         scheduler = self.scheduler
         timesteps, num_inference_steps = self._get_timesteps(
@@ -202,11 +221,21 @@ class WanFFLFEngine(WanShared):
         latent_condition = torch.concat([mask_lat_size, latent_condition], dim=1)
 
         if boundary_ratio is not None:
+
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
         else:
             boundary_timestep = None
+
+        # Set preview context for per-step rendering on the main engine when available
+        self._preview_height = height
+        self._preview_width = width
+        self._preview_offload = offload
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
 
         latents = self.denoise(
             boundary_timestep=boundary_timestep,
@@ -233,6 +262,7 @@ class WanFFLFEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
@@ -241,9 +271,14 @@ class WanFFLFEngine(WanShared):
         if offload:
             self._offload(self.transformer)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             video = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
+            safe_emit_progress(progress_callback, 1.0, "Completed FFLF pipeline")
             return postprocessed_video

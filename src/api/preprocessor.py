@@ -428,6 +428,8 @@ def get_result(job_id: str):
     # Try to load from metadata file
     cache_path = Path(DEFAULT_CACHE_PATH) / "preprocessor_results" / job_id
     metadata_path = cache_path / "metadata.json"
+
+
     
     if metadata_path.exists():
         with open(metadata_path, 'r') as f:

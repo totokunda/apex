@@ -31,23 +31,12 @@ spec:
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
         Edit model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: /Users/tosinkuye/apex-diffusion/components/ddad6fcc41e8f75ee9d69bc659fc405da69b4c0cb68c25286a5bbb23cba6fa2c_scheduler_config.json
-    - name: EulerDiscreteScheduler
-      label: Euler Discrete Scheduler
-      description: The Euler Discrete Scheduler is a scheduler for the QwenImage Edit
-        model.
-      base: diffusers.EulerDiscreteScheduler
-    - name: DPMSolverMultistepScheduler
-      label: DPMSolver Multistep Scheduler
-      description: The DPMSolver Multistep Scheduler is a scheduler for the QwenImage
-        Edit model.
-      base: diffusers.DPMSolverMultistepScheduler
-    is_downloaded: true
+      config_path: Qwen/Qwen-Image-Edit/scheduler/scheduler_config.json
   - type: vae
     label: QwenImage VAE
     base: qwenimage
     model_path:
-    - path: /Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/vae
+    - path: Qwen/Qwen-Image/vae
       variant: default
       precision: fp16
       type: safetensors
@@ -59,12 +48,12 @@ spec:
     is_downloaded: true
   - type: text_encoder
     label: Qwen2.5 VL Text Encoder
-    config_path: /Users/tosinkuye/apex-diffusion/components/016abbd0eb9b01a47743c88f5601d81b8678dd524da4c251fd2d87f30eaaae24_config.json
+    config_path: Qwen/Qwen-Image/text_encoder/config.json
     base: Qwen2_5_VLForConditionalGeneration
     gguf_kwargs:
       key_map: llama
     model_path:
-    - path: /Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/text_encoder
+    - path: Qwen/Qwen-Image/text_encoder
       variant: default
       precision: fp16
       type: safetensors
@@ -99,7 +88,7 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.base
-    config_path: /Users/tosinkuye/apex-diffusion/components/f4e7ba505bf8ad43090f6642a54562a1aeca22686375a8487f841d550c037806_config.json
+    config_path: Qwen/Qwen-Image-Edit/transformer/config.json
     model_path:
     - path: Qwen/Qwen-Image-Edit/transformer
       variant: default
@@ -109,8 +98,7 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227106
-      is_downloaded: false
-    - path: /Users/tosinkuye/apex-diffusion/components/5a8b98fe06bd8d6f489f98dbdc2e4d901ce8e0aac640b7250d0f942d8d90bf9c_Qwen_Image_Edit-Q2_K.gguf
+    - path: QuantStack/Qwen-Image-Edit-GGUF/Qwen_Image_Edit-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
@@ -118,7 +106,6 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 7062518304
-      is_downloaded: true
     - path: QuantStack/Qwen-Image-Edit-GGUF/Qwen_Image_Edit-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
@@ -127,7 +114,6 @@ spec:
         min_vram_gb: 14
         recommended_vram_gb: 20
       file_size: 12105441280
-      is_downloaded: false
     - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/Qwen_Image_Edit-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
@@ -136,7 +122,6 @@ spec:
         min_vram_gb: 18
         recommended_vram_gb: 28
       file_size: 16824990240
-      is_downloaded: false
     - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/Qwen_Image_Edit-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -145,19 +130,15 @@ spec:
         min_vram_gb: 24
         recommended_vram_gb: 36
       file_size: 21761817120
-      is_downloaded: false
-    is_downloaded: true
   - type: helper
     name: image.processor
     label: Image Processor
     module: transformers.models.qwen2_vl.processing_qwen2_vl
     base: Qwen2VLProcessor
     model_path:
-    - path: /Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image-Edit/processor
+    - path: Qwen/Qwen-Image-Edit/processor
       type: safetensors
       file_size: 15879236
-      is_downloaded: true
-    is_downloaded: true
   defaults:
     run:
       num_inference_steps: 40

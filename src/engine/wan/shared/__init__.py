@@ -251,6 +251,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
 
 
+
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
@@ -333,6 +334,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
+
                 if use_cfg_guidance and kwargs.get(
                     "unconditional_transformer_kwargs", None
                 ):
@@ -345,6 +347,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     noise_pred = uncond_noise_pred + guidance_scale * (
                         noise_pred - uncond_noise_pred
                     )
+ 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
             
                 if self.vae_scale_factor_spatial >= 16 and mask is not None and not mask[:, :, 0, :, :].any():

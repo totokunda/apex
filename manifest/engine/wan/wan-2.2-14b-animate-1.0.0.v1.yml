@@ -145,6 +145,17 @@ spec:
         flow: column
         rows:
         - - negative_prompt
+    - name: size
+      label: Size
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - resolution
+        - - aspect_ratio
+        - - height
+          - width
     - name: sampling
       label: Sampling
       collapsible: true
@@ -176,7 +187,6 @@ spec:
       required: true
       map_h: height
       map_w: width
-      scale_by: resolution
     - id: pose_video
       label: Pose Video
       description: The pose video to condition on.
@@ -242,6 +252,23 @@ spec:
       min: 1
       max: 100
       step: 64
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output image
+      panel: size
+      type: select
+      default: "9:16"
+      options:
+      - name: Wide
+        value: "16:9"
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: "9:16"
+        ratio_w: 9
+        ratio_h: 16
+      - name: Custom
+        value: custom
     - id: height
       label: Height
       description: Explicit height override

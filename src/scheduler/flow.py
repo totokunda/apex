@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 class FlowMatchScheduler(SchedulerInterface):
 
+    @register_to_config
     def __init__(
         self,
         num_inference_steps=100,

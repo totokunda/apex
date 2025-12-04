@@ -198,6 +198,7 @@ class WanCausalEngine(WanShared):
         num_output_frames = num_input_frames + latent_frames
         num_blocks = latent_frames // num_frame_per_block
         all_num_frames = [num_frame_per_block] * num_blocks
+
         current_start_frame = 0
         output = torch.zeros(
             [batch_size, num_channels, num_output_frames, latent_height, latent_width],
@@ -375,6 +376,7 @@ class WanCausalEngine(WanShared):
                     :,
                 ] = latent
 
+
                 context_timestep = torch.ones_like(timestep) * context_noise
                 # Clean context cache
                 self.transformer(
@@ -390,14 +392,17 @@ class WanCausalEngine(WanShared):
                     return_dict=False,
                 )
                 current_start_frame += current_num_frames
+    
         
         if offload:
             self._offload(self.transformer)
 
         if return_latents:
+
             return output
         else:
             video = self.vae_decode(output, offload=offload)
+
             postprocessed_video = self._tensor_to_frames(video)
             return postprocessed_video
 

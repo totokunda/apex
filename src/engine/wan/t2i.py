@@ -135,16 +135,14 @@ class WanT2IEngine(WanShared):
         else:
             boundary_timestep = None
 
-        # Reserve denoising progress range
-        mapped_denoise_progress = make_mapped_progress(progress_callback, 0.40, 0.92)
-        denoise_progress_callback = denoise_progress_callback or mapped_denoise_progress
-        safe_emit_progress(progress_callback, 0.40, "Starting denoising")
-
         # Set preview context for step-wise rendering
         
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
+        # Reserve denoising progress range
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.40, 0.92)
+        safe_emit_progress(progress_callback, 0.40, "Starting denoising")
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -186,7 +184,7 @@ class WanT2IEngine(WanShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
-            tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
+            tensor_image = self.vae_decode(latents, offload=offload)
             image = self._tensor_to_frame(tensor_image)
             safe_emit_progress(progress_callback, 1.0, "Completed t2i pipeline")
             return image

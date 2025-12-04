@@ -16,6 +16,7 @@ from typing import Tuple
 from torch.nn import functional as F
 from src.engine.base_engine import BaseEngine
 from .shared import LTXVideoCondition
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 class LTXX2VEngine(BaseEngine):
     """LTX Any-to-Video Engine Implementation"""
@@ -151,6 +152,8 @@ class LTXX2VEngine(BaseEngine):
             second element is the number of inference steps.
         """
         if timesteps is not None:
+            if not torch.is_tensor(timesteps):
+                timesteps = torch.tensor(timesteps, dtype=torch.float32, device=device)
             accepts_timesteps = "timesteps" in set(
                 inspect.signature(scheduler.set_timesteps).parameters.keys()
             )
@@ -203,6 +206,7 @@ class LTXX2VEngine(BaseEngine):
     ):
         if parse_frames or isinstance(duration, str):
             num_frames = self._parse_num_frames(duration, fps)
+
             latent_num_frames = math.ceil(
                 (num_frames + 3) / self.vae_scale_factor_temporal
             )
@@ -802,6 +806,7 @@ class LTXX2VEngine(BaseEngine):
         image_cond_noise_scale: float = 0.15,
         offload: bool = True,
         render_on_step: bool = False,
+        progress_callback: Callable | None = None,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         guidance_timesteps: List[int] | None = None,
@@ -817,10 +822,13 @@ class LTXX2VEngine(BaseEngine):
         **kwargs,
     ):
 
+        safe_emit_progress(progress_callback, 0.0, "Starting LTX Any-to-Video pipeline")
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
         if skip_layer_strategy is not None:
             if isinstance(skip_layer_strategy, str):
@@ -833,6 +841,8 @@ class LTXX2VEngine(BaseEngine):
             return_attention_mask=True,
             **text_encoder_kwargs,
         )
+
+        safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
 
         if negative_prompt:
             negative_prompt_embeds, negative_prompt_attention_mask = (
@@ -849,8 +859,16 @@ class LTXX2VEngine(BaseEngine):
                 prompt_embeds
             ), torch.zeros_like(prompt_attention_mask)
 
+        safe_emit_progress(
+            progress_callback,
+            0.13,
+            "Prepared negative prompt embeds" if negative_prompt else "Skipped negative prompt embeds",
+        )
+
         if offload:
             self._offload(self.text_encoder)
+
+        safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -1028,6 +1046,10 @@ class LTXX2VEngine(BaseEngine):
 
         init_latents = latents.clone()  # Used for image_cond_noise_update
         orig_conditioning_mask = conditioning_mask
+
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
         
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -1199,13 +1221,18 @@ class LTXX2VEngine(BaseEngine):
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
                 ):
                     progress_bar.update()
+                    # Emit progress during denoising
+                    step_progress = (i + 1) / len(timesteps)
+                    safe_emit_progress(denoise_progress_callback, step_progress, f"Denoising step {i + 1}/{len(timesteps)}")
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback)
+                # if render_on_step and render_on_step_callback and i != len(timesteps) - 1:
+                #     self._render_step(latents, render_on_step_callback)
 
 
         if offload:
             self._offload(self.transformer)
+
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         latents = latents[:, num_cond_latents:]
 
@@ -1221,9 +1248,11 @@ class LTXX2VEngine(BaseEngine):
             self._offload(self.transformer)
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
-        return self.prepare_output(
+        safe_emit_progress(progress_callback, 0.95, "Decoding latents to video")
+        output = self.prepare_output(
             latents=latents,
             offload=offload,
             generator=generator,
@@ -1231,3 +1260,5 @@ class LTXX2VEngine(BaseEngine):
             decode_noise_scale=decode_noise_scale,
             tone_map_compression_ratio=tone_map_compression_ratio,
         )
+        safe_emit_progress(progress_callback, 1.0, "Completed LTX Any-to-Video pipeline")
+        return output

@@ -119,6 +119,7 @@ spec:
         flow: column
         rows:
         - - image
+        - - audio
         - - sampling_rate
     - name: prompting
       label: Prompting
@@ -145,6 +146,8 @@ spec:
         rows:
         - - resolution
         - - aspect_ratio
+        - - height
+          - width
     - name: sampling
       label: Sampling
       collapsible: true
@@ -170,7 +173,16 @@ spec:
       required: true
       map_h: height
       map_w: width
-      scale_by: resolution
+    - id: sampling_rate
+      label: Sampling Rate
+      description: The sampling rate of the audio.
+      type: number
+      panel: audio
+      required: true
+      default: 16000
+      min: 8000
+      max: 48000
+      step: 1000
     - id: prompt
       label: Prompt
       description: Describe the image you want to generate.
@@ -229,6 +241,8 @@ spec:
         value: classic
         ratio_w: 4
         ratio_h: 3
+      - name: Custom
+        value: custom
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps
