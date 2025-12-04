@@ -510,92 +510,93 @@ def download_unified(
                 from src.preprocess.download_tracker import DownloadProgressTracker
                 lora_manager = LoraManager()
 
-                # 1) Immediately register the LoRA in manifests (if not already present)
-                entry = _ensure_lora_registered_in_manifests(source, manifest_id, lora_name)
-                
-                logger.info(f"Registered LoRA '{source}' in manifests: {entry}")
-
-                # 2) Start the actual download using the LoRA manager with progress tracking
+                # 1) Start the actual download using the LoRA manager with progress tracking
                 def _lora_download_progress_adapter(
                     p: Optional[float],
                     message: str,
                     metadata: Optional[Dict[str, Any]] = None,
                 ):
                     """
-                    Map raw download progress (0..1) into the 0..0.75 range of the
-                    unified job progress, reserving the remaining 0.25 for LoRA
-                    verification.
+                    Map LoRA download progress into the 0..0.75 range of the unified
+                    job progress so the frontend can visualize the entire download.
+
+                    We prefer byte-level aggregation from metadata when available,
+                    falling back to the fractional progress `p` from the tracker.
                     """
-                    if p is None:
-                        send_progress(None, message, metadata)
-                        return
+                    # Prefer explicit byte counts when provided by DownloadProgressTracker
+                    frac: float
                     try:
-                        frac = max(0.0, min(1.0, float(p)))
+                        downloaded = None
+                        total = None
+                        if isinstance(metadata, dict):
+                            downloaded = (
+                                metadata.get("downloaded")
+                                or metadata.get("bytes_downloaded")
+                                or metadata.get("current_bytes")
+                            )
+                            total = (
+                                metadata.get("total")
+                                or metadata.get("bytes_total")
+                                or metadata.get("total_bytes")
+                            )
+                        if isinstance(downloaded, (int, float)) and isinstance(
+                            total, (int, float)
+                        ) and total > 0:
+                            frac = max(0.0, min(1.0, float(downloaded) / float(total)))
+                        elif p is not None:
+                            frac = max(0.0, min(1.0, float(p)))
+                        else:
+                            # If we truly have no signal, just don't touch progress
+                            send_progress(None, message, metadata)
+                            return
                     except Exception:
-                        frac = 0.0
+                        if p is None:
+                            send_progress(None, message, metadata)
+                            return
+                        frac = max(0.0, min(1.0, float(p)))
+
                     scaled = 0.75 * frac
                     send_progress(scaled, message, metadata)
 
                 tracker = DownloadProgressTracker(job_id, _lora_download_progress_adapter)
-                if entry is not None:
-                    if "source" in entry and entry.get("verified"):
-                        # No resolve needed
-                        send_progress(
-                            1.0,
-                            "LoRA already downloaded and verified",
-                            {
-                                "status": "complete",
-                                "bucket": norm_type,
-                                "stage": "lora_download",
-                            },
-                        )
-                        return {
-                            "job_id": job_id,
-                            "status": "complete",
-                            "type": "lora",
-                            "id": source,
-                            "message": "LoRA already downloaded and verified",
-                        }
-                    else:
-                        lora_item = lora_manager.resolve(
-                            source,
-                            prefer_name=lora_name,
-                            progress_callback=tracker.update_progress,
-                        )
-                        if not getattr(lora_item, "local_paths", None) or len(lora_item.local_paths) == 0:
-                            # Resolved but no actual files -> treat as failure and clean up manifest
-                            logger.error(
-                                f"No LoRA files were found for source '{source}'. "
-                                "Removing LoRA entry from manifest."
-                            )
-                            _remove_lora_from_manifest(lora_name, manifest_id)
-                            send_progress(
-                                0.0,
-                                f"LoRA download failed for '{source}' (no files found)",
-                                {
-                                    "status": "error",
-                                    "bucket": norm_type,
-                                    "stage": "lora_download",
-                                    "error": "No LoRA files found for source",
-                                },
-                            )
-                            return {
-                                "job_id": job_id,
-                                "status": "error",
-                                "type": "lora",
-                                "id": source,
-                                "message": "LoRA download failed: no files found for source; removed from manifest",
-                            }
-                else:
-                    logger.error(f"LoRA entry is not registered in manifests: {entry}")
-                    send_progress(0.0, f"LoRA entry is not registered in manifests: {entry}", {"status": "error", "bucket": norm_type, "stage": "lora_download", "error": f"LoRA entry is not registered in manifests: {entry}"})
+                lora_item = lora_manager.resolve(
+                    source,
+                    prefer_name=lora_name,
+                    progress_callback=tracker.update_progress,
+                )
+                if not getattr(lora_item, "local_paths", None) or len(lora_item.local_paths) == 0:
+                    # Resolved but no actual files -> treat as failure and (best-effort) clean up any manifest traces
+                    logger.error(
+                        f"No LoRA files were found for source '{source}'. "
+                        "Ensuring LoRA is not present in manifest."
+                    )
+                    _remove_lora_from_manifest(lora_name, manifest_id)
+                    _remove_lora_from_manifest(source, manifest_id)
+                    send_progress(
+                        0.0,
+                        f"LoRA download failed for '{source}' (no files found)",
+                        {
+                            "status": "error",
+                            "bucket": norm_type,
+                            "stage": "lora_download",
+                            "error": "No LoRA files found for source",
+                        },
+                    )
                     return {
                         "job_id": job_id,
                         "status": "error",
                         "type": "lora",
                         "id": source,
-                        "message": f"LoRA entry is not registered in manifests: {entry}",
+                        "message": "LoRA download failed: no files found for source; removed from manifest",
                     }
+
+                # 2) Only after a successful download do we register/update the LoRA in the manifest.
+                try:
+                    entry = _ensure_lora_registered_in_manifests(source, manifest_id, lora_name)
+                    logger.info(f"Registered LoRA '{source}' in manifests after download: {entry}")
+                except Exception as register_err:
+                    traceback.print_exc()
+                    logger.warning(f"Failed to register LoRA '{source}' in manifest after download: {register_err}")
                 # Explicitly mark the end of the download phase at 75%
                 try:
                     send_progress(
