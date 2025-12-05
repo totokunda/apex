@@ -21,6 +21,11 @@ spec:
   model_type: control
   engine_type: torch
   denoise_type: base
+  compute_requirements:
+    min_cuda_compute_capability: 7.0
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types: [sdpa]
   components:
   - type: scheduler

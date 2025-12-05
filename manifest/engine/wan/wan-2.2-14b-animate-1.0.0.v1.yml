@@ -17,7 +17,6 @@ metadata:
   categories:
   - control
 spec:
-  fps: 30
   engine: wan
   model_type: animate
   engine_type: torch
