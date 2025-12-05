@@ -1832,6 +1832,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 src = entry.get("source") or entry.get("path") or entry.get("url")
                 scale = float(entry.get("scale", 1.0))
                 name = entry.get("name")
+                if scale == 0.0:
+                    continue
                 if name is not None:
                     adapter_names.append(name)
                 else:

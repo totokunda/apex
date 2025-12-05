@@ -11,7 +11,9 @@ metadata:
   - t2v
   - 14b
   - '2.1'
-  author: Apex AI
+  - text 
+  - video
+  author: Wan-AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
   categories:
@@ -23,7 +25,18 @@ spec:
   default_duration_secs: 5.0
   min_duration_secs: 1.0
   engine_type: torch
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   fps: 16
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
+  - xformers
   components:
   - type: scheduler
     label: Scheduler
@@ -240,7 +253,7 @@ spec:
       step: 0.5
   loras:
   - scale: 1.0
-    name: Blowjob
-    label: Blowjob
+    name: Wan Distill
+    label: Wan Distill
     verified: true
-    source: /home/tosin_coverquick_co/apex-diffusion/loras/c7125f73bc8612b97848056c2150e728de78d80bae8dd5c88bd39a406188ebd0_deepthroatEpoch80.2Ssf.safetensors
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/29569a7b82c9afc9ced4638d666fd2128f2d84ee106a17dd879db733fe9143b9_wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors

@@ -2,7 +2,7 @@ import os
 from typing import Iterator, Optional, Callable
 from urllib.parse import urlparse, parse_qs
 from tenacity import retry, stop_after_attempt, wait_exponential
-from src.utils.defaults import DEFAULT_HEADERS, DEFAULT_CONFIG_SAVE_PATH
+from src.utils.defaults import DEFAULT_HEADERS
 from logging import Logger
 from loguru import logger
 import hashlib
@@ -1188,17 +1188,7 @@ class DownloadMixin:
         relative_path_from_url = parsed_url.path.lstrip("/")
         # Build base headers (may be extended for specific providers like CivitAI)
         base_headers = dict(DEFAULT_HEADERS)
-        try:
-            # If this is a CivitAI URL and an API key is configured, attach it
-            netloc = (parsed_url.netloc or "").lower()
-            if "civitai.com" in netloc:
-                api_key = os.getenv("CIVITAI_API_KEY")
-                if api_key:
-                    # Do not overwrite an existing Authorization header if one is already set
-                    base_headers.setdefault("Authorization", f"Bearer {api_key}")
-        except Exception:
-            # Best-effort only; downloading should still work without CivitAI-specific headers
-            pass
+
         # Compute deterministic destination
         if dest_path:
             file_path = dest_path

@@ -1,0 +1,178 @@
+Using pip 22.3.1 from /home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip (python 3.10)
+Non-user install because site-packages writeable
+Created temporary directory: /tmp/pip-build-tracker-ihqy7m7y
+Initialized build tracking at /tmp/pip-build-tracker-ihqy7m7y
+Created build tracker: /tmp/pip-build-tracker-ihqy7m7y
+Entered build tracker: /tmp/pip-build-tracker-ihqy7m7y
+Created temporary directory: /tmp/pip-install-hw1ndip2
+Created temporary directory: /tmp/pip-ephem-wheel-cache-xyvxnw3l
+1 location(s) to search for versions of sageattention:
+* https://pypi.org/simple/sageattention/
+Fetching project page and analyzing links: https://pypi.org/simple/sageattention/
+Getting page https://pypi.org/simple/sageattention/
+Found index url https://pypi.org/simple
+Looking up "https://pypi.org/simple/sageattention/" in the cache
+Request header has "max_age" as 0, cache bypassed
+Starting new HTTPS connection (1): pypi.org:443
+https://pypi.org:443 "GET /simple/sageattention/ HTTP/1.1" 304 0
+Fetched page https://pypi.org/simple/sageattention/ as application/vnd.pypi.simple.v1+json
+  Found link https://files.pythonhosted.org/packages/d6/8a/af5dc354790d70ef91b1fcc833a567c76fcb245a67e59d7f6377a41d2b6c/sageattention-0.1.0-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 0.1.0
+  Found link https://files.pythonhosted.org/packages/5a/97/a4a6cf99319b859e590c7c3cb773e829f3a86717bda70bdf71eb069653ee/sageattention-0.1.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 0.1.0
+  Found link https://files.pythonhosted.org/packages/c7/73/3a512f81282c08757fe218b56d9b09814c47d90869c6a6c8287f9928734e/sageattention-1.0.0-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.0
+  Found link https://files.pythonhosted.org/packages/6d/7a/72dcd61c9e57eb24e0e9c9fd2bd5e622b1a8cd2e4e6cede0f2376fce56e6/sageattention-1.0.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.0
+  Found link https://files.pythonhosted.org/packages/3f/3b/d2304370591f62336dfc9b2ae59835cc66b71a58e3df6af680f0cc049c41/sageattention-1.0.1-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.1
+  Found link https://files.pythonhosted.org/packages/0e/5d/09021b1886534df456d0e8a7dc67f66e4773fd6f4d41598d159c9c0941f6/sageattention-1.0.1.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.1
+  Found link https://files.pythonhosted.org/packages/58/31/2e1b9993f755e1b901eb2a4be442e366a0b4b7d144cd5a1325445c0f88f3/sageattention-1.0.2-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.2
+  Found link https://files.pythonhosted.org/packages/00/0f/0564de49e61fc70e844b70e84eed326d3b9ccd1c8097e4a4067055c7edd7/sageattention-1.0.2.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.2
+  Found link https://files.pythonhosted.org/packages/c7/5a/6a8b8c3d8571b055ffce2832c97bb62b15e1cd6ee813bbbeab30d34167e3/sageattention-1.0.3-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.3
+  Found link https://files.pythonhosted.org/packages/c9/13/a6e9885a0fbfad243a52efe264f42431658137e65bbecff403a448d0b5e7/sageattention-1.0.3.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.3
+  Found link https://files.pythonhosted.org/packages/b2/ff/423d083caaca2e6315c5e24289a02cd6d48b0da04351861fb3fe0c68a2ed/sageattention-1.0.4-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.4
+  Found link https://files.pythonhosted.org/packages/8b/2b/67456109ffee08eff645406e6724195f36a687a2b5865b55a107b6f9af96/sageattention-1.0.4.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.4
+  Found link https://files.pythonhosted.org/packages/f1/20/32a857b41fed1c84d95fd2b3d52a61219bec433a759d04d99ab6b943d6e5/sageattention-1.0.5-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.5
+  Found link https://files.pythonhosted.org/packages/98/6b/ac1a0d37ac7eaa715b03923d4595f1899f5ce57760dc11ea13186c18e96f/sageattention-1.0.5.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.5
+  Found link https://files.pythonhosted.org/packages/53/06/f7b47adb766bcb38b3f88763374a3e8dffea05ee9b556bc24dbcbd60fd29/sageattention-1.0.6-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.6
+  Found link https://files.pythonhosted.org/packages/a5/c9/0445157fd09c8e5722503588db2a25afe9ab362d927b344dbbe7ee3ce84b/sageattention-1.0.6.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.6
+  Found link https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 2.2.0
+Skipping link: not a file: https://pypi.org/simple/sageattention/
+Given no hashes to check 1 links for project 'sageattention': discarding no candidates
+Collecting sageattention==2.2.0
+  Created temporary directory: /tmp/pip-unpack-znea_u1l
+  Looking up "https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz" in the cache
+  Current age based on date: 1589
+  Ignoring unknown cache-control directive: immutable
+  Freshness lifetime from max-age: 365000000
+  The response is "fresh", returning cached response
+  365000000 > 1589
+  Using cached sageattention-2.2.0.tar.gz (67 kB)
+  Added sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz to build tracker '/tmp/pip-build-tracker-ihqy7m7y'
+  Created temporary directory: /tmp/pip-modern-metadata-emv7rz2a
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+  Source in /tmp/pip-install-hw1ndip2/sageattention_2986c23bb9b24c55a66c2dfc5e87ab53 has version 2.2.0, which satisfies requirement sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz
+  Removed sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz from build tracker '/tmp/pip-build-tracker-ihqy7m7y'
+Created temporary directory: /tmp/pip-unpack-l40y6db1
+Building wheels for collected packages: sageattention
+  Created temporary directory: /tmp/pip-wheel-8t4yhyek
+  Destination directory: /tmp/pip-wheel-8t4yhyek
+  Building wheel for sageattention (pyproject.toml): started
+  Building wheel for sageattention (pyproject.toml): finished with status 'canceled'
+Exception information:
+Traceback (most recent call last):
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/cli/base_command.py", line 160, in exc_logging_wrapper
+    status = run_func(*args)
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+    return func(self, options, args)
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/commands/install.py", line 450, in run
+    _, build_failures = build(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 347, in build
+    wheel_file = _build_one(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 221, in _build_one
+    wheel_path = _build_one_inside_env(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 261, in _build_one_inside_env
+    wheel_path = build_wheel_pep517(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/operations/build/wheel.py", line 30, in build_wheel_pep517
+    wheel_name = backend.build_wheel(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/misc.py", line 660, in build_wheel
+    return super().build_wheel(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_vendor/pep517/wrappers.py", line 209, in build_wheel
+    return self._call_hook('build_wheel', {
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_vendor/pep517/wrappers.py", line 309, in _call_hook
+    self._subprocess_runner(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/subprocess.py", line 252, in runner
+    call_subprocess(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/subprocess.py", line 166, in call_subprocess
+    line: str = proc.stdout.readline()
+KeyboardInterrupt
+Remote version of pip: 25.3
+Local version of pip:  22.3.1
+Was pip installed by pip? True
+Removed build tracker: '/tmp/pip-build-tracker-ihqy7m7y'
+Using pip 22.3.1 from /home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip (python 3.10)
+Non-user install because site-packages writeable
+Created temporary directory: /tmp/pip-build-tracker-6qyad9q5
+Initialized build tracking at /tmp/pip-build-tracker-6qyad9q5
+Created build tracker: /tmp/pip-build-tracker-6qyad9q5
+Entered build tracker: /tmp/pip-build-tracker-6qyad9q5
+Created temporary directory: /tmp/pip-install-krg0q3b4
+Created temporary directory: /tmp/pip-ephem-wheel-cache-l6ugevjc
+1 location(s) to search for versions of sageattention:
+* https://pypi.org/simple/sageattention/
+Fetching project page and analyzing links: https://pypi.org/simple/sageattention/
+Getting page https://pypi.org/simple/sageattention/
+Found index url https://pypi.org/simple
+Looking up "https://pypi.org/simple/sageattention/" in the cache
+Request header has "max_age" as 0, cache bypassed
+Starting new HTTPS connection (1): pypi.org:443
+https://pypi.org:443 "GET /simple/sageattention/ HTTP/1.1" 304 0
+Fetched page https://pypi.org/simple/sageattention/ as application/vnd.pypi.simple.v1+json
+  Found link https://files.pythonhosted.org/packages/d6/8a/af5dc354790d70ef91b1fcc833a567c76fcb245a67e59d7f6377a41d2b6c/sageattention-0.1.0-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 0.1.0
+  Found link https://files.pythonhosted.org/packages/5a/97/a4a6cf99319b859e590c7c3cb773e829f3a86717bda70bdf71eb069653ee/sageattention-0.1.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 0.1.0
+  Found link https://files.pythonhosted.org/packages/c7/73/3a512f81282c08757fe218b56d9b09814c47d90869c6a6c8287f9928734e/sageattention-1.0.0-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.0
+  Found link https://files.pythonhosted.org/packages/6d/7a/72dcd61c9e57eb24e0e9c9fd2bd5e622b1a8cd2e4e6cede0f2376fce56e6/sageattention-1.0.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.0
+  Found link https://files.pythonhosted.org/packages/3f/3b/d2304370591f62336dfc9b2ae59835cc66b71a58e3df6af680f0cc049c41/sageattention-1.0.1-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.1
+  Found link https://files.pythonhosted.org/packages/0e/5d/09021b1886534df456d0e8a7dc67f66e4773fd6f4d41598d159c9c0941f6/sageattention-1.0.1.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.1
+  Found link https://files.pythonhosted.org/packages/58/31/2e1b9993f755e1b901eb2a4be442e366a0b4b7d144cd5a1325445c0f88f3/sageattention-1.0.2-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.2
+  Found link https://files.pythonhosted.org/packages/00/0f/0564de49e61fc70e844b70e84eed326d3b9ccd1c8097e4a4067055c7edd7/sageattention-1.0.2.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.2
+  Found link https://files.pythonhosted.org/packages/c7/5a/6a8b8c3d8571b055ffce2832c97bb62b15e1cd6ee813bbbeab30d34167e3/sageattention-1.0.3-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.3
+  Found link https://files.pythonhosted.org/packages/c9/13/a6e9885a0fbfad243a52efe264f42431658137e65bbecff403a448d0b5e7/sageattention-1.0.3.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.3
+  Found link https://files.pythonhosted.org/packages/b2/ff/423d083caaca2e6315c5e24289a02cd6d48b0da04351861fb3fe0c68a2ed/sageattention-1.0.4-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.4
+  Found link https://files.pythonhosted.org/packages/8b/2b/67456109ffee08eff645406e6724195f36a687a2b5865b55a107b6f9af96/sageattention-1.0.4.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.4
+  Found link https://files.pythonhosted.org/packages/f1/20/32a857b41fed1c84d95fd2b3d52a61219bec433a759d04d99ab6b943d6e5/sageattention-1.0.5-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.5
+  Found link https://files.pythonhosted.org/packages/98/6b/ac1a0d37ac7eaa715b03923d4595f1899f5ce57760dc11ea13186c18e96f/sageattention-1.0.5.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.5
+  Found link https://files.pythonhosted.org/packages/53/06/f7b47adb766bcb38b3f88763374a3e8dffea05ee9b556bc24dbcbd60fd29/sageattention-1.0.6-py3-none-any.whl (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.6
+  Found link https://files.pythonhosted.org/packages/a5/c9/0445157fd09c8e5722503588db2a25afe9ab362d927b344dbbe7ee3ce84b/sageattention-1.0.6.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 1.0.6
+  Found link https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz (from https://pypi.org/simple/sageattention/) (requires-python:>=3.9), version: 2.2.0
+Skipping link: not a file: https://pypi.org/simple/sageattention/
+Given no hashes to check 1 links for project 'sageattention': discarding no candidates
+Collecting sageattention==2.2.0
+  Created temporary directory: /tmp/pip-unpack-o1wpm7_e
+  Looking up "https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz" in the cache
+  Current age based on date: 1665
+  Ignoring unknown cache-control directive: immutable
+  Freshness lifetime from max-age: 365000000
+  The response is "fresh", returning cached response
+  365000000 > 1665
+  Using cached sageattention-2.2.0.tar.gz (67 kB)
+  Added sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz to build tracker '/tmp/pip-build-tracker-6qyad9q5'
+  Created temporary directory: /tmp/pip-modern-metadata-hnk5jdmr
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+  Source in /tmp/pip-install-krg0q3b4/sageattention_ca3d90b5159a4fa88628503cc1c1e44e has version 2.2.0, which satisfies requirement sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz
+  Removed sageattention==2.2.0 from https://files.pythonhosted.org/packages/01/7c/448c9bf634c10ef9dcb49e259e29d90c34f2f85a5a341367ac85f7ed5ca8/sageattention-2.2.0.tar.gz from build tracker '/tmp/pip-build-tracker-6qyad9q5'
+Created temporary directory: /tmp/pip-unpack-n7xgi175
+Building wheels for collected packages: sageattention
+  Created temporary directory: /tmp/pip-wheel-nn60ih04
+  Destination directory: /tmp/pip-wheel-nn60ih04
+  Building wheel for sageattention (pyproject.toml): started
+  Building wheel for sageattention (pyproject.toml): finished with status 'canceled'
+Exception information:
+Traceback (most recent call last):
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/cli/base_command.py", line 160, in exc_logging_wrapper
+    status = run_func(*args)
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/cli/req_command.py", line 247, in wrapper
+    return func(self, options, args)
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/commands/install.py", line 450, in run
+    _, build_failures = build(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 347, in build
+    wheel_file = _build_one(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 221, in _build_one
+    wheel_path = _build_one_inside_env(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/wheel_builder.py", line 261, in _build_one_inside_env
+    wheel_path = build_wheel_pep517(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/operations/build/wheel.py", line 30, in build_wheel_pep517
+    wheel_name = backend.build_wheel(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/misc.py", line 660, in build_wheel
+    return super().build_wheel(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_vendor/pep517/wrappers.py", line 209, in build_wheel
+    return self._call_hook('build_wheel', {
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_vendor/pep517/wrappers.py", line 309, in _call_hook
+    self._subprocess_runner(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/subprocess.py", line 252, in runner
+    call_subprocess(
+  File "/home/tosin_coverquick_co/miniconda3/envs/apex/lib/python3.10/site-packages/pip/_internal/utils/subprocess.py", line 166, in call_subprocess
+    line: str = proc.stdout.readline()
+KeyboardInterrupt
+Remote version of pip: 25.3
+Local version of pip:  22.3.1
+Was pip installed by pip? True
+Removed build tracker: '/tmp/pip-build-tracker-6qyad9q5'
