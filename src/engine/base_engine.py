@@ -2033,10 +2033,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         return height, width
 
     
-    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable, timestep: Optional[torch.Tensor] = None):
-        video = self.vae_decode(latents, timestep=timestep)
-        rendered_video = self._tensor_to_frames(video)
-        render_on_step_callback(rendered_video[0])
+    def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable, timestep: Optional[torch.Tensor] = None, image: Optional[bool] = False):
+        if image:
+            image = self.vae_decode(latents, timestep=timestep)
+            rendered_image = self._tensor_to_frame(image)
+            render_on_step_callback(rendered_image[0])
+        else:
+            video = self.vae_decode(latents, timestep=timestep)
+            rendered_video = self._tensor_to_frames(video)
+            render_on_step_callback(rendered_video)
 
     def _tensor_to_frames(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(

@@ -1,84 +1,42 @@
 {
     "engine_kwargs": {
-<<<<<<< HEAD
-        "engine_type": "qwenimage",
-        "yaml_path": "/Users/tosinkuye/apex-workspace/apex/manifest/engine/qwenimage/qwenimage-edit-1.0.0.v1.yml",
-        "model_type": "edit",
+        "engine_type": "flux2",
+        "yaml_path": "/home/divineade/apex/manifest/engine/flux2/flux2-dev-image-edit-1.0.0.v1.yml",
+        "model_type": "ti2i",
         "selected_components": {
             "scheduler": {
                 "name": "scheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "/Users/tosinkuye/apex-diffusion/components/ddad6fcc41e8f75ee9d69bc659fc405da69b4c0cb68c25286a5bbb23cba6fa2c_scheduler_config.json",
-=======
-        "engine_type": "wan",
-        "yaml_path": "/home/divineade/apex/manifest/engine/wan/lynx-14b-1.0.0.v1.yml",
-        "model_type": "lynx",
-        "selected_components": {
-            "scheduler": {
-                "name": "scheduler",
-                "base": "diffusers.UniPCMultistepScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/94e26df96dd3f147a7f094b7cdfb489857ab9602280c8b1e4297a7a64a01acd1_scheduler_config.json",
->>>>>>> aaac502 (engine and manifest fixes)
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/4b2cec2794947dc94a1eba03184663476b9c0a2a083515bda77f5d8a8438e11d_scheduler_config.json",
                 "type": "scheduler",
                 "label": "Scheduler",
-                "default": "FlowMatchEulerDiscreteScheduler",
-                "is_downloaded": true
+                "default": "FlowMatchEulerDiscreteScheduler"
             },
             "vae": {
-                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/vae",
-                "variant": "default",
-                "precision": "fp16",
-                "type": "safetensors"
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/black-forest-labs_FLUX.2-dev/vae",
+                "variant": "default"
             },
             "text_encoder": {
-                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
-                "variant": "default",
-                "precision": "fp16",
-                "type": "safetensors"
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/black-forest-labs_FLUX.2-dev/text_encoder",
+                "variant": "default"
             },
             "transformer": {
-<<<<<<< HEAD
-                "path": "/Users/tosinkuye/apex-diffusion/components/5a8b98fe06bd8d6f489f98dbdc2e4d901ce8e0aac640b7250d0f942d8d90bf9c_Qwen_Image_Edit-Q2_K.gguf",
-                "variant": "GGUF_Q2_K",
-                "precision": "q2_k",
-                "type": "gguf"
-            },
-            "image.processor": {
-                "path": "/Users/tosinkuye/apex-diffusion/components/Qwen_Qwen-Image-Edit/processor",
-=======
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-T2V-14B-Diffusers/transformer",
-                "variant": "default",
-                "precision": "fp16",
->>>>>>> aaac502 (engine and manifest fixes)
-                "type": "safetensors"
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/black-forest-labs_FLUX.2-dev/transformer",
+                "variant": "default"
             }
         },
         "attention_type": "sdpa"
     },
     "inputs": {
-<<<<<<< HEAD
-        "image": "/Users/tosinkuye/Library/Application Support/apex-studio/media/previews/5d56efa8-9dd6-43fe-8e43-38db9fc8e567_image_0_4.png",
-        "prompt": "ll;ml;m",
-        "negative_prompt": " ",
-        "resolution": "custom",
-        "aspect_ratio": "custom",
-        "num_inference_steps": 40,
-        "height": 736,
-        "width": 736,
-        "seed": 3939454035,
-        "true_cfg_scale": 4,
-=======
-        "subject_image": "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/4cd05427-bcf1-458e-b1c1-6af56d48652e-281e8f10-2801-4b5f-a7a1-36fd5ed5b4e7_subject_image_0.png",
-        "prompt": "A man walking the down the beach floor as the waves wash his footprint",
-        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
-        "resolution": 1024,
-        "aspect_ratio": "1:1",
+        "image": "/Users/divineade/Library/Application Support/apex-studio/media/previews/e94b2cb8-fb4b-4ee5-b385-c777a7d0df58_image_0_1.png",
+        "prompt": "Change the character to be a woman with long blond hair, freckles with a stern look on her face ",
+        "resolution": 720,
+        "aspect_ratio": "16:9",
         "num_inference_steps": 50,
-        "height": 1024,
-        "width": 1024,
-        "seed": 3279626026,
-        "guidance_scale": 5,
->>>>>>> aaac502 (engine and manifest fixes)
+        "height": 704,
+        "width": 1280,
+        "seed": 1186390096,
+        "guidance_scale": 3.5,
         "duration": "5s"
     }
 }

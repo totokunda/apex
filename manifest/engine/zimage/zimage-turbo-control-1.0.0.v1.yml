@@ -1,9 +1,9 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: zimage-turbo
+  id: zimage-turbo-control
   model: zimage
-  name: ZImage Turbo
+  name: ZImage Turbo Control
   version: 1.0.0
   description: ZImage Turbo is a 6B parameter model for text-to-image generation with controlnet.
   tags:
@@ -20,6 +20,11 @@ spec:
   engine: zimage
   model_type: control
   engine_type: torch
+  compute_requirements:
+    min_cuda_compute_capability: 7.0
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   components:
