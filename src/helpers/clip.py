@@ -10,6 +10,9 @@ from typing import Union, Dict, Any, List
 from src.helpers.helpers import helpers
 import torch.nn as nn
 from src.helpers.base import BaseHelper
+from transformers import CLIPImageProcessor
+from src.utils.module import find_class_recursive
+import importlib
 
 @helpers("clip")
 class CLIP(BaseHelper):
@@ -31,13 +34,17 @@ class CLIP(BaseHelper):
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
-        self.processor = self.load_processor(preprocessor_path)
+        processor_class = find_class_recursive(
+                importlib.import_module("transformers"), processor_class
+            )
+        
+        self.processor = processor_class.from_pretrained(preprocessor_path)
 
         self.model = self._load_model(
             {
                 "type": "clip",
                 "base": model_class,
-                "model_path": self.model_path,
+                "model_path": model_path,
                 "config_path": model_config_path,
                 "config": model_config,
             },

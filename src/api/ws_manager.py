@@ -45,8 +45,37 @@ class WebSocketManager:
                 del self.connections[job_id]
     
     async def send_update(self, job_id: str, data: dict):
-        """Send update to all websockets listening to a job"""
-        # Store latest update
+        """
+        Send update to all websockets listening to a job.
+
+        We also cache the *merged* latest state for the job so that fields like
+        `preview_path` (emitted during render_step/preview events) are not lost
+        when subsequent non-preview progress updates arrive.
+        """
+        # Merge with any previously cached latest update so we don't drop fields
+        # such as preview_path that may only be present on some events.
+        try:
+            existing = self.latest_updates.get(job_id)
+            if existing:
+                merged = dict(existing)
+                # Always take the newest scalar fields when present
+                for key in ("progress", "message", "status"):
+                    if key in data and data[key] is not None:
+                        merged[key] = data[key]
+                # Merge metadata dictionaries (existing keys can be overridden)
+                existing_meta = existing.get("metadata") or {}
+                new_meta = data.get("metadata") or {}
+                if isinstance(existing_meta, dict) and isinstance(new_meta, dict):
+                    merged["metadata"] = {**existing_meta, **new_meta}
+                elif "metadata" in data:
+                    merged["metadata"] = data["metadata"]
+                # Use merged object as the cached latest
+                data = merged
+        except Exception:
+            # Best-effort only; fall back to storing the raw update
+            pass
+
+        # Store latest (possibly merged) update
         self.latest_updates[job_id] = data
         
         if job_id in self.connections:

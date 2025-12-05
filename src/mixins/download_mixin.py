@@ -2,7 +2,7 @@ import os
 from typing import Iterator, Optional, Callable
 from urllib.parse import urlparse, parse_qs
 from tenacity import retry, stop_after_attempt, wait_exponential
-from src.utils.defaults import DEFAULT_HEADERS, DEFAULT_CONFIG_SAVE_PATH
+from src.utils.defaults import DEFAULT_HEADERS
 from logging import Logger
 from loguru import logger
 import hashlib
@@ -1186,6 +1186,9 @@ class DownloadMixin:
         import time
         parsed_url = urlparse(url)
         relative_path_from_url = parsed_url.path.lstrip("/")
+        # Build base headers (may be extended for specific providers like CivitAI)
+        base_headers = dict(DEFAULT_HEADERS)
+
         # Compute deterministic destination
         if dest_path:
             file_path = dest_path
@@ -1225,7 +1228,7 @@ class DownloadMixin:
                     url,
                     timeout=10,
                     verify=self._requests_verify(),
-                    headers=DEFAULT_HEADERS,
+                    headers=base_headers,
                     allow_redirects=True,
                 )
                 if head_resp.ok:
@@ -1251,7 +1254,7 @@ class DownloadMixin:
                     pass
 
             # Build headers; attempt Range resume if we have partial bytes
-            headers = dict(DEFAULT_HEADERS)
+            headers = dict(base_headers)
             if resume_size > 0:
                 headers["Range"] = f"bytes={resume_size}-"
 

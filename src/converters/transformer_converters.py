@@ -1,7 +1,6 @@
 from typing import Dict, Any
 from src.converters.utils import update_state_dict_, swap_proj_gate, swap_scale_shift
 from src.quantize.ggml_ops import ggml_cat, ggml_chunk, ggml_split
-import torch
 import re
 
 
@@ -10,6 +9,10 @@ class TransformerConverter:
         self.rename_dict = {}
         self.special_keys_map = {}
         self.pre_special_keys_map = {}
+
+    @staticmethod
+    def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
+        state_dict.pop(key, None)
 
     def _sort_rename_dict(self):
         """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
@@ -26,8 +29,7 @@ class TransformerConverter:
             for pre_special_key, handler_fn_inplace in self.pre_special_keys_map.items():
                 if pre_special_key in key:
                     handler_fn_inplace(key, state_dict)
-                    
-                    
+
         for key in list(state_dict.keys()):
             new_key = key[:]
             for replace_key, rename_key in self.rename_dict.items():
@@ -41,14 +43,42 @@ class TransformerConverter:
                 handler_fn_inplace(key, state_dict)
 
 
-class WanTransformerConverter(TransformerConverter):
+class KohyaToPeftTransformerConverter(TransformerConverter):
+    """
+    Base converter that performs a generic Kohya-style LoRA -> PEFT-style LoRA key normalization
+    before running the usual `TransformerConverter.convert` logic.
+
+    It converts:
+      - `*.lora_down.weight` / `*.lora_down.bias` -> `*.lora_A.weight` / `*.lora_A.bias`
+      - `*.lora_up.weight`   / `*.lora_up.bias`   -> `*.lora_B.weight` / `*.lora_B.bias`
+    """
+
+    def convert(self, state_dict: Dict[str, Any]):
+        # First, normalize Kohya-style LoRA keys to PEFT-style keys.
+        for key in list(state_dict.keys()):
+            new_key = key
+
+            if ".lora_down." in new_key:
+                new_key = new_key.replace(".lora_down.", ".lora_A.")
+
+            if ".lora_up." in new_key:
+                new_key = new_key.replace(".lora_up.", ".lora_B.")
+
+            if new_key != key:
+                update_state_dict_(state_dict, key, new_key)
+
+        # Then run the standard transformer conversion logic.
+        super().convert(state_dict)
+
+
+class WanTransformerConverter(KohyaToPeftTransformerConverter):
     def __init__(self):
         self.rename_dict = {
             "time_embedding.0": "condition_embedder.time_embedder.linear_1",
             "time_embedding.2": "condition_embedder.time_embedder.linear_2",
             "text_embedding.0": "condition_embedder.text_embedder.linear_1",
             "text_embedding.2": "condition_embedder.text_embedder.linear_2",
-            "time_projection.1": "condition_embedder.time_proj",
+             "time_projection.1": "condition_embedder.time_proj",
             "head.modulation": "scale_shift_table",
             "head.head": "proj_out",
             "modulation": "scale_shift_table",
@@ -90,7 +120,53 @@ class WanTransformerConverter(TransformerConverter):
             "cross_attn.norm_k_img": "attn2.norm_added_k",
         }
         self.special_keys_map = {}
-        self.pre_special_keys_map = {}
+        # Drop auxiliary diff-bias / diff vectors that don't have a counterpart in the target Wan model.
+        # Example keys:
+        #   diffusion_model.blocks.0.cross_attn.k.diff_b
+        #   diffusion_model.blocks.0.cross_attn.norm_k.diff
+        self.pre_special_keys_map = {
+            ".diff_b": self.remove_keys_inplace,
+            ".diff": self.remove_keys_inplace,
+        }
+
+    @staticmethod
+    def _remap_lora_unet_blocks_underscore_keys(state_dict: Dict[str, Any]):
+        """
+        Support LoRA weights produced with `--lora_unet_blocks` where keys use
+        underscore-separated segments instead of dot notation, e.g.:
+
+          lora_unet_blocks_0_cross_attn_k.lora_down.weight
+          lora_unet_blocks_0_self_attn_q.lora_up.weight
+          lora_unet_blocks_0_ffn_0.lora_down.weight
+
+        These are mapped to Wan transformer block keys so that the rest of the
+        rename rules can apply:
+
+          blocks.0.cross_attn.k.lora_down.weight
+          blocks.0.self_attn.q.lora_up.weight
+          blocks.0.ffn.0.lora_down.weight
+        """
+        pattern = re.compile(
+            r"^lora_unet_blocks_(\d+)_(cross_attn|self_attn|ffn)_(\d+|[qkvo])(\..+)$"
+        )
+
+        for key in list(state_dict.keys()):
+            m = pattern.match(key)
+            if not m:
+                continue
+
+            layer_idx, block_type, sub_key, suffix = m.groups()
+            new_key = f"blocks.{layer_idx}.{block_type}.{sub_key}{suffix}"
+            update_state_dict_(state_dict, key, new_key)
+
+    def convert(self, state_dict: Dict[str, Any]):
+        # First, normalize any underscore-style `lora_unet_blocks_*` keys to
+        # proper Wan transformer block names.
+        self._remap_lora_unet_blocks_underscore_keys(state_dict)
+
+        # Then delegate to the generic Kohya-style → PEFT-style conversion and
+        # the standard TransformerConverter rename logic.
+        super().convert(state_dict)
 
 
 class SkyReelsTransformerConverter(WanTransformerConverter):

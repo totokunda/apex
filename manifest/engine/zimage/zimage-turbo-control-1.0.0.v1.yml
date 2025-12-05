@@ -3,9 +3,9 @@ kind: Model
 metadata:
   id: zimage-turbo-control
   model: zimage
-  name: ZImage Turbo Control
+  name: ZImage Turbo Control  
   version: 1.0.0
-  description: ZImage Turbo is a 6B parameter model for text-to-image generation with controlnet.
+  description: ZImage Turbo Control is a 6B parameter model for text-to-image generation with controlnet.
   tags:
   - zimage
   - turbo
