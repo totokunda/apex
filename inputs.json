@@ -28,14 +28,14 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "image": "/Users/divineade/Library/Application Support/apex-studio/media/previews/e94b2cb8-fb4b-4ee5-b385-c777a7d0df58_image_0_1.png",
+        "image": "/Users/divineade/Library/Application Support/apex-studio/media/previews/e94b2cb8-fb4b-4ee5-b385-c777a7d0df58_image_0_4.png",
         "prompt": "Change the character to be a woman with long blond hair, freckles with a stern look on her face ",
         "resolution": 720,
         "aspect_ratio": "16:9",
         "num_inference_steps": 50,
         "height": 704,
         "width": 1280,
-        "seed": 1186390096,
+        "seed": 2303884335,
         "guidance_scale": 3.5,
         "duration": "5s"
     }
