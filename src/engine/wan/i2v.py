@@ -27,7 +27,6 @@ class WanI2VEngine(WanShared):
         fps: int = 16,
         guidance_scale: float = 5.0,
         progress_callback: Callable = None,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -43,6 +42,10 @@ class WanI2VEngine(WanShared):
         enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
+
+        use_cfg_guidance = (
+            guidance_scale > 1.0 and negative_prompt is not None
+        )
 
         safe_emit_progress(progress_callback, 0.0, "Starting image-to-video pipeline")
 

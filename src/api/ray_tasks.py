@@ -14,6 +14,7 @@ import shutil
 import torch
 import inspect
 import yaml
+import json
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
     get_preprocessor_info
@@ -24,7 +25,117 @@ from src.utils.defaults import get_components_path, get_lora_path, get_preproces
 from diffusers.utils import export_to_video
 from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
+from src.lora.manager import LoraManager
+from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 
+
+def _persist_run_config(
+    manifest_path: str,
+    engine_kwargs: Dict[str, Any],
+    inputs: Dict[str, Any],
+    run_root: Optional[Path] = None,
+) -> Optional[Path]:
+    """
+    Persist a snapshot of the engine invocation into a structured `runs` directory.
+
+    Layout:
+        <project_root>/runs/<manifest_stem>/assets/<media files...>
+        <project_root>/runs/<manifest_stem>/inputs.json
+
+    - Copies any local image/audio/video files referenced in `inputs` into `assets/`
+    - Rewrites those input values to use relative `assets/<filename>` paths in the
+      persisted JSON, without mutating the original `inputs` dict used by the engine.
+    """
+    try:
+        project_root = Path(__file__).parent.parent
+        base_runs_dir = run_root or (project_root / "runs")
+
+        manifest_stem = Path(manifest_path).stem
+        run_dir = base_runs_dir / manifest_stem
+        assets_dir = run_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+        def _extract_media_candidate(value: Any) -> tuple[Optional[str], Optional[str]]:
+            """
+            Return (path, field_key) where field_key is the dict key that held the path
+            ('input_path' / 'src' / 'path') or None if `value` is a bare string.
+            """
+            if isinstance(value, dict):
+                for k in ("input_path", "src", "path"):
+                    v = value.get(k)
+                    if isinstance(v, str):
+                        return v, k
+                return None, None
+            if isinstance(value, str):
+                return value, None
+            return None, None
+
+        def _is_media_file(path_str: str) -> bool:
+            lower = path_str.lower()
+            media_exts = (
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp",
+                ".gif",
+                ".bmp",
+                ".tiff",
+                ".mp4",
+                ".mov",
+                ".mkv",
+                ".avi",
+                ".webm",
+                ".wav",
+                ".mp3",
+                ".flac",
+                ".m4a",
+                ".ogg",
+            )
+            return any(lower.endswith(ext) for ext in media_exts)
+
+        persisted_inputs: Dict[str, Any] = {}
+
+        for key, value in inputs.items():
+            media_path, field_key = _extract_media_candidate(value)
+            new_value = value
+
+            if media_path and _is_media_file(media_path):
+                try:
+                    src_path = Path(media_path)
+                    if src_path.is_file():
+                        dest_path = assets_dir / src_path.name
+                        if src_path.resolve() != dest_path.resolve():
+                            shutil.copy2(src_path, dest_path)
+                        rel_path = f"assets/{dest_path.name}"
+
+                        if isinstance(value, dict) and field_key:
+                            updated = dict(value)
+                            updated[field_key] = rel_path
+                            new_value = updated
+                        elif isinstance(value, str):
+                            new_value = rel_path
+                except Exception as copy_err:
+                    logger.warning(f"Failed to copy media input '{media_path}' for key '{key}': {copy_err}")
+
+            persisted_inputs[key] = new_value
+
+        persisted_engine_kwargs: Dict[str, Any] = dict(engine_kwargs or {})
+        persisted_engine_kwargs["yaml_path"] = manifest_path
+
+        payload = {
+            "engine_kwargs": persisted_engine_kwargs,
+            "inputs": persisted_inputs,
+        }
+
+        json_path = run_dir / "inputs.json"
+        with json_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4)
+
+        logger.info(f"Persisted run configuration to {json_path}")
+        return json_path
+    except Exception as e:
+        logger.warning(f"Failed to persist run configuration: {e}")
+        return None
 
 
 def _derive_lora_name_from_source(source: str) -> str:
@@ -571,7 +682,6 @@ def download_unified(
                         "Ensuring LoRA is not present in manifest."
                     )
                     _remove_lora_from_manifest(lora_name, manifest_id)
-                    _remove_lora_from_manifest(source, manifest_id)
                     send_progress(
                         0.0,
                         f"LoRA download failed for '{source}' (no files found)",
@@ -591,6 +701,7 @@ def download_unified(
                     }
 
                 # 2) Only after a successful download do we register/update the LoRA in the manifest.
+                source = lora_item.local_paths[0]
                 try:
                     entry = _ensure_lora_registered_in_manifests(source, manifest_id, lora_name)
                     logger.info(f"Registered LoRA '{source}' in manifests after download: {entry}")
@@ -617,11 +728,11 @@ def download_unified(
                 except Exception:
                     pass
 
-                verified = _mark_lora_verified_in_manifests(lora_item.source, manifest_id)
+                verified = _mark_lora_verified_in_manifests(source, manifest_id)
 
                 # If verification explicitly failed, surface an error and remove the LoRA
                 if verified is False:
-                    _remove_lora_from_manifest(lora_item.source, manifest_id)
+                    _remove_lora_from_manifest(lora_name, manifest_id)
                     _cleanup_lora_artifacts_if_remote(lora_item)
                     send_progress(
                         0.0,
@@ -1237,13 +1348,10 @@ def run_engine_from_manifest(
                 return
             bounded = max(0.0, min(1.0, progress))
             send_progress(engine_stage_start + bounded * engine_stage_span, message, metadata)
-        
-        import json 
-        json.dump({
-                "engine_kwargs": input_kwargs,
-                "inputs": prepared_inputs,
-            }, indent=4, fp=open("inputs.json", "w"))
-        
+
+        # Persist a snapshot of the invocation into the structured `runs` directory
+        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+
         output = engine.run(
             **(prepared_inputs or {}),
             progress_callback=progress_callback,

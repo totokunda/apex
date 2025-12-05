@@ -8,9 +8,6 @@ from src.quantize.ggml_tensor import GGMLTensor
 from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.utils.dtype import convert_str_dtype
 from loguru import logger
-from src.converters.transformer_converters import TransformerConverter
-
-transformer_converter = TransformerConverter()
 
 T5_SD_MAP = {
     "enc.": "encoder.",

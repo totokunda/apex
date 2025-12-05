@@ -628,9 +628,55 @@ def flash_attention3(
 
 
 @attention_register("sage", available=sageattn is not None)
-def sage_attention(q, k, v, is_causal=False, softmax_scale=None, **kwargs):
+def sage_attention(
+    q,
+    k,
+    v,
+    attn_mask=None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    softmax_scale=None,
+    **kwargs,
+):
+    """
+    SageAttention backend with an SDPA-compatible calling convention.
+
+    Mirrors the signature of `sdpa` so that `attention_register.call(...)`
+    can switch between backends transparently:
+
+        (q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False, softmax_scale=None)
+
+    Notes
+    -----
+    * `attn_mask` is currently **ignored** – SageAttention does not support it.
+    * `dropout_p` is also ignored and must effectively be 0.0 in inference.
+    * When `softmax_scale` is None we match PyTorch SDPA's default of
+      `1 / sqrt(head_dim)`.
+    """
+    if attn_mask is not None:
+        warnings.warn(
+            "sage_attention currently ignores `attn_mask` – behaviour may differ "
+            "from SDPA when masks are used.",
+            RuntimeWarning,
+        )
+
+    if dropout_p not in (0.0, None):
+        warnings.warn(
+            "sage_attention does not implement dropout – `dropout_p` is ignored.",
+            RuntimeWarning,
+        )
+
+    # Match PyTorch SDPA's default scaling when none is provided
+    if softmax_scale is None:
+        softmax_scale = 1.0 / math.sqrt(q.shape[-1])
+
     attn_output = sageattn(
-        q, k, v, tensor_layout="HND", is_causal=is_causal, sm_scale=softmax_scale
+        q,
+        k,
+        v,
+        tensor_layout="HND",
+        is_causal=is_causal,
+        sm_scale=softmax_scale,
     )
     return attn_output
 

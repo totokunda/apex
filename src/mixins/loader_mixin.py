@@ -29,7 +29,6 @@ from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
-from src.converters.convert import get_transformer_converter, get_vae_converter
 from contextlib import nullcontext
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
@@ -247,6 +246,9 @@ class LoaderMixin(DownloadMixin):
             )
             # check if we need to convert the weights
             if component.get("type") == "transformer":
+                # Lazy import to avoid circular dependency at module import time.
+                from src.converters.convert import get_transformer_converter
+
                 converter = get_transformer_converter(model_base)
                 converter.convert(state_dict)
 
@@ -292,12 +294,20 @@ class LoaderMixin(DownloadMixin):
                     )
                 
                 if extra_kwargs.get("require_conversion", False):
+                    # Lazy import here as well to avoid circular imports.
+                    from src.converters.convert import (
+                        get_transformer_converter,
+                        get_vae_converter,
+                    )
+
                     if component.get("type") == "vae":
                         converter = get_vae_converter(model_base)
                     elif component.get("type") == "transformer":
                         converter = get_transformer_converter(model_base)
                     else:
-                        raise ValueError(f"Unsupported component type: {component.get('type')}")
+                        raise ValueError(
+                            f"Unsupported component type: {component.get('type')}"
+                        )
                     converter.convert(state_dict)
                 
                 if load_dtype and not is_safetensors:

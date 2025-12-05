@@ -11,7 +11,7 @@ from diffusers.loaders import PeftAdapterMixin
 from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
-
+from urllib.parse import urlencode
 try: 
     from nunchaku.lora.flux.compose import compose_lora
 except ImportError:
@@ -121,11 +121,11 @@ class LoraManager(DownloadMixin):
 
         # CivitAI integration: support plain download links and model/file ids
         if self._is_civitai(source):
+            # Model-id style spec, delegate to helper with progress
             if source.startswith("civitai:"):
-                # Model-id style spec, delegate to helper with progress
                 local_path = self._download_from_civitai_spec(
-                    source,
-                    progress_callback=progress_callback,
+                        source,
+                        progress_callback=progress_callback,
                 )
             else:
                 # Direct CivitAI download URL
@@ -163,7 +163,7 @@ class LoraManager(DownloadMixin):
         return bool(re.match(r"^[\w\-]+/[\w\-]+/.+\.[A-Za-z0-9]+$", text))
 
     def _is_civitai(self, url: str) -> bool:
-        return "civitai.com" in url
+        return "civitai.com" in url or url.startswith("civitai:")
 
     def _infer_name(self, source: str, local_path: str) -> str:
         if os.path.isdir(local_path):
@@ -178,16 +178,44 @@ class LoraManager(DownloadMixin):
             files = []
             for root, _dirs, fnames in os.walk(path):
                 for fn in fnames:
-                    if self._is_lora_file(fn):
-                        files.append(os.path.join(root, fn))
+                    path = os.path.join(root, fn)
+                    if self._is_lora_file(path):
+                        files.append(path)
             return sorted(files)
         if os.path.isfile(path) and self._is_lora_file(path):
             return [path]
         return []
 
     def _is_lora_file(self, filename: str) -> bool:
-        lower = filename.lower()
-        return lower.endswith((".safetensors", ".bin", ".pt", ".pth"))
+        """
+        Heuristic check for whether a file is *likely* a LoRA weights file.
+        Designed to be very cheap in CPU usage:
+        - Only checks the extension.
+        - Optionally sniffs a tiny header to rule out obvious HTML/text error pages.
+        """
+        try:
+            with open(filename, "rb") as f:
+                head = f.read(2048)
+        except OSError:
+            return False
+
+        if not head:
+            return False
+
+        # If this decodes cleanly to mostly text and looks like HTML or an error,
+        # treat it as "not a LoRA file". This keeps CPU usage tiny while avoiding
+        # obviously-wrong files.
+        text_sample = head.decode("utf-8", errors="ignore").lstrip().lower()
+        html_markers = ("<!doctype html", "<html", "<head", "<body")
+        if text_sample.startswith(html_markers):
+            return False
+
+        # Common text error indicators near the top of the file.
+        for marker in ("error", "not found", "access denied"):
+            if marker in text_sample[:512]:
+                return False
+
+        return True
     
     def _clean_adapter_name(self, name: str) -> str:
         if len(name) > 64:
@@ -312,6 +340,16 @@ class LoraManager(DownloadMixin):
             converter.convert(state_dict)
             converted = True
         return state_dict, converted
+    
+    
+    def _format_to_extension(self, format: str) -> str:
+        format = format.lower()
+        if format == "safetensors" or format == "safetensor":
+            return "safetensors"
+        elif format == "pickletensor" or format == "pickle" or format == "pt" or format == "pth":
+            return "pt"
+        else:
+            return "safetensors" # default to safetensors
 
     def _download_from_civitai_spec(
         self,
@@ -331,14 +369,23 @@ class LoraManager(DownloadMixin):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        def download_file_id(file_id: Union[int, str]) -> str:
+        def download_file_id(file_id: Union[int, str], format: Optional[str] = None) -> str:
             url = f"https://civitai.com/api/download/models/{file_id}"
-            # Use the unified downloader so websocket progress is reported
-            return self._download(url, self.save_dir, progress_callback=progress_callback)
+            url_params = {}
+            if format is not None and format == "safetensors" or format == "pt": 
+                url_params["type"] = "Model"
+                url_params["format"] = "SafeTensor" if format == "safetensors" or format == "safetensor" else "PickleTensor"
+            api_key = os.getenv("CIVITAI_API_KEY", None)
+            if api_key:
+                url_params["token"] = api_key
+            url_params = urlencode(url_params)
+            url = f"{url}?{url_params}"
+            local_path = self.download_from_url(url, self.save_dir, progress_callback=progress_callback, filename=f"{file_id}.{format}" if format else None) 
+            return local_path
 
         if spec.startswith("civitai-file:"):
             file_id = spec.split(":", 1)[1]
-            return download_file_id(file_id)
+            return download_file_id(file_id, format)
 
         # civitai:MODEL_ID
         model_id = spec.split(":", 1)[1]
@@ -348,20 +395,16 @@ class LoraManager(DownloadMixin):
         resp.raise_for_status()
         data = resp.json()
         # Find a file that looks like a LoRA in SafeTensor format
+        format = None
         for version in data.get("modelVersions", []):
+            file_id = version.get("id")
             for f in version.get("files", []):
                 fname = f.get("name") or ""
-                if fname.lower().endswith((".safetensors", ".pt", ".bin")):
-                    file_id = f.get("id")
-                    if file_id is not None:
-                        return download_file_id(file_id)
-        # Fallback to first file id
-        for version in data.get("modelVersions", []):
-            files = version.get("files", [])
-            if files:
-                file_id = files[0].get("id")
-                if file_id is not None:
-                    return download_file_id(file_id)
+                format = f.get("metadata", {}).get("format", "").lower()
+                format = self._format_to_extension(format)
+                if fname.lower().endswith((".safetensors", ".pt", ".bin")) and file_id is not None:
+                    return download_file_id(file_id, format)
+        
         raise RuntimeError(f"No downloadable files found for CivitAI model {model_id}")
 
     def load_file(self, local_path: str) -> str:
