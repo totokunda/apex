@@ -1,4 +1,5 @@
 from sam2.build_sam import build_sam2_video_predictor
+from sam3.model.sam3_video_predictor import Sam3VideoPredictor
 from sam2.sam2_video_predictor import SAM2VideoPredictor
 from src.mixins import LoaderMixin
 from PIL import Image, ImageOps
@@ -24,13 +25,14 @@ class ModelType(Enum):
     SAM2_SMALL = "sam2_small"
     SAM2_BASE_PLUS = "sam2_base_plus"
     SAM2_LARGE = "sam2_large"
-    
+    SAM3 = "sam3"
 
 MODEL_WEIGHTS = {
     ModelType.SAM2_TINY: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt",
     ModelType.SAM2_SMALL: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt", 
     ModelType.SAM2_BASE_PLUS: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_base_plus.pt",
     ModelType.SAM2_LARGE: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt",
+    ModelType.SAM3: "https://huggingface.co/1038lab/sam3/resolve/main/sam3.pt",
 }
 
 MODEL_CONFIGS = {
@@ -1051,6 +1053,7 @@ class UnifiedSAM2Predictor:
             self.logger.info(f"Loading unified SAM2 video predictor with config: {self.config_name}, checkpoint: {self.model_path}")
             
             # Build the predictor
+            
             predictor = build_sam2_video_predictor(
                 self.config_name, 
                 self.model_path, 

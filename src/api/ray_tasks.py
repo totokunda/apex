@@ -47,7 +47,7 @@ def _persist_run_config(
       persisted JSON, without mutating the original `inputs` dict used by the engine.
     """
     try:
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         base_runs_dir = run_root or (project_root / "runs")
 
         manifest_stem = Path(manifest_path).stem
@@ -1319,12 +1319,12 @@ def run_engine_from_manifest(
 
         # Render-on-step callback that writes previews
         step_counter = {"i": 0}
-        def render_on_step_callback(frames):
+        def render_on_step_callback(frames, is_result: bool = False):
             try:
                 idx = step_counter["i"]
                 step_counter["i"] = idx + 1
                 # Persist preview to cache and notify over websocket with metadata only
-                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}")
+                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}" if not is_result else "result")
                 logger.info(f"Preview saved to {result_path} with media type {media_type}")
                 try:
                     # Send an update that does not overwrite progress (progress=None)
@@ -1358,6 +1358,8 @@ def run_engine_from_manifest(
             render_on_step=True,
             render_on_step_callback=render_on_step_callback,
         )
+        
+        render_on_step_callback(output[0], is_result=True)
         
         # Persist final result using the unified saver
         result_path, media_type = save_output(output[0], filename_prefix="result", final=True)

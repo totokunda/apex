@@ -11,6 +11,7 @@ import numpy as np
 from loguru import logger
 import cv2
 from datetime import datetime
+import os
 
 from src.mask.mask import (
     get_sam2_predictor,
@@ -39,8 +40,6 @@ class MaskRequest(BaseModel):
     # SAM2 parameters
     multimask_output: bool = Field(True, description="Whether to generate multiple mask proposals and return the best one")
     simplify_tolerance: float = Field(1.0, description="Contour simplification tolerance (Douglas-Peucker epsilon)")
-    model_type: str = Field("sam2_base_plus", description="SAM2 model variant: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
-     
     # Debug parameter
     debug: bool = Field(False, description="Enable debug visualization - saves input points/bbox and output contours as images")
     shape_type: Optional[Literal['rectangle','ellipse','polygon','triangle','star']] = Field(
@@ -54,7 +53,6 @@ class MaskTrackingRequest(BaseModel):
     input_path: str = Field(..., description="Path to input image or video file")
     frame_start: int = Field(..., description="Start frame number for video input (0-based)")
     frame_end: int = Field(..., description="End frame number for video input (0-based)")
-    model_type: str = Field("sam2_base_plus", description="SAM2 model variant: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
     max_frames: Optional[int] = Field(None, description="Optional maximum number of frames to track from the anchor frame")
     anchor_frame: Optional[int] = Field(None, description="Anchor frame containing the initial mask")
     direction: Optional[Literal['forward','backward','both']] = Field(
@@ -345,11 +343,11 @@ async def create_mask(request: MaskRequest):
         
         # Get SAM2 model actor
         try:
-            model_type_enum = ModelType[request.model_type.upper()]
+            model_type_enum = ModelType[os.environ.get("MASK_MODEL", "sam2_base_plus").upper()]
         except KeyError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid model_type: {request.model_type}. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large"
+                detail=f"Invalid model_type: {os.environ.get('MASK_MODEL', 'sam2_base_plus')}. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large"
             )
 
         predictor = get_sam2_predictor(model_type=model_type_enum)
@@ -457,9 +455,9 @@ async def track_mask(request: MaskTrackingRequest):
 
         # Validate model type
         try:
-            model_type_enum = ModelType[request.model_type.upper()]
+            model_type_enum = ModelType[os.environ.get("MASK_MODEL", "sam2_base_plus").upper()]
         except KeyError:
-            raise HTTPException(status_code=400, detail=f"Invalid model_type: {request.model_type}")
+            raise HTTPException(status_code=400, detail=f"Invalid model_type: {os.environ.get('MASK_MODEL', 'sam2_base_plus')}")
 
         predictor = get_sam2_predictor(model_type=model_type_enum)
 

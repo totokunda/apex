@@ -131,4 +131,3 @@ thirdparty/SageAttention
 InfiniteTalk/
 **/debug/*
 .env
-inputs.json

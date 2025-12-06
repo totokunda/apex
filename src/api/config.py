@@ -98,6 +98,12 @@ class CivitaiApiKeyRequest(BaseModel):
 class CivitaiApiKeyResponse(BaseModel):
     is_set: bool
     masked_token: Optional[str] = None
+    
+class MaskModelRequest(BaseModel):
+    mask_model: str
+    
+class MaskModelResponse(BaseModel):
+    mask_model: str
 
 @router.get("/home-dir", response_model=HomeDirectoryResponse)
 def get_home_directory():
@@ -316,6 +322,23 @@ def set_civitai_api_key(request: CivitaiApiKeyRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set CIVITAI_API_KEY: {str(e)}")
 
+@router.get("/mask-model", response_model=MaskModelResponse)
+def get_mask_model():
+    """Get the current mask model"""
+    return MaskModelResponse(mask_model=os.environ.get("MASK_MODEL", "sam2_base_plus"))
+
+@router.post("/mask-model", response_model=MaskModelResponse)
+def set_mask_model(request: MaskModelRequest):
+    """Set the mask model"""
+    try:
+        mask_model = request.mask_model.lower()
+        if mask_model not in ["sam2_tiny", "sam2_small", "sam2_base_plus", "sam2_large"]:
+            raise HTTPException(status_code=400, detail="Invalid mask model. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
+        os.environ["MASK_MODEL"] = mask_model
+        _update_persisted_config(mask_model=request.mask_model)
+        return MaskModelResponse(mask_model=request.mask_model)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to set mask model: {str(e)}")
 
 def _update_persisted_config(**updates: str) -> None:
     """
