@@ -34,7 +34,6 @@ spec:
     module: transformers.models.qwen2_vl.processing_qwen2_vl
     base: Qwen2VLProcessor
     model_path: Qwen/Qwen-Image-Edit/processor
-    
   defaults:
     run:
       num_inference_steps: 40

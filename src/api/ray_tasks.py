@@ -1,7 +1,7 @@
 """
 Ray tasks for preprocessor operations
 """
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Tuple
 from pathlib import Path
 from urllib.parse import urlparse
 import ray
@@ -14,6 +14,7 @@ import shutil
 import torch
 import inspect
 import yaml
+import numpy as np 
 import json
 from src.utils.cache import empty_cache
 from src.api.preprocessor_registry import (
@@ -403,7 +404,9 @@ def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dic
                         path_val = item.get("path")
                         if isinstance(path_val, str):
                             candidate_paths.append(path_val)
-
+                            
+            has_local_model_path = False
+            
             base_dir = get_components_path()
             for p in candidate_paths:
                 local = DownloadMixin.is_downloaded(str(p), base_dir)
@@ -411,8 +414,27 @@ def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dic
                     # Return a shallow copy so callers can safely mutate model_path
                     comp_copy: Dict[str, Any] = dict(component)
                     comp_copy["model_path"] = local
-                    return comp_copy
+                    has_local_model_path = True
+        
+        extra_model_paths = component.get("extra_model_paths", [])
+        local_extra_model_paths: List[str] = []
+        if isinstance(extra_model_paths, list):
+            for extra_model_path in extra_model_paths:
+                local = DownloadMixin.is_downloaded(str(extra_model_path.get("path")), base_dir)
+                if local:
+                    local_extra_model_paths.append(local)
+
+        if extra_model_paths:
+            comp_copy["extra_model_paths"] = local_extra_model_paths
+            
+        if len(local_extra_model_paths) != len(extra_model_paths):
+            return None
+        
+        if has_local_model_path:
+            return comp_copy
+                   
         return None
+    
     except Exception as e:
         logger.warning(f"Failed to determine transformer download status for manifest: {e}")
         return None
@@ -468,6 +490,7 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
             # Validate this LoRA against the transformer
             is_valid = False
             try:
+                logger.info(f"Validating LoRA '{entry_source}' against transformer component: {transformer_component}")
                 is_valid = bool(engine.validate_lora_path(entry_source, transformer_component))
             except Exception as ve:
                 logger.error(traceback.format_exc())
@@ -1133,7 +1156,18 @@ def run_engine_from_manifest(
         config = validate_and_normalize(raw)
         inputs = inputs or {}
         selected_components = selected_components or {}
-        
+
+        # Extract any audio inputs that should be persisted alongside the final video
+        spec_block = (raw.get("spec") or {}) if isinstance(raw, dict) else {}
+        audio_inputs_to_save = spec_block.get("audio_inputs_to_save") or []
+        if not isinstance(audio_inputs_to_save, list):
+            audio_inputs_to_save = []
+        audio_inputs_to_save = [
+            str(x) for x in audio_inputs_to_save if isinstance(x, (str, int))
+        ]
+        # Resolved file system paths for those audio inputs (filled after preprocessing)
+        audio_input_paths: List[str] = []
+
         def _extract_ui_inputs() -> List[Dict[str, Any]]:
             spec_ui = ((raw.get("spec") or {}).get("ui") or {})
             raw_inputs = spec_ui.get("inputs")
@@ -1175,7 +1209,6 @@ def run_engine_from_manifest(
             
         
         engine = UniversalEngine(**input_kwargs)
-
 
         def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:
             if isinstance(value, dict):
@@ -1220,7 +1253,98 @@ def run_engine_from_manifest(
         job_dir.mkdir(parents=True, exist_ok=True)
 
         # Unified saver usable for previews and final outputs
-        def save_output(output_obj, filename_prefix: str = "result", final: bool = False):
+        def _mux_audio_into_video(video_path: str, audio_paths: List[str]) -> Optional[str]:
+            """
+            Best-effort helper to mux one or more audio files into a video using ffmpeg.
+            Returns the new video path on success, or None on failure.
+            """
+            import subprocess
+            import os
+
+            try:
+                valid_audio_paths = [
+                    p
+                    for p in audio_paths
+                    if isinstance(p, str) and os.path.isfile(p)
+                ]
+                if not valid_audio_paths:
+                    return None
+
+                base = Path(video_path)
+                # We first mux into a temporary file, then overwrite the original
+                # video so that the final saved filename remains unchanged.
+                temp_out_path = base.with_name(f"{base.stem}_with_audio{base.suffix}")
+
+                cmd: List[str] = ["ffmpeg", "-y", "-i", video_path]
+                for ap in valid_audio_paths:
+                    cmd.extend(["-i", ap])
+
+                if len(valid_audio_paths) == 1:
+                    # Single audio track: simple stream copy, similar to test_humo.py
+                    cmd.extend(
+                        [
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "1:a:0?",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-shortest",
+                            str(temp_out_path),
+                        ]
+                    )
+                else:
+                    # Multiple audio inputs: mix them down into a single track with amix.
+                    # Audio inputs start from index 1 (0 is the video).
+                    inputs_count = len(valid_audio_paths)
+                    filter_inputs = "".join(f"[{i+1}:a]" for i in range(inputs_count))
+                    filter_spec = f"{filter_inputs}amix=inputs={inputs_count}:dropout_transition=0[aout]"
+                    cmd.extend(
+                        [
+                            "-filter_complex",
+                            filter_spec,
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "[aout]",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-shortest",
+                            "-movflags",
+                            "+faststart",
+                            str(temp_out_path),
+                        ]
+                    )
+
+                proc = subprocess.run(cmd, capture_output=True)
+                if proc.returncode != 0 or not temp_out_path.is_file():
+                    logger.warning(
+                        f"ffmpeg audio mux failed with code {proc.returncode}"
+                    )
+                    return None
+                try:
+                    # Overwrite the original file so callers keep the same filename.
+                    temp_out_path.replace(base)
+                except Exception as move_err:
+                    logger.warning(
+                        f"ffmpeg audio mux succeeded but failed to move into place: {move_err}"
+                    )
+                    return None
+                return str(base)
+            except Exception as e:
+                logger.warning(f"Failed to mux audio into video: {e}")
+                return None
+
+        def save_output(
+            output_obj,
+            filename_prefix: str = "result",
+            final: bool = False,
+            audio_inputs: Optional[List[str]] = None,
+        ):
             result_path: Optional[str] = None
             media_type: Optional[str] = None
             try:
@@ -1236,10 +1360,7 @@ def run_engine_from_manifest(
                     media_type = "image"
                 # Sequence of frames
                 elif isinstance(output_obj, list) and len(output_obj) > 0:
-                    fps = (
-                        config.get("spec", {}).get("fps")
-                        or (config or {}).get("defaults", {}).get("run", {}).get("fps")
-                    )
+                    fps = config.get("fps", None)
                     if not fps:
                         try:
                             impl = getattr(engine.engine, "implementation_engine", None)
@@ -1251,10 +1372,33 @@ def run_engine_from_manifest(
                         except Exception:
                             pass
                     fps = fps or 16
+                    logger.info(f"Saving video to {result_path} with fps {fps}")
                     result_path = str(job_dir / f"{filename_prefix}.mp4")
-                    export_to_video(output_obj, result_path, fps=int(fps), quality=8.0 if final else 5.0)
+                    export_to_video(
+                        output_obj,
+                        result_path,
+                        fps=int(fps),
+                        quality=8.0 if final else 5.0,
+                    )
                     media_type = "video"
-                
+
+                    # If this is the final video and we have audio inputs to save, try to mux them in.
+                    if (
+                        final
+                        and media_type == "video"
+                        and result_path
+                        and audio_inputs
+                    ):
+                        try:
+                            muxed = _mux_audio_into_video(result_path, audio_inputs)
+                            if muxed:
+                                result_path = muxed
+                        except Exception as mux_err:
+                            logger.warning(
+                                "Audio muxing failed; returning video-only output. "
+                                f"Error: {mux_err}"
+                            )
+
                 else:
                     # Fallback best-effort serialization
                     try:
@@ -1273,6 +1417,78 @@ def run_engine_from_manifest(
                 logger.error(f"Failed to save output: {save_err}")
                 raise
             return result_path, media_type
+
+        def save_ovi_output(
+            video_numpy: np.ndarray,
+            audio_numpy: Optional[np.ndarray] = None,
+            filename_prefix: str = "result",
+            sample_rate: int = 16000,
+            fps: int = 24,
+        ) -> Tuple[str, str]:
+            """
+            Combine a sequence of video frames with an optional audio track and save as an MP4.
+
+            Args:
+                output_path (str): Path to the output MP4 file.
+                video_numpy (np.ndarray): Numpy array of frames. Shape (C, F, H, W).
+                                          Values can be in range [-1, 1] or [0, 255].
+                audio_numpy (Optional[np.ndarray]): 1D or 2D numpy array of audio samples, range [-1, 1].
+                sample_rate (int): Sample rate of the audio in Hz. Defaults to 16000.
+                fps (int): Frames per second for the video. Defaults to 24.
+
+            Returns:
+                str: Path to the saved MP4 file.
+            """
+            from moviepy.editor import ImageSequenceClip, AudioFileClip
+            import soundfile as wavfile
+            import tempfile
+
+            # Validate inputs
+            assert isinstance(video_numpy, np.ndarray), "video_numpy must be a numpy array"
+            assert video_numpy.ndim == 4, "video_numpy must have shape (C, F, H, W)"
+            assert video_numpy.shape[0] in {1, 3}, "video_numpy must have 1 or 3 channels"
+
+            if audio_numpy is not None:
+                assert isinstance(audio_numpy, np.ndarray), "audio_numpy must be a numpy array"
+                assert np.abs(audio_numpy).max() <= 1.0, "audio_numpy values must be in range [-1, 1]"
+
+            # Reorder dimensions: (C, F, H, W) → (F, H, W, C)
+            video_numpy = video_numpy.transpose(1, 2, 3, 0)
+
+            # Normalize frames if values are in [-1, 1]
+            if video_numpy.max() <= 1.0:
+                video_numpy = np.clip(video_numpy, -1, 1)
+                video_numpy = ((video_numpy + 1) / 2 * 255).astype(np.uint8)
+            else:
+                video_numpy = video_numpy.astype(np.uint8)
+
+            # Convert numpy array to a list of frames
+            frames = list(video_numpy)
+
+            # Create video clip
+            clip = ImageSequenceClip(frames, fps=fps)
+
+            # Add audio if provided
+            if audio_numpy is not None:
+                with tempfile.NamedTemporaryFile(suffix=".wav", mode='wb', delete=False) as temp_audio_file:
+                    wavfile.write(
+                        temp_audio_file.name,
+                        (audio_numpy * 32767).astype(np.int16),
+                        sample_rate,
+                    )
+                    audio_clip = AudioFileClip(temp_audio_file.name)
+                    final_clip = clip.set_audio(audio_clip)
+            else:
+                final_clip = clip
+
+            # Write final video to disk
+            output_path = str(job_dir / f"{filename_prefix}.mp4")
+            final_clip.write_videofile(
+                output_path, codec="libx264", audio_codec="aac", fps=fps, verbose=False, logger=None
+            )
+            final_clip.close()
+
+            return output_path, "video"
 
         total_steps = max(1, len(preprocessor_jobs) + 1)
         
@@ -1314,31 +1530,76 @@ def run_engine_from_manifest(
             print(f"\n\n\n {result} \n\n\n")
             prepared_inputs[job["input_id"]] = result.get("result_path")
 
+        # Resolve concrete file paths for any audio inputs that should be saved with the final video
+        if audio_inputs_to_save:
+            for audio_key in audio_inputs_to_save:
+                try:
+                    key_str = str(audio_key)
+                    val = prepared_inputs.get(key_str)
+                    media_path, _ = _coerce_media_input(val) if isinstance(val, dict) else (val, None)
+                    if isinstance(media_path, str) and media_path not in audio_input_paths:
+                        audio_input_paths.append(media_path)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resolve audio input '{audio_key}' for saving: {e}"
+                    )
+
         engine_stage_start = len(preprocessor_jobs) / total_steps
         engine_stage_span = 1.0 / total_steps
 
         # Render-on-step callback that writes previews
         step_counter = {"i": 0}
-        def render_on_step_callback(frames, is_result: bool = False):
+        def render_on_step_callback(
+            frames,
+            is_result: bool = False,
+            audio_inputs: Optional[List[str]] = None,
+        ):
             try:
                 idx = step_counter["i"]
                 step_counter["i"] = idx + 1
                 # Persist preview to cache and notify over websocket with metadata only
-                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}" if not is_result else "result")
+                result_path, media_type = save_output(
+                    frames,
+                    filename_prefix=f"preview_{idx:04d}" if not is_result else "result",
+                    final=is_result,
+                    audio_inputs=audio_inputs if is_result else None,
+                )
                 logger.info(f"Preview saved to {result_path} with media type {media_type}")
                 try:
                     # Send an update that does not overwrite progress (progress=None)
                     logger.info(f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}")
-                    send_progress(None, f"Preview frame {idx}", {
-                        "status": "preview",
+                    send_progress(1.0 if is_result else None, f"Preview frame {idx}", {
+                        "status": "complete" if is_result else "preview",
                         "preview_path": result_path,
                         "type": media_type,
                         "index": idx,
                     })
                 except Exception as se:
                     logger.warning(f"Failed sending preview websocket update at step {idx}: {se}")
+                return result_path, media_type
             except Exception as e:
                 logger.warning(f"Preview save failed at step {step_counter['i']}: {e}")
+                
+        def render_on_step_callback_ovi(
+            output_obj: Tuple[np.ndarray, np.ndarray],
+            is_result: bool = False,
+        ):
+            idx = step_counter["i"]
+            step_counter["i"] = idx + 1 
+            logger.info(f"Saving OVI output at step {idx} with output object {output_obj[0].shape} and {output_obj[1].shape}")
+            result_path, media_type = save_ovi_output(output_obj[0], output_obj[1], filename_prefix=f"preview_{idx:04d}" if not is_result else "result")
+            logger.info(f"Preview saved to {result_path} with media type {media_type}")
+            try:
+                logger.info(f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}")
+                send_progress(1.0 if is_result else None, f"Preview frame {idx}", {
+                    "status": "complete" if is_result else "preview",
+                    "preview_path": result_path,
+                    "type": media_type,
+                    "index": idx,
+                })
+            except Exception as se:
+                logger.warning(f"Failed sending preview websocket update at step {idx}: {se}")
+            return result_path, media_type
 
         # Progress callback forwarded into the engine
         def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
@@ -1350,20 +1611,29 @@ def run_engine_from_manifest(
             send_progress(engine_stage_start + bounded * engine_stage_span, message, metadata)
 
         # Persist a snapshot of the invocation into the structured `runs` directory
+        render_func = render_on_step_callback if model_type.lower() != "ovi" else render_on_step_callback_ovi
         _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),
             progress_callback=progress_callback,
             render_on_step=True,
-            render_on_step_callback=render_on_step_callback,
+            render_on_step_callback=render_func,
         )
-        
-        render_on_step_callback(output[0], is_result=True)
-        
-        # Persist final result using the unified saver
-        result_path, media_type = save_output(output[0], filename_prefix="result", final=True)
 
+        # OVI models return a tuple of (video_tensor, audio_numpy). Use a dedicated
+        # saver so we correctly embed the generated audio into the MP4 output.
+        if isinstance(model_type, str) and model_type.lower() == "ovi":
+            result_path, media_type = render_func(
+                output,
+                is_result=True,
+            )
+        else:
+            result_path, media_type = render_func(
+                output[0],
+                is_result=True,
+                audio_inputs=audio_input_paths or None,
+            )
         send_progress(1.0, "Complete", {"status": "complete"})
         return {"status": "complete", "result_path": result_path, "type": media_type}
 

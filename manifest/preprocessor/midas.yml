@@ -37,9 +37,7 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: midas/models--Intel--dpt-hybrid-midas/blobs/b6c4d44f9d96ca3fa76dd3bbb153989a60b4ad5526559f3c598562a368d687ec
   name: pytorch_model.bin
   size_bytes: 489648389
-

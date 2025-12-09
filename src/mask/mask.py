@@ -1,5 +1,4 @@
 from sam2.build_sam import build_sam2_video_predictor
-from sam3.model.sam3_video_predictor import Sam3VideoPredictor
 from sam2.sam2_video_predictor import SAM2VideoPredictor
 from src.mixins import LoaderMixin
 from PIL import Image, ImageOps

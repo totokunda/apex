@@ -24,7 +24,8 @@ class AutoEncoderModule(nn.Module):
         # --- VAE ---
         self.vae: VAE = get_my_vae(mode).eval()
         self.vocoder = BigVGAN().eval()
-
+        self.weight_norm_removed = False
+        
         for param in self.parameters():
             param.requires_grad = False
 
@@ -32,8 +33,10 @@ class AutoEncoderModule(nn.Module):
             del self.vae.encoder
             
     def remove_weight_norm(self):
-        self.vae.remove_weight_norm()
-        self.vocoder.remove_weight_norm()
+        if not self.weight_norm_removed:
+            self.vae.remove_weight_norm()
+            self.vocoder.remove_weight_norm()
+            self.weight_norm_removed = True
 
     @torch.inference_mode()
     def encode(self, x: torch.Tensor) -> DiagonalGaussianDistribution:

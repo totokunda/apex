@@ -74,7 +74,6 @@ spec:
           description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Kandinsky 5.0 T2V Pro 5s model.
           base: diffusers.FlowMatchEulerDiscreteScheduler
           config_path: kandinskylab/Kandinsky-5.0-T2V-Pro-sft-5s-Diffusers/scheduler/scheduler_config.json
-
   defaults:
     run:
       height: 512

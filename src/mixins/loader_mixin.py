@@ -573,10 +573,27 @@ class LoaderMixin(DownloadMixin):
     ) -> List[Image.Image]:
 
         def _finalize_frames(frames, inferred_fps=None):
+            # Ensure we are always working with a concrete list
+            frames = list(frames)
+
+            # Apply temporal direction first so num_frames semantics are
+            # always with respect to the final playback order.
             if reverse:
                 frames = list(reversed(frames))
-            if num_frames is not None:
-                frames = frames[:num_frames]
+
+            if num_frames is not None and len(frames) > 0:
+                current_len = len(frames)
+
+                if num_frames < current_len:
+                    # If we need fewer frames than we have, simply truncate.
+                    frames = frames[:num_frames]
+                elif num_frames > current_len:
+                    # If we need more frames than we have, resample by
+                    # evenly duplicating frames across the sequence so
+                    # motion still appears smooth.
+                    indices = np.linspace(0, current_len - 1, num_frames)
+                    frames = [frames[int(round(idx))] for idx in indices]
+
             if return_fps:
                 return frames, inferred_fps
             return frames

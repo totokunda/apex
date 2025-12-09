@@ -63,7 +63,6 @@ parameters:
   type: bool
 supports_image: true
 supports_video: true
-
 files:
 - path: yzd-v/DWPose/dw-ll_ucoco_384.onnx
   size_bytes: 134399116

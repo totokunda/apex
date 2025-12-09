@@ -395,7 +395,6 @@ def flash_attention_varlen(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    *,
     cu_seqlens_q: torch.Tensor | None = None,
     cu_seqlens_k: torch.Tensor | None = None,
     max_seqlen_q: int | None = None,

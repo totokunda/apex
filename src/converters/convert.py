@@ -24,6 +24,7 @@ from src.converters.transformer_converters import (
     MagiTransformerConverter,
     FluxTransformerConverter,
     NoOpTransformerConverter,
+    LoraTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -94,6 +95,8 @@ def get_transformer_converter_by_model_name(model_name: str):
         return MagiTransformerConverter()
     elif "Flux" in model_name or "Chroma" in model_name:
         return FluxTransformerConverter()
+    elif "lora" in model_name:
+        return LoraTransformerConverter()
     return NoOpTransformerConverter()
 
 

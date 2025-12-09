@@ -6,6 +6,7 @@ from skimage.measure import label
 
 from . import util
 from .model import handpose_model
+from src.utils.defaults import get_torch_device
 
 
 class Hand(object):
@@ -14,7 +15,8 @@ class Hand(object):
         model_dict = util.transfer(self.model, torch.load(model_path))
         self.model.load_state_dict(model_dict)
         self.model.eval()
-        self.device = "cpu"
+        self.device = get_torch_device()
+        self.model.to(self.device)
 
     def to(self, device):
         self.model.to(device)

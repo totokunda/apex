@@ -458,6 +458,7 @@ class WanHoloCineEngine(WanShared):
             shot_captions: List[str] | None = None,
             duration: int | str = 241,
             shot_cut_frames: List[int] = None,
+            shot_cut_points: List[float] = None,
             negative_prompt: str = None,
             fps: int = 15,
             seed: int | None = None,
@@ -482,7 +483,8 @@ class WanHoloCineEngine(WanShared):
         """
         # num_frames = None
         # shot_cut_frames = None
-
+        safe_emit_progress(progress_callback, 0.0, "Starting holocine pipeline")
+        safe_emit_progress(progress_callback, 0.05, "Preparing inputs")
         if global_caption and shot_captions:
             inputs = self.prepare_multishot_inputs(global_caption, shot_captions, duration, shot_cut_frames, fps)
             prompt = inputs["prompt"]
@@ -490,9 +492,14 @@ class WanHoloCineEngine(WanShared):
             num_frames = inputs["num_frames"]
         elif prompt:
             num_frames = self._parse_num_frames(duration, fps)
-            shot_cut_frames = [self._parse_num_frames(frame, fps) for frame in shot_cut_frames]
+            if shot_cut_points:
+                shot_cut_frames = [int(point * fps) for point in shot_cut_points]
+            else:
+                shot_cut_frames = [self._parse_num_frames(frame, fps) for frame in shot_cut_frames]
+            # remove any frames that are greater than the number of frames
+            shot_cut_frames = [frame for frame in shot_cut_frames if frame < num_frames]
 
-        
+        safe_emit_progress(progress_callback, 0.10, "Preparing shot indices")
 
         shot_indices = self._process_shot_cut_frames(shot_cut_frames, num_frames)
         positive_context, positive_text_cut_positions = self.encode_prompt(prompt, positive=True)
@@ -500,7 +507,8 @@ class WanHoloCineEngine(WanShared):
         negative_text_cut_positions = {"global": None, "shots": []}
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
- 
+
+        safe_emit_progress(progress_callback, 0.15, "Preparing latents")
  
         latents = self._get_latents(
             height,
@@ -521,13 +529,12 @@ class WanHoloCineEngine(WanShared):
             num_inference_steps=num_inference_steps,
         )
         
-        
+        safe_emit_progress(progress_callback, 0.20, "Preparing transformer")
         transformer_dtype = self.component_dtypes.get("transformer")
         boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.25, 0.90)
         total_steps = len(timesteps) if timesteps is not None else 0
-        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
-        
+        safe_emit_progress(progress_callback, 0.30, "Starting denoise")
         
         
         with self._progress_bar(total_steps, desc="Denoising") as pbar:

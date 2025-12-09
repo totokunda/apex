@@ -39,7 +39,6 @@ spec:
         base_image_seq_len: 256
         max_image_seq_len: 4096
         use_dynamic_shifting: false
-
   - type: vae
     label: WAN VAE
     name: wan/vae
@@ -175,7 +174,6 @@ spec:
         - - low_noise_guidance_scale
         - - seed
         - - boundary_ratio
-
     inputs:
     - id: reference_image
       label: Reference Image
@@ -213,7 +211,6 @@ spec:
       type: image
       panel: masking_inputs
       required: false
-
     - id: subject_reference_images
       label: Subject Reference Images
       description: The subject reference images to use for the generation.
@@ -250,13 +247,10 @@ spec:
       options:
       - name: Ultra HD
         value: 1024
-        height: 1024
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -355,5 +349,3 @@ spec:
       min: 0.0
       max: 1.0
       step: 0.01
-
-

@@ -46,7 +46,6 @@ parameters:
   type: int
 supports_image: true
 supports_video: true
-
 files:
 - path: bdsqlsz/qinglong_controlnet-lllite/Annotators/7_model.pth
   size_bytes: 247232

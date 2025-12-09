@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/netG.pth
   size_bytes: 217631959

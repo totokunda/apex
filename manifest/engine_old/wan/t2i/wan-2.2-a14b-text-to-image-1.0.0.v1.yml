@@ -42,5 +42,3 @@ spec:
       return_latents: false
       text_encoder_kwargs: {}
       attention_kwargs: {}
-
-

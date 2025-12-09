@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: depth_anything/models--LiheYoung--depth-anything-large-hf/blobs/bc27360a3e6906e5ddd8f618e2dcde11362327361918b8f76793e42e25de31b3
   name: model.safetensors

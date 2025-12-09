@@ -42,7 +42,6 @@ parameters:
   type: bool
 supports_image: true
 supports_video: true
-
 files:
 - path: bdsqlsz/qinglong_controlnet-lllite/Annotators/UNet.pth
   size_bytes: 6428741

@@ -26,10 +26,8 @@ parameters:
     type: category
 supports_image: true
 supports_video: true
-
 files:
   - path: Wan-AI/Wan2.2-Animate-14B/process_checkpoint/pose2d/vitpose_h_wholebody.onnx
     size_bytes: 2549362899
   - path: Wan-AI/Wan2.2-Animate-14B/process_checkpoint/det/yolov10m.onnx
     size_bytes: 61659339
-

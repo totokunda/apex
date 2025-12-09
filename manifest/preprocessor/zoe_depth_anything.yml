@@ -38,7 +38,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: huggingface/hub/models--Intel--zoedepth-nyu-kitti/blobs/c5494fa0938f18d71e215e245472470c3aefebd7b434abd89750e5ae4008e2dc
   name: model.safetensors

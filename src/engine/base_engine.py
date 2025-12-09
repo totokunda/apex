@@ -1,4 +1,5 @@
 import os
+from threading import local
 from typing import List, Dict, Any, Optional, Literal, Union
 from typing import TYPE_CHECKING, overload
 from diffusers.utils.dummy_pt_objects import SchedulerMixin
@@ -194,6 +195,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     sub_engines: Dict[str, "BaseEngine"] = {}
     _memory_management_map: Dict[str, MemoryConfig] | None = None
     selected_components: Dict[str, Any] | None = None
+    auto_apply_loras: bool = True
     
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -281,8 +283,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
+        self.auto_apply_loras = kwargs.get("auto_apply_loras", True)
         self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        loaded_loras, loaded_loras_names = self._load_loras(kwargs.get("lora_model_name_or_type", "transformer"), auto_apply=kwargs.get("auto_apply_loras", True))
+        loaded_loras, loaded_loras_names = self._load_loras()
         for i, lora_item in enumerate(loaded_loras):
             self.preloaded_loras[loaded_loras_names[i]] = lora_item
 
@@ -967,6 +970,20 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
         transformer = transformer.eval()
+
+        if self.preloaded_loras and self.auto_apply_loras and not no_weights:
+            name_or_type = component.get("name", "transformer")
+        
+            if name_or_type != "transformer":
+                setattr(self, "transformer", transformer)
+            else:
+                setattr(self, name_or_type, transformer)
+            self.logger.info(f"Applying {len(self.preloaded_loras)} loras to transformer")
+            # filter loras by component if specified
+            preloaded_loras = [(lora.source, lora.scale) for lora in self.preloaded_loras.values() if lora.component is None or lora.component == name_or_type]
+            
+            self.apply_loras(preloaded_loras, adapter_names=list(self.preloaded_loras.keys()), model_name_or_type=name_or_type)
+            
         return transformer
 
     def _get_safetensors_keys(
@@ -1523,7 +1540,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         
         video = getattr(self, component_name).decode(denormalized_latents, return_dict=False)[0]
         if offload:
-            self._offload(getattr(self, component_name))
+            self._offload(getattr(self, component_name), delete_from_cpu=False)
         return video.to(dtype=dtype)
 
     @torch.no_grad()
@@ -1560,7 +1577,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             latents = getattr(self, component_name).normalize_latents(latents)
 
         if offload:
-            self._offload(getattr(self, component_name))
+            self._offload(getattr(self, component_name), delete_from_cpu=False)
 
         return latents.to(dtype=dtype)
 
@@ -1803,6 +1820,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         resolved = self.lora_manager.load_into(
             model, loras, adapter_names=adapter_names, scales=scales, replace_keys=replace_keys
         )
+ 
         # Track by adapter name
         for i, item in enumerate(resolved):
             name = (
@@ -1813,7 +1831,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             self.loaded_loras[name] = item
         self.logger.info(f"Applied {len(resolved)} LoRA(s) to transformer")
     
-    def _load_loras(self, model_name_or_type: str = "transformer", auto_apply: bool = True):
+    def _load_loras(self):
         """If the YAML config includes a top-level `loras` list, apply them on init.
         Supported formats:
         - ["source1", "source2"]
@@ -1838,17 +1856,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     adapter_names.append(name)
                 else:
                     adapter_names.append(None)
-                formatted.append((src, scale))
+                formatted.append(LoraItem(source=src, scale=scale, name=name, local_paths=[], component=entry.get("component")))
         # remove None names at end so we can pass None overall if all None
         final_names = (
             adapter_names if any(n is not None for n in adapter_names) else None
         )
-        if auto_apply:
-            try:
-                self.apply_loras(formatted, adapter_names=final_names, model_name_or_type=model_name_or_type)
-            except Exception as e:
-                traceback.print_exc()
-                self.logger.warning(f"Auto-apply LoRAs failed: {e}")
+       
         return formatted, final_names
 
     def download(
@@ -1919,7 +1932,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                                 component['extra_kwargs'] = model_path_item.get('extra_kwargs')
                     
                     path = self.is_downloaded(component['model_path'], components_path)
-                    print(path, component['model_path'])
+              
                     if path is None:
                         component['model_path'] = self._download(component['model_path'], components_path)
                     else:
@@ -1962,6 +1975,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
         return_generator: bool = False,
         parse_frames: bool = True,
         order: Literal["BCF", "BFC"] = "BCF",
+         device: torch.device = None,
     ):
 
         if parse_frames or isinstance(duration, str):
@@ -1992,7 +2006,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
 
         if generator is None:
-            device = self.device
+            device = device or self.device
             if seed is not None:
                 generator = torch.Generator(device=device).manual_seed(seed)
         else:
@@ -2016,7 +2030,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             )
         else:
             raise ValueError(f"Invalid order: {order}")
-        
+   
         noise = randn_tensor(
             shape,
             device=device,
@@ -2029,6 +2043,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             return noise, generator
         else:
             return noise
+        
+        
+        
     def get_height_width(self, height, width, resolution, aspect_ratio):
         height = (height // 2) * 2
         width = (width // 2) * 2

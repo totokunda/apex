@@ -1,377 +1,363 @@
-from src.transformer.wan.base.model import (
-    WanRotaryPosEmbed,
-    WanTimeTextImageEmbedding,
-    WanTransformerBlock,
-)
-import math
-from typing import Any, Dict, Optional, Tuple, Union
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
+from typing import Tuple, Optional
 from einops import rearrange
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-from diffusers.utils import (
-    USE_PEFT_BACKEND,
-    logging,
-    scale_lora_layers,
-    unscale_lora_layers,
-)
-
-from diffusers.models.cache_utils import CacheMixin
-
-from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
+from src.attention.functions import attention_register
+from diffusers.configuration_utils import register_to_config, ConfigMixin
+    
 
-from diffusers.models.normalization import FP32LayerNorm
-from src.transformer.base import TRANSFORMERS_REGISTRY
+    
+def flash_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, num_heads: int, compatibility_mode=False):
+    mode = attention_register.get_default()
+    if mode == "sdpa":
+        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+        x = F.scaled_dot_product_attention(q, k, v)
+        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+    elif mode == "flash3" and attention_register.is_available("flash3"):
+        from flash_attn_interface import flash_attn_func
+        q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
+        x = flash_attn_func(q, k, v)
+        x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
+    elif mode == "flash2" and attention_register.is_available("flash2"):
+        from flash_attn import flash_attn_func
+        q = rearrange(q, "b s (n d) -> b s n d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b s n d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b s n d", n=num_heads)
+        x = flash_attn_func(q, k, v)
+        x = rearrange(x, "b s n d -> b s (n d)", n=num_heads)
+    elif mode == "sage" and attention_register.is_available("sage"):
+        from sageattention import sageattn
+        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+        x = sageattn(q, k, v)
+        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+    else:
+        q = rearrange(q, "b s (n d) -> b n s d", n=num_heads)
+        k = rearrange(k, "b s (n d) -> b n s d", n=num_heads)
+        v = rearrange(v, "b s (n d) -> b n s d", n=num_heads)
+        x = F.scaled_dot_product_attention(q, k, v)
+        x = rearrange(x, "b n s d -> b s (n d)", n=num_heads)
+    return x
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+def modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor):
+    return (x * (1 + scale) + shift)
 
 
-class WanRecamTransformerBlock(WanTransformerBlock):
-    def __init__(
-        self,
-        dim: int,
-        ffn_dim: int,
-        num_heads: int,
-        qk_norm: str = "rms_norm_across_heads",
-        cross_attn_norm: bool = False,
-        eps: float = 1e-6,
-        added_kv_proj_dim: Optional[int] = None,
-    ):
-        super().__init__(
-            dim, ffn_dim, num_heads, qk_norm, cross_attn_norm, eps, added_kv_proj_dim
-        )
-        self.cam_encoder = nn.Linear(in_features=12, out_features=dim)
-        self.projector = nn.Linear(in_features=dim, out_features=dim)
+def sinusoidal_embedding_1d(dim, position):
+    sinusoid = torch.outer(position.type(torch.float64), torch.pow(
+        10000, -torch.arange(dim//2, dtype=torch.float64, device=position.device).div(dim//2)))
+    x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
+    return x.to(position.dtype)
+
+
+def precompute_freqs_cis_3d(dim: int, end: int = 1024, theta: float = 10000.0):
+    # 3d rope precompute
+    f_freqs_cis = precompute_freqs_cis(dim - 2 * (dim // 3), end, theta)
+    h_freqs_cis = precompute_freqs_cis(dim // 3, end, theta)
+    w_freqs_cis = precompute_freqs_cis(dim // 3, end, theta)
+    return f_freqs_cis, h_freqs_cis, w_freqs_cis
+
+
+def precompute_freqs_cis(dim: int, end: int = 1024, theta: float = 10000.0):
+    # 1d rope precompute
+    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)
+                   [: (dim // 2)].double() / dim))
+    freqs = torch.outer(torch.arange(end, device=freqs.device), freqs)
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+    return freqs_cis
+
+
+def rope_apply(x, freqs, num_heads):
+    x = rearrange(x, "b s (n d) -> b s n d", n=num_heads)
+    x_out = torch.view_as_complex(x.to(torch.float64).reshape(
+        x.shape[0], x.shape[1], x.shape[2], -1, 2))
+    x_out = torch.view_as_real(x_out * freqs).flatten(2)
+    return x_out.to(x.dtype)
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        dtype = x.dtype
+        return self.norm(x.float()).to(dtype) * self.weight
+
+
+class AttentionModule(nn.Module):
+    def __init__(self, num_heads):
+        super().__init__()
+        self.num_heads = num_heads
+        
+    def forward(self, q, k, v):
+        x = flash_attention(q=q, k=k, v=v, num_heads=self.num_heads)
+        return x
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, dim: int, num_heads: int, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+
+        self.q = nn.Linear(dim, dim)
+        self.k = nn.Linear(dim, dim)
+        self.v = nn.Linear(dim, dim)
+        self.o = nn.Linear(dim, dim)
+        self.norm_q = RMSNorm(dim, eps=eps)
+        self.norm_k = RMSNorm(dim, eps=eps)
+        
+        self.attn = AttentionModule(self.num_heads)
+
+    def forward(self, x, freqs):
+        q = self.norm_q(self.q(x))
+        k = self.norm_k(self.k(x))
+        v = self.v(x)
+        q = rope_apply(q, freqs, self.num_heads)
+        k = rope_apply(k, freqs, self.num_heads)
+        x = self.attn(q, k, v)
+        return self.o(x)
+
+
+class CrossAttention(nn.Module):
+    def __init__(self, dim: int, num_heads: int, eps: float = 1e-6, has_image_input: bool = False):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+
+        self.q = nn.Linear(dim, dim)
+        self.k = nn.Linear(dim, dim)
+        self.v = nn.Linear(dim, dim)
+        self.o = nn.Linear(dim, dim)
+        self.norm_q = RMSNorm(dim, eps=eps)
+        self.norm_k = RMSNorm(dim, eps=eps)
+        self.has_image_input = has_image_input
+        if has_image_input:
+            self.k_img = nn.Linear(dim, dim)
+            self.v_img = nn.Linear(dim, dim)
+            self.norm_k_img = RMSNorm(dim, eps=eps)
+            
+        self.attn = AttentionModule(self.num_heads)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor):
+        if self.has_image_input:
+            img = y[:, :257]
+            ctx = y[:, 257:]
+        else:
+            ctx = y
+        q = self.norm_q(self.q(x))
+        k = self.norm_k(self.k(ctx))
+        v = self.v(ctx)
+        x = self.attn(q, k, v)
+        if self.has_image_input:
+            k_img = self.norm_k_img(self.k_img(img))
+            v_img = self.v_img(img)
+            y = flash_attention(q, k_img, v_img, num_heads=self.num_heads)
+            x = x + y
+        return self.o(x)
+
+
+class DiTBlock(nn.Module):
+    def __init__(self, has_image_input: bool, dim: int, num_heads: int, ffn_dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.ffn_dim = ffn_dim
+
+        self.self_attn = SelfAttention(dim, num_heads, eps)
+        self.cross_attn = CrossAttention(
+            dim, num_heads, eps, has_image_input=has_image_input)
+        self.norm1 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.norm2 = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.norm3 = nn.LayerNorm(dim, eps=eps)
+        self.ffn = nn.Sequential(nn.Linear(dim, ffn_dim), nn.GELU(
+            approximate='tanh'), nn.Linear(ffn_dim, dim))
+        self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
+        self.cam_encoder = nn.Linear(12, dim)
+        self.projector = nn.Linear(dim, dim)
         self.cam_encoder.weight.data.zero_()
         self.cam_encoder.bias.data.zero_()
         self.projector.weight = nn.Parameter(torch.eye(dim))
         self.projector.bias = nn.Parameter(torch.zeros(dim))
 
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        temb: torch.Tensor,
-        rotary_emb: torch.Tensor,
-        cam_hidden_states: torch.Tensor = None,
-        post_patch_height: int = None,
-        post_patch_width: int = None,
-    ) -> torch.Tensor:
+    def forward(self, x, context, cam_emb, t_mod, freqs):
+        # msa: multi-head self-attention  mlp: multi-layer perceptron
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(6, dim=1)
+        input_x = modulate(self.norm1(x), shift_msa, scale_msa)
 
-        if temb.ndim == 4:
-            # temb: batch_size, seq_len, 6, inner_dim (wan2.2 ti2v)
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table.unsqueeze(0) + temb
-            ).chunk(6, dim=2)
-            # batch_size, seq_len, 1, inner_dim
-            shift_msa = shift_msa.squeeze(2)
-            scale_msa = scale_msa.squeeze(2)
-            gate_msa = gate_msa.squeeze(2)
-            c_shift_msa = c_shift_msa.squeeze(2)
-            c_scale_msa = c_scale_msa.squeeze(2)
-            c_gate_msa = c_gate_msa.squeeze(2)
-        else:
-            # temb: batch_size, 6, inner_dim (wan2.1/wan2.2 14B)
-            shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = (
-                self.scale_shift_table + temb
-            ).chunk(6, dim=1)
+        # encode camera
+        cam_emb = self.cam_encoder(cam_emb)
+        cam_emb = cam_emb.repeat(1, 2, 1)
+        cam_emb = cam_emb.unsqueeze(2).unsqueeze(3).repeat(1, 1, 30, 52, 1)
+        cam_emb = rearrange(cam_emb, 'b f h w d -> b (f h w) d')
+        input_x = input_x + cam_emb
+        x = x + gate_msa * self.projector(self.self_attn(input_x, freqs))
+        
+        x = x + self.cross_attn(self.norm3(x), context)
+        input_x = modulate(self.norm2(x), shift_mlp, scale_mlp)
+        x = x + gate_mlp * self.ffn(input_x)
+        return x
 
-        # 1. Self-attention
-        norm_hidden_states = (
-            self.norm1(hidden_states) * (1 + scale_msa) + shift_msa
-        ).type_as(hidden_states)
 
-        ## Encode camera hidden states
-        cam_hidden_states = self.cam_encoder(cam_hidden_states)
-        cam_hidden_states = cam_hidden_states.repeat(1, 2, 1)
-        cam_hidden_states = (
-            cam_hidden_states.unsqueeze(2)
-            .unsqueeze(3)
-            .repeat(1, 1, post_patch_height, post_patch_width, 1)
+class MLP(torch.nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.proj = torch.nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, in_dim),
+            nn.GELU(),
+            nn.Linear(in_dim, out_dim),
+            nn.LayerNorm(out_dim)
         )
 
-        cam_hidden_states = rearrange(cam_hidden_states, "b f h w d -> b (f h w) d")
-        norm_hidden_states = norm_hidden_states + cam_hidden_states
-
-        attn_output = self.attn1(
-            hidden_states=norm_hidden_states, rotary_emb=rotary_emb
-        )
-
-        attn_output = self.projector(attn_output)
-
-        hidden_states = hidden_states + attn_output * gate_msa
-        # 2. Cross-attention
-        norm_hidden_states = self.norm2(hidden_states)
-        attn_output = self.attn2(
-            hidden_states=norm_hidden_states,
-            encoder_hidden_states=encoder_hidden_states,
-            no_cache=True,
-        )
-
-        hidden_states = hidden_states + attn_output
-
-        # 3. Feed-forward
-        norm_hidden_states = self.norm3(hidden_states) * (1 + c_scale_msa) + c_shift_msa
-        ff_output = self.ffn(norm_hidden_states)
-        hidden_states = hidden_states + ff_output * c_gate_msa
-
-        return hidden_states
+    def forward(self, x):
+        return self.proj(x)
 
 
-@TRANSFORMERS_REGISTRY("wan.recam")
-class WanRecamTransformer3DModel(
-    ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
-):
-    r"""
-    A Transformer model for video-like data used in the Wan model.
+class Head(nn.Module):
+    def __init__(self, dim: int, out_dim: int, patch_size: Tuple[int, int, int], eps: float):
+        super().__init__()
+        self.dim = dim
+        self.patch_size = patch_size
+        self.norm = nn.LayerNorm(dim, eps=eps, elementwise_affine=False)
+        self.head = nn.Linear(dim, out_dim * math.prod(patch_size))
+        self.modulation = nn.Parameter(torch.randn(1, 2, dim) / dim**0.5)
 
-    Args:
-        patch_size (`Tuple[int]`, defaults to `(1, 2, 2)`):
-            3D patch dimensions for video embedding (t_patch, h_patch, w_patch).
-        num_attention_heads (`int`, defaults to `40`):
-            Fixed length for text embeddings.
-        attention_head_dim (`int`, defaults to `128`):
-            The number of channels in each head.
-        in_channels (`int`, defaults to `16`):
-            The number of channels in the input.
-        out_channels (`int`, defaults to `16`):
-            The number of channels in the output.
-        text_dim (`int`, defaults to `512`):
-            Input dimension for text embeddings.
-        freq_dim (`int`, defaults to `256`):
-            Dimension for sinusoidal time embeddings.
-        ffn_dim (`int`, defaults to `13824`):
-            Intermediate dimension in feed-forward network.
-        num_layers (`int`, defaults to `40`):
-            The number of layers of transformer blocks to use.
-        window_size (`Tuple[int]`, defaults to `(-1, -1)`):
-            Window size for local attention (-1 indicates global attention).
-        cross_attn_norm (`bool`, defaults to `True`):
-            Enable cross-attention normalization.
-        qk_norm (`bool`, defaults to `True`):
-            Enable query/key normalization.
-        eps (`float`, defaults to `1e-6`):
-            Epsilon value for normalization layers.
-        add_img_emb (`bool`, defaults to `False`):
-            Whether to use img_emb.
-        added_kv_proj_dim (`int`, *optional*, defaults to `None`):
-            The number of channels to use for the added key and value projections. If `None`, no projection is used.
-    """
+    def forward(self, x, t_mod):
+        shift, scale = (self.modulation.to(dtype=t_mod.dtype, device=t_mod.device) + t_mod).chunk(2, dim=1)
+        x = (self.head(self.norm(x) * (1 + scale) + shift))
+        return x
 
-    _supports_gradient_checkpointing = True
-    _skip_layerwise_casting_patterns = ["patch_embedding", "condition_embedder", "norm"]
-    _no_split_modules = ["WanTransformerBlock"]
-    _keep_in_fp32_modules = []
-    _keys_to_ignore_on_load_unexpected = ["norm_added_q"]
 
+class WanRecamTransformer3DModel(ModelMixin, ConfigMixin):
+    
     @register_to_config
     def __init__(
         self,
-        patch_size: Tuple[int] = (1, 2, 2),
-        num_attention_heads: int = 40,
-        attention_head_dim: int = 128,
-        in_channels: int = 16,
-        out_channels: int = 16,
-        text_dim: int = 4096,
-        freq_dim: int = 256,
-        ffn_dim: int = 13824,
-        num_layers: int = 40,
-        cross_attn_norm: bool = True,
-        qk_norm: Optional[str] = "rms_norm_across_heads",
-        eps: float = 1e-6,
-        image_dim: Optional[int] = None,
-        added_kv_proj_dim: Optional[int] = None,
-        rope_max_seq_len: int = 1024,
-        pos_embed_seq_len: Optional[int] = None,
-    ) -> None:
+        dim: int,
+        in_dim: int,
+        ffn_dim: int,
+        out_dim: int,
+        text_dim: int,
+        freq_dim: int,
+        eps: float,
+        patch_size: Tuple[int, int, int],
+        num_heads: int,
+        num_layers: int,
+        has_image_input: bool,
+    ):
         super().__init__()
+        self.dim = dim
+        self.freq_dim = freq_dim
+        self.has_image_input = has_image_input
+        self.patch_size = patch_size
 
-        inner_dim = num_attention_heads * attention_head_dim
-        out_channels = out_channels or in_channels
-
-        # 1. Patch & position embedding
-        self.rope = WanRotaryPosEmbed(attention_head_dim, patch_size, rope_max_seq_len)
         self.patch_embedding = nn.Conv3d(
-            in_channels, inner_dim, kernel_size=patch_size, stride=patch_size
+            in_dim, dim, kernel_size=patch_size, stride=patch_size)
+        self.text_embedding = nn.Sequential(
+            nn.Linear(text_dim, dim),
+            nn.GELU(approximate='tanh'),
+            nn.Linear(dim, dim)
+        )
+        self.time_embedding = nn.Sequential(
+            nn.Linear(freq_dim, dim),
+            nn.SiLU(),
+            nn.Linear(dim, dim)
+        )
+        self.time_projection = nn.Sequential(
+            nn.SiLU(), nn.Linear(dim, dim * 6))
+        self.blocks = nn.ModuleList([
+            DiTBlock(has_image_input, dim, num_heads, ffn_dim, eps)
+            for _ in range(num_layers)
+        ])
+        self.head = Head(dim, out_dim, patch_size, eps)
+        head_dim = dim // num_heads
+        self.freqs = precompute_freqs_cis_3d(head_dim)
+
+        if has_image_input:
+            self.img_emb = MLP(1280, dim)  # clip_feature_dim = 1280
+
+    def patchify(self, x: torch.Tensor):
+        x = self.patch_embedding(x)
+        grid_size = x.shape[2:]
+        x = rearrange(x, 'b c f h w -> b (f h w) c').contiguous()
+        return x, grid_size  # x, grid_size: (f, h, w)
+
+    def unpatchify(self, x: torch.Tensor, grid_size: torch.Tensor):
+        return rearrange(
+            x, 'b (f h w) (x y z c) -> b c (f x) (h y) (w z)',
+            f=grid_size[0], h=grid_size[1], w=grid_size[2], 
+            x=self.patch_size[0], y=self.patch_size[1], z=self.patch_size[2]
         )
 
-        # 2. Condition embeddings
-        # image_embedding_dim=1280 for I2V model
-        self.condition_embedder = WanTimeTextImageEmbedding(
-            dim=inner_dim,
-            time_freq_dim=freq_dim,
-            time_proj_dim=inner_dim * 6,
-            text_embed_dim=text_dim,
-            image_embed_dim=image_dim,
-            pos_embed_seq_len=pos_embed_seq_len,
-        )
+    def forward(self,
+                x: torch.Tensor,
+                timestep: torch.Tensor,
+                cam_emb: torch.Tensor,
+                context: torch.Tensor,
+                clip_feature: Optional[torch.Tensor] = None,
+                y: Optional[torch.Tensor] = None,
+                use_gradient_checkpointing: bool = False,
+                use_gradient_checkpointing_offload: bool = False,
+                **kwargs,
+                ):
+        t = self.time_embedding(
+            sinusoidal_embedding_1d(self.freq_dim, timestep))
+        t_mod = self.time_projection(t).unflatten(1, (6, self.dim))
+        context = self.text_embedding(context)
+        
+        if self.has_image_input:
+            x = torch.cat([x, y], dim=1)  # (b, c_x + c_y, f, h, w)
+            clip_embdding = self.img_emb(clip_feature)
+            context = torch.cat([clip_embdding, context], dim=1)
+        
+        x, (f, h, w) = self.patchify(x)
+        
+        freqs = torch.cat([
+            self.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
+            self.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+            self.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
+        ], dim=-1).reshape(f * h * w, 1, -1).to(x.device)
+        
+        def create_custom_forward(module):
+            def custom_forward(*inputs):
+                return module(*inputs)
+            return custom_forward
 
-        # 3. Transformer blocks
-        self.blocks = nn.ModuleList(
-            [
-                WanRecamTransformerBlock(
-                    inner_dim,
-                    ffn_dim,
-                    num_attention_heads,
-                    qk_norm,
-                    cross_attn_norm,
-                    eps,
-                    added_kv_proj_dim,
-                )
-                for _ in range(num_layers)
-            ]
-        )
+        for block in self.blocks:
+            if self.training and use_gradient_checkpointing:
+                if use_gradient_checkpointing_offload:
+                    with torch.autograd.graph.save_on_cpu():
+                        x = torch.utils.checkpoint.checkpoint(
+                            create_custom_forward(block),
+                            x, context, cam_emb, t_mod, freqs,
+                            use_reentrant=False,
+                        )
+                else:
+                    x = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        x, context, cam_emb, t_mod, freqs,
+                        use_reentrant=False,
+                    )
+            else:
+                x = block(x, context, cam_emb, t_mod, freqs)
 
-        # 4. Output norm & projection
-        self.norm_out = FP32LayerNorm(inner_dim, eps, elementwise_affine=False)
-        self.proj_out = nn.Linear(inner_dim, out_channels * math.prod(patch_size))
-        self.scale_shift_table = nn.Parameter(
-            torch.randn(1, 2, inner_dim) / inner_dim**0.5
-        )
-
-        self.gradient_checkpointing = False
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        timestep: torch.LongTensor,
-        encoder_hidden_states: torch.Tensor,
-        encoder_hidden_states_image: Optional[torch.Tensor] = None,
-        cam_hidden_states: Optional[torch.Tensor] = None,
-        return_dict: bool = True,
-        attention_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
-        if attention_kwargs is not None:
-            attention_kwargs = attention_kwargs.copy()
-            lora_scale = attention_kwargs.pop("scale", 1.0)
-        else:
-            lora_scale = 1.0
-
-        if USE_PEFT_BACKEND:
-            # weight the lora layers by setting `lora_scale` for each PEFT layer
-            scale_lora_layers(self, lora_scale)
-        else:
-            if (
-                attention_kwargs is not None
-                and attention_kwargs.get("scale", None) is not None
-            ):
-                logger.warning(
-                    "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
-                )
-
-        batch_size, num_channels, num_frames, height, width = hidden_states.shape
-        p_t, p_h, p_w = self.config.patch_size
-        post_patch_num_frames = num_frames // p_t
-        post_patch_height = height // p_h
-        post_patch_width = width // p_w
-
-        rotary_emb = self.rope(hidden_states)
-
-        hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)
-
-        if timestep.ndim == 2:
-            ts_seq_len = timestep.shape[1]
-            timestep = timestep.flatten()  # batch_size * seq_len
-        else:
-            ts_seq_len = None
-
-        (
-            temb,
-            timestep_proj,
-            encoder_hidden_states,
-            encoder_hidden_states_image,
-            _,
-        ) = self.condition_embedder(
-            timestep,
-            encoder_hidden_states,
-            encoder_hidden_states_image,
-            timestep_seq_len=ts_seq_len,
-        )
-
-        if ts_seq_len is not None:
-            # batch_size, seq_len, 6, inner_dim
-            timestep_proj = timestep_proj.unflatten(2, (6, -1))
-        else:
-            # batch_size, 6, inner_dim
-            timestep_proj = timestep_proj.unflatten(1, (6, -1))
-
-        if encoder_hidden_states_image is not None:
-            encoder_hidden_states = torch.concat(
-                [encoder_hidden_states_image, encoder_hidden_states], dim=1
-            )
-
-        # 4. Transformer blocks
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            for block in self.blocks:
-                hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    encoder_hidden_states,
-                    timestep_proj,
-                    rotary_emb,
-                    cam_hidden_states,
-                    post_patch_height,
-                    post_patch_width,
-                )
-        else:
-            for block in self.blocks:
-                hidden_states = block(
-                    hidden_states,
-                    encoder_hidden_states,
-                    timestep_proj,
-                    rotary_emb,
-                    cam_hidden_states,
-                    post_patch_height,
-                    post_patch_width,
-                )
-
-        if temb.ndim == 3:
-            # batch_size, seq_len, inner_dim (wan 2.2 ti2v)
-            shift, scale = (
-                self.scale_shift_table.unsqueeze(0) + temb.unsqueeze(2)
-            ).chunk(2, dim=2)
-            shift = shift.squeeze(2)
-            scale = scale.squeeze(2)
-        else:
-            # batch_size, inner_dim
-            shift, scale = (self.scale_shift_table + temb.unsqueeze(1)).chunk(2, dim=1)
-
-        # Move the shift and scale tensors to the same device as hidden_states.
-        # When using multi-GPU inference via accelerate these will be on the
-        # first device rather than the last device, which hidden_states ends up
-        # on.
-        shift = shift.to(hidden_states.device)
-        scale = scale.to(hidden_states.device)
-
-        hidden_states = (
-            self.norm_out(hidden_states.float()) * (1 + scale) + shift
-        ).type_as(hidden_states)
-        hidden_states = self.proj_out(hidden_states)
-
-        hidden_states = hidden_states.reshape(
-            batch_size,
-            post_patch_num_frames,
-            post_patch_height,
-            post_patch_width,
-            p_t,
-            p_h,
-            p_w,
-            -1,
-        )
-
-        hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
-        output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
-
-        if USE_PEFT_BACKEND:
-            # remove `lora_scale` from each PEFT layer
-            unscale_lora_layers(self, lora_scale)
-
-        if not return_dict:
-            return (output,)
-
-        return Transformer2DModelOutput(sample=output)
+        x = self.head(x, t)
+        x = self.unpatchify(x, (f, h, w))
+        return x

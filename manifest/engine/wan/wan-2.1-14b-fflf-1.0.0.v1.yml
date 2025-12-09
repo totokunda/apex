@@ -12,16 +12,29 @@ metadata:
   - 14b
   - '2.1'
   - 720p
-  author: Apex AI
+  author: Wan-AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
   categories:
-    - first-frame-last-frame
+  - first-frame-last-frame
 spec:
   engine: wan
   model_type: fflf
   denoise_type: base
   engine_type: torch
+  default_duration_secs: 5.0
+  min_duration_secs: 1.0
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
+  fps: 16
   components:
   - type: scheduler
     label: Scheduler
@@ -29,14 +42,14 @@ spec:
     scheduler_options:
     - name: UniPCMultistepScheduler
       label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN 2.2 A14B I2V.
+      description: The UniPC Multistep Scheduler is used for WAN 2.1 14B FFLF.
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/scheduler/scheduler_config.json
   - type: vae
     name: wan/vae_fflf
     label: WAN VAE
     base: wan
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/vae
       variant: default
       precision: fp16
@@ -47,7 +60,7 @@ spec:
     name: wan/text_encoder
     label: Wan Text Encoder
     base: UMT5EncoderModel
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
       variant: default
       precision: fp16
@@ -57,7 +70,7 @@ spec:
   - type: transformer
     label: Wan Transformer
     base: wan.base
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/transformer
       variant: default
       precision: fp16
@@ -100,7 +113,7 @@ spec:
     base: clip
     name: wan/clip_fflf
     label: Wan CLIP
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-FLF2V-14B-720P-diffusers/image_encoder
       variant: default
       precision: fp16
@@ -168,7 +181,6 @@ spec:
         - - guidance_scale
         - - seed
         - - boundary_ratio
-
     inputs:
     - id: first_frame
       label: First Frame
@@ -176,15 +188,12 @@ spec:
       type: image
       panel: input
       required: true
-      map_h: height
-      map_w: width
       scale_by: resolution
     - id: last_frame
       label: Last Frame
       description: The last frame of the video to generate.
       type: image
       panel: input
-
       scale_by: resolution
     - id: prompt
       label: Prompt
@@ -213,38 +222,31 @@ spec:
       type: select
       default: 720
       options:
-      - name: Ultra HD
-        value: 1024
-        height: 1024
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
-      - name: Custom
-        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: 61
+      default: '16:9'
       options:
       - name: Square
-        value: 61
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: 969
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: 556
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: 184
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -265,20 +267,20 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 720
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 1280
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -299,14 +301,9 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-    - id: boundary_ratio
-      label: Boundary Ratio
-      description: The ratio of the boundary of the image
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 0.875
-      min: 0.0
-      max: 1.0
-      step: 0.01
+  loras:
+  - scale: 1.0
+    name: Wan Lightning
+    label: Wan Lightning
+    verified: true
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/f317c7db62b962f61de98ca4739ded6dacfe564035bb49244f75a24c5cb9ed7a_wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors

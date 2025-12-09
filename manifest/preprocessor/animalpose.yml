@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: yzd-v/DWPose/yolox_l.onnx
   size_bytes: 216746733

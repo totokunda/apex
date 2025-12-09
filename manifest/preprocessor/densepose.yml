@@ -55,7 +55,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: LayerNorm/DensePose-TorchScript-with-hint-image/densepose_r50_fpn_dl.torchscript
   size_bytes: 265257836

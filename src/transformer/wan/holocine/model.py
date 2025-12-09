@@ -1,9 +1,11 @@
+from flash_attn import flash_attn_varlen_func
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
 from typing import Tuple, Optional
 from einops import rearrange
+from src.attention.functions import flash_attention_varlen
 from src.transformer.wan.holocine.camera import SimpleAdapter
 from einops import rearrange
 from typing import List, Sequence, Optional
@@ -137,13 +139,21 @@ def attention_per_batch_with_shots(
         max_kv_seqlen = max(kv_lengths) if len(kv_lengths) > 0 else 0
 
         
-        O_packed = attention_register.call(
-            Q_packed, K_packed, V_packed,
-            q_seqlens, kv_seqlens,
-            max_q_seqlen, max_kv_seqlen,
-            softmax_scale=None, causal=causal,
-            key=attn_func
-        )  # [sum_N, n, d]
+        if attention_register.is_available("flash_varlen"):
+            O_packed = flash_attn_varlen_func(
+                Q_packed, K_packed, V_packed,
+                q_seqlens, kv_seqlens,
+                max_q_seqlen, max_kv_seqlen,
+                softmax_scale=None, causal=causal,
+            )  # [sum_N, n, d]
+        else:
+            O_packed = attention_register.call(
+                Q_packed, K_packed, V_packed,
+                q_seqlens, kv_seqlens,
+                softmax_scale=None, 
+                is_causal=causal,
+                key="sdpa_varlen",
+            )  # [sum_N, n, d]
 
 
         O_list = []

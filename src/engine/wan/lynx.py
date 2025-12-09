@@ -12,7 +12,7 @@ class LynxEngine(WanShared):
     """Personalized Wan (Lynx) engine with IPA and Ref adapters."""
 
     def __init__(self, yaml_path: str, **kwargs):
-        super().__init__(yaml_path, **kwargs)
+        super().__init__(yaml_path, auto_apply_loras=False, **kwargs)
         self._adapter_path = self._resolve_adapter_path()
         self._lynx_helper = WanLynxHelper(adapter_path=self._adapter_path)
 
@@ -48,7 +48,7 @@ class LynxEngine(WanShared):
         adapter_path: str | None = None,
         face_embeds: Optional[np.ndarray | torch.Tensor] = None,
         landmarks: Optional[np.ndarray | torch.Tensor] = None,
-        use_cfg_guidance: bool = True,
+
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -65,6 +65,8 @@ class LynxEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting Lynx pipeline")
+        
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         helper = self._lynx_helper
         adapter_root = helper.resolve_adapter_path(
@@ -145,6 +147,10 @@ class LynxEngine(WanShared):
         self.transformer = helper.load_adapters(
             self.transformer, adapter_root, device=self.device, dtype=transformer_dtype
         )
+        
+        lora_items, adapter_names = list(self.preloaded_loras.values()), list(self.preloaded_loras.keys())
+        if lora_items:
+            self.apply_loras(lora_items, adapter_names=adapter_names)
 
         ip_states, ip_states_uncond = helper.build_ip_states(
             embeds, device=self.device, dtype=transformer_dtype

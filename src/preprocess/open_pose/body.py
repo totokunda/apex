@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from scipy.ndimage.filters import gaussian_filter
 
+from src.utils.defaults import get_torch_device
 from . import util
 from .model import bodypose_model
 
@@ -35,7 +36,9 @@ class Body(object):
         model_dict = util.transfer(self.model, torch.load(model_path))
         self.model.load_state_dict(model_dict)
         self.model.eval()
-        self.device = "cpu"
+        self.device = get_torch_device()
+        self.model.to(self.device)
+        
 
     def to(self, device):
         self.model.to(device)
@@ -62,9 +65,13 @@ class Body(object):
             im = np.ascontiguousarray(im)
 
             data = torch.from_numpy(im).float()
+            
             data = data.to(self.device)
             # data = data.permute([2, 0, 1]).unsqueeze(0).float()
+            print(f"Data device: {data.device}")
             with torch.no_grad():
+                if hasattr(self.model, 'device'):
+                    print(f"Model device: {self.model.device}")
                 Mconv7_stage6_L1, Mconv7_stage6_L2 = self.model(data)
             Mconv7_stage6_L1 = Mconv7_stage6_L1.cpu().numpy()
             Mconv7_stage6_L2 = Mconv7_stage6_L2.cpu().numpy()

@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: ali-vilab/VACE-Annotators/scribble/anime_style/netG_A_latest.pth
   size_bytes: 17173511

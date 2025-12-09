@@ -70,14 +70,12 @@ spec:
   - type: helper
     base: ltx.patchifier
     patch_size: 1
-
   loras:
   - source: https://huggingface.co/Lightricks/LTX-Video-ICLoRA-canny-13b-0.9.7/resolve/main/ltxv-097-ic-lora-canny-control-comfyui.safetensors
     scale: 1.0
     verified: false
     name: ic_canny_lora
     label: ICLoRA canny 
-    
   defaults:
     run:
       num_inference_steps: 30
@@ -175,13 +173,10 @@ spec:
       options:
       - name: HD
         value: 720
-        height: 720
       - name: Full HD
         value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -269,10 +264,3 @@ spec:
       min: 0.1
       max: 15.0
       step: 0.5
-
-
-
-
-
-
-
