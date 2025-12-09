@@ -20,6 +20,11 @@ spec:
   engine: zimage
   model_type: control
   engine_type: torch
+  compute_requirements:
+    min_cuda_compute_capability: 7.0
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   components:

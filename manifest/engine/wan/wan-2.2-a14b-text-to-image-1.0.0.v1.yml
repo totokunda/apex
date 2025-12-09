@@ -21,6 +21,8 @@ spec:
   model_type: t2i
   engine_type: torch
   denoise_type: moe
+  attention_types:
+  - sdpa
   components:
   - type: scheduler
     label: Scheduler
