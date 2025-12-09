@@ -52,7 +52,6 @@ parameters:
   type: bool
 supports_image: false
 supports_video: true
-
 files:
 - path: hr16/Unimatch/gmflow-scale2-regrefine6-mixdata.pth
   size_bytes: 29500177

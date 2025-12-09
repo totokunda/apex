@@ -67,7 +67,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: JUGGHM/Metric3D/metric_depth_vit_small_800k.pth
   size_bytes: 150120967

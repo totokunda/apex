@@ -219,9 +219,8 @@ class OpenposeDetector(ToMixin, BasePreprocessor):
     
     def process(self, input_image: InputImage, detect_resolution=512, include_body=True, include_hand=True, include_face=True, image_and_json=False, upscale_method="INTER_CUBIC", xinsr_stick_scaling=False, **kwargs) -> OutputImage:
 
-
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
         

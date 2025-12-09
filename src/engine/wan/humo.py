@@ -4,7 +4,7 @@ from typing import List, Union, Optional, Dict, Any, Tuple, Callable
 from torch import Tensor
 from PIL import Image
 import torch
-from src.utils.progress import safe_emit_progress
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 import numpy as np
 import torch.nn.functional as F
 import math
@@ -259,12 +259,11 @@ class HuMoEngine(WanShared):
             audio: InputAudio | None,
             image: InputImage | List[InputImage] | None = None,
             negative_prompt: List[str] | str = None,
-            use_cfg_guidance: bool = True,
             height: int = 480,
             width: int = 832,
             duration: int | str = 97,
             fps: int = 25,
-            num_inference_steps: int = 40,
+            num_inference_steps: int = 50,
             seed: int | None = None,
             generator: torch.Generator | None = None,
             progress_callback: Callable | None = None,
@@ -281,6 +280,9 @@ class HuMoEngine(WanShared):
             aspect_ratio: str | None = None,
             **kwargs
             ):
+    
+        use_cfg_guidance = guidance_scale_a > 1.0 and guidance_scale_t > 1.0 and negative_prompt is not None
+        safe_emit_progress(progress_callback, 0.0, "Starting HuMo pipeline")
 
         height, width = self.get_height_width(height, width, resolution, aspect_ratio)
 
@@ -299,10 +301,14 @@ class HuMoEngine(WanShared):
         if offload and self.vae is not None:
             self._offload(self.vae)
         
+        audio_processor = None
+
         if seed is not None:
             generator = torch.Generator(device=self.device)
             generator.manual_seed(seed)
             
+        frame_num = self._parse_num_frames(duration, fps)
+
         if audio is not None:
             audio_processor = self.helpers['wan.humo_audio_processor']
             audio_processor.update_sample_rate(16000)
@@ -314,8 +320,6 @@ class HuMoEngine(WanShared):
         
         if offload and audio_processor is not None:
             self._offload(audio_processor)
-            
-        frame_num = self._parse_num_frames(duration, fps)
         
         if frame_num > 129 and width*height < 720*1280:
             frame_num = 129
@@ -361,6 +365,8 @@ class HuMoEngine(WanShared):
             offload=offload,
         )
         
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
+        
         context = [prompt_embeds[0]]
         context_null = [negative_prompt_embeds[0]]
         
@@ -373,10 +379,13 @@ class HuMoEngine(WanShared):
             self.scheduler,
             num_inference_steps,
         )
+        
+        safe_emit_progress(progress_callback, 0.40, "Scheduler ready and timesteps prepared")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+
             
         # HuMo has two variants: ~1.7B params and ~17B params.
         # Use a threshold safely between them so this is True only for the 1.7B model.
@@ -385,6 +394,13 @@ class HuMoEngine(WanShared):
                 
         latents = noise
         
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        total_steps = len(timesteps)
+        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+        
+        self.logger.info(f"Using HuMo model with {num_params} parameters")
+
         with amp.autocast(device_type=self.device.type, dtype=transformer_dtype):
             if not small_model:
                 msk = torch.ones(4, target_shape[1], target_shape[2], target_shape[3], device=self.device)
@@ -424,13 +440,19 @@ class HuMoEngine(WanShared):
                     latents = [temp_x0.squeeze(0)]
                     
                     if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                        self._render_step(torch.stack(latents), render_on_step_callback)
+                        self._render_step(torch.stack([x0_[:,:-latents_ref[0].shape[1]] for x0_ in latents]), render_on_step_callback)
+                    
+                    safe_emit_progress(
+                        denoise_progress_callback,
+                        float(i + 1) / float(total_steps) if total_steps else 1.0,
+                        f"Denoising step {i + 1}/{total_steps}",
+                    )
             else:
                 arg_ta = {'context': context, 'seq_len': seq_len, 'audio': audio_emb}
                 arg_t = {'context': context, 'seq_len': seq_len, 'audio': audio_emb_neg}
                 arg_null = {'context': context_null, 'seq_len': seq_len, 'audio': audio_emb_neg}
 
-                for _, t in enumerate(tqdm(timesteps, desc="Sampling", total=num_inference_steps)):
+                for i, t in enumerate(tqdm(timesteps, desc="Sampling", total=num_inference_steps)):
                     timestep = [t]
                     timestep = torch.stack(timestep)
                     if generation_mode == "TIA":
@@ -445,17 +467,31 @@ class HuMoEngine(WanShared):
                             return_dict=False,
                             generator=generator)[0]
                     latents = [temp_x0.squeeze(0)]
+                    
+                    if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                        self._render_step(torch.stack([x0_[:,:-latents_ref[0].shape[1]] for x0_ in latents]), render_on_step_callback)
+                    
+                    safe_emit_progress(
+                        denoise_progress_callback,
+                        float(i + 1) / float(total_steps) if total_steps else 1.0,
+                        f"Denoising step {i + 1}/{total_steps}",
+                    )
 
         x0 = latents
         x0 = torch.stack([x0_[:,:-latents_ref[0].shape[1]] for x0_ in x0])
         
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+
         if offload:
             self._offload(self.transformer)
+        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
             
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return x0
             
         video = self.vae_decode(x0, offload=offload)
         video = self._tensor_to_frames(video)
+        safe_emit_progress(progress_callback, 1.0, "Completed HuMo pipeline")
         return video
         

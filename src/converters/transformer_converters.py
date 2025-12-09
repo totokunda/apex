@@ -69,7 +69,11 @@ class KohyaToPeftTransformerConverter(TransformerConverter):
 
         # Then run the standard transformer conversion logic.
         super().convert(state_dict)
+        
 
+
+class LoraTransformerConverter(KohyaToPeftTransformerConverter):
+    pass
 
 class WanTransformerConverter(KohyaToPeftTransformerConverter):
     def __init__(self):

@@ -24,7 +24,7 @@ class LoraItem:
     local_paths: List[str]
     scale: float = 1.0
     name: Optional[str] = None
-
+    component: Optional[str] = None
 
 class LoraManager(DownloadMixin):
     def __init__(self, save_dir: str = DEFAULT_LORA_SAVE_PATH) -> None:
@@ -97,6 +97,7 @@ class LoraManager(DownloadMixin):
         prefer_name: Optional[str] = None,
         progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
     ) -> LoraItem:
+
         """
         Resolve and download a LoRA from any supported source:
         - HuggingFace repo or file path
@@ -288,8 +289,9 @@ class LoraManager(DownloadMixin):
                 final_scales.append(item.scale)
                 # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
                 for local_path in item.local_paths:
+                    class_name = getattr(model.config, "_class_name", "lora")
                     local_path_state_dict, converted = self.maybe_convert_state_dict(
-                        local_path, model.config._class_name
+                        local_path, class_name
                     )
 
                     local_path_state_dict = strip_common_prefix(
@@ -312,12 +314,16 @@ class LoraManager(DownloadMixin):
                         prefix = "transformer"
                     elif keys[0].startswith("diffusion_model") and keys[-1].startswith("diffusion_model"):
                         prefix = "diffusion_model"
+                    elif keys[0].startswith("model") and keys[-1].startswith("model"):
+                        prefix = "model"
                     
                     # ensure adapter name is not too long and does not have . or / in it if so remove it
                     adapter_name = self._clean_adapter_name(adapter_name)
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
+                    
+                    
 
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 

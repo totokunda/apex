@@ -240,9 +240,6 @@ class ZImageT2IEngine(ZImageShared):
                 latents = self.scheduler.step(noise_pred.to(torch.float32), t, latents, return_dict=False)[0]
                 assert latents.dtype == torch.float32
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback)
-
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()

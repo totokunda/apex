@@ -382,6 +382,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         ip_image = kwargs.get("ip_image", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
         num_warmup_steps = kwargs.get("num_warmup_steps", 0)
+        num_reference_images = kwargs.get("num_reference_images", 0)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -457,7 +458,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
                 if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback)
+                    self._render_step(latents[:, :, num_reference_images:], render_on_step_callback)
                     
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     pbar.update(1)
@@ -476,3 +477,4 @@ class WanShared(BaseEngine, WanMLXDenoise):
             self.logger.info("Denoising completed.")
 
         return latents
+    

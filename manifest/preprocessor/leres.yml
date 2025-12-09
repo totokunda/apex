@@ -59,7 +59,6 @@ parameters:
   type: bool
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/res101.pth
   size_bytes: 530760553

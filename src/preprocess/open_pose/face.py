@@ -7,6 +7,7 @@ from torch.nn import Conv2d, MaxPool2d, Module, ReLU, init
 from torchvision.transforms import ToPILImage, ToTensor
 
 from . import util
+from src.utils.defaults import get_torch_device
 
 
 class FaceNet(Module):
@@ -324,7 +325,8 @@ class Face(object):
         self.model = FaceNet()
         self.model.load_state_dict(torch.load(face_model_path))
         self.model.eval()
-        self.device = "cpu"
+        self.device = get_torch_device()
+        self.model.to(self.device)
 
     def to(self, device):
         self.model.to(device)

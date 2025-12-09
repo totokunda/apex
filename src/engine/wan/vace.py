@@ -29,7 +29,6 @@ class WanVaceEngine(WanShared):
         fps: int = 16,
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
-        use_cfg_guidance: bool = True,
         seed: int | None = None,
         num_videos: int = 1,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -46,6 +45,8 @@ class WanVaceEngine(WanShared):
         enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
+        
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         safe_emit_progress(progress_callback, 0.0, "Starting VACE video generation pipeline")
 
@@ -57,7 +58,6 @@ class WanVaceEngine(WanShared):
 
 
         num_frames = self._parse_num_frames(duration, fps=fps)
-
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -119,9 +119,8 @@ class WanVaceEngine(WanShared):
         safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
 
         if mask:
-            loaded_mask = self._load_video(mask, fps=fps)
-            if num_frames < len(loaded_mask):
-                loaded_mask = loaded_mask[:num_frames]
+            loaded_mask = self._load_video(mask, fps=fps, num_frames=num_frames)
+
 
         if isinstance(conditioning_scale, (int, float)):
             conditioning_scale = [conditioning_scale] * len(
@@ -143,27 +142,16 @@ class WanVaceEngine(WanShared):
             )
 
         if video is not None:
-            loaded_video = self._load_video(video, fps=fps)
-            if num_frames < len(loaded_video):
-                loaded_video = loaded_video[:num_frames]
-            video_height, video_width = self.video_processor.get_default_height_width(
-                loaded_video[0]
-            )
-            base = self.vae_scale_factor_spatial * ph
-            if video_height * video_width > height * width:
-                scale = min(width / video_width, height / video_height)
-                video_height, video_width = int(video_height * scale), int(
-                    video_width * scale
-                )
-
-            if video_height % base != 0 or video_width % base != 0:
-                video_height = (video_height // base) * base
-                video_width = (video_width // base) * base
-
-            assert video_height * video_width <= height * width
+            loaded_video = self._load_video(video, fps=fps, num_frames=num_frames)
+            
+            max_area = height * width
+            loaded_video = [self._aspect_ratio_resize(frame, max_area)[0] for frame in loaded_video]
+            video_height, video_width = loaded_video[0].height, loaded_video[0].width
 
             preprocessed_video = self.video_processor.preprocess_video(
-                loaded_video, video_height, video_width
+                loaded_video, 
+                height=video_height,
+                width=video_width,
             )
 
             height, width = video_height, video_width
@@ -351,6 +339,7 @@ class WanVaceEngine(WanShared):
             dtype=torch.float32,
             generator=generator,
         )
+        
 
         if latents.shape[2] != conditioning_latents.shape[2]:
             self.logger.warning(
@@ -390,6 +379,7 @@ class WanVaceEngine(WanShared):
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
+            num_reference_images=num_reference_images,
         )
 
         if offload:

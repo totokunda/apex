@@ -208,10 +208,8 @@ spec:
         height: 768
       - name: Ultra HD
         value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio

@@ -26,7 +26,8 @@ spec:
   - source: QingyanBai/Ditto_models/models/ditto_global.safetensors
     scale: 1.0
     name: ditto_global
-    label: Ditto Global 
+    label: Ditto Global
+    required: true
     verified: true
   components:
   - type: scheduler
@@ -136,6 +137,7 @@ spec:
       map_w: width
       scale_by: resolution
       required: true
+      max_duration_seconds: 10
     - id: prompt
       label: Prompt
       description: Describe the video you want to edit.
@@ -161,17 +163,12 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 1024
+      default: 720
       options:
       - name: HD
         value: 720
-        height: 720
-      - name: Full HD
-        value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -179,7 +176,7 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: "16:9"
       options:
       - name: Square
         value: "1:1"
@@ -205,7 +202,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 30
       min: 1
       max: 100
       step: 1
@@ -215,20 +212,20 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 720
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 1280
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -249,14 +246,3 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-    - id: boundary_ratio
-      label: Boundary Ratio
-      description: The ratio of the boundary of the image
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 0.875
-      min: 0.0
-      max: 1.0
-      step: 0.01

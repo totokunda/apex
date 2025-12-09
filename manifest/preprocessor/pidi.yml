@@ -55,7 +55,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/table5_pidinet.pth
   size_bytes: 2871148

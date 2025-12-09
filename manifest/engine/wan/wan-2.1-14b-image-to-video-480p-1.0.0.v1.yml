@@ -9,6 +9,7 @@ metadata:
     at 480P resolution.
   tags:
   - wan
+  - 480p
   - i2v
   - 14b
   - '2.1'
@@ -249,9 +250,3 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-  loras:
-  - scale: 1.0
-    name: Lightning Distill
-    label: Lightning Distill
-    verified: true
-    source: /home/tosin_coverquick_co/apex-diffusion/loras/f317c7db62b962f61de98ca4739ded6dacfe564035bb49244f75a24c5cb9ed7a_wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors

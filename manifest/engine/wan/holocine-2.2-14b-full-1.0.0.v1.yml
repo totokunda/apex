@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: holocine-2.2-14b
+  id: holocine-2.2-14b-full
   model: wan
-  name: Holocine 2.2 14B
+  name: Holocine 2.2 14B Full
   version: 1.0.0
-  description: Holocine 2.2 14B is a 14B parameter model for text-to-video
+  description: Holocine 2.2 14B Full is a 14B parameter model for text-to-video with full attention.
   tags:
   - wan
   - holocine
@@ -21,6 +21,21 @@ spec:
   model_type: holocine
   engine_type: torch
   denoise_type: base
+  fps: 15
+  default_duration_secs: 16
+  min_duration_secs: 1
+  max_duration_secs: 16
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
+  - xformers
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   components:
   - type: scheduler
     label: Scheduler
@@ -61,9 +76,16 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 57154175562
+    - path: /home/tosin_coverquick_co/apex-diffusion/components/holocine/HoloCine_dit/full/full_high_noise.safetensors
+      variant: High Noise
+      custom: true
+      file_size: 57154079192
     config:
-      has_image_input: False
-      patch_size: [1, 2, 2]
+      has_image_input: false
+      patch_size:
+      - 1
+      - 2
+      - 2
       in_dim: 16
       dim: 5120
       ffn_dim: 13824
@@ -72,7 +94,7 @@ spec:
       out_dim: 16
       num_heads: 40
       num_layers: 40
-      eps: 0.000001
+      eps: 1.0e-06
   - type: transformer
     label: Low Noise Transformer
     name: transformer_2
@@ -84,8 +106,11 @@ spec:
       type: safetensors
       file_size: 57154175562
     config:
-      has_image_input: False
-      patch_size: [1, 2, 2]
+      has_image_input: false
+      patch_size:
+      - 1
+      - 2
+      - 2
       in_dim: 16
       dim: 5120
       ffn_dim: 13824
@@ -94,8 +119,7 @@ spec:
       out_dim: 16
       num_heads: 40
       num_layers: 40
-      eps: 0.000001
-
+      eps: 1.0e-06
   defaults:
     run:
       num_inference_steps: 30
@@ -116,7 +140,7 @@ spec:
         flow: column
         rows:
         - - prompt
-        - - shot_cut_frames
+        - - shot_cut_points
     - name: advanced_prompting
       label: Advanced Prompting
       collapsible: true
@@ -148,12 +172,11 @@ spec:
         - - low_noise_guidance_scale
         - - seed
         - - boundary_ratio
-
     inputs:
     - id: prompt
-      label: Prompt
-      description: Describe the image you want to generate.
-      placeholder: A beautiful landscape at golden hour.
+      label: Scene Prompt
+      description: Use [global caption] for the global caption and [shot caption] for the shot caption separated by [shot cut] in the prompt. [character1] and [character2] are placeholders for the characters in the scene.
+      placeholder: '[global caption] A beautiful landscape at golden hour. '
       type: text
       panel: prompting
       required: true
@@ -175,40 +198,33 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 480
       options:
-      - name: Ultra HD
-        value: 1024
-        height: 1024
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
-      - name: Custom
-        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: '16:9'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -219,7 +235,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 30
       min: 1
       max: 100
       step: 1
@@ -229,20 +245,20 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 480
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 832
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -284,10 +300,13 @@ spec:
       min: 0.0
       max: 1.0
       step: 0.01
-    - id: shot_cut_frames
-      label: Shot Cut Frames
-      description: The frames on where to cut the shot
+    - id: shot_cut_points
+      label: Shot Cut Points
+      description: The points on where to cut the shot. The first point is the start of the first shot, the last point is the end of the last shot. The points are in seconds.
       type: number_list
-      value_type: integer
+      value_type: float
       panel: prompting
       required: true
+      min: 0.0
+      max: 30.0
+      step: 0.1

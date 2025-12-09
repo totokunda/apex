@@ -55,7 +55,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/mlsd_large_512_fp32.pth
   size_bytes: 6341481

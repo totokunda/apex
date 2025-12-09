@@ -46,7 +46,6 @@ parameters:
   type: int
 supports_image: true
 supports_video: true
-
 files:
 - path: hr16/ControlNet-HandRefiner-pruned/graphormer_hand_state_dict.bin
   size_bytes: 855658184

@@ -236,10 +236,8 @@ spec:
       options:
       - name: SD
         value: 480
-        height: 480
       - name: HD
         value: 720
-        height: 720
       - name: Custom
         value: custom
     - id: num_inference_steps

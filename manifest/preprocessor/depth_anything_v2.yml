@@ -53,7 +53,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: depth-anything/Depth-Anything-V2-Small/depth_anything_v2_vits.pth
   size_bytes: 99218434

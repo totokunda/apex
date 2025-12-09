@@ -168,6 +168,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         pad_with_zero: bool = True,
         clean_text: bool = True,
         process_inputs_func: Callable = None,
+        reshape_prompt_embeds: bool = True,
         output_type: Literal["hidden_states", "hidden_states_all", "pooler_output", "text_embeds", "raw"] = "hidden_states",
         lower_case: bool = False,
     ):
@@ -311,30 +312,32 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 dim=0,
             )
             # duplicate text embeddings for each generation per prompt, using mps friendly method
-            _, seq_len, _ = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            mask = mask.repeat(1, num_videos_per_prompt)
-            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
+            if reshape_prompt_embeds:
+                _, seq_len, _ = prompt_embeds.shape
+                prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+                mask = mask.repeat(1, num_videos_per_prompt)
+                mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
 
-            prompt_embeds = prompt_embeds.view(
-                batch_size * num_videos_per_prompt, seq_len, -1
-            )
+                prompt_embeds = prompt_embeds.view(
+                    batch_size * num_videos_per_prompt, seq_len, -1
+                )
             
         elif output_type == "text_embeds":
-            prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
-            mask = mask.repeat(num_videos_per_prompt, 1)
+            if reshape_prompt_embeds:
+                prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
+                mask = mask.repeat(num_videos_per_prompt, 1)
         elif output_type == "hidden_states":
-            _, seq_len, _ = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            if reshape_prompt_embeds:
+                _, seq_len, _ = prompt_embeds.shape
+                prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
 
-            prompt_embeds = prompt_embeds.view(
-                batch_size * num_videos_per_prompt, seq_len, -1
-            )
-        
-            mask = mask.repeat(1, num_videos_per_prompt)
-            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
-        
+                prompt_embeds = prompt_embeds.view(
+                    batch_size * num_videos_per_prompt, seq_len, -1
+                )
 
+                mask = mask.repeat(1, num_videos_per_prompt)
+                mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
+        
         if self.enable_cache:
             self.cache(
                 prompt_hash,

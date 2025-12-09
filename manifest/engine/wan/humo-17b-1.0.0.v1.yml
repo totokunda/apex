@@ -11,20 +11,34 @@ metadata:
     \ following, consistent subject preservation, synchronized audio-driven motion."
   tags:
   - humo
-  - t2v
+  - audio
   - i2v
   - 17b
-  author: Apex AI
+  author: Bytedance Research
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
   categories:
   - audio-to-video
 spec:
   max_duration_secs: 6.44
+  default_duration_secs: 3.88
+  min_duration_secs: 1.0
   fps: 25
   engine: wan
   model_type: humo
   engine_type: torch
+  audio_inputs_to_save:
+  - audio
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   components:
   - type: scheduler
     label: Scheduler
@@ -102,7 +116,6 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 24701695487
   defaults:
     run:
       num_inference_steps: 50
@@ -120,7 +133,6 @@ spec:
         rows:
         - - image
         - - audio
-        - - sampling_rate
     - name: prompting
       label: Prompting
       collapsible: true
@@ -173,16 +185,6 @@ spec:
       required: true
       map_h: height
       map_w: width
-    - id: sampling_rate
-      label: Sampling Rate
-      description: The sampling rate of the audio.
-      type: number
-      panel: audio
-      required: true
-      default: 16000
-      min: 8000
-      max: 48000
-      step: 1000
     - id: prompt
       label: Prompt
       description: Describe the image you want to generate.
@@ -212,10 +214,8 @@ spec:
       options:
       - name: SD
         value: 480
-        height: 480
       - name: HD
         value: 720
-        height: 720
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -252,7 +252,7 @@ spec:
       default: 50
       min: 1
       max: 100
-      step: 64
+      step: 1
     - id: height
       label: Height
       description: Explicit height override
@@ -262,7 +262,7 @@ spec:
       default: 480
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
@@ -272,7 +272,7 @@ spec:
       default: 832
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -283,8 +283,8 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: guidance_scale
-      label: Guidance Scale
+    - id: guidance_scale_a
+      label: Audio Guidance Scale
       type: number+slider
       value_type: float
       panel: sampling
@@ -293,3 +293,10 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: guidance_scale_t
+      label: Text Guidance Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 5.5

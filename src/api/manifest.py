@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from loguru import logger
 import yaml
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -173,6 +174,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     content["spec"]["attention_types_detail"] = attention_options
 
     # Enrich LoRA entries
+    all_loras_downloaded = True
     for lora_index, lora in enumerate(content.get("spec", {}).get("loras", [])):
         if isinstance(lora, str):
             is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
@@ -189,6 +191,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             else:
                 out_lora["is_downloaded"] = False
                 out_lora["source"] = lora
+                all_loras_downloaded = False
             content["spec"]["loras"][lora_index] = out_lora
         elif isinstance(lora, dict):
             is_downloaded = DownloadMixin.is_downloaded(lora.get("source"), get_lora_path())
@@ -198,6 +201,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             else:
                 lora["is_downloaded"] = False
                 lora["source"] = lora.get("source")
+                all_loras_downloaded = False
             content["spec"]["loras"][lora_index] = lora
 
     # Enrich components entries
@@ -265,14 +269,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
         component['is_downloaded'] = is_component_downloaded
         content["spec"]["components"][component_index] = component
         
-    loras = content.get("spec", {}).get("loras", [])
-    all_loras_downloaded = True
-    for lora_index, lora in enumerate(loras):
-        if isinstance(lora, dict) and lora.get("required", False):
-            is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
-            if is_downloaded is None:
-                all_loras_downloaded = False
-                break
+
             
 
     # Convenience fields for filtering and compatibility with previous ManifestInfo
@@ -630,21 +627,25 @@ def list_all_manifests(include_incompatible: bool = False):
                             with the current system's compute capabilities.
                             Default is False (only show compatible manifests).
     """
-    if include_incompatible:
-        # Load all manifests without filtering
-        manifests: List[Dict[str, Any]] = []
-        for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
-            for file in files:
-                if file.endswith('.yml') and not file.startswith('shared'):
-                    file_path = Path(root) / file
-                    relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
-                    enriched = _load_and_enrich_manifest(str(relative_path))
-                    manifests.append(enriched)
-        return manifests
-    else:
-        # Use the normal filtered list
-        manifests = get_all_manifest_files()
-        return manifests
+    try:
+        if include_incompatible:
+            # Load all manifests without filtering
+            manifests: List[Dict[str, Any]] = []
+            for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
+                for file in files:
+                    if file.endswith('.yml') and not file.startswith('shared'):
+                        file_path = Path(root) / file
+                        relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
+                        enriched = _load_and_enrich_manifest(str(relative_path))
+                        manifests.append(enriched)
+            return manifests
+        else:
+            # Use the normal filtered list
+            manifests = get_all_manifest_files()
+            return manifests
+    except Exception as e:
+        logger.error(f"Error listing manifests: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing manifests: {e}")
 
 @router.get("/list/model/{model}")
 def list_manifests_by_model(model: str, include_incompatible: bool = False):

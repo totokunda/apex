@@ -53,7 +53,6 @@ spec:
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 16
-      
   - type: transformer
     label: HunyuanVideo Transformer
     base: hunyuanvideo15.base
@@ -83,7 +82,6 @@ spec:
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 24
-    
   - type: helper
     label: HunyuanVideo Text Encoder 2
     base: hunyuanvideo15.text
@@ -94,7 +92,6 @@ spec:
     apply_final_norm: false
     prompt_template: li-dit-encode-image-json
     prompt_template_video: li-dit-encode-video-json
-  
   - type: helper
     label: HunyuanVideo Vision Encoder
     base: hunyuanvideo15.vision
@@ -118,7 +115,6 @@ spec:
     name: prompt_format
     font_path: multimodalart/glyph-sdxl-v2-byt5-small/assets/multilingual_10-lang_idx.json
     color_path: multimodalart/glyph-sdxl-v2-byt5-small/assets/color_idx.json
-
   - type: text_encoder
     label: HunyuanVideo ByT5 Encoder
     base: T5EncoderModel
@@ -141,7 +137,6 @@ spec:
         resource_requirements:
           min_vram_gb: 12
           recommended_vram_gb: 24 
-  
   defaults:
     run:
       num_inference_steps: 30
@@ -228,7 +223,6 @@ spec:
       min: 0.0
       max: 1.0
       step: 0.01
-
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -238,13 +232,10 @@ spec:
       options:
       - name: Ultra HD
         value: 1024
-        height: 1024
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio

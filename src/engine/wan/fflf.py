@@ -27,7 +27,6 @@ class WanFFLFEngine(WanShared):
         num_videos: int = 1,
         seed: int | None = None,
         guidance_scale: float = 5.0,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -35,6 +34,7 @@ class WanFFLFEngine(WanShared):
         progress_callback: Callable | None = None,
         offload: bool = True,
         render_on_step: bool = False,
+        render_on_step_interval: int = 3,
         generator: torch.Generator | None = None,
         timesteps: List[int] | None = None,
         timesteps_as_indices: bool = True,
@@ -47,6 +47,8 @@ class WanFFLFEngine(WanShared):
         First Frame Last Frame generation method.
         Generates video content conditioned on both first and last frames.
         """
+        
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         safe_emit_progress(progress_callback, 0.0, "Starting FFLF pipeline")
 
@@ -262,6 +264,7 @@ class WanFFLFEngine(WanShared):
             use_cfg_guidance=use_cfg_guidance,
             render_on_step=render_on_step,
             render_on_step_callback=render_on_step_callback,
+            render_on_step_interval=render_on_step_interval,
             denoise_progress_callback=denoise_progress_callback,
             scheduler=scheduler,
             guidance_scale=guidance_scale,
