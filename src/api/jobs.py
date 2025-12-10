@@ -29,5 +29,3 @@ def job_cancel(job_id: str) -> Dict[str, Any]:
     if status in ["cancelled", "canceled"]:
         return {"job_id": job_id, "status": status, "message": message}
     raise HTTPException(status_code=404, detail=message or "Job not found")
-
-

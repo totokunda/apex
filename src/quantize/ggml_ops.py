@@ -137,5 +137,3 @@ def ggml_split(
         out_splits.append(wrapped)
 
     return tuple(out_splits)
-
-

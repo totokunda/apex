@@ -5,6 +5,7 @@ import torch
 from typing import Optional
 from warnings import warn
 
+
 class FluxTransformer2dModel(NunchakuFluxTransformer2dModel):
     """
     Apex wrapper around Nunchaku's quantized FLUX transformer.
@@ -46,9 +47,9 @@ class FluxTransformer2dModel(NunchakuFluxTransformer2dModel):
         """
 
         # Detect whether a device / dtype is being requested.
-        device_arg_or_kwarg_present = any(
-            isinstance(arg, torch.device) for arg in args
-        ) or "device" in kwargs
+        device_arg_or_kwarg_present = (
+            any(isinstance(arg, torch.device) for arg in args) or "device" in kwargs
+        )
         dtype_present_in_args = "dtype" in kwargs
 
         # Strings that can be parsed as a device also count as a device request.

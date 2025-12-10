@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from typing import List
 
+
 @helpers("hidream.llama")
 class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
     def __init__(
@@ -44,7 +45,7 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
             tokenizer_class=tokenizer_class,
         )
         self.tokenizer.pad_token = self.tokenizer.eos_token
-        
+
     def load_model(self, device: torch.device = None, dtype: torch.dtype = None):
         model = self._load_model(
             {
@@ -53,16 +54,22 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
                 "model_path": self.model_path,
             },
             module_name="transformers",
-            load_dtype=dtype
+            load_dtype=dtype,
         )
         self.to_device(model, device=device)
 
         return model
-        
 
     @torch.no_grad()
-    def __call__(self, prompt: str | List[str], max_sequence_length: int = 128, device: torch.device = None, dtype: torch.dtype = None, num_images_per_prompt: int = 1):
-        
+    def __call__(
+        self,
+        prompt: str | List[str],
+        max_sequence_length: int = 128,
+        device: torch.device = None,
+        dtype: torch.dtype = None,
+        num_images_per_prompt: int = 1,
+    ):
+
         kwargs = {
             "prompt": prompt,
             "max_sequence_length": max_sequence_length,
@@ -70,20 +77,20 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
             "dtype": dtype,
             "num_images_per_prompt": num_images_per_prompt,
         }
-        
+
         prompt_hash = self.hash_prompt(kwargs)
-        
+
         if self.enable_cache:
             cached = self.load_cached(prompt_hash)
             if cached is not None:
                 prompt_embeds = cached[0]
                 prompt_embeds = prompt_embeds.to(device).to(dtype)
                 return prompt_embeds
-            
+
         if not self.model_loaded:
             self.model = self.load_model(device=device, dtype=dtype)
             self.model_loaded = True
-            
+
         prompt = [prompt] if isinstance(prompt, str) else prompt
 
         text_inputs = self.tokenizer(
@@ -94,10 +101,10 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
             add_special_tokens=True,
             return_tensors="pt",
         )
-        
+
         text_input_ids = text_inputs.input_ids
         attention_mask = text_inputs.attention_mask
-        
+
         outputs = self.model(
             text_input_ids.to(device),
             attention_mask=attention_mask.to(device),
@@ -106,14 +113,14 @@ class HidreamLlama(CacheMixin, LoaderMixin, OffloadMixin, ToMixin, nn.Module):
         )
 
         prompt_embeds = outputs.hidden_states[1:]
-        
+
         prompt_embeds = torch.stack(prompt_embeds, dim=0)
 
         _, bs_embed, seq_len, dim = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1, 1)
         prompt_embeds = prompt_embeds.view(-1, num_images_per_prompt, seq_len, dim)
-        
+
         if self.enable_cache:
             self.cache(prompt_hash, prompt_embeds, attention_mask)
-            
+
         return prompt_embeds

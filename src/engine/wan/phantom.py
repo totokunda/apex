@@ -53,7 +53,7 @@ class WanPhantomEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:

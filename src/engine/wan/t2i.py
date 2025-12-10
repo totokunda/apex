@@ -42,8 +42,11 @@ class WanT2IEngine(WanShared):
     ):
 
         safe_emit_progress(progress_callback, 0.0, "Starting t2i pipeline")
-        
-        if high_noise_guidance_scale is not None and low_noise_guidance_scale is not None:
+
+        if (
+            high_noise_guidance_scale is not None
+            and low_noise_guidance_scale is not None
+        ):
             guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
 
         if not self.text_encoder:
@@ -57,9 +60,9 @@ class WanT2IEngine(WanShared):
             num_videos_per_prompt=num_images,
             **text_encoder_kwargs,
         )
-        
+
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -74,7 +77,11 @@ class WanT2IEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.14,
-            "Prepared negative prompt" if negative_prompt_embeds is not None else "Skipped negative prompt",
+            (
+                "Prepared negative prompt"
+                if negative_prompt_embeds is not None
+                else "Skipped negative prompt"
+            ),
         )
 
         if offload:
@@ -87,7 +94,9 @@ class WanT2IEngine(WanShared):
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
-        safe_emit_progress(progress_callback, 0.20, "Prepared embeddings for transformer")
+        safe_emit_progress(
+            progress_callback, 0.20, "Prepared embeddings for transformer"
+        )
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -136,7 +145,7 @@ class WanT2IEngine(WanShared):
             boundary_timestep = None
 
         # Set preview context for step-wise rendering
-        
+
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
@@ -188,5 +197,3 @@ class WanT2IEngine(WanShared):
             image = self._tensor_to_frame(tensor_image)
             safe_emit_progress(progress_callback, 1.0, "Completed t2i pipeline")
             return image
-    
-    

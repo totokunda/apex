@@ -13,9 +13,10 @@ from src.preprocess.base_preprocessor import BasePreprocessor
 from src.mixins import ToMixin
 from src.utils.defaults import get_torch_device
 
+
 class ZoeDetector(ToMixin, BasePreprocessor):
     """ZoeDepth depth estimation using HuggingFace transformers."""
-    
+
     def __init__(self, model_name="Intel/zoedepth-nyu-kitti"):
         """Initialize ZoeDepth with specified model."""
         super().__init__()
@@ -24,6 +25,7 @@ class ZoeDetector(ToMixin, BasePreprocessor):
         from src.preprocess.util import DOWNLOAD_PROGRESS_CALLBACK
         import os as _os
         import tqdm as _tqdm_mod
+
         try:
             from tqdm import auto as _tqdm_auto
         except Exception:
@@ -37,15 +39,18 @@ class ZoeDetector(ToMixin, BasePreprocessor):
         except Exception:
             _hf_utils_tqdm_mod = None
 
-        _orig_tqdm = getattr(_tqdm_mod, 'tqdm', None)
-        _orig_tqdm_auto = getattr(_tqdm_auto, 'tqdm', None) if _tqdm_auto else None
-        _orig_hf_fd_tqdm = getattr(_hf_fd, 'tqdm', None) if _hf_fd else None
-        _orig_hf_utils_tqdm = getattr(_hf_utils_tqdm_mod, 'tqdm', None) if _hf_utils_tqdm_mod else None
+        _orig_tqdm = getattr(_tqdm_mod, "tqdm", None)
+        _orig_tqdm_auto = getattr(_tqdm_auto, "tqdm", None) if _tqdm_auto else None
+        _orig_hf_fd_tqdm = getattr(_hf_fd, "tqdm", None) if _hf_fd else None
+        _orig_hf_utils_tqdm = (
+            getattr(_hf_utils_tqdm_mod, "tqdm", None) if _hf_utils_tqdm_mod else None
+        )
 
         class _ProgressTqdm(_tqdm_mod.tqdm):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self._filename = kwargs.get('desc') or model_name
+                self._filename = kwargs.get("desc") or model_name
+
             def update(self, n=1):
                 result = super().update(n)
                 try:
@@ -69,11 +74,12 @@ class ZoeDetector(ToMixin, BasePreprocessor):
                 pass
 
             # Ensure HF progress bars are enabled during download
-            _prev_disable = _os.environ.get('HF_HUB_DISABLE_PROGRESS_BARS')
-            _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '0'
+            _prev_disable = _os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+            _os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
             # Prefetch model repo with custom tqdm
             try:
                 from huggingface_hub import snapshot_download
+
                 snapshot_download(
                     repo_id=model_name,
                     tqdm_class=_ProgressTqdm,
@@ -81,14 +87,17 @@ class ZoeDetector(ToMixin, BasePreprocessor):
             except Exception:
                 pass
             from transformers import pipeline
-            self.pipe = pipeline(task="depth-estimation", model=model_name, device=self.device)
+
+            self.pipe = pipeline(
+                task="depth-estimation", model=model_name, device=self.device
+            )
         finally:
             # Restore env var
             try:
                 if _prev_disable is None:
-                    _os.environ.pop('HF_HUB_DISABLE_PROGRESS_BARS', None)
+                    _os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
                 else:
-                    _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = _prev_disable
+                    _os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = _prev_disable
             except Exception:
                 pass
             # Restore tqdm references
@@ -113,49 +122,62 @@ class ZoeDetector(ToMixin, BasePreprocessor):
             except Exception:
                 pass
 
-    @classmethod  
-    def from_pretrained(cls, pretrained_model_or_path="Intel/zoedepth-nyu-kitti", filename=None, **kwargs):
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_or_path="Intel/zoedepth-nyu-kitti",
+        filename=None,
+        **kwargs,
+    ):
         """Create ZoeDetector from pretrained model."""
         return cls(model_name=pretrained_model_or_path)
-        
-    def process(self, input_image: InputImage, detect_resolution=512, upscale_method="INTER_CUBIC", **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        detect_resolution=512,
+        upscale_method="INTER_CUBIC",
+        **kwargs,
+    ) -> OutputImage:
         """Perform depth estimation on input image."""
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
-        input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
-        
+
+        input_image, remove_pad = resize_image_with_pad(
+            input_image, detect_resolution, upscale_method
+        )
+
         pil_image = Image.fromarray(input_image)
-        
+
         with torch.no_grad():
             result = self.pipe(pil_image)
             depth = result["depth"]
-            
+
             if isinstance(depth, Image.Image):
                 depth_array = np.array(depth, dtype=np.float32)
             else:
                 depth_array = np.array(depth)
-                
+
             vmin = np.percentile(depth_array, 2)
             vmax = np.percentile(depth_array, 85)
-            
+
             depth_array = depth_array - vmin
             depth_array = depth_array / (vmax - vmin)
             depth_array = 1.0 - depth_array
             depth_image = (depth_array * 255.0).clip(0, 255).astype(np.uint8)
 
         detected_map = remove_pad(HWC3(depth_image))
-        
+
         detected_map = Image.fromarray(detected_map)
-            
+
         return detected_map
 
 
 class ZoeDepthAnythingDetector(ToMixin, BasePreprocessor):
     """ZoeDepthAnything implementation using HuggingFace transformers."""
-    
+
     def __init__(self, model_name="Intel/zoedepth-nyu-kitti"):
         """Initialize ZoeDepthAnything detector."""
         super().__init__()
@@ -163,6 +185,7 @@ class ZoeDepthAnythingDetector(ToMixin, BasePreprocessor):
         from src.preprocess.util import DOWNLOAD_PROGRESS_CALLBACK
         import os as _os
         import tqdm as _tqdm_mod
+
         try:
             from tqdm import auto as _tqdm_auto
         except Exception:
@@ -176,15 +199,18 @@ class ZoeDepthAnythingDetector(ToMixin, BasePreprocessor):
         except Exception:
             _hf_utils_tqdm_mod = None
 
-        _orig_tqdm = getattr(_tqdm_mod, 'tqdm', None)
-        _orig_tqdm_auto = getattr(_tqdm_auto, 'tqdm', None) if _tqdm_auto else None
-        _orig_hf_fd_tqdm = getattr(_hf_fd, 'tqdm', None) if _hf_fd else None
-        _orig_hf_utils_tqdm = getattr(_hf_utils_tqdm_mod, 'tqdm', None) if _hf_utils_tqdm_mod else None
+        _orig_tqdm = getattr(_tqdm_mod, "tqdm", None)
+        _orig_tqdm_auto = getattr(_tqdm_auto, "tqdm", None) if _tqdm_auto else None
+        _orig_hf_fd_tqdm = getattr(_hf_fd, "tqdm", None) if _hf_fd else None
+        _orig_hf_utils_tqdm = (
+            getattr(_hf_utils_tqdm_mod, "tqdm", None) if _hf_utils_tqdm_mod else None
+        )
 
         class _ProgressTqdm(_tqdm_mod.tqdm):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self._filename = kwargs.get('desc') or model_name
+                self._filename = kwargs.get("desc") or model_name
+
             def update(self, n=1):
                 result = super().update(n)
                 try:
@@ -208,17 +234,18 @@ class ZoeDepthAnythingDetector(ToMixin, BasePreprocessor):
                 pass
 
             # Ensure HF progress bars are enabled during download
-            _prev_disable = _os.environ.get('HF_HUB_DISABLE_PROGRESS_BARS')
-            _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '0'
+            _prev_disable = _os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+            _os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
             from transformers import pipeline
+
             self.pipe = pipeline(task="depth-estimation", model=model_name)
         finally:
             # Restore env var
             try:
                 if _prev_disable is None:
-                    _os.environ.pop('HF_HUB_DISABLE_PROGRESS_BARS', None)
+                    _os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
                 else:
-                    _os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = _prev_disable
+                    _os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = _prev_disable
             except Exception:
                 pass
             # Restore tqdm references
@@ -244,41 +271,54 @@ class ZoeDepthAnythingDetector(ToMixin, BasePreprocessor):
                 pass
         self.device = "cpu"
 
-    @classmethod  
-    def from_pretrained(cls, pretrained_model_or_path="Intel/zoedepth-nyu-kitti", filename=None, **kwargs):
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_or_path="Intel/zoedepth-nyu-kitti",
+        filename=None,
+        **kwargs,
+    ):
         """Create from pretrained model."""
         return cls(model_name=pretrained_model_or_path)
-        
-    def process(self, input_image: InputImage, detect_resolution=512, upscale_method="INTER_CUBIC", **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        detect_resolution=512,
+        upscale_method="INTER_CUBIC",
+        **kwargs,
+    ) -> OutputImage:
         """Perform depth estimation."""
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
-        input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
-        
+
+        input_image, remove_pad = resize_image_with_pad(
+            input_image, detect_resolution, upscale_method
+        )
+
         pil_image = Image.fromarray(input_image)
-        
+
         with torch.no_grad():
             result = self.pipe(pil_image)
             depth = result["depth"]
-            
+
             if isinstance(depth, Image.Image):
                 depth_array = np.array(depth, dtype=np.float32)
             else:
                 depth_array = np.array(depth)
-                
+
             vmin = np.percentile(depth_array, 2)
             vmax = np.percentile(depth_array, 85)
-            
+
             depth_array = depth_array - vmin
             depth_array = depth_array / (vmax - vmin)
             depth_array = 1.0 - depth_array
             depth_image = (depth_array * 255.0).clip(0, 255).astype(np.uint8)
 
         detected_map = remove_pad(HWC3(depth_image))
-        
+
         detected_map = Image.fromarray(detected_map)
-            
+
         return detected_map

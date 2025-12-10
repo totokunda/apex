@@ -4,6 +4,7 @@ from .shared import QwenImageShared
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class QwenImageT2IEngine(QwenImageShared):
     """QwenImage Text-to-Image Engine Implementation"""
 
@@ -39,7 +40,9 @@ class QwenImageT2IEngine(QwenImageShared):
         self.to_device(self.text_encoder)
         safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
-        batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images
+        batch_size = (
+            num_images * len(prompt) if isinstance(prompt, list) else num_images
+        )
 
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
@@ -60,7 +63,11 @@ class QwenImageT2IEngine(QwenImageShared):
         safe_emit_progress(
             progress_callback,
             0.18,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -130,7 +137,9 @@ class QwenImageT2IEngine(QwenImageShared):
             mu=mu,
             timesteps=timesteps,
         )
-        safe_emit_progress(progress_callback, 0.40, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.40, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -187,7 +196,7 @@ class QwenImageT2IEngine(QwenImageShared):
             denoise_progress_callback=denoise_progress_callback,
             render_on_step_interval=render_on_step_interval,
         )
-        
+
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:

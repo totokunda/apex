@@ -3,6 +3,7 @@ from src.utils.type import EnumType
 from typing import List, Dict, Any, Tuple
 from collections import Counter
 
+
 class UnconditionGuard:
     def __init__(self, kwargs):
         self.kwargs = kwargs
@@ -44,9 +45,7 @@ def check_forward(module, inputs, outputs):
 
 
 class MagiDenoise:
-    def __init__(
-        self,  *args, **kwargs
-    ):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:

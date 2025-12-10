@@ -30,8 +30,10 @@ router = APIRouter(prefix="/engine", tags=["engine"])
 
 class RunEngineRequest(BaseModel):
     # Identify the manifest to run. One of these must be provided.
-    manifest_id: Optional[str] = None  # matches metadata.id discovered via /manifest/list
-    yaml_path: Optional[str] = None    # absolute path to a YAML file
+    manifest_id: Optional[str] = (
+        None  # matches metadata.id discovered via /manifest/list
+    )
+    yaml_path: Optional[str] = None  # absolute path to a YAML file
     # Inputs keyed by UI input id, values already resolved to primitives or file paths
     inputs: Dict[str, Any]
     # Optional: user-selected component choices (e.g., scheduler, transformer, etc.)
@@ -64,10 +66,14 @@ def _resolve_manifest_path(manifest_id: Optional[str], yaml_path: Optional[str])
     if manifest_id:
         manifest = get_manifest(manifest_id)
         if not manifest:
-            raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
-        return str(MANIFEST_BASE_PATH / manifest['full_path'])
+            raise HTTPException(
+                status_code=404, detail=f"Manifest not found: {manifest_id}"
+            )
+        return str(MANIFEST_BASE_PATH / manifest["full_path"])
 
-    raise HTTPException(status_code=400, detail="Provide either manifest_id or yaml_path")
+    raise HTTPException(
+        status_code=400, detail="Provide either manifest_id or yaml_path"
+    )
 
 
 @router.post("/run", response_model=JobResponse)
@@ -89,7 +95,7 @@ def run_engine(request: RunEngineRequest):
 
     try:
         from .ray_tasks import run_engine_from_manifest  # lazy import to avoid cycles
-        
+
         ref = run_engine_from_manifest.options(**resources).remote(
             manifest_path,
             job_id,
@@ -99,7 +105,9 @@ def run_engine(request: RunEngineRequest):
         )
 
         register_job(job_id, ref, "engine", {"manifest_path": manifest_path})
-        logger.info(f"Engine run submitted job_id={job_id} manifest={manifest_path} resources={resources}")
+        logger.info(
+            f"Engine run submitted job_id={job_id} manifest={manifest_path} resources={resources}"
+        )
         return JobResponse(job_id=job_id, status="queued", message="Engine job created")
     except Exception as e:
         logger.error(f"Failed to submit engine run: {e}")
@@ -140,5 +148,3 @@ def cancel_engine(job_id: str):
     if status in ["cancelled", "canceled"]:
         return JobResponse(job_id=job_id, status=status, message=result.get("message"))
     raise HTTPException(status_code=404, detail=result.get("message", "Job not found"))
-
-

@@ -1,26 +1,31 @@
 from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
-import torch 
+import torch
 from typing import Union, List, Optional, Callable, Dict, Any
 
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 import numpy as np
 from diffusers.utils.torch_utils import randn_tensor
 
+
 class OvisT2IEngine(BaseEngine):
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1)
+            if getattr(self, "vae", None)
+            else 8
+        )
         # Ovis-Image latents are turned into 2x2 patches and packed. This means the latent width and height has to be divisible
         # by the patch size. So the vae scale factor is multiplied by the patch size to account for this
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
+        self.image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
         self.system_prompt = "Describe the image by detailing the color, quantity, text, shape, size, texture, spatial relationships of the objects and background: "
         self.user_prompt_begin_id = 28
         self.tokenizer_max_length = 256 + self.user_prompt_begin_id
         self.default_sample_size = 128
-        
-        
-    
+
     def _get_messages(
         self,
         prompt: Union[str, List[str]] = None,
@@ -37,7 +42,10 @@ class OvisT2IEngine(BaseEngine):
                 }
             ]
             message = self.text_encoder.tokenizer.apply_chat_template(
-                message, tokenize=False, add_generation_prompt=True, enable_thinking=False
+                message,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
             )
             messages.append(message)
         return messages
@@ -69,10 +77,10 @@ class OvisT2IEngine(BaseEngine):
             return_attention_mask=True,
             reshape_prompt_embeds=False,
         )
-        
+
         prompt_embeds = prompt_embeds.to(device=device, dtype=dtype)
         attention_mask = attention_mask.to(device=device)
-        
+
         prompt_embeds = prompt_embeds * attention_mask[..., None]
         prompt_embeds = prompt_embeds[:, self.user_prompt_begin_id :, :]
 
@@ -80,7 +88,9 @@ class OvisT2IEngine(BaseEngine):
 
         # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_images_per_prompt, seq_len, -1
+        )
 
         return prompt_embeds
 
@@ -115,18 +125,28 @@ class OvisT2IEngine(BaseEngine):
 
         dtype = self.component_dtypes["transformer"]
         text_ids = torch.zeros(prompt_embeds.shape[1], 3)
-        text_ids[..., 1] = text_ids[..., 1] + torch.arange(prompt_embeds.shape[1])[None, :]
-        text_ids[..., 2] = text_ids[..., 2] + torch.arange(prompt_embeds.shape[1])[None, :]
+        text_ids[..., 1] = (
+            text_ids[..., 1] + torch.arange(prompt_embeds.shape[1])[None, :]
+        )
+        text_ids[..., 2] = (
+            text_ids[..., 2] + torch.arange(prompt_embeds.shape[1])[None, :]
+        )
         text_ids = text_ids.to(device=device, dtype=dtype)
         return prompt_embeds, text_ids
-    
+
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
         latent_image_ids = torch.zeros(height, width, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None]
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        latent_image_ids[..., 1] = (
+            latent_image_ids[..., 1] + torch.arange(height)[:, None]
+        )
+        latent_image_ids[..., 2] = (
+            latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        )
 
-        latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
+        latent_image_id_height, latent_image_id_width, latent_image_id_channels = (
+            latent_image_ids.shape
+        )
 
         latent_image_ids = latent_image_ids.reshape(
             latent_image_id_height * latent_image_id_width, latent_image_id_channels
@@ -136,9 +156,13 @@ class OvisT2IEngine(BaseEngine):
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
-        latents = latents.view(batch_size, num_channels_latents, height // 2, 2, width // 2, 2)
+        latents = latents.view(
+            batch_size, num_channels_latents, height // 2, 2, width // 2, 2
+        )
         latents = latents.permute(0, 2, 4, 1, 3, 5)
-        latents = latents.reshape(batch_size, (height // 2) * (width // 2), num_channels_latents * 4)
+        latents = latents.reshape(
+            batch_size, (height // 2) * (width // 2), num_channels_latents * 4
+        )
 
         return latents
 
@@ -177,7 +201,9 @@ class OvisT2IEngine(BaseEngine):
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is not None:
-            latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+            latent_image_ids = self._prepare_latent_image_ids(
+                batch_size, height // 2, width // 2, device, dtype
+            )
             return latents.to(device=device, dtype=dtype), latent_image_ids
 
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -187,9 +213,13 @@ class OvisT2IEngine(BaseEngine):
             )
 
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
+        latents = self._pack_latents(
+            latents, batch_size, num_channels_latents, height, width
+        )
 
-        latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+        latent_image_ids = self._prepare_latent_image_ids(
+            batch_size, height // 2, width // 2, device, dtype
+        )
 
         return latents, latent_image_ids
 
@@ -212,8 +242,9 @@ class OvisT2IEngine(BaseEngine):
     @property
     def interrupt(self):
         return self._interrupt
-        
-    def run(self, 
+
+    def run(
+        self,
         prompt: Union[str, List[str]] = None,
         negative_prompt: Union[str, List[str]] = "",
         guidance_scale: float = 5.0,
@@ -235,15 +266,15 @@ class OvisT2IEngine(BaseEngine):
         progress_callback: Callable = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
-        ):
-        
+    ):
+
         if not height or not width:
-            height = self.default_sample_size * self.vae_scale_factor 
-            width = self.default_sample_size * self.vae_scale_factor 
-            
+            height = self.default_sample_size * self.vae_scale_factor
+            width = self.default_sample_size * self.vae_scale_factor
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         self._joint_attention_kwargs = joint_attention_kwargs
         self._current_timestep = None
         self._interrupt = False
@@ -278,15 +309,14 @@ class OvisT2IEngine(BaseEngine):
                 device=device,
                 num_images_per_prompt=num_images_per_prompt,
             )
-            
+
         if offload:
             self._offload(self.text_encoder)
 
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-            
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
@@ -305,8 +335,15 @@ class OvisT2IEngine(BaseEngine):
         )
 
         # 5. Prepare timesteps
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
-        if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
+        sigmas = (
+            np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+            if sigmas is None
+            else sigmas
+        )
+        if (
+            hasattr(self.scheduler.config, "use_flow_sigmas")
+            and self.scheduler.config.use_flow_sigmas
+        ):
             sigmas = None
         image_seq_len = latents.shape[1]
         mu = self.calculate_shift(
@@ -322,7 +359,9 @@ class OvisT2IEngine(BaseEngine):
             sigmas=sigmas,
             mu=mu,
         )
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
         if self.joint_attention_kwargs is None:
@@ -335,7 +374,7 @@ class OvisT2IEngine(BaseEngine):
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
-        
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -365,37 +404,50 @@ class OvisT2IEngine(BaseEngine):
                             img_ids=latent_image_ids,
                             return_dict=False,
                         )[0]
-                    noise_pred = neg_noise_pred + guidance_scale * (noise_pred - neg_noise_pred)
+                    noise_pred = neg_noise_pred + guidance_scale * (
+                        noise_pred - neg_noise_pred
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
         self._current_timestep = None
-        
+
         if return_latents:
             return latents
-        
+
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         images = self.vae_decode(latents, offload=offload)
         images = self._tensor_to_frame(images)
-        
+
         return images
-    
+
     def _render_step(self, latents, render_on_step_callback):
-        latents = self._unpack_latents(latents, self._preview_height, self._preview_width, self.vae_scale_factor)
+        latents = self._unpack_latents(
+            latents, self._preview_height, self._preview_width, self.vae_scale_factor
+        )
         images = self.vae_decode(latents, offload=self._preview_offload)
         images = self._tensor_to_frame(images)
         render_on_step_callback(images[0])

@@ -60,11 +60,11 @@ class LayerNorm_FP32(nn.LayerNorm):
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         origin_dtype = inputs.dtype
         out = F.layer_norm(
-            inputs.float(), 
-            self.normalized_shape, 
-            None if self.weight is None else self.weight.float(), 
-            None if self.bias is None else self.bias.float() ,
-            self.eps
+            inputs.float(),
+            self.normalized_shape,
+            None if self.weight is None else self.weight.float(),
+            None if self.bias is None else self.bias.float(),
+            self.eps,
         ).to(origin_dtype)
         return out
 
@@ -94,7 +94,9 @@ class PatchEmbed3D(nn.Module):
         self.in_chans = in_chans
         self.embed_dim = embed_dim
 
-        self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(
+            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
@@ -146,9 +148,13 @@ class FinalLayer_FP32(nn.Module):
         self.out_channels = out_channels
         self.adaln_tembed_dim = adaln_tembed_dim
 
-        self.norm_final = LayerNorm_FP32(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm_final = LayerNorm_FP32(
+            hidden_size, elementwise_affine=False, eps=1e-6
+        )
         self.linear = nn.Linear(hidden_size, num_patch * out_channels, bias=True)
-        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(adaln_tembed_dim, 2 * hidden_size, bias=True))
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(), nn.Linear(adaln_tembed_dim, 2 * hidden_size, bias=True)
+        )
 
     def forward(self, x, t, latent_shape):
         # timestep shape: [B, T, C]
@@ -156,9 +162,13 @@ class FinalLayer_FP32(nn.Module):
         B, N, C = x.shape
         T, _, _ = latent_shape
 
-        with amp.autocast('cuda', dtype=torch.float32):
-            shift, scale = self.adaLN_modulation(t).unsqueeze(2).chunk(2, dim=-1) # [B, T, 1, C]
-            x = modulate_fp32(self.norm_final, x.view(B, T, -1, C), shift, scale).view(B, N, C)
+        with amp.autocast("cuda", dtype=torch.float32):
+            shift, scale = (
+                self.adaLN_modulation(t).unsqueeze(2).chunk(2, dim=-1)
+            )  # [B, T, 1, C]
+            x = modulate_fp32(self.norm_final, x.view(B, T, -1, C), shift, scale).view(
+                B, N, C
+            )
             x = self.linear(x)
         return x
 
@@ -189,12 +199,18 @@ class TimestepEmbedder(nn.Module):
         :return: an (N, D) Tensor of positional embeddings.
         """
         half = dim // 2
-        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half)
+        freqs = torch.exp(
+            -math.log(max_period)
+            * torch.arange(start=0, end=half, dtype=torch.float32)
+            / half
+        )
         freqs = freqs.to(device=t.device)
         args = t[:, None].float() * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
-            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+            embedding = torch.cat(
+                [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+            )
         return embedding
 
     def forward(self, t, dtype):

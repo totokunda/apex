@@ -109,13 +109,17 @@ class RifePostprocessor(BasePostprocessor):
                 try:
                     src_model_dir = os.path.join(os.path.dirname(__file__), "model")
                     dst_model_dir = os.path.join(save_rife_path, "model")
-                    if os.path.isdir(src_model_dir) and not os.path.exists(dst_model_dir):
+                    if os.path.isdir(src_model_dir) and not os.path.exists(
+                        dst_model_dir
+                    ):
                         shutil.copytree(src_model_dir, dst_model_dir)
                 except Exception:
                     pass
                 # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
                 try:
-                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    engine_root = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                    )
                     if engine_root not in sys.path:
                         sys.path.insert(0, engine_root)
                 except Exception:
@@ -145,7 +149,9 @@ class RifePostprocessor(BasePostprocessor):
                 sys.path.insert(0, save_rife_path)
             # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
             try:
-                engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                engine_root = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                )
                 if engine_root not in sys.path:
                     sys.path.insert(0, engine_root)
             except Exception:
@@ -164,7 +170,9 @@ class RifePostprocessor(BasePostprocessor):
                     sys.path.insert(0, rife_dir)
                 # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
                 try:
-                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    engine_root = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                    )
                     if engine_root not in sys.path:
                         sys.path.insert(0, engine_root)
                 except Exception:
@@ -176,7 +184,9 @@ class RifePostprocessor(BasePostprocessor):
                     sys.path.insert(0, abs_path)
                     # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
                     try:
-                        engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                        engine_root = os.path.abspath(
+                            os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                        )
                         if engine_root not in sys.path:
                             sys.path.insert(0, engine_root)
                     except Exception:
@@ -188,7 +198,9 @@ class RifePostprocessor(BasePostprocessor):
                     sys.path.insert(0, rife_dir)
                 # Ensure engine root (parent of 'src') is available for 'src.utils.*' imports
                 try:
-                    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+                    engine_root = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                    )
                     if engine_root not in sys.path:
                         sys.path.insert(0, engine_root)
                 except Exception:
@@ -196,7 +208,7 @@ class RifePostprocessor(BasePostprocessor):
             return model_dir
 
     @torch.no_grad()
-    def __call__(self, video:InputVideo, **kwargs) -> List[Image.Image]:
+    def __call__(self, video: InputVideo, **kwargs) -> List[Image.Image]:
         """
         RIFE interpolation that mirrors the provided reference script:
           - multi expansion (default 2, or 2**exp when exp != 1)
@@ -239,11 +251,13 @@ class RifePostprocessor(BasePostprocessor):
         n_inserts = multi - 1
 
         # Optional progress callback (idx, total, message)
-        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = kwargs.get("progress_callback")
+        progress_callback: Optional[Callable[[int, int, Optional[str]], None]] = (
+            kwargs.get("progress_callback")
+        )
 
         # ---- 3) Prepare numpy frames like inference script ----
         # Ensure we use the model's actual device for all tensors
-       
+
         dev = get_torch_device()
         frames_np: List[np.ndarray] = []
         for im in frames:
@@ -277,7 +291,11 @@ class RifePostprocessor(BasePostprocessor):
             if version >= 3.9:
                 res = []
                 for i in range(n):
-                    res.append(self.model.inference(I0, I1, (i + 1) * 1.0 / (n + 1), self.scale))
+                    res.append(
+                        self.model.inference(
+                            I0, I1, (i + 1) * 1.0 / (n + 1), self.scale
+                        )
+                    )
                 return res
             else:
                 middle = self.model.inference(I0, I1, self.scale)
@@ -307,7 +325,13 @@ class RifePostprocessor(BasePostprocessor):
         videogen = frames_np[1:]
         write_out: List[np.ndarray] = []
 
-        I1 = torch.from_numpy(np.transpose(lastframe, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+        I1 = (
+            torch.from_numpy(np.transpose(lastframe, (2, 0, 1)))
+            .to(dev, non_blocking=True)
+            .unsqueeze(0)
+            .float()
+            / 255.0
+        )
         I1 = pad_image(I1)
         temp = None
         idx = 0
@@ -322,10 +346,16 @@ class RifePostprocessor(BasePostprocessor):
             if frame is None:
                 break
             I0 = I1
-            I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+            I1 = (
+                torch.from_numpy(np.transpose(frame, (2, 0, 1)))
+                .to(dev, non_blocking=True)
+                .unsqueeze(0)
+                .float()
+                / 255.0
+            )
             I1 = pad_image(I1)
-            I0_small = F.interpolate(I0, (32, 32), mode='bilinear', align_corners=False)
-            I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
+            I0_small = F.interpolate(I0, (32, 32), mode="bilinear", align_corners=False)
+            I1_small = F.interpolate(I1, (32, 32), mode="bilinear", align_corners=False)
             ssim = float(_ssim(I0_small[:, :3], I1_small[:, :3]))
 
             break_flag = False
@@ -338,10 +368,18 @@ class RifePostprocessor(BasePostprocessor):
                     frame = lastframe
                 else:
                     temp = next_frame
-                I1 = torch.from_numpy(np.transpose(frame, (2, 0, 1))).to(dev, non_blocking=True).unsqueeze(0).float() / 255.0
+                I1 = (
+                    torch.from_numpy(np.transpose(frame, (2, 0, 1)))
+                    .to(dev, non_blocking=True)
+                    .unsqueeze(0)
+                    .float()
+                    / 255.0
+                )
                 I1 = pad_image(I1)
                 I1 = self.model.inference(I0, I1, scale=self.scale)
-                I1_small = F.interpolate(I1, (32, 32), mode='bilinear', align_corners=False)
+                I1_small = F.interpolate(
+                    I1, (32, 32), mode="bilinear", align_corners=False
+                )
                 ssim = float(_ssim(I0_small[:, :3], I1_small[:, :3]))
                 frame = (I1[0] * 255).byte().cpu().numpy().transpose(1, 2, 0)[:h, :w]
 
@@ -355,7 +393,7 @@ class RifePostprocessor(BasePostprocessor):
             # write frames (non-montage path)
             write_out.append(lastframe)
             for mid in output:
-                mid_np = (((mid[0] * 255.0).byte().cpu().numpy().transpose(1, 2, 0)))
+                mid_np = (mid[0] * 255.0).byte().cpu().numpy().transpose(1, 2, 0)
                 write_out.append(mid_np[:h, :w])
             pbar.update(1)
             processed_steps += 1

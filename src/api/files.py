@@ -9,13 +9,16 @@ from src.utils.defaults import get_cache_path, get_components_path
 
 router = APIRouter(prefix="/files", tags=["files"])
 
+
 def _base_for_scope(scope: str) -> Path:
     s = (scope or "").lower().strip()
     if s == "apex-cache":
         return Path(get_cache_path()).expanduser().resolve()
     if s == "components":
         return Path(get_components_path()).expanduser().resolve()
-    raise HTTPException(status_code=400, detail="Invalid scope; expected 'apex-cache' or 'components'")
+    raise HTTPException(
+        status_code=400, detail="Invalid scope; expected 'apex-cache' or 'components'"
+    )
 
 
 def _safe_join(base: Path, rel: str) -> Path:
@@ -27,7 +30,7 @@ def _safe_join(base: Path, rel: str) -> Path:
     # If rel already includes the base at its start, strip it to avoid duplication
     base_str = str(base)
     if rel_input.startswith(base_str):
-        rel_stripped = rel_input[len(base_str):].lstrip("/\\")
+        rel_stripped = rel_input[len(base_str) :].lstrip("/\\")
         rel_path = Path(rel_stripped)
     else:
         # Normalize leading separators for regular relative joins
@@ -133,5 +136,3 @@ async def ingest(scope: str, dest: str, file: UploadFile = File(...)):
     # Return the path relative to base
     rel = str(target.relative_to(base))
     return {"path": rel}
-
-

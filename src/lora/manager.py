@@ -4,7 +4,10 @@ import hashlib
 import traceback
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Union
-from src.converters.convert import get_transformer_converter_by_model_name, strip_common_prefix
+from src.converters.convert import (
+    get_transformer_converter_by_model_name,
+    strip_common_prefix,
+)
 import torch
 from loguru import logger
 from diffusers.loaders import PeftAdapterMixin
@@ -12,10 +15,17 @@ from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
 from urllib.parse import urlencode
-try: 
+
+# Ensure PEFT is patched to handle GGML / FP8-scaled linears with a custom LoRA wrapper.
+from src.lora.quantized_lora import patch_peft_for_quantized_lora
+
+patch_peft_for_quantized_lora()
+
+try:
     from nunchaku.lora.flux.compose import compose_lora
 except ImportError:
     compose_lora = None
+
 
 @dataclass
 class LoraItem:
@@ -26,6 +36,7 @@ class LoraItem:
     name: Optional[str] = None
     component: Optional[str] = None
 
+
 class LoraManager(DownloadMixin):
     def __init__(self, save_dir: str = DEFAULT_LORA_SAVE_PATH) -> None:
         self.save_dir = save_dir
@@ -35,8 +46,10 @@ class LoraManager(DownloadMixin):
 
     def _hash(self, text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
-    
-    def _replace_up_down_to_AB_keys(self, state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+
+    def _replace_up_down_to_AB_keys(
+        self, state_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
         # Replace all keys that end with _up or _down with _A or _B
         # and make sure the LoRA rank is on the **second** dimension for lora_B
         # to match how diffusers / PEFT infer rank (see `peft.py` around rank[f"^{key}"] = val.shape[1]).
@@ -75,7 +88,9 @@ class LoraManager(DownloadMixin):
 
             a_val = new_state_dict.get(a_key)
             b_val = new_state_dict.get(b_key)
-            if not isinstance(a_val, torch.Tensor) or not isinstance(b_val, torch.Tensor):
+            if not isinstance(a_val, torch.Tensor) or not isinstance(
+                b_val, torch.Tensor
+            ):
                 continue
 
             # Only handle simple linear-style LoRA weights
@@ -85,19 +100,18 @@ class LoraManager(DownloadMixin):
             b0, b1 = b_val.shape
             # If the smaller dimension (candidate rank) is on dim 0 for lora_B,
             # transpose both A and B so that rank becomes the second dim for lora_B.
-            
 
         del state_dict
         return new_state_dict
-
 
     def resolve(
         self,
         source: str,
         prefer_name: Optional[str] = None,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ) -> LoraItem:
-
         """
         Resolve and download a LoRA from any supported source:
         - HuggingFace repo or file path
@@ -125,8 +139,8 @@ class LoraManager(DownloadMixin):
             # Model-id style spec, delegate to helper with progress
             if source.startswith("civitai:"):
                 local_path = self._download_from_civitai_spec(
-                        source,
-                        progress_callback=progress_callback,
+                    source,
+                    progress_callback=progress_callback,
                 )
             else:
                 # Direct CivitAI download URL
@@ -217,7 +231,7 @@ class LoraManager(DownloadMixin):
                 return False
 
         return True
-    
+
     def _clean_adapter_name(self, name: str) -> str:
         if len(name) > 64:
             name = name[:64]
@@ -240,7 +254,7 @@ class LoraManager(DownloadMixin):
         - scales optionally overrides per-adapter scale values
         Returns resolved LoraItem objects in load order.
         """
-  
+
         if not hasattr(model, "set_adapters"):
             raise ValueError(
                 "Model doesn't support PEFT/LoRA. Ensure transformer inherits PeftAdapterMixin."
@@ -263,14 +277,13 @@ class LoraManager(DownloadMixin):
                 item = src_or_item
             else:
                 item = self.resolve(str(src_or_item))
-            
+
             # override from global scales list if provided
             if scales is not None and idx < len(scales) and scales[idx] is not None:
                 scale = float(scales[idx])
             item.scale = float(scale)
             resolved.append(item)
-            
-        
+
         if hasattr(model, "update_lora_params") and compose_lora is not None:
             composed_lora = []
             for i, item in enumerate(resolved):
@@ -304,7 +317,7 @@ class LoraManager(DownloadMixin):
                     local_path_state_dict = self._strip_adapter_name_from_keys(
                         local_path_state_dict
                     )
-                    
+
                     keys = list(local_path_state_dict.keys())
 
                     prefix = None
@@ -312,18 +325,18 @@ class LoraManager(DownloadMixin):
                         "transformer"
                     ):
                         prefix = "transformer"
-                    elif keys[0].startswith("diffusion_model") and keys[-1].startswith("diffusion_model"):
+                    elif keys[0].startswith("diffusion_model") and keys[-1].startswith(
+                        "diffusion_model"
+                    ):
                         prefix = "diffusion_model"
                     elif keys[0].startswith("model") and keys[-1].startswith("model"):
                         prefix = "model"
-                    
+
                     # ensure adapter name is not too long and does not have . or / in it if so remove it
                     adapter_name = self._clean_adapter_name(adapter_name)
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
-                    
-                    
 
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 
@@ -332,7 +345,7 @@ class LoraManager(DownloadMixin):
                 model.set_adapters(final_names, weights=final_scales)
                 loaded_resolved.append(resolved[i])
             except Exception as e:
-                raise e # For now 
+                raise e  # For now
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
@@ -346,21 +359,27 @@ class LoraManager(DownloadMixin):
             converter.convert(state_dict)
             converted = True
         return state_dict, converted
-    
-    
+
     def _format_to_extension(self, format: str) -> str:
         format = format.lower()
         if format == "safetensors" or format == "safetensor":
             return "safetensors"
-        elif format == "pickletensor" or format == "pickle" or format == "pt" or format == "pth":
+        elif (
+            format == "pickletensor"
+            or format == "pickle"
+            or format == "pt"
+            or format == "pth"
+        ):
             return "pt"
         else:
-            return "safetensors" # default to safetensors
+            return "safetensors"  # default to safetensors
 
     def _download_from_civitai_spec(
         self,
         spec: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ) -> str:
         """
         Support strings like:
@@ -375,18 +394,29 @@ class LoraManager(DownloadMixin):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        def download_file_id(file_id: Union[int, str], format: Optional[str] = None) -> str:
+        def download_file_id(
+            file_id: Union[int, str], format: Optional[str] = None
+        ) -> str:
             url = f"https://civitai.com/api/download/models/{file_id}"
             url_params = {}
-            if format is not None and format == "safetensors" or format == "pt": 
+            if format is not None and format == "safetensors" or format == "pt":
                 url_params["type"] = "Model"
-                url_params["format"] = "SafeTensor" if format == "safetensors" or format == "safetensor" else "PickleTensor"
+                url_params["format"] = (
+                    "SafeTensor"
+                    if format == "safetensors" or format == "safetensor"
+                    else "PickleTensor"
+                )
             api_key = os.getenv("CIVITAI_API_KEY", None)
             if api_key:
                 url_params["token"] = api_key
             url_params = urlencode(url_params)
             url = f"{url}?{url_params}"
-            local_path = self.download_from_url(url, self.save_dir, progress_callback=progress_callback, filename=f"{file_id}.{format}" if format else None) 
+            local_path = self.download_from_url(
+                url,
+                self.save_dir,
+                progress_callback=progress_callback,
+                filename=f"{file_id}.{format}" if format else None,
+            )
             return local_path
 
         if spec.startswith("civitai-file:"):
@@ -408,9 +438,12 @@ class LoraManager(DownloadMixin):
                 fname = f.get("name") or ""
                 format = f.get("metadata", {}).get("format", "").lower()
                 format = self._format_to_extension(format)
-                if fname.lower().endswith((".safetensors", ".pt", ".bin")) and file_id is not None:
+                if (
+                    fname.lower().endswith((".safetensors", ".pt", ".bin"))
+                    and file_id is not None
+                ):
                     return download_file_id(file_id, format)
-        
+
         raise RuntimeError(f"No downloadable files found for CivitAI model {model_id}")
 
     def load_file(self, local_path: str) -> str:
@@ -443,6 +476,6 @@ class LoraManager(DownloadMixin):
                 parts.pop(-2)
                 key = ".".join(parts)
             new_state[key] = value
-        
+
         del state_dict
         return new_state

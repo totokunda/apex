@@ -17,7 +17,12 @@ import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.models.attention_processor import Attention
-from diffusers.models.embeddings import TimestepEmbedding, apply_rotary_emb, get_1d_rotary_pos_embed, get_timestep_embedding
+from diffusers.models.embeddings import (
+    TimestepEmbedding,
+    apply_rotary_emb,
+    get_1d_rotary_pos_embed,
+    get_timestep_embedding,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.transformers.transformer_bria import BriaAttnProcessor
@@ -29,11 +34,14 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import AttentionModuleMixin, FeedForward
-from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
+from diffusers.models.normalization import (
+    AdaLayerNormContinuous,
+    AdaLayerNormZero,
+    AdaLayerNormZeroSingle,
+)
 from src.transformer.fibo.base.attention import BriaFiboAttnProcessor
- 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 # Based on https://github.com/huggingface/diffusers/blob/55d49d4379007740af20629bb61aba9546c6b053/src/diffusers/models/transformers/transformer_flux.py
@@ -72,23 +80,35 @@ class BriaFiboAttention(torch.nn.Module, AttentionModuleMixin):
         self.added_kv_proj_dim = added_kv_proj_dim
         self.added_proj_bias = added_proj_bias
 
-        self.norm_q = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
-        self.norm_k = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
+        self.norm_q = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.norm_k = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
         self.to_q = torch.nn.Linear(query_dim, self.inner_dim, bias=bias)
         self.to_k = torch.nn.Linear(query_dim, self.inner_dim, bias=bias)
         self.to_v = torch.nn.Linear(query_dim, self.inner_dim, bias=bias)
 
         if not self.pre_only:
             self.to_out = torch.nn.ModuleList([])
-            self.to_out.append(torch.nn.Linear(self.inner_dim, self.out_dim, bias=out_bias))
+            self.to_out.append(
+                torch.nn.Linear(self.inner_dim, self.out_dim, bias=out_bias)
+            )
             self.to_out.append(torch.nn.Dropout(dropout))
 
         if added_kv_proj_dim is not None:
             self.norm_added_q = torch.nn.RMSNorm(dim_head, eps=eps)
             self.norm_added_k = torch.nn.RMSNorm(dim_head, eps=eps)
-            self.add_q_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
-            self.add_k_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
-            self.add_v_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+            self.add_q_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
+            self.add_k_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
+            self.add_v_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
             self.to_add_out = torch.nn.Linear(self.inner_dim, query_dim, bias=out_bias)
 
         if processor is None:
@@ -103,15 +123,28 @@ class BriaFiboAttention(torch.nn.Module, AttentionModuleMixin):
         image_rotary_emb: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        attn_parameters = set(inspect.signature(self.processor.__call__).parameters.keys())
+        attn_parameters = set(
+            inspect.signature(self.processor.__call__).parameters.keys()
+        )
         quiet_attn_parameters = {"ip_adapter_masks", "ip_hidden_states"}
-        unused_kwargs = [k for k, _ in kwargs.items() if k not in attn_parameters and k not in quiet_attn_parameters]
+        unused_kwargs = [
+            k
+            for k, _ in kwargs.items()
+            if k not in attn_parameters and k not in quiet_attn_parameters
+        ]
         if len(unused_kwargs) > 0:
             logger.warning(
                 f"joint_attention_kwargs {unused_kwargs} are not expected by {self.processor.__class__.__name__} and will be ignored."
             )
         kwargs = {k: w for k, w in kwargs.items() if k in attn_parameters}
-        return self.processor(self, hidden_states, encoder_hidden_states, attention_mask, image_rotary_emb, **kwargs)
+        return self.processor(
+            self,
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            image_rotary_emb,
+            **kwargs,
+        )
 
 
 class BriaFiboEmbedND(torch.nn.Module):
@@ -146,7 +179,13 @@ class BriaFiboEmbedND(torch.nn.Module):
 
 @maybe_allow_in_graph
 class BriaFiboSingleTransformerBlock(nn.Module):
-    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, mlp_ratio: float = 4.0):
+    def __init__(
+        self,
+        dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        mlp_ratio: float = 4.0,
+    ):
         super().__init__()
         self.mlp_hidden_dim = int(dim * mlp_ratio)
 
@@ -200,7 +239,9 @@ class BriaFiboSingleTransformerBlock(nn.Module):
 class BriaFiboTextProjection(nn.Module):
     def __init__(self, in_features, hidden_size):
         super().__init__()
-        self.linear = nn.Linear(in_features=in_features, out_features=hidden_size, bias=False)
+        self.linear = nn.Linear(
+            in_features=in_features, out_features=hidden_size, bias=False
+        )
 
     def forward(self, caption):
         hidden_states = self.linear(caption)
@@ -211,7 +252,12 @@ class BriaFiboTextProjection(nn.Module):
 # Based on from diffusers.models.transformers.transformer_flux.FluxTransformerBlock
 class BriaFiboTransformerBlock(nn.Module):
     def __init__(
-        self, dim: int, num_attention_heads: int, attention_head_dim: int, qk_norm: str = "rms_norm", eps: float = 1e-6
+        self,
+        dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        qk_norm: str = "rms_norm",
+        eps: float = 1e-6,
     ):
         super().__init__()
 
@@ -234,7 +280,9 @@ class BriaFiboTransformerBlock(nn.Module):
         self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff_context = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
+        self.ff_context = FeedForward(
+            dim=dim, dim_out=dim, activation_fn="gelu-approximate"
+        )
 
     def forward(
         self,
@@ -244,10 +292,12 @@ class BriaFiboTransformerBlock(nn.Module):
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
+        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(
+            hidden_states, emb=temb
+        )
 
-        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
-            encoder_hidden_states, emb=temb
+        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
+            self.norm1_context(encoder_hidden_states, emb=temb)
         )
         joint_attention_kwargs = joint_attention_kwargs or {}
 
@@ -269,7 +319,9 @@ class BriaFiboTransformerBlock(nn.Module):
         hidden_states = hidden_states + attn_output
 
         norm_hidden_states = self.norm2(hidden_states)
-        norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        norm_hidden_states = (
+            norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        )
 
         ff_output = self.ff(norm_hidden_states)
         ff_output = gate_mlp.unsqueeze(1) * ff_output
@@ -283,10 +335,15 @@ class BriaFiboTransformerBlock(nn.Module):
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
-        norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
+        norm_encoder_hidden_states = (
+            norm_encoder_hidden_states * (1 + c_scale_mlp[:, None])
+            + c_shift_mlp[:, None]
+        )
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
-        encoder_hidden_states = encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        encoder_hidden_states = (
+            encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        )
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
@@ -295,7 +352,12 @@ class BriaFiboTransformerBlock(nn.Module):
 
 class BriaFiboTimesteps(nn.Module):
     def __init__(
-        self, num_channels: int, flip_sin_to_cos: bool, downscale_freq_shift: float, scale: int = 1, time_theta=10000
+        self,
+        num_channels: int,
+        flip_sin_to_cos: bool,
+        downscale_freq_shift: float,
+        scale: int = 1,
+        time_theta=10000,
     ):
         super().__init__()
         self.num_channels = num_channels
@@ -321,9 +383,14 @@ class BriaFiboTimestepProjEmbeddings(nn.Module):
         super().__init__()
 
         self.time_proj = BriaFiboTimesteps(
-            num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0, time_theta=time_theta
+            num_channels=256,
+            flip_sin_to_cos=True,
+            downscale_freq_shift=0,
+            time_theta=time_theta,
         )
-        self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+        self.timestep_embedder = TimestepEmbedding(
+            in_channels=256, time_embed_dim=embedding_dim
+        )
 
     def forward(self, timestep, dtype):
         timesteps_proj = self.time_proj(timestep)
@@ -331,7 +398,9 @@ class BriaFiboTimestepProjEmbeddings(nn.Module):
         return timesteps_emb
 
 
-class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
+class BriaFiboTransformer2DModel(
+    ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin
+):
     """
     Parameters:
         patch_size (`int`): Patch size to turn the input data into small patches.
@@ -367,16 +436,24 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
     ):
         super().__init__()
         self.out_channels = in_channels
-        self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
+        self.inner_dim = (
+            self.config.num_attention_heads * self.config.attention_head_dim
+        )
 
         self.pos_embed = BriaFiboEmbedND(theta=rope_theta, axes_dim=axes_dims_rope)
 
-        self.time_embed = BriaFiboTimestepProjEmbeddings(embedding_dim=self.inner_dim, time_theta=time_theta)
+        self.time_embed = BriaFiboTimestepProjEmbeddings(
+            embedding_dim=self.inner_dim, time_theta=time_theta
+        )
 
         if guidance_embeds:
-            self.guidance_embed = BriaFiboTimestepProjEmbeddings(embedding_dim=self.inner_dim)
+            self.guidance_embed = BriaFiboTimestepProjEmbeddings(
+                embedding_dim=self.inner_dim
+            )
 
-        self.context_embedder = nn.Linear(self.config.joint_attention_dim, self.inner_dim)
+        self.context_embedder = nn.Linear(
+            self.config.joint_attention_dim, self.inner_dim
+        )
         self.x_embedder = torch.nn.Linear(self.config.in_channels, self.inner_dim)
 
         self.transformer_blocks = nn.ModuleList(
@@ -401,13 +478,19 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
             ]
         )
 
-        self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
-        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
+        self.norm_out = AdaLayerNormContinuous(
+            self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6
+        )
+        self.proj_out = nn.Linear(
+            self.inner_dim, patch_size * patch_size * self.out_channels, bias=True
+        )
 
         self.gradient_checkpointing = False
 
         caption_projection = [
-            BriaFiboTextProjection(in_features=text_encoder_dim, hidden_size=self.inner_dim // 2)
+            BriaFiboTextProjection(
+                in_features=text_encoder_dim, hidden_size=self.inner_dim // 2
+            )
             for i in range(self.config.num_layers + self.config.num_single_layers)
         ]
         self.caption_projection = nn.ModuleList(caption_projection)
@@ -457,7 +540,10 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
             # weight the lora layers by setting `lora_scale` for each PEFT layer
             scale_lora_layers(self, lora_scale)
         else:
-            if joint_attention_kwargs is not None and joint_attention_kwargs.get("scale", None) is not None:
+            if (
+                joint_attention_kwargs is not None
+                and joint_attention_kwargs.get("scale", None) is not None
+            ):
                 logger.warning(
                     "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
                 )
@@ -495,17 +581,23 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
         for index_block, block in enumerate(self.transformer_blocks):
             current_text_encoder_layer = text_encoder_layers[block_id]
             encoder_hidden_states = torch.cat(
-                [encoder_hidden_states[:, :, : self.inner_dim // 2], current_text_encoder_layer], dim=-1
+                [
+                    encoder_hidden_states[:, :, : self.inner_dim // 2],
+                    current_text_encoder_layer,
+                ],
+                dim=-1,
             )
             block_id += 1
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                encoder_hidden_states, hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    encoder_hidden_states,
-                    temb,
-                    image_rotary_emb,
-                    joint_attention_kwargs,
+                encoder_hidden_states, hidden_states = (
+                    self._gradient_checkpointing_func(
+                        block,
+                        hidden_states,
+                        encoder_hidden_states,
+                        temb,
+                        image_rotary_emb,
+                        joint_attention_kwargs,
+                    )
                 )
 
             else:
@@ -520,7 +612,11 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
         for index_block, block in enumerate(self.single_transformer_blocks):
             current_text_encoder_layer = text_encoder_layers[block_id]
             encoder_hidden_states = torch.cat(
-                [encoder_hidden_states[:, :, : self.inner_dim // 2], current_text_encoder_layer], dim=-1
+                [
+                    encoder_hidden_states[:, :, : self.inner_dim // 2],
+                    current_text_encoder_layer,
+                ],
+                dim=-1,
             )
             block_id += 1
             hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
@@ -541,7 +637,9 @@ class BriaFiboTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, From
                     joint_attention_kwargs=joint_attention_kwargs,
                 )
 
-            encoder_hidden_states = hidden_states[:, : encoder_hidden_states.shape[1], ...]
+            encoder_hidden_states = hidden_states[
+                :, : encoder_hidden_states.shape[1], ...
+            ]
             hidden_states = hidden_states[:, encoder_hidden_states.shape[1] :, ...]
 
         hidden_states = self.norm_out(hidden_states, temb)

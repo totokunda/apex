@@ -10,6 +10,7 @@ import numpy as np
 import math
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class WanMultitalkEngine(WanShared):
     """WAN MultiTalk (Audio-driven) Engine Implementation"""
 
@@ -118,17 +119,24 @@ class WanMultitalkEngine(WanShared):
 
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-        
-        if audio_paths is None and person_1_audio is not None and person_2_audio is None:
+
+        if (
+            audio_paths is None
+            and person_1_audio is not None
+            and person_2_audio is None
+        ):
             audio_paths = {
                 "person1": person_1_audio,
             }
-        elif audio_paths is None and person_1_audio is not None and person_2_audio is not None:
+        elif (
+            audio_paths is None
+            and person_1_audio is not None
+            and person_2_audio is not None
+        ):
             audio_paths = {
                 "person1": person_1_audio,
                 "person2": person_2_audio,
             }
-
 
         preprocessor = self.helpers["wan.multitalk"]
 
@@ -175,7 +183,7 @@ class WanMultitalkEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -195,10 +203,8 @@ class WanMultitalkEngine(WanShared):
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
 
-
         using_video_input = input_video is not None
-        
-        
+
         while True:
             audio_embs = []
             # split audio with window size
@@ -369,8 +375,10 @@ class WanMultitalkEngine(WanShared):
                 latents[:, :C, :T_m, :H, :W] = add_latent
 
             total_steps = len(timesteps) if timesteps is not None else 0
-            #!TODO: This is incorrect. 
-            denoise_progress_callback = make_mapped_progress(progress_callback, 0.0, 1.0)
+            #!TODO: This is incorrect.
+            denoise_progress_callback = make_mapped_progress(
+                progress_callback, 0.0, 1.0
+            )
             audio_embeds = audio_embs.to(transformer_dtype).to(self.device)
 
             with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
@@ -381,9 +389,9 @@ class WanMultitalkEngine(WanShared):
                             latent_motion_frames.unsqueeze(0)
                         )
 
-                    latent_model_input = torch.cat([latents, latent_condition], dim=1).to(
-                        transformer_dtype
-                    )
+                    latent_model_input = torch.cat(
+                        [latents, latent_condition], dim=1
+                    ).to(transformer_dtype)
 
                     timestep = t.expand(latents.shape[0])
 
@@ -405,7 +413,9 @@ class WanMultitalkEngine(WanShared):
                             timestep,
                             encoder_hidden_states=prompt_embeds,
                             encoder_hidden_states_image=image_embeds,
-                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
+                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[
+                                -1:
+                            ],
                             ref_target_masks=ref_target_masks,
                             human_num=human_num,
                             return_dict=False,
@@ -429,7 +439,9 @@ class WanMultitalkEngine(WanShared):
                             timestep,
                             encoder_hidden_states=negative_prompt_embeds,
                             encoder_hidden_states_image=image_embeds,
-                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[-1:],
+                            encoder_hidden_states_audio=torch.zeros_like(audio_embeds)[
+                                -1:
+                            ],
                             ref_target_masks=ref_target_masks,
                             human_num=human_num,
                             return_dict=False,
@@ -448,12 +460,14 @@ class WanMultitalkEngine(WanShared):
                             * (noise_pred_drop_text - noise_pred_uncond)
                         )
 
-                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[
+                        0
+                    ]
 
                     if not is_first_clip:
-                        latent_motion_frames = latent_motion_frames.to(latents.dtype).to(
-                            self.device
-                        )
+                        latent_motion_frames = latent_motion_frames.to(
+                            latents.dtype
+                        ).to(self.device)
                         motion_add_noise = torch.randn_like(
                             latent_motion_frames
                         ).contiguous()
@@ -468,7 +482,12 @@ class WanMultitalkEngine(WanShared):
                             latent_motion_frames.unsqueeze(0)
                         )
 
-                    if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                    if (
+                        render_on_step
+                        and render_on_step_callback
+                        and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                        and i != len(timesteps) - 1
+                    ):
                         self._render_step(latents, render_on_step_callback)
                     pbar.update(1)
                     safe_emit_progress(
@@ -572,12 +591,12 @@ class WanMultitalkEngine(WanShared):
 
             postprocessed_video = self._tensor_to_frames(gen_video_samples)
             return postprocessed_video
-    
+
     def _render_step(self, latents, render_on_step_callback):
         video = self.vae_decode(latents)
         gen_video_list = self._preview_video_list + [video]
         gen_video_samples = torch.cat(gen_video_list, dim=2)[
-                :, :, : int(self._preview_max_num_frames)
-            ]
+            :, :, : int(self._preview_max_num_frames)
+        ]
         rendered_video = self._tensor_to_frames(gen_video_samples)
         render_on_step_callback(rendered_video[0])

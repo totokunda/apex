@@ -21,6 +21,7 @@ VAE_CONFIG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "vae_configs"
 )
 
+
 def get_transformer_config(model_tag: str, config_path: str | None = None):
     if config_path is None:
         if "/" in model_tag:
@@ -72,7 +73,7 @@ def get_model_class(
             f"No subclass of ModelMixin found in module "
             f"'src.{model_type}.{model_base}.model'"
         )
-    
+
     return candidate_class
 
 
@@ -160,7 +161,7 @@ def strip_common_prefix(
     if ref_state is None:
         # Heuristic: do *all* keys share the same first token?
         first_tokens = {k.split(".", 1)[0] for k in src_state.keys()}
-        
+
         if len(first_tokens) == 1:  # unanimous
             prefix = next(iter(first_tokens)) + "."
         else:

@@ -112,7 +112,11 @@ class WanFunEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -385,7 +389,9 @@ class WanFunEngine(WanShared):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         scheduler = self.scheduler
         scheduler.set_timesteps(

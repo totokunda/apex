@@ -13,22 +13,39 @@ from typing import List, Optional
 from .types import PoseResult, BodyResult, Keypoint
 from timeit import default_timer
 import os
-from .util import guess_onnx_input_shape_dtype, get_model_type, get_ort_providers, is_model_torchscript
+from .util import (
+    guess_onnx_input_shape_dtype,
+    get_model_type,
+    get_ort_providers,
+    is_model_torchscript,
+)
 import torch
 
+
 class Wholebody:
-    def __init__(self, det_model_path: Optional[str] = None, pose_model_path: Optional[str] = None, torchscript_device="cuda"):
+    def __init__(
+        self,
+        det_model_path: Optional[str] = None,
+        pose_model_path: Optional[str] = None,
+        torchscript_device="cuda",
+    ):
         self.det_filename = det_model_path and os.path.basename(det_model_path)
         self.pose_filename = pose_model_path and os.path.basename(pose_model_path)
         self.det, self.pose = None, None
         # return type: None ort cv2 torchscript
-        self.det_model_type = get_model_type("DWPose",self.det_filename)
-        self.pose_model_type = get_model_type("DWPose",self.pose_filename)
+        self.det_model_type = get_model_type("DWPose", self.det_filename)
+        self.pose_model_type = get_model_type("DWPose", self.pose_filename)
         # Always loads to CPU to avoid building OpenCV.
-        cv2_device = 'cpu'
-        cv2_backend = cv2.dnn.DNN_BACKEND_OPENCV if cv2_device == 'cpu' else cv2.dnn.DNN_BACKEND_CUDA
+        cv2_device = "cpu"
+        cv2_backend = (
+            cv2.dnn.DNN_BACKEND_OPENCV
+            if cv2_device == "cpu"
+            else cv2.dnn.DNN_BACKEND_CUDA
+        )
         # You need to manually build OpenCV through cmake to work with your GPU.
-        cv2_providers = cv2.dnn.DNN_TARGET_CPU if cv2_device == 'cpu' else cv2.dnn.DNN_TARGET_CUDA
+        cv2_providers = (
+            cv2.dnn.DNN_TARGET_CPU if cv2_device == "cpu" else cv2.dnn.DNN_TARGET_CUDA
+        )
         ort_providers = get_ort_providers()
 
         if self.det_model_type is None:
@@ -36,22 +53,34 @@ class Wholebody:
         elif self.det_model_type == "ort":
             try:
                 import onnxruntime as ort
+
                 self.det = ort.InferenceSession(det_model_path, providers=ort_providers)
             except:
-                print(f"Failed to load onnxruntime with {self.det.get_providers()}.\nPlease change EP_list in the config.yaml and restart ComfyUI")
-                self.det = ort.InferenceSession(det_model_path, providers=["CPUExecutionProvider"])
+                print(
+                    f"Failed to load onnxruntime with {self.det.get_providers()}.\nPlease change EP_list in the config.yaml and restart ComfyUI"
+                )
+                self.det = ort.InferenceSession(
+                    det_model_path, providers=["CPUExecutionProvider"]
+                )
         elif self.det_model_type == "cv2":
             try:
                 self.det = cv2.dnn.readNetFromONNX(det_model_path)
                 self.det.setPreferableBackend(cv2_backend)
                 self.det.setPreferableTarget(cv2_providers)
             except:
-                print("TopK operators may not work on your OpenCV, try use onnxruntime with CPUExecutionProvider")
+                print(
+                    "TopK operators may not work on your OpenCV, try use onnxruntime with CPUExecutionProvider"
+                )
                 try:
                     import onnxruntime as ort
-                    self.det = ort.InferenceSession(det_model_path, providers=["CPUExecutionProvider"])
+
+                    self.det = ort.InferenceSession(
+                        det_model_path, providers=["CPUExecutionProvider"]
+                    )
                 except:
-                    print(f"Failed to load {det_model_path}, you can use other models instead")
+                    print(
+                        f"Failed to load {det_model_path}, you can use other models instead"
+                    )
         else:
             self.det = torch.jit.load(det_model_path)
             self.det.to(torchscript_device)
@@ -61,10 +90,17 @@ class Wholebody:
         elif self.pose_model_type == "ort":
             try:
                 import onnxruntime as ort
-                self.pose = ort.InferenceSession(pose_model_path, providers=ort_providers)
+
+                self.pose = ort.InferenceSession(
+                    pose_model_path, providers=ort_providers
+                )
             except:
-                print(f"Failed to load onnxruntime with {self.pose.get_providers()}.\nPlease change EP_list in the config.yaml and restart ComfyUI")
-                self.pose = ort.InferenceSession(pose_model_path, providers=["CPUExecutionProvider"])
+                print(
+                    f"Failed to load onnxruntime with {self.pose.get_providers()}.\nPlease change EP_list in the config.yaml and restart ComfyUI"
+                )
+                self.pose = ort.InferenceSession(
+                    pose_model_path, providers=["CPUExecutionProvider"]
+                )
         elif self.pose_model_type == "cv2":
             self.pose = cv2.dnn.readNetFromONNX(pose_model_path)
             self.pose.setPreferableBackend(cv2_backend)
@@ -72,17 +108,19 @@ class Wholebody:
         else:
             self.pose = torch.jit.load(pose_model_path)
             self.pose.to(torchscript_device)
-        
+
         if self.pose_filename is not None:
             self.pose_input_size, _ = guess_onnx_input_shape_dtype(self.pose_filename)
 
     def __call__(self, oriImg) -> Optional[np.ndarray]:
-        #Sacrifice accurate time measurement for compatibility 
-        
+        # Sacrifice accurate time measurement for compatibility
+
         det_result = None
-        
+
         if self.det is None:
-            print("DWPose: No detector specified, using full image for pose estimation.") # pragma: no cover
+            print(
+                "DWPose: No detector specified, using full image for pose estimation."
+            )  # pragma: no cover
             det_result = []
         else:
             det_start = default_timer()
@@ -90,47 +128,58 @@ class Wholebody:
                 det_result = inference_jit_yolox(self.det, oriImg, detect_classes=[0])
             else:
                 if "yolox" in self.det_filename:
-                    det_result = inference_onnx_yolox(self.det, oriImg, detect_classes=[0], dtype=np.float32)
+                    det_result = inference_onnx_yolox(
+                        self.det, oriImg, detect_classes=[0], dtype=np.float32
+                    )
                 else:
-                    #FP16 and INT8 YOLO NAS accept uint8 input
-                    det_result = inference_onnx_yolo_nas(self.det, oriImg, detect_classes=[0], dtype=np.uint8)
+                    # FP16 and INT8 YOLO NAS accept uint8 input
+                    det_result = inference_onnx_yolo_nas(
+                        self.det, oriImg, detect_classes=[0], dtype=np.uint8
+                    )
             print(f"DWPose: Bbox {((default_timer() - det_start) * 1000):.2f}ms")
             if (det_result is None) or (det_result.shape[0] == 0):
                 return None
 
         pose_start = default_timer()
         if is_model_torchscript(self.pose):
-            keypoints, scores = inference_jit_pose(self.pose, det_result, oriImg, self.pose_input_size)
+            keypoints, scores = inference_jit_pose(
+                self.pose, det_result, oriImg, self.pose_input_size
+            )
         else:
             _, pose_onnx_dtype = guess_onnx_input_shape_dtype(self.pose_filename)
-            keypoints, scores = inference_onnx_pose(self.pose, det_result, oriImg, self.pose_input_size, dtype=pose_onnx_dtype)
-            
-        num_subjects_log = 'full image'
-        if hasattr(det_result, 'shape') and det_result.shape[0] > 0:
-            num_subjects_log = f"{det_result.shape[0]} people"
-        elif isinstance(det_result, list) and len(det_result) > 0 and isinstance(det_result[0], (list, np.ndarray)):
-             num_subjects_log = f"{len(det_result)} people"
-        
-        print(f"DWPose: Pose {((default_timer() - pose_start) * 1000):.2f}ms on {num_subjects_log}\n")
+            keypoints, scores = inference_onnx_pose(
+                self.pose,
+                det_result,
+                oriImg,
+                self.pose_input_size,
+                dtype=pose_onnx_dtype,
+            )
 
-        keypoints_info = np.concatenate(
-            (keypoints, scores[..., None]), axis=-1)
+        num_subjects_log = "full image"
+        if hasattr(det_result, "shape") and det_result.shape[0] > 0:
+            num_subjects_log = f"{det_result.shape[0]} people"
+        elif (
+            isinstance(det_result, list)
+            and len(det_result) > 0
+            and isinstance(det_result[0], (list, np.ndarray))
+        ):
+            num_subjects_log = f"{len(det_result)} people"
+
+        print(
+            f"DWPose: Pose {((default_timer() - pose_start) * 1000):.2f}ms on {num_subjects_log}\n"
+        )
+
+        keypoints_info = np.concatenate((keypoints, scores[..., None]), axis=-1)
         # compute neck joint
         neck = np.mean(keypoints_info[:, [5, 6]], axis=1)
         # neck score when visualizing pred
         neck[:, 2:4] = np.logical_and(
-            keypoints_info[:, 5, 2:4] > 0.3,
-            keypoints_info[:, 6, 2:4] > 0.3).astype(int)
-        new_keypoints_info = np.insert(
-            keypoints_info, 17, neck, axis=1)
-        mmpose_idx = [
-            17, 6, 8, 10, 7, 9, 12, 14, 16, 13, 15, 2, 1, 4, 3
-        ]
-        openpose_idx = [
-            1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17
-        ]
-        new_keypoints_info[:, openpose_idx] = \
-            new_keypoints_info[:, mmpose_idx]
+            keypoints_info[:, 5, 2:4] > 0.3, keypoints_info[:, 6, 2:4] > 0.3
+        ).astype(int)
+        new_keypoints_info = np.insert(keypoints_info, 17, neck, axis=1)
+        mmpose_idx = [17, 6, 8, 10, 7, 9, 12, 14, 16, 13, 15, 2, 1, 4, 3]
+        openpose_idx = [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17]
+        new_keypoints_info[:, openpose_idx] = new_keypoints_info[:, mmpose_idx]
         keypoints_info = new_keypoints_info
 
         return keypoints_info

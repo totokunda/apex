@@ -26,13 +26,19 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 
 from .modules.activation_layers import get_activation_layer
 from .modules.norm_layers import get_norm_layer
-from .modules.embed_layers import TimestepEmbedder, PatchEmbed, TextProjection, VisionProjection
+from .modules.embed_layers import (
+    TimestepEmbedder,
+    PatchEmbed,
+    TextProjection,
+    VisionProjection,
+)
 from .modules.attention import parallel_attention
 from .modules.posemb_layers import apply_rotary_emb, get_nd_rotary_pos_embed
 from .modules.mlp_layers import MLP, MLPEmbedder, FinalLayer, LinearWarpforSingle
 from .modules.modulate_layers import ModulateDiT, modulate, apply_gate
 from .modules.token_refiner import SingleTokenRefiner
 from src.attention import attention_register
+
 
 class ByT5Mapper(nn.Module):
     """
@@ -105,43 +111,93 @@ class MMDoubleStreamBlock(nn.Module):
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
 
         self.img_mod = ModulateDiT(
-            hidden_size, factor=6, act_layer=get_activation_layer("silu"), **factory_kwargs
+            hidden_size,
+            factor=6,
+            act_layer=get_activation_layer("silu"),
+            **factory_kwargs,
         )
-        self.img_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-        self.img_attn_q = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
-        self.img_attn_k = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
-        self.img_attn_v = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
+        self.img_norm1 = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
+        )
+        self.img_attn_q = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
+        self.img_attn_k = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
+        self.img_attn_v = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.img_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
         self.img_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
-        self.img_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
+        self.img_attn_proj = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
 
-        self.img_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-        self.img_mlp = MLP(hidden_size, mlp_hidden_dim, act_layer=get_activation_layer(mlp_act_type), bias=True, **factory_kwargs)
+        self.img_norm2 = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
+        )
+        self.img_mlp = MLP(
+            hidden_size,
+            mlp_hidden_dim,
+            act_layer=get_activation_layer(mlp_act_type),
+            bias=True,
+            **factory_kwargs,
+        )
 
         self.txt_mod = ModulateDiT(
-            hidden_size, factor=6, act_layer=get_activation_layer("silu"), **factory_kwargs
+            hidden_size,
+            factor=6,
+            act_layer=get_activation_layer("silu"),
+            **factory_kwargs,
         )
-        self.txt_norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
+        self.txt_norm1 = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
+        )
 
-        self.txt_attn_q = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
-        self.txt_attn_k = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
-        self.txt_attn_v = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
+        self.txt_attn_q = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
+        self.txt_attn_k = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
+        self.txt_attn_v = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
 
         self.txt_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
         self.txt_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
-        self.txt_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
-        self.txt_norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-        self.txt_mlp = MLP(hidden_size, mlp_hidden_dim, act_layer=get_activation_layer(mlp_act_type), bias=True, **factory_kwargs)
+        self.txt_attn_proj = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
+        self.txt_norm2 = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
+        )
+        self.txt_mlp = MLP(
+            hidden_size,
+            mlp_hidden_dim,
+            act_layer=get_activation_layer(mlp_act_type),
+            bias=True,
+            **factory_kwargs,
+        )
 
         self.hybrid_seq_parallel_attn = None
 
@@ -151,7 +207,6 @@ class MMDoubleStreamBlock(nn.Module):
     def disable_deterministic(self):
         self.deterministic = False
 
-    
     def forward(
         self,
         img: torch.Tensor,
@@ -182,7 +237,9 @@ class MMDoubleStreamBlock(nn.Module):
         ) = self.txt_mod(vec).chunk(6, dim=-1)
 
         img_modulated = self.img_norm1(img)
-        img_modulated = modulate(img_modulated, shift=img_mod1_shift, scale=img_mod1_scale)
+        img_modulated = modulate(
+            img_modulated, shift=img_mod1_shift, scale=img_mod1_scale
+        )
 
         img_q = self.img_attn_q(img_modulated)
         img_k = self.img_attn_k(img_modulated)
@@ -201,7 +258,9 @@ class MMDoubleStreamBlock(nn.Module):
             img_q, img_k = img_qq, img_kk
 
         txt_modulated = self.txt_norm1(txt)
-        txt_modulated = modulate(txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale)
+        txt_modulated = modulate(
+            txt_modulated, shift=txt_mod1_shift, scale=txt_mod1_scale
+        )
         txt_q = self.txt_attn_q(txt_modulated)
         txt_k = self.txt_attn_k(txt_modulated)
         txt_v = self.txt_attn_v(txt_modulated)
@@ -211,7 +270,7 @@ class MMDoubleStreamBlock(nn.Module):
         txt_q = self.txt_attn_q_norm(txt_q).to(txt_v)
         txt_k = self.txt_attn_k_norm(txt_k).to(txt_v)
 
-        attn_mode = 'flash' if is_flash else self.attn_mode
+        attn_mode = "flash" if is_flash else self.attn_mode
         attn = parallel_attention(
             (img_q, txt_q),
             (img_k, txt_k),
@@ -224,19 +283,28 @@ class MMDoubleStreamBlock(nn.Module):
             block_idx=block_idx,
         )
 
-        img_attn, txt_attn = attn[:, :img_q.shape[1]].contiguous(), attn[:, img_q.shape[1]:].contiguous()
+        img_attn, txt_attn = (
+            attn[:, : img_q.shape[1]].contiguous(),
+            attn[:, img_q.shape[1] :].contiguous(),
+        )
 
         img = img + apply_gate(self.img_attn_proj(img_attn), gate=img_mod1_gate)
         img = img + apply_gate(
             self.img_mlp(
-                modulate(self.img_norm2(img), shift=img_mod2_shift, scale=img_mod2_scale)
+                modulate(
+                    self.img_norm2(img), shift=img_mod2_shift, scale=img_mod2_scale
+                )
             ),
             gate=img_mod2_gate,
         )
 
         txt = txt + apply_gate(self.txt_attn_proj(txt_attn), gate=txt_mod1_gate)
         txt = txt + apply_gate(
-            self.txt_mlp(modulate(self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale)),
+            self.txt_mlp(
+                modulate(
+                    self.txt_norm2(txt), shift=txt_mod2_shift, scale=txt_mod2_scale
+                )
+            ),
             gate=txt_mod2_gate,
         )
 
@@ -269,25 +337,38 @@ class MMSingleStreamBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.scale = qk_scale or head_dim ** -0.5
+        self.scale = qk_scale or head_dim**-0.5
 
         self.linear1_q = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
         self.linear1_k = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
         self.linear1_v = nn.Linear(hidden_size, hidden_size, **factory_kwargs)
         self.linear1_mlp = nn.Linear(hidden_size, mlp_hidden_dim, **factory_kwargs)
-        self.linear2 = LinearWarpforSingle(hidden_size + mlp_hidden_dim, hidden_size, bias=True, **factory_kwargs)
+        self.linear2 = LinearWarpforSingle(
+            hidden_size + mlp_hidden_dim, hidden_size, bias=True, **factory_kwargs
+        )
         self.mlp_act = get_activation_layer(mlp_act_type)()
 
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
         self.k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
 
-        self.pre_norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs)
-        self.modulation = ModulateDiT(hidden_size, factor=3, act_layer=get_activation_layer("silu"), **factory_kwargs)
+        self.pre_norm = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6, **factory_kwargs
+        )
+        self.modulation = ModulateDiT(
+            hidden_size,
+            factor=3,
+            act_layer=get_activation_layer("silu"),
+            **factory_kwargs,
+        )
         self.hybrid_seq_parallel_attn = None
 
     def enable_deterministic(self):
@@ -317,7 +398,7 @@ class MMSingleStreamBlock(nn.Module):
         q = rearrange(q, "B L (H D) -> B L H D", H=self.heads_num)
         k = rearrange(k, "B L (H D) -> B L H D", H=self.heads_num)
         v = rearrange(v, "B L (H D) -> B L H D", H=self.heads_num)
-        
+
         mlp = self.linear1_mlp(x_mod)
 
         # Apply QK-Norm if needed.
@@ -334,7 +415,7 @@ class MMSingleStreamBlock(nn.Module):
         img_q, img_k = img_qq, img_kk
 
         if is_flash:
-            attn_mode = 'flash'
+            attn_mode = "flash"
         else:
             attn_mode = self.attn_mode
         attn = parallel_attention(
@@ -348,8 +429,9 @@ class MMSingleStreamBlock(nn.Module):
             attn_param=attn_param,
         )
         output = self.linear2(attn, self.mlp_act(mlp))
-        
+
         return x + apply_gate(output, gate=mod_gate)
+
 
 class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
     """
@@ -434,9 +516,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         # Alternative: TokenRefiner. See more details (LI-DiT): http://arxiv.org/abs/2406.11831
         self.use_attention_mask = use_attention_mask
         self.text_projection = text_projection
-        self.attn_mode = attention_register._default or attn_mode 
-        if self.attn_mode == 'sdpa' or self.attn_mode is None:
-            self.attn_mode = 'torch'
+        self.attn_mode = attention_register._default or attn_mode
+        if self.attn_mode == "sdpa" or self.attn_mode is None:
+            self.attn_mode = "torch"
 
         self.text_pool_type = text_pool_type
         self.text_states_dim = text_states_dim
@@ -450,7 +532,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 out_dim=2048,
                 hidden_dim=2048,
                 out_dim1=hidden_size,
-                use_residual=False
+                use_residual=False,
             )
 
         if hidden_size % heads_num != 0:
@@ -466,8 +548,12 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         self.heads_num = heads_num
 
         self.img_in = PatchEmbed(
-            self.patch_size, self.in_channels, self.hidden_size,
-            is_reshape_temporal_channels=is_reshape_temporal_channels, concat_condition=concat_condition, **factory_kwargs
+            self.patch_size,
+            self.in_channels,
+            self.hidden_size,
+            is_reshape_temporal_channels=is_reshape_temporal_channels,
+            concat_condition=concat_condition,
+            **factory_kwargs,
         )
 
         # Vision projection
@@ -506,7 +592,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         self.vector_in = (
             MLPEmbedder(
                 self.config.text_states_dim_2, self.hidden_size, **factory_kwargs
-            ) if self.text_pool_type is not None else None
+            )
+            if self.text_pool_type is not None
+            else None
         )
         self.guidance_in = (
             TimestepEmbedder(
@@ -517,11 +605,12 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         )
 
         self.time_r_in = (
-            TimestepEmbedder(self.hidden_size, get_activation_layer("silu"), **factory_kwargs)
+            TimestepEmbedder(
+                self.hidden_size, get_activation_layer("silu"), **factory_kwargs
+            )
             if use_meanflow
             else None
         )
-
 
         self.double_blocks = nn.ModuleList(
             [
@@ -566,35 +655,39 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
 
         # STA
         if attn_param is None:
-            self.attn_param = { 
+            self.attn_param = {
                 # STA
-                'win_size': [[3, 3, 3]],
-                'win_type': "fixed",
-                'win_ratio': 10,
-                'tile_size': [6, 8, 8],
+                "win_size": [[3, 3, 3]],
+                "win_type": "fixed",
+                "win_ratio": 10,
+                "tile_size": [6, 8, 8],
                 # SSTA
-                'ssta_topk': 64,
-                'ssta_threshold': 0.0,
-                'ssta_lambda': 0.7,
-                'ssta_sampling_type': 'importance',
-                'ssta_adaptive_pool': None,
+                "ssta_topk": 64,
+                "ssta_threshold": 0.0,
+                "ssta_lambda": 0.7,
+                "ssta_sampling_type": "importance",
+                "ssta_adaptive_pool": None,
                 # flex-block-attn:
-                "attn_sparse_type": 'ssta',
-                "attn_pad_type": 'zero',
+                "attn_sparse_type": "ssta",
+                "attn_pad_type": "zero",
                 "attn_use_text_mask": 1,
                 "attn_mask_share_within_head": 0,
             }
         else:
             self.attn_param = attn_param
 
-        if attn_mode == 'flex-block-attn':
+        if attn_mode == "flex-block-attn":
             self.register_to_config(attn_param=self.attn_param)
 
         if use_cond_type_embedding:
-            self.cond_type_embedding = nn.Embedding(3, self.hidden_size) 
+            self.cond_type_embedding = nn.Embedding(3, self.hidden_size)
             self.cond_type_embedding.weight.data.fill_(0)
-            assert self.glyph_byT5_v2, "text type embedding is only used when glyph_byT5_v2 is True"
-            assert vision_projection is not None, "text type embedding is only used when vision_projection is not None"
+            assert (
+                self.glyph_byT5_v2
+            ), "text type embedding is only used when glyph_byT5_v2 is True"
+            assert (
+                vision_projection is not None
+            ), "text type embedding is only used when vision_projection is not None"
             # 0: text_encoder feature
             # 1: byt5 feature
             # 2: vision_encoder feature
@@ -605,13 +698,12 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         load_key = "module"
         bare_model = "unknown"
 
-        if model_path.endswith('.safetensors'):
+        if model_path.endswith(".safetensors"):
             from safetensors.torch import load_file
+
             state_dict = load_file(model_path, device="cpu")
         else:
-            state_dict = torch.load(
-                model_path, map_location="cpu", weights_only=True
-            )
+            state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
 
         if bare_model == "unknown" and ("ema" in state_dict or "module" in state_dict):
             bare_model = False
@@ -635,7 +727,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             for key in result.unexpected_keys:
                 logger.info(f"[load.py] Unexpected key: {key}")
         if result.missing_keys or result.unexpected_keys:
-            raise ValueError(f"Missing: {result.missing_keys}, Unexpected: {result.unexpected_keys}")
+            raise ValueError(
+                f"Missing: {result.missing_keys}, Unexpected: {result.unexpected_keys}"
+            )
 
         return result
 
@@ -669,7 +763,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         )
         return freqs_cos, freqs_sin
 
-    def reorder_txt_token(self, byt5_txt, txt, byt5_text_mask, text_mask, zero_feat=False, is_reorder=True):
+    def reorder_txt_token(
+        self, byt5_txt, txt, byt5_text_mask, text_mask, zero_feat=False, is_reorder=True
+    ):
         if is_reorder:
             reorder_txt = []
             reorder_mask = []
@@ -684,14 +780,32 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                     pad_byt5 = torch.zeros_like(byt5_txt_i[~byt5_text_mask_i])
                     pad_text = torch.zeros_like(txt_i[~text_mask_i])
                     reorder_txt_i = torch.cat(
-                        [byt5_txt_i[byt5_text_mask_i], txt_i[text_mask_i], pad_byt5, pad_text], dim=0
+                        [
+                            byt5_txt_i[byt5_text_mask_i],
+                            txt_i[text_mask_i],
+                            pad_byt5,
+                            pad_text,
+                        ],
+                        dim=0,
                     )
                 else:
                     reorder_txt_i = torch.cat(
-                        [byt5_txt_i[byt5_text_mask_i], txt_i[text_mask_i], byt5_txt_i[~byt5_text_mask_i], txt_i[~text_mask_i]], dim=0
+                        [
+                            byt5_txt_i[byt5_text_mask_i],
+                            txt_i[text_mask_i],
+                            byt5_txt_i[~byt5_text_mask_i],
+                            txt_i[~text_mask_i],
+                        ],
+                        dim=0,
                     )
                 reorder_mask_i = torch.cat(
-                    [byt5_text_mask_i[byt5_text_mask_i], text_mask_i[text_mask_i], byt5_text_mask_i[~byt5_text_mask_i], text_mask_i[~text_mask_i]], dim=0
+                    [
+                        byt5_text_mask_i[byt5_text_mask_i],
+                        text_mask_i[text_mask_i],
+                        byt5_text_mask_i[~byt5_text_mask_i],
+                        text_mask_i[~text_mask_i],
+                    ],
+                    dim=0,
                 )
 
                 reorder_txt.append(reorder_txt_i)
@@ -701,7 +815,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             reorder_mask = torch.stack(reorder_mask).to(dtype=torch.int64)
         else:
             reorder_txt = torch.concat([byt5_txt, txt], dim=1)
-            reorder_mask = torch.concat([byt5_text_mask, text_mask], dim=1).to(dtype=torch.int64)
+            reorder_mask = torch.concat([byt5_text_mask, text_mask], dim=1).to(
+                dtype=torch.int64
+            )
 
         return reorder_txt, reorder_mask
 
@@ -740,7 +856,7 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             oh // self.patch_size[1],
             ow // self.patch_size[2],
         )
-        self.attn_param['thw'] = [tt, th, tw]
+        self.attn_param["thw"] = [tt, th, tw]
         if freqs_cos is None and freqs_sin is None:
             freqs_cos, freqs_sin = self.get_rotary_pos_embed((tt, th, tw))
 
@@ -763,7 +879,6 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
         if timestep_r is not None:
             vec = vec + self.time_r_in(timestep_r)
 
-
         # Embed text tokens
         if self.text_projection == "linear":
             txt = self.txt_in(txt)
@@ -775,7 +890,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             )
         if self.cond_type_embedding is not None:
             cond_emb = self.cond_type_embedding(
-                torch.zeros_like(txt[:, :, 0], device=text_mask.device, dtype=torch.long)
+                torch.zeros_like(
+                    txt[:, :, 0], device=text_mask.device, dtype=torch.long
+                )
             )
             txt = txt + cond_emb
 
@@ -785,7 +902,9 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             byt5_txt = self.byt5_in(byt5_text_states)
             if self.cond_type_embedding is not None:
                 cond_emb = self.cond_type_embedding(
-                    torch.ones_like(byt5_txt[:, :, 0], device=byt5_txt.device, dtype=torch.long)
+                    torch.ones_like(
+                        byt5_txt[:, :, 0], device=byt5_txt.device, dtype=torch.long
+                    )
                 )
                 byt5_txt = byt5_txt + cond_emb
             txt, text_mask = self.reorder_txt_token(
@@ -812,7 +931,8 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
             # Ensure valid tokens precede padding tokens
             if self.cond_type_embedding is not None:
                 cond_emb = self.cond_type_embedding(
-                    2 * torch.ones_like(
+                    2
+                    * torch.ones_like(
                         extra_encoder_hidden_states[:, :, 0],
                         dtype=torch.long,
                         device=extra_encoder_hidden_states.device,
@@ -849,7 +969,6 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 block_idx=index,
             )
 
-
         txt_seq_len = txt.shape[1]
         img_seq_len = img.shape[1]
 
@@ -880,11 +999,10 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
                 if output_features and index % output_features_stride == 0:
                     features_list.append(x[:, :img_seq_len, ...])
         img = x[:, :img_seq_len, ...]
-        
 
         # Final Layer
         img = self.final_layer(img, vec)
-        
+
         img = self.unpatchify(img, tt, th, tw)
         assert return_dict is False, "return_dict is not supported."
         if output_features:
@@ -917,6 +1035,6 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
     def set_attn_mode(self, attn_mode: str):
         self.attn_mode = attn_mode
         for block in self.double_blocks:
-            block.attn_mode = attn_mode 
+            block.attn_mode = attn_mode
         for block in self.single_blocks:
             block.attn_mode = attn_mode

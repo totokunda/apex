@@ -13,6 +13,7 @@ from .job_store import register_job, job_store as unified_job_store
 
 router = APIRouter(prefix="/components", tags=["components"])
 
+
 class ComponentsDownloadRequest(BaseModel):
     paths: List[str]
     save_path: Optional[str] = None
@@ -28,6 +29,7 @@ class JobResponse(BaseModel):
 # Legacy/auxiliary tracking. Unified store is the source of truth for ref and cancel.
 job_store: Dict[str, ray.ObjectRef] = {}
 job_paths: Dict[str, list] = {}
+
 
 @router.post("/download", response_model=JobResponse)
 def start_components_download(request: ComponentsDownloadRequest):
@@ -47,12 +49,18 @@ def start_components_download(request: ComponentsDownloadRequest):
     try:
         ref = download_components.remote(request.paths, job_id, bridge, save_path)
         # Register in unified store
-        register_job(job_id, ref, 'components', { 'paths': request.paths, 'save_path': save_path })
+        register_job(
+            job_id, ref, "components", {"paths": request.paths, "save_path": save_path}
+        )
         # Keep legacy store for compatibility with existing status endpoint
         job_store[job_id] = ref
         job_paths[job_id] = request.paths
-        logger.info(f"Started components download job {job_id} with {len(request.paths)} items")
-        return JobResponse(job_id=job_id, status="queued", message="Download job created")
+        logger.info(
+            f"Started components download job {job_id} with {len(request.paths)} items"
+        )
+        return JobResponse(
+            job_id=job_id, status="queued", message="Download job created"
+        )
     except Exception as e:
         logger.error(f"Failed to start components download: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -72,7 +80,9 @@ def delete_component(request: DeleteRequest):
     try:
         target.relative_to(base)
     except ValueError:
-        raise HTTPException(status_code=400, detail="path must be within components directory")
+        raise HTTPException(
+            status_code=400, detail="path must be within components directory"
+        )
 
     if not target.exists():
         raise HTTPException(status_code=404, detail="Path not found")
@@ -85,6 +95,7 @@ def delete_component(request: DeleteRequest):
         return {"status": "deleted", "path": str(target)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
+
 
 @router.get("/status/{job_id}")
 def components_job_status(job_id: str):
@@ -118,5 +129,3 @@ def cancel_components_download(job_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to cancel: {e}")
-
-

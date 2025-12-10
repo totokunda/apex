@@ -4,6 +4,7 @@ import albumentations
 import PIL
 import numpy as np
 import torchvision.transforms.functional as TF
+
 # from omegaconf import OmegaConf
 from functools import partial
 from PIL import Image
@@ -11,7 +12,12 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, Subset
 
 import src.preprocess.diffusion_edge.taming.data.utils as tdu
-from src.preprocess.diffusion_edge.taming.data.imagenet import str_to_indices, give_synsets_from_indices, download, retrieve
+from src.preprocess.diffusion_edge.taming.data.imagenet import (
+    str_to_indices,
+    give_synsets_from_indices,
+    download,
+    retrieve,
+)
 from src.preprocess.diffusion_edge.taming.data.imagenet import ImagePaths
 
 # from ldm.modules.image_degradation import degradation_fn_bsr, degradation_fn_bsr_light
@@ -20,7 +26,7 @@ from src.preprocess.diffusion_edge.taming.data.imagenet import ImagePaths
 def synset2idx(path_to_yaml="data/index_synset.yaml"):
     with open(path_to_yaml) as f:
         di2s = yaml.load(f)
-    return dict((v,k) for k,v in di2s.items())
+    return dict((v, k) for k, v in di2s.items())
 
 
 class ImageNetBase(Dataset):
@@ -46,13 +52,17 @@ class ImageNetBase(Dataset):
         raise NotImplementedError()
 
     def _filter_relpaths(self, relpaths):
-        ignore = set([
-            "n06596364_9591.JPEG",
-        ])
+        ignore = set(
+            [
+                "n06596364_9591.JPEG",
+            ]
+        )
         relpaths = [rpath for rpath in relpaths if not rpath.split("/")[-1] in ignore]
         if "sub_indices" in self.config:
             indices = str_to_indices(self.config["sub_indices"])
-            synsets = give_synsets_from_indices(indices, path_to_yaml=self.idx2syn)  # returns a list of strings
+            synsets = give_synsets_from_indices(
+                indices, path_to_yaml=self.idx2syn
+            )  # returns a list of strings
             self.synset2idx = synset2idx(path_to_yaml=self.idx2syn)
             files = []
             for rpath in relpaths:
@@ -67,20 +77,24 @@ class ImageNetBase(Dataset):
         SIZE = 2655750
         URL = "https://heibox.uni-heidelberg.de/f/9f28e956cd304264bb82/?dl=1"
         self.human_dict = os.path.join(self.root, "synset_human.txt")
-        if (not os.path.exists(self.human_dict) or
-                not os.path.getsize(self.human_dict)==SIZE):
+        if (
+            not os.path.exists(self.human_dict)
+            or not os.path.getsize(self.human_dict) == SIZE
+        ):
             download(URL, self.human_dict)
 
     def _prepare_idx_to_synset(self):
         URL = "https://heibox.uni-heidelberg.de/f/d835d5b6ceda4d3aa910/?dl=1"
         self.idx2syn = os.path.join(self.root, "index_synset.yaml")
-        if (not os.path.exists(self.idx2syn)):
+        if not os.path.exists(self.idx2syn):
             download(URL, self.idx2syn)
 
     def _prepare_human_to_integer_label(self):
         URL = "https://heibox.uni-heidelberg.de/f/2362b797d5be43b883f6/?dl=1"
-        self.human2integer = os.path.join(self.root, "imagenet1000_clsidx_to_labels.txt")
-        if (not os.path.exists(self.human2integer)):
+        self.human2integer = os.path.join(
+            self.root, "imagenet1000_clsidx_to_labels.txt"
+        )
+        if not os.path.exists(self.human2integer):
             download(URL, self.human2integer)
         with open(self.human2integer, "r") as f:
             lines = f.read().splitlines()
@@ -95,7 +109,11 @@ class ImageNetBase(Dataset):
             self.relpaths = f.read().splitlines()
             l1 = len(self.relpaths)
             self.relpaths = self._filter_relpaths(self.relpaths)
-            print("Removed {} files from filelist during filtering.".format(l1 - len(self.relpaths)))
+            print(
+                "Removed {} files from filelist during filtering.".format(
+                    l1 - len(self.relpaths)
+                )
+            )
 
         self.synsets = [p.split("/")[0] for p in self.relpaths]
         self.abspaths = [os.path.join(self.datadir, p) for p in self.relpaths]
@@ -123,11 +141,12 @@ class ImageNetBase(Dataset):
         if self.process_images:
             # self.size = retrieve(self.config, "size", default=256)
             self.size = self.config.get("size", default=256)
-            self.data = ImagePaths(self.abspaths,
-                                   labels=labels,
-                                   size=self.size,
-                                   random_crop=self.random_crop,
-                                   )
+            self.data = ImagePaths(
+                self.abspaths,
+                labels=labels,
+                size=self.size,
+                random_crop=self.random_crop,
+            )
         else:
             self.data = self.abspaths
 
@@ -167,8 +186,12 @@ class ImageNetTrain(ImageNetBase):
             datadir = self.datadir
             if not os.path.exists(datadir):
                 path = os.path.join(self.root, self.FILES[0])
-                if not os.path.exists(path) or not os.path.getsize(path)==self.SIZES[0]:
+                if (
+                    not os.path.exists(path)
+                    or not os.path.getsize(path) == self.SIZES[0]
+                ):
                     import academictorrents as at
+
                     atpath = at.get(self.AT_HASH, datastore=self.root)
                     assert atpath == path
 
@@ -180,7 +203,7 @@ class ImageNetTrain(ImageNetBase):
                 print("Extracting sub-tars.")
                 subpaths = sorted(glob.glob(os.path.join(datadir, "*.tar")))
                 for subpath in tqdm(subpaths):
-                    subdir = subpath[:-len(".tar")]
+                    subdir = subpath[: -len(".tar")]
                     os.makedirs(subdir, exist_ok=True)
                     with tarfile.open(subpath, "r:") as tar:
                         tar.extractall(path=subdir)
@@ -188,7 +211,7 @@ class ImageNetTrain(ImageNetBase):
             filelist = glob.glob(os.path.join(datadir, "**", "*.JPEG"))
             filelist = [os.path.relpath(p, start=datadir) for p in filelist]
             filelist = sorted(filelist)
-            filelist = "\n".join(filelist)+"\n"
+            filelist = "\n".join(filelist) + "\n"
             with open(self.txt_filelist, "w") as f:
                 f.write(filelist)
 
@@ -232,8 +255,12 @@ class ImageNetValidation(ImageNetBase):
             datadir = self.datadir
             if not os.path.exists(datadir):
                 path = os.path.join(self.root, self.FILES[0])
-                if not os.path.exists(path) or not os.path.getsize(path)==self.SIZES[0]:
+                if (
+                    not os.path.exists(path)
+                    or not os.path.getsize(path) == self.SIZES[0]
+                ):
                     import academictorrents as at
+
                     atpath = at.get(self.AT_HASH, datastore=self.root)
                     assert atpath == path
 
@@ -243,7 +270,10 @@ class ImageNetValidation(ImageNetBase):
                     tar.extractall(path=datadir)
 
                 vspath = os.path.join(self.root, self.FILES[1])
-                if not os.path.exists(vspath) or not os.path.getsize(vspath)==self.SIZES[1]:
+                if (
+                    not os.path.exists(vspath)
+                    or not os.path.getsize(vspath) == self.SIZES[1]
+                ):
                     download(self.VS_URL, vspath)
 
                 with open(vspath, "r") as f:
@@ -262,18 +292,23 @@ class ImageNetValidation(ImageNetBase):
             filelist = glob.glob(os.path.join(datadir, "**", "*.JPEG"))
             filelist = [os.path.relpath(p, start=datadir) for p in filelist]
             filelist = sorted(filelist)
-            filelist = "\n".join(filelist)+"\n"
+            filelist = "\n".join(filelist) + "\n"
             with open(self.txt_filelist, "w") as f:
                 f.write(filelist)
 
             tdu.mark_prepared(self.root)
 
 
-
 class ImageNetSR(Dataset):
-    def __init__(self, size=None,
-                 degradation=None, downscale_f=4, min_crop_f=0.5, max_crop_f=1.,
-                 random_crop=True):
+    def __init__(
+        self,
+        size=None,
+        degradation=None,
+        downscale_f=4,
+        min_crop_f=0.5,
+        max_crop_f=1.0,
+        random_crop=True,
+    ):
         """
         Imagenet Superresolution Dataloader
         Performs following ops in order:
@@ -297,12 +332,16 @@ class ImageNetSR(Dataset):
         self.LR_size = int(size / downscale_f)
         self.min_crop_f = min_crop_f
         self.max_crop_f = max_crop_f
-        assert(max_crop_f <= 1.)
+        assert max_crop_f <= 1.0
         self.center_crop = not random_crop
 
-        self.image_rescaler = albumentations.SmallestMaxSize(max_size=size, interpolation=cv2.INTER_AREA)
+        self.image_rescaler = albumentations.SmallestMaxSize(
+            max_size=size, interpolation=cv2.INTER_AREA
+        )
 
-        self.pil_interpolation = False # gets reset later if incase interp_op is from pillow
+        self.pil_interpolation = (
+            False  # gets reset later if incase interp_op is from pillow
+        )
 
         if degradation == "bsrgan":
             self.degradation_process = partial(degradation_fn_bsr, sf=downscale_f)
@@ -312,27 +351,30 @@ class ImageNetSR(Dataset):
 
         else:
             interpolation_fn = {
-            "cv_nearest": cv2.INTER_NEAREST,
-            "cv_bilinear": cv2.INTER_LINEAR,
-            "cv_bicubic": cv2.INTER_CUBIC,
-            "cv_area": cv2.INTER_AREA,
-            "cv_lanczos": cv2.INTER_LANCZOS4,
-            "pil_nearest": PIL.Image.NEAREST,
-            "pil_bilinear": PIL.Image.BILINEAR,
-            "pil_bicubic": PIL.Image.BICUBIC,
-            "pil_box": PIL.Image.BOX,
-            "pil_hamming": PIL.Image.HAMMING,
-            "pil_lanczos": PIL.Image.LANCZOS,
+                "cv_nearest": cv2.INTER_NEAREST,
+                "cv_bilinear": cv2.INTER_LINEAR,
+                "cv_bicubic": cv2.INTER_CUBIC,
+                "cv_area": cv2.INTER_AREA,
+                "cv_lanczos": cv2.INTER_LANCZOS4,
+                "pil_nearest": PIL.Image.NEAREST,
+                "pil_bilinear": PIL.Image.BILINEAR,
+                "pil_bicubic": PIL.Image.BICUBIC,
+                "pil_box": PIL.Image.BOX,
+                "pil_hamming": PIL.Image.HAMMING,
+                "pil_lanczos": PIL.Image.LANCZOS,
             }[degradation]
 
             self.pil_interpolation = degradation.startswith("pil_")
 
             if self.pil_interpolation:
-                self.degradation_process = partial(TF.resize, size=self.LR_size, interpolation=interpolation_fn)
+                self.degradation_process = partial(
+                    TF.resize, size=self.LR_size, interpolation=interpolation_fn
+                )
 
             else:
-                self.degradation_process = albumentations.SmallestMaxSize(max_size=self.LR_size,
-                                                                          interpolation=interpolation_fn)
+                self.degradation_process = albumentations.SmallestMaxSize(
+                    max_size=self.LR_size, interpolation=interpolation_fn
+                )
 
     def __len__(self):
         return len(self.base)
@@ -347,14 +389,20 @@ class ImageNetSR(Dataset):
         image = np.array(image).astype(np.uint8)
 
         min_side_len = min(image.shape[:2])
-        crop_side_len = min_side_len * np.random.uniform(self.min_crop_f, self.max_crop_f, size=None)
+        crop_side_len = min_side_len * np.random.uniform(
+            self.min_crop_f, self.max_crop_f, size=None
+        )
         crop_side_len = int(crop_side_len)
 
         if self.center_crop:
-            self.cropper = albumentations.CenterCrop(height=crop_side_len, width=crop_side_len)
+            self.cropper = albumentations.CenterCrop(
+                height=crop_side_len, width=crop_side_len
+            )
 
         else:
-            self.cropper = albumentations.RandomCrop(height=crop_side_len, width=crop_side_len)
+            self.cropper = albumentations.RandomCrop(
+                height=crop_side_len, width=crop_side_len
+            )
 
         image = self.cropper(image=image)["image"]
         image = self.image_rescaler(image=image)["image"]
@@ -367,8 +415,8 @@ class ImageNetSR(Dataset):
         else:
             LR_image = self.degradation_process(image=image)["image"]
 
-        example["image"] = (image/127.5 - 1.0).astype(np.float32)
-        example["LR_image"] = (LR_image/127.5 - 1.0).astype(np.float32)
+        example["image"] = (image / 127.5 - 1.0).astype(np.float32)
+        example["LR_image"] = (LR_image / 127.5 - 1.0).astype(np.float32)
 
         return example
 
@@ -380,7 +428,9 @@ class ImageNetSRTrain(ImageNetSR):
     def get_base(self):
         with open("data/imagenet_train_hr_indices.p", "rb") as f:
             indices = pickle.load(f)
-        dset = ImageNetTrain(process_images=False,)
+        dset = ImageNetTrain(
+            process_images=False,
+        )
         return Subset(dset, indices)
 
 
@@ -391,5 +441,7 @@ class ImageNetSRValidation(ImageNetSR):
     def get_base(self):
         with open("data/imagenet_val_hr_indices.p", "rb") as f:
             indices = pickle.load(f)
-        dset = ImageNetValidation(process_images=False,)
+        dset = ImageNetValidation(
+            process_images=False,
+        )
         return Subset(dset, indices)

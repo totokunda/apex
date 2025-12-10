@@ -4,7 +4,11 @@ import torch.utils.data as data
 import torch.nn as nn
 from pathlib import Path
 from functools import partial
-from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.utils import exists, convert_image_to_fn, normalize_to_neg_one_to_one
+from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.utils import (
+    exists,
+    convert_image_to_fn,
+    normalize_to_neg_one_to_one,
+)
 from PIL import Image, ImageDraw
 import torch.nn.functional as F
 import math
@@ -19,10 +23,19 @@ import copy
 import albumentations
 from torchvision.transforms.functional import InterpolationMode
 
+
 def get_imgs_list(imgs_dir):
     imgs_list = os.listdir(imgs_dir)
     imgs_list.sort()
-    return [os.path.join(imgs_dir, f) for f in imgs_list if f.endswith('.jpg') or f.endswith('.JPG')or f.endswith('.png') or f.endswith('.pgm') or f.endswith('.ppm')]
+    return [
+        os.path.join(imgs_dir, f)
+        for f in imgs_list
+        if f.endswith(".jpg")
+        or f.endswith(".JPG")
+        or f.endswith(".png")
+        or f.endswith(".pgm")
+        or f.endswith(".ppm")
+    ]
 
 
 def fit_img_postfix(img_path):
@@ -39,14 +52,15 @@ class AdaptEdgeDataset(data.Dataset):
         data_root,
         # mask_folder,
         image_size,
-        exts = ['png', 'jpg'],
-        augment_horizontal_flip = False,
-        convert_image_to = None,
+        exts=["png", "jpg"],
+        augment_horizontal_flip=False,
+        convert_image_to=None,
         normalize_to_neg_one_to_one=True,
-        split='train',
+        split="train",
         # inter_type='bicubic',
         # down=4,
-        threshold=0.3, use_uncertainty=False
+        threshold=0.3,
+        use_uncertainty=False,
     ):
         super().__init__()
         # self.img_folder = Path(img_folder)
@@ -65,7 +79,11 @@ class AdaptEdgeDataset(data.Dataset):
         self.use_uncertainty = use_uncertainty
         self.normalize_to_neg_one_to_one = normalize_to_neg_one_to_one
 
-        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else Identity()
+        maybe_convert_fn = (
+            partial(convert_image_to_fn, convert_image_to)
+            if exists(convert_image_to)
+            else Identity()
+        )
 
         # self.normalize_to_neg_one_to_one = normalize_to_neg_one_to_one
         # self.random_crop = RandomCrop(size=image_size)
@@ -79,18 +97,20 @@ class AdaptEdgeDataset(data.Dataset):
         # ])
         self.data_list = self.build_list()
 
-        self.transform = transforms.Compose([
-            # Resize(self.image_size, interpolation=InterpolationMode.BILINEAR, interpolation2=InterpolationMode.NEAREST),
-            transforms.ToTensor()])
+        self.transform = transforms.Compose(
+            [
+                # Resize(self.image_size, interpolation=InterpolationMode.BILINEAR, interpolation2=InterpolationMode.NEAREST),
+                transforms.ToTensor()
+            ]
+        )
 
     def __len__(self):
         return len(self.data_list)
 
-
     def read_img(self, image_path):
-        with open(image_path, 'rb') as f:
+        with open(image_path, "rb") as f:
             img = Image.open(f)
-            img = img.convert('RGB')
+            img = img.convert("RGB")
 
         raw_width, raw_height = img.size
         # width = int(raw_width / 32) * 32
@@ -122,23 +142,27 @@ class AdaptEdgeDataset(data.Dataset):
         if self.use_uncertainty:
             lb[np.logical_and(lb > 0, lb < threshold)] = 2
         else:
-            lb[np.logical_and(lb > 0, lb < threshold)] /= 255.
+            lb[np.logical_and(lb > 0, lb < threshold)] /= 255.0
 
         lb[lb >= threshold] = 1
         return lb
 
     def build_list(self):
         data_root = os.path.abspath(self.data_root)
-        images_path = os.path.join(data_root, 'image', "raw")
-        labels_path = os.path.join(data_root, 'edge', "raw")
+        images_path = os.path.join(data_root, "image", "raw")
+        labels_path = os.path.join(data_root, "edge", "raw")
 
         samples = []
         for directory_name in os.listdir(images_path):
             image_directories = os.path.join(images_path, directory_name)
             for file_name_ext in os.listdir(image_directories):
                 file_name = os.path.basename(file_name_ext)
-                image_path = fit_img_postfix(os.path.join(images_path, directory_name, file_name))
-                lb_path = fit_img_postfix(os.path.join(labels_path, directory_name, file_name))
+                image_path = fit_img_postfix(
+                    os.path.join(images_path, directory_name, file_name)
+                )
+                lb_path = fit_img_postfix(
+                    os.path.join(labels_path, directory_name, file_name)
+                )
                 samples.append((image_path, lb_path))
         return samples
 
@@ -156,10 +180,11 @@ class AdaptEdgeDataset(data.Dataset):
         # # default to score-sde preprocessing
         # mask = Image.open(img_path).convert('RGB')
         # edge, img = self.transform(edge, mask)
-        if self.normalize_to_neg_one_to_one:   # transform to [-1, 1]
+        if self.normalize_to_neg_one_to_one:  # transform to [-1, 1]
             edge = normalize_to_neg_one_to_one(edge)
             img = normalize_to_neg_one_to_one(img)
-        return {'image': edge, 'cond': img, 'raw_size': raw_size, 'img_name': img_name}
+        return {"image": edge, "cond": img, "raw_size": raw_size, "img_name": img_name}
+
 
 class EdgeDataset(data.Dataset):
     def __init__(
@@ -167,14 +192,16 @@ class EdgeDataset(data.Dataset):
         data_root,
         # mask_folder,
         image_size,
-        exts = ['png', 'jpg'],
-        augment_horizontal_flip = True,
-        convert_image_to = None,
+        exts=["png", "jpg"],
+        augment_horizontal_flip=True,
+        convert_image_to=None,
         normalize_to_neg_one_to_one=True,
-        split='train',
+        split="train",
         # inter_type='bicubic',
         # down=4,
-        threshold=0.3, use_uncertainty=False, cfg={}
+        threshold=0.3,
+        use_uncertainty=False,
+        cfg={},
     ):
         super().__init__()
         # self.img_folder = Path(img_folder)
@@ -193,7 +220,11 @@ class EdgeDataset(data.Dataset):
         self.use_uncertainty = use_uncertainty
         self.normalize_to_neg_one_to_one = normalize_to_neg_one_to_one
 
-        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else Identity()
+        maybe_convert_fn = (
+            partial(convert_image_to_fn, convert_image_to)
+            if exists(convert_image_to)
+            else Identity()
+        )
 
         self.data_list = self.build_list()
 
@@ -202,29 +233,32 @@ class EdgeDataset(data.Dataset):
         #     RandomHorizontalFlip() if augment_horizontal_flip else Identity(),
         #     ToTensor()
         # ])
-        crop_type = cfg.get('crop_type') if 'crop_type' in cfg else 'rand_crop'
-        if crop_type == 'rand_crop':
-            self.transform = Compose([
-                RandomCrop(image_size),
-                RandomHorizontalFlip() if augment_horizontal_flip else Identity(),
-                ToTensor()
-            ])
-        elif crop_type == 'rand_resize_crop':
-            self.transform = Compose([
-                RandomResizeCrop(image_size),
-                RandomHorizontalFlip() if augment_horizontal_flip else Identity(),
-                ToTensor()
-            ])
+        crop_type = cfg.get("crop_type") if "crop_type" in cfg else "rand_crop"
+        if crop_type == "rand_crop":
+            self.transform = Compose(
+                [
+                    RandomCrop(image_size),
+                    RandomHorizontalFlip() if augment_horizontal_flip else Identity(),
+                    ToTensor(),
+                ]
+            )
+        elif crop_type == "rand_resize_crop":
+            self.transform = Compose(
+                [
+                    RandomResizeCrop(image_size),
+                    RandomHorizontalFlip() if augment_horizontal_flip else Identity(),
+                    ToTensor(),
+                ]
+            )
         print("crop_type:", crop_type)
 
     def __len__(self):
         return len(self.data_list)
 
-
     def read_img(self, image_path):
-        with open(image_path, 'rb') as f:
+        with open(image_path, "rb") as f:
             img = Image.open(f)
-            img = img.convert('RGB')
+            img = img.convert("RGB")
 
         raw_width, raw_height = img.size
         # width = int(raw_width / 32) * 32
@@ -236,7 +270,7 @@ class EdgeDataset(data.Dataset):
         return img, (raw_width, raw_height)
 
     def read_lb(self, lb_path):
-        lb_data = Image.open(lb_path).convert('L')
+        lb_data = Image.open(lb_path).convert("L")
         lb = np.array(lb_data).astype(np.float32)
         # width, height = lb_data.size
         # width = int(width / 32) * 32
@@ -263,16 +297,20 @@ class EdgeDataset(data.Dataset):
 
     def build_list(self):
         data_root = os.path.abspath(self.data_root)
-        images_path = os.path.join(data_root, 'image')
-        labels_path = os.path.join(data_root, 'edge')
+        images_path = os.path.join(data_root, "image")
+        labels_path = os.path.join(data_root, "edge")
 
         samples = []
         for directory_name in os.listdir(images_path):
             image_directories = os.path.join(images_path, directory_name)
             for file_name_ext in os.listdir(image_directories):
                 file_name = os.path.basename(file_name_ext)
-                image_path = fit_img_postfix(os.path.join(images_path, directory_name, file_name))
-                lb_path = fit_img_postfix(os.path.join(labels_path, directory_name, file_name))
+                image_path = fit_img_postfix(
+                    os.path.join(images_path, directory_name, file_name)
+                )
+                lb_path = fit_img_postfix(
+                    os.path.join(labels_path, directory_name, file_name)
+                )
                 samples.append((image_path, lb_path))
         return samples
 
@@ -291,10 +329,11 @@ class EdgeDataset(data.Dataset):
         # # default to score-sde preprocessing
         # mask = Image.open(img_path).convert('RGB')
         # edge, img = self.transform(edge, mask)
-        if self.normalize_to_neg_one_to_one:   # transform to [-1, 1]
+        if self.normalize_to_neg_one_to_one:  # transform to [-1, 1]
             edge = normalize_to_neg_one_to_one(edge)
             img = normalize_to_neg_one_to_one(img)
-        return {'image': edge, 'cond': img, 'raw_size': raw_size, 'img_name': img_name}
+        return {"image": edge, "cond": img, "raw_size": raw_size, "img_name": img_name}
+
 
 class EdgeDatasetTest(data.Dataset):
     def __init__(
@@ -302,8 +341,8 @@ class EdgeDatasetTest(data.Dataset):
         data_root,
         # mask_folder,
         image_size,
-        exts = ['png', 'jpg'],
-        convert_image_to = None,
+        exts=["png", "jpg"],
+        convert_image_to=None,
         normalize_to_neg_one_to_one=True,
     ):
         super().__init__()
@@ -312,34 +351,33 @@ class EdgeDatasetTest(data.Dataset):
         self.image_size = image_size
         self.normalize_to_neg_one_to_one = normalize_to_neg_one_to_one
 
-        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else Identity()
+        maybe_convert_fn = (
+            partial(convert_image_to_fn, convert_image_to)
+            if exists(convert_image_to)
+            else Identity()
+        )
 
         self.data_list = self.build_list()
 
-        self.transform = Compose([
-            ToTensor()
-        ])
+        self.transform = Compose([ToTensor()])
 
     def __len__(self):
         return len(self.data_list)
 
-
     def read_img(self, image_path):
-        with open(image_path, 'rb') as f:
+        with open(image_path, "rb") as f:
             img = Image.open(f)
-            img = img.convert('RGB')
+            img = img.convert("RGB")
 
         raw_width, raw_height = img.size
-
 
         return img, (raw_width, raw_height)
 
     def read_lb(self, lb_path):
-        lb_data = Image.open(lb_path).convert('L')
+        lb_data = Image.open(lb_path).convert("L")
         lb = np.array(lb_data).astype(np.float32)
 
         threshold = self.threshold
-
 
         lb[lb >= threshold] = 255
         lb = Image.fromarray(lb.astype(np.uint8))
@@ -361,9 +399,9 @@ class EdgeDatasetTest(data.Dataset):
         img, raw_size = self.read_img(img_path)
 
         img = self.transform(img)
-        if self.normalize_to_neg_one_to_one:   # transform to [-1, 1]
+        if self.normalize_to_neg_one_to_one:  # transform to [-1, 1]
             img = normalize_to_neg_one_to_one(img)
-        return {'cond': img, 'raw_size': raw_size, 'img_name': img_name}
+        return {"cond": img, "raw_size": raw_size, "img_name": img_name}
 
 
 class Identity(nn.Identity):
@@ -386,11 +424,13 @@ class Identity(nn.Identity):
         torch.Size([128, 20])
 
     """
+
     def __init__(self, *args, **kwargs):
         super(Identity, self).__init__(*args, **kwargs)
 
     def forward(self, input, target):
         return input, target
+
 
 class Resize(T.Resize):
     def __init__(self, size, interpolation2=None, **kwargs):
@@ -402,12 +442,19 @@ class Resize(T.Resize):
 
     def forward(self, img, target=None):
         if target is None:
-            img = F2.resize(img, self.size, self.interpolation, self.max_size, self.antialias)
+            img = F2.resize(
+                img, self.size, self.interpolation, self.max_size, self.antialias
+            )
             return img
         else:
-            img = F2.resize(img, self.size, self.interpolation, self.max_size, self.antialias)
-            target = F2.resize(target, self.size, self.interpolation2, self.max_size, self.antialias)
+            img = F2.resize(
+                img, self.size, self.interpolation, self.max_size, self.antialias
+            )
+            target = F2.resize(
+                target, self.size, self.interpolation2, self.max_size, self.antialias
+            )
             return img, target
+
 
 class RandomHorizontalFlip(T.RandomHorizontalFlip):
     def __init__(self, p=0.5):
@@ -424,6 +471,7 @@ class RandomHorizontalFlip(T.RandomHorizontalFlip):
                 target = F2.hflip(target)
             return img, target
 
+
 class CenterCrop(T.CenterCrop):
     def __init__(self, size):
         super().__init__(size)
@@ -436,6 +484,7 @@ class CenterCrop(T.CenterCrop):
             img = F2.center_crop(img, self.size)
             target = F2.center_crop(target, self.size)
             return img, target
+
 
 class RandomCrop(T.RandomCrop):
     def __init__(self, size, **kwargs):
@@ -465,6 +514,7 @@ class RandomCrop(T.RandomCrop):
             img = self.single_forward(img, i, j, h, w)
             target = self.single_forward(target, i, j, h, w)
             return img, target
+
 
 class RandomResizeCrop(T.RandomResizedCrop):
     def __init__(self, size, scale=(0.25, 1.0), **kwargs):
@@ -503,8 +553,11 @@ class RandomResizeCrop(T.RandomResizedCrop):
             return img
         else:
             img = self.single_forward(img, i, j, h, w)
-            target = self.single_forward(target, i, j, h, w, interpolation=InterpolationMode.NEAREST)
+            target = self.single_forward(
+                target, i, j, h, w, interpolation=InterpolationMode.NEAREST
+            )
             return img, target
+
 
 class ToTensor(T.ToTensor):
     def __init__(self):
@@ -518,6 +571,7 @@ class ToTensor(T.ToTensor):
             img = F2.to_tensor(img)
             target = F2.to_tensor(target)
             return img, target
+
 
 class Lambda(T.Lambda):
     """Apply a user-defined lambda as a transform. This transform does not support torchscript.
@@ -535,6 +589,7 @@ class Lambda(T.Lambda):
         else:
             return self.lambd(img), self.lambd(target)
 
+
 class Compose(T.Compose):
     def __init__(self, transforms):
         super().__init__(transforms)
@@ -550,10 +605,10 @@ class Compose(T.Compose):
             return img, target
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     dataset = CIFAR10(
-        img_folder='/media/huang/2da18d46-7cba-4259-9abd-0df819bb104c/data/cifar-10-python',
-        augment_horizontal_flip=False
+        img_folder="/media/huang/2da18d46-7cba-4259-9abd-0df819bb104c/data/cifar-10-python",
+        augment_horizontal_flip=False,
     )
     # dataset = CityscapesDataset(
     #     # img_folder='/media/huang/2da18d46-7cba-4259-9abd-0df819bb104c/data/CelebAHQ/celeba_hq_256',
@@ -575,18 +630,19 @@ if __name__ == '__main__':
     #     augment_horizontal_flip = True
     # )
     dataset = EdgeDataset(
-        data_root='/media/huang/2da18d46-7cba-4259-9abd-0df819bb104c/data/BSDS',
+        data_root="/media/huang/2da18d46-7cba-4259-9abd-0df819bb104c/data/BSDS",
         image_size=[320, 320],
     )
     for i in range(len(dataset)):
         d = dataset[i]
-        mask = d['cond']
+        mask = d["cond"]
         print(mask.max())
-    dl = data.DataLoader(dataset, batch_size=2, shuffle=False, pin_memory=True, num_workers=0)
+    dl = data.DataLoader(
+        dataset, batch_size=2, shuffle=False, pin_memory=True, num_workers=0
+    )
 
-
-    dataset_builder = tfds.builder('cifar10')
-    split = 'train'
+    dataset_builder = tfds.builder("cifar10")
+    split = "train"
     dataset_options = tf.data.Options()
     dataset_options.experimental_optimization.map_parallelization = True
     dataset_options.experimental_threading.private_threadpool_size = 48
@@ -594,5 +650,6 @@ if __name__ == '__main__':
     read_config = tfds.ReadConfig(options=dataset_options)
     dataset_builder.download_and_prepare()
     ds = dataset_builder.as_dataset(
-        split=split, shuffle_files=True, read_config=read_config)
+        split=split, shuffle_files=True, read_config=read_config
+    )
     pause = 0

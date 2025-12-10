@@ -81,7 +81,6 @@ class WanCausalEngine(WanShared):
         latent_image = None
         latent_video = None
         num_input_frames = 0
-        
 
         if image is not None:
             loaded_image = self._load_image(image)
@@ -302,19 +301,23 @@ class WanCausalEngine(WanShared):
 
                     if render_on_step:
                         if render_on_step_callback:
-                            self._render_step(current_ref_latents, render_on_step_callback)
+                            self._render_step(
+                                current_ref_latents, render_on_step_callback
+                            )
 
                     current_start_frame += num_frame_per_block
 
         safe_emit_progress(
-            progress_callback, 0.45, "Finished caching input frames; starting causal generation"
+            progress_callback,
+            0.45,
+            "Finished caching input frames; starting causal generation",
         )
 
         # Reserve a progress span for causal denoising [0.50, 0.90]
-        denoise_progress_callback = make_mapped_progress(
-            progress_callback, 0.50, 0.90
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        total_denoise_steps = (
+            len(all_num_frames) * len(timesteps) if timesteps is not None else 0
         )
-        total_denoise_steps = len(all_num_frames) * len(timesteps) if timesteps is not None else 0
         current_denoise_step = 0
 
         safe_emit_progress(progress_callback, 0.50, "Beginning causal denoising loop")
@@ -404,7 +407,6 @@ class WanCausalEngine(WanShared):
                         ).unflatten(0, flow_pred.shape[:2])
                         latent = pred_x0.permute(0, 2, 1, 3, 4)
 
-
                     pbar.update(1)
 
                     if total_denoise_steps > 0:
@@ -421,11 +423,10 @@ class WanCausalEngine(WanShared):
                     :,
                     :,
                 ] = latent
-                
+
                 if render_on_step:
                     if render_on_step_callback:
                         self._render_step(output, render_on_step_callback)
-                
 
                 context_timestep = torch.ones_like(timestep) * context_noise
                 # Clean context cache

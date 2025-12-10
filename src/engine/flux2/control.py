@@ -7,8 +7,9 @@ from src.types import InputImage
 from typing import Tuple
 from torch.nn import functional as F
 
+
 class Flux2Control(Flux2Shared):
-    
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -28,9 +29,9 @@ class Flux2Control(Flux2Shared):
     @property
     def interrupt(self):
         return self._interrupt
-    
+
     def _padding_image(self, images, new_width, new_height):
-        new_image = Image.new('RGB', (new_width, new_height), (255, 255, 255))
+        new_image = Image.new("RGB", (new_width, new_height), (255, 255, 255))
 
         aspect_ratio = images.width / images.height
         if new_width / new_height > 1:
@@ -56,18 +57,18 @@ class Flux2Control(Flux2Shared):
         new_image.paste(resized_img, (paste_x, paste_y))
 
         return new_image
-    
-    def prepare_image(self, ref_image, sample_size: Tuple[int, int], padding=False): 
+
+    def prepare_image(self, ref_image, sample_size: Tuple[int, int], padding=False):
         ref_image = self._load_image(ref_image)
         if padding:
             ref_image = self._padding_image(ref_image, sample_size[1], sample_size[0])
         ref_image = ref_image.resize((sample_size[1], sample_size[0]))
         ref_image = torch.from_numpy(np.array(ref_image))
         ref_image = ref_image.unsqueeze(0).permute([3, 0, 1, 2]).unsqueeze(0) / 255
-        
+
         return ref_image
 
-    def run( 
+    def run(
         self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
@@ -92,7 +93,7 @@ class Flux2Control(Flux2Shared):
         offload: bool = True,
         **kwargs,
     ):
-        
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -114,37 +115,49 @@ class Flux2Control(Flux2Shared):
         width = width or self.default_sample_size * self.vae_scale_factor
         transformer_config = self.load_config_by_type("transformer")
         num_channels_latents = transformer_config.in_channels // 4
-        
-        if not self.vae: 
+
+        if not self.vae:
             self.load_component_by_type("vae")
         self.to_device(self.vae)
-        
+
         # Prepare mask latent variables
         if mask_image is not None:
             mask_image = self.prepare_image(mask_image, (height, width))[:, :1, 0]
         else:
             mask_image = torch.ones([1, 1, height, width]) * 255
-            
-        mask_condition = self.mask_processor.preprocess(mask_image, height=height, width=width) 
-        mask_condition = torch.tile(mask_condition, [1, 3, 1, 1]).to(dtype=weight_dtype, device=device)
+
+        mask_condition = self.mask_processor.preprocess(
+            mask_image, height=height, width=width
+        )
+        mask_condition = torch.tile(mask_condition, [1, 3, 1, 1]).to(
+            dtype=weight_dtype, device=device
+        )
 
         if inpaint_image is not None:
             inpaint_image = self.prepare_image(inpaint_image, (height, width))[:, :, 0]
         else:
             inpaint_image = torch.zeros([1, 3, height, width])
-        init_image = self.diffusers_image_processor.preprocess(inpaint_image, height=height, width=width)
-        init_image = init_image.to(dtype=weight_dtype, device=device) * (mask_condition < 0.5)
+        init_image = self.diffusers_image_processor.preprocess(
+            inpaint_image, height=height, width=width
+        )
+        init_image = init_image.to(dtype=weight_dtype, device=device) * (
+            mask_condition < 0.5
+        )
         inpaint_latent = self.vae.encode(init_image)[0].mode()
 
         if control_image is not None:
             control_image = self.prepare_image(control_image, (height, width))[:, :, 0]
-            control_image = self.diffusers_image_processor.preprocess(control_image, height=height, width=width) 
+            control_image = self.diffusers_image_processor.preprocess(
+                control_image, height=height, width=width
+            )
             control_image = control_image.to(dtype=weight_dtype, device=device)
             control_latents = self.vae.encode(control_image)[0].mode()
         else:
             control_latents = torch.zeros_like(inpaint_latent)
 
-        mask_condition = F.interpolate(1 - mask_condition[:, :1], size=control_latents.size()[-2:], mode='nearest').to(device, weight_dtype)
+        mask_condition = F.interpolate(
+            1 - mask_condition[:, :1], size=control_latents.size()[-2:], mode="nearest"
+        ).to(device, weight_dtype)
         mask_condition = self._patchify_latents(mask_condition)
         mask_condition = self._pack_latents(mask_condition)
 
@@ -163,8 +176,10 @@ class Flux2Control(Flux2Shared):
         else:
             control_latents = self._patchify_latents(control_latents)
             control_latents = self._pack_latents(control_latents)
-        control_context = torch.concat([control_latents, mask_condition, inpaint_latent], dim=2)
-        
+        control_context = torch.concat(
+            [control_latents, mask_condition, inpaint_latent], dim=2
+        )
+
         if offload:
             self._offload(self.vae)
 
@@ -177,7 +192,7 @@ class Flux2Control(Flux2Shared):
             max_sequence_length=max_sequence_length,
             text_encoder_out_layers=text_encoder_out_layers,
         )
-        
+
         if offload:
             self._offload(self.text_encoder)
 
@@ -200,7 +215,9 @@ class Flux2Control(Flux2Shared):
                 multiple_of = self.vae_scale_factor * 2
                 image_width = (image_width // multiple_of) * multiple_of
                 image_height = (image_height // multiple_of) * multiple_of
-                img = self.image_processor.preprocess(img, height=image_height, width=image_width, resize_mode="crop")
+                img = self.image_processor.preprocess(
+                    img, height=image_height, width=image_width, resize_mode="crop"
+                )
                 condition_images.append(img)
                 height = height or image_height
                 width = width or image_width
@@ -232,23 +249,34 @@ class Flux2Control(Flux2Shared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-        
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
-        if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
+
+        sigmas = (
+            np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+            if sigmas is None
+            else sigmas
+        )
+        if (
+            hasattr(self.scheduler.config, "use_flow_sigmas")
+            and self.scheduler.config.use_flow_sigmas
+        ):
             sigmas = None
         image_seq_len = latents.shape[1]
-        mu = self.compute_empirical_mu(image_seq_len=image_seq_len, num_steps=num_inference_steps)
+        mu = self.compute_empirical_mu(
+            image_seq_len=image_seq_len, num_steps=num_inference_steps
+        )
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
             mu=mu,
         )
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
         # handle guidance
@@ -273,7 +301,9 @@ class Flux2Control(Flux2Shared):
                 latent_image_ids = latent_ids
 
                 if image_latents is not None:
-                    latent_model_input = torch.cat([latents, image_latents], dim=1).to(self.transformer.dtype)
+                    latent_model_input = torch.cat([latents, image_latents], dim=1).to(
+                        self.transformer.dtype
+                    )
                     latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
 
                     local_bs, local_length, local_c = control_context.size()
@@ -281,13 +311,10 @@ class Flux2Control(Flux2Shared):
                         [
                             control_context,
                             torch.zeros(
-                                [
-                                    local_bs, 
-                                    image_latents.size()[1], 
-                                    local_c
-                                ]
-                            ).to(control_context.device, control_context.dtype)], 
-                        dim=1
+                                [local_bs, image_latents.size()[1], local_c]
+                            ).to(control_context.device, control_context.dtype),
+                        ],
+                        dim=1,
                     ).to(self.transformer.dtype)
 
                 noise_pred = self.transformer(
@@ -307,7 +334,9 @@ class Flux2Control(Flux2Shared):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
@@ -315,11 +344,13 @@ class Flux2Control(Flux2Shared):
                         latents = latents.to(latents_dtype)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
 
         self._current_timestep = None
-        
+
         if offload:
             self._offload(self.transformer)
 
@@ -330,12 +361,12 @@ class Flux2Control(Flux2Shared):
             if not self.vae:
                 self.load_component_by_type("vae")
             self.to_device(self.vae)
-            
+
             latents = self.vae.denormalize_latents(latents)
-                
+
             latents = self._unpatchify_latents(latents)
 
             image = self.vae_decode(latents, offload=offload, denormalize_latents=False)
             image = self._tensor_to_frame(image)
-        
+
         return image

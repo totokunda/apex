@@ -111,23 +111,57 @@ class ToMixin:
         elif isinstance(module, torch.nn.Parameter):
             return is_quantized(module.data)
         elif isinstance(module, ModelMixin):
-            for name, param in module.named_parameters():
+            for _, param in module.named_parameters():
                 if is_quantized(param.data):
                     return True
             return False
         else:
             raise ValueError(f"Unsupported module type: {type(module)}")
 
+    def _is_scaled_module(self, module: ModelMixin) -> bool:
+        """
+        Heuristically detect whether a module uses scaled / quantized weights.
+
+        We treat a module as "scaled" when:
+          * it is explicitly detected as quantized via `check_quantized`, or
+          * any *parameter* has a dtype that is not one of {fp16, bf16, fp32},
+            including integer dtypes (e.g. int8) and newer float types (e.g. fp8).
+
+        In those cases we skip blanket casting to avoid breaking quantized models.
+        """
+        # First, honour any explicit quantization markers we know about.
+        try:
+            if self.check_quantized(module):
+                return True
+        except Exception:
+            # If quantization inspection fails for any reason, fall back to dtype checks.
+            pass
+
+        allowed_fp = {torch.float16, torch.bfloat16, torch.float32}
+
+        # Only look at trainable parameters (weights); buffers often hold indices,
+        # masks, etc. and should not by themselves mark a module as "scaled".
+        for param in module.parameters():
+            if param is None:
+                continue
+            # Non-floating parameters (e.g. int8) imply quantization/scaling.
+            if not param.is_floating_point():
+                return True
+            # Floating dtypes outside the standard trio (fp16/bf16/fp32) are treated
+            # as scaled (e.g. fp8 variants, float64, etc.).
+            if param.dtype not in allowed_fp:
+                return True
+
+        return False
+
     def to_dtype(
         self,
         module: ModelMixin,
         dtype: str | torch.dtype,
-        requires_grad: bool = False,
         # ---- new knobs -----------------------------------------------
         layerwise: bool = False,
         storage_dtype: torch.dtype | None = None,
         compute_dtype: torch.dtype | None = None,
-        cast_buffers: bool = True,
     ) -> ModelMixin:
         """
         Cast *either* uniformly (like `from_pretrained(torch_dtype=…)`)
@@ -147,11 +181,8 @@ class ToMixin:
         """
         target_dtype = self._parse_dtype(dtype)
 
-        keep_fp32_patterns = tuple(getattr(module, "_keep_in_fp32_modules", []) or [])
-        no_split_patterns = tuple(getattr(module, "_no_split_modules", []) or [])
-
         # ------------------------------------------------------------------
-        # 1. Fast path – use the official API when layer-wise casting is wanted
+        # 1. Layer-wise casting – delegate entirely to Diffusers
         # ------------------------------------------------------------------
         if layerwise:
             skip_patterns = tuple(
@@ -161,61 +192,28 @@ class ToMixin:
                 storage_dtype=storage_dtype or target_dtype,
                 compute_dtype=compute_dtype or torch.float32,
                 skip_modules_pattern=skip_patterns,
-            )  # Diffusers handles the heavy lifting :contentReference[oaicite:3]{index=3}
+            )
             return module
 
         # ------------------------------------------------------------------
-        # 2. Uniform cast (like `from_pretrained(torch_dtype=…)`)
-        #    – skip-patterns are intentionally *ignored* here
+        # 2. Casting behaviour based on whether the module is "scaled"
         # ------------------------------------------------------------------
-        def _matches(patterns, name):
-            return any(re.search(p, name) for p in patterns)
-
-        # a) cast whole sub-modules that must stay together
-        frozen_prefixes = []
-        for name, submod in module.named_modules():
-            if _matches(no_split_patterns, name):
-                dtype_mod = (
-                    torch.float32
-                    if _matches(keep_fp32_patterns, name)
-                    else target_dtype
-                )
-                if not self.check_quantized(submod):
-                    submod.to(dtype_mod)
-                frozen_prefixes.append(name)
-
-        # b) cast individual parameters
-        for name, param in module.named_parameters(recurse=True):
-            if any(name == p or name.startswith(p + ".") for p in frozen_prefixes):
-                param.requires_grad = requires_grad
-                continue
-            wanted_dtype = (
-                torch.float32 if _matches(keep_fp32_patterns, name) else target_dtype
-            )
-            if self.check_quantized(param):
-                continue
-            param.data = param.data.to(wanted_dtype)
-            param.requires_grad = requires_grad
-            if param.grad is not None:
-                param.grad.data = param.grad.data.to(wanted_dtype)
-
-        # c) cast buffers
-        if cast_buffers:
-            for name, buf in module.named_buffers(recurse=True):
-                if any(name == p or name.startswith(p + ".") for p in frozen_prefixes):
+        if self._is_scaled_module(module):
+            # For scaled / quantized modules, only downcast true FP32 weights to the
+            # requested dtype and leave all other dtypes (e.g. int8, fp8) untouched.
+            for param in module.parameters():
+                if param is None:
                     continue
-                wanted_dtype = (
-                    torch.float32
-                    if _matches(keep_fp32_patterns, name)
-                    else target_dtype
-                )
-                buf.data = buf.data.to(wanted_dtype)
+                if (
+                    param.is_floating_point()
+                    and param.dtype is torch.float32
+                    and param.dtype != target_dtype
+                ):
+                    param.data = param.data.to(dtype=target_dtype)
+            return module
 
-        # d) propagate ignore-lists for state-dict loading
-        if hasattr(module, "_keys_to_ignore_on_load_unexpected"):
-            module._keys_to_ignore_on_load_unexpected = getattr(
-                self, "_keys_to_ignore_on_load_unexpected", []
-            )
+        # For regular (unscaled) modules, rely on the standard blanket `.to(...)`.
+        module.to(dtype=target_dtype)
 
         return module
 
@@ -303,7 +301,10 @@ class ToMixin:
             # For torch modules that contain any group-offloaded submodules, we need
             # finer-grained control: we move only the non-offloaded parts while
             # leaving group-offloaded subtrees alone so their hooks can manage them.
-            if isinstance(comp, torch.nn.Module) and _hf_is_group_offload_enabled is not None:
+            if (
+                isinstance(comp, torch.nn.Module)
+                and _hf_is_group_offload_enabled is not None
+            ):
                 try:
                     if _hf_is_group_offload_enabled(comp):
                         _move_module_to_device_excluding_group_offload(comp, device)

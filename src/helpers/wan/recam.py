@@ -16,7 +16,6 @@ class Camera(object):
 class WanRecam:
     def __init__(self, cam_type: int = 1):
         self.cam_type = cam_type
-        
 
     def parse_matrix(self, matrix_str):
         rows = matrix_str.strip().split("] [")
@@ -50,19 +49,24 @@ class WanRecam:
             cam_data = json.load(file)
 
         cam_idx = list(range(num_frames))[::4]
-        traj = [self.parse_matrix(cam_data[f"frame{idx}"][f"cam{int(self.cam_type):02d}"]) for idx in cam_idx]
+        traj = [
+            self.parse_matrix(cam_data[f"frame{idx}"][f"cam{int(self.cam_type):02d}"])
+            for idx in cam_idx
+        ]
         traj = np.stack(traj).transpose(0, 2, 1)
         c2ws = []
         for c2w in traj:
             c2w = c2w[:, [1, 2, 0, 3]]
-            c2w[:3, 1] *= -1.
+            c2w[:3, 1] *= -1.0
             c2w[:3, 3] /= 100
             c2ws.append(c2w)
         tgt_cam_params = [Camera(cam_param) for cam_param in c2ws]
         relative_poses = []
         for i in range(len(tgt_cam_params)):
-            relative_pose = self.get_relative_pose([tgt_cam_params[0], tgt_cam_params[i]])
-            relative_poses.append(torch.as_tensor(relative_pose)[:,:3,:][1])
+            relative_pose = self.get_relative_pose(
+                [tgt_cam_params[0], tgt_cam_params[i]]
+            )
+            relative_poses.append(torch.as_tensor(relative_pose)[:, :3, :][1])
         pose_embedding = torch.stack(relative_poses, dim=0)  # 21x3x4
-        pose_embedding = rearrange(pose_embedding, 'b c d -> b (c d)')
+        pose_embedding = rearrange(pose_embedding, "b c d -> b (c d)")
         return pose_embedding.to(torch.bfloat16)

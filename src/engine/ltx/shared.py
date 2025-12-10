@@ -12,6 +12,7 @@ import av
 import numpy as np
 import torchvision.transforms.functional as TVF
 
+
 def _encode_single_frame(output_file, image_array: np.ndarray, crf):
     container = av.open(output_file, "w", format="mp4")
     try:
@@ -109,7 +110,6 @@ class LTXVideoCondition(LoaderMixin):
         num_frames = (
             1 if isinstance(self._media_item, Image.Image) else len(self._media_item)
         )
-
 
         num_frames = self.trim_conditioning_sequence(
             self.frame_number, num_frames, target_frames or num_frames
@@ -231,6 +231,3 @@ class LTXVideoCondition(LoaderMixin):
         # Trim down to a multiple of temporal_scale_factor frames plus 1
         num_frames = (num_frames - 1) // scale_factor * scale_factor + 1
         return num_frames
-
-
-

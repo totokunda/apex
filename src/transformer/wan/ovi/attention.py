@@ -3,12 +3,14 @@ import torch
 
 try:
     import flash_attn_interface
+
     FLASH_ATTN_3_AVAILABLE = True
 except ModuleNotFoundError:
     FLASH_ATTN_3_AVAILABLE = False
 
 try:
     import flash_attn
+
     FLASH_ATTN_2_AVAILABLE = True
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
@@ -16,24 +18,25 @@ except ModuleNotFoundError:
 import warnings
 
 __all__ = [
-    'flash_attention',
+    "flash_attention",
 ]
 
 if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
+
     def flash_attention(
         q,
         k,
         v,
         q_lens=None,
         k_lens=None,
-        dropout_p=0.,
+        dropout_p=0.0,
         softmax_scale=None,
         q_scale=None,
         causal=False,
         window_size=(-1, -1),
         deterministic=False,
         dtype=torch.bfloat16,
-        version=None
+        version=None,
     ):
         """
         q:              [B, Lq, Nq, C1].
@@ -50,7 +53,7 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
         """
         half_dtypes = (torch.float16, torch.bfloat16)
         assert dtype in half_dtypes
-        assert q.device.type == 'cuda' and q.size(-1) <= 256
+        assert q.device.type == "cuda" and q.size(-1) <= 256
 
         # params
         b, lq, lk, out_dtype = q.size(0), q.size(1), k.size(1), q.dtype
@@ -61,9 +64,9 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
         # preprocess query
         if q_lens is None:
             q = half(q.flatten(0, 1))
-            q_lens = torch.tensor(
-                [lq] * b, dtype=torch.int32).to(
-                    device=q.device, non_blocking=True)
+            q_lens = torch.tensor([lq] * b, dtype=torch.int32).to(
+                device=q.device, non_blocking=True
+            )
         else:
             q = half(torch.cat([u[:v] for u, v in zip(q, q_lens)]))
 
@@ -71,9 +74,9 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
         if k_lens is None:
             k = half(k.flatten(0, 1))
             v = half(v.flatten(0, 1))
-            k_lens = torch.tensor(
-                [lk] * b, dtype=torch.int32).to(
-                    device=k.device, non_blocking=True)
+            k_lens = torch.tensor([lk] * b, dtype=torch.int32).to(
+                device=k.device, non_blocking=True
+            )
         else:
             k = half(torch.cat([u[:v] for u, v in zip(k, k_lens)]))
             v = half(torch.cat([u[:v] for u, v in zip(v, k_lens)]))
@@ -86,7 +89,7 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
 
         if version is not None and version == 3 and not FLASH_ATTN_3_AVAILABLE:
             warnings.warn(
-                'Flash attention 3 is not available, use flash attention 2 instead.'
+                "Flash attention 3 is not available, use flash attention 2 instead."
             )
 
         # apply attention
@@ -96,17 +99,20 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
                 q=q,
                 k=k,
                 v=v,
-                cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(
-                    0, dtype=torch.int32).to(q.device, non_blocking=True),
-                cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(
-                    0, dtype=torch.int32).to(q.device, non_blocking=True),
+                cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens])
+                .cumsum(0, dtype=torch.int32)
+                .to(q.device, non_blocking=True),
+                cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens])
+                .cumsum(0, dtype=torch.int32)
+                .to(q.device, non_blocking=True),
                 seqused_q=None,
                 seqused_k=None,
                 max_seqlen_q=lq,
                 max_seqlen_k=lk,
                 softmax_scale=softmax_scale,
                 causal=causal,
-                deterministic=deterministic)
+                deterministic=deterministic,
+            )
 
             if isinstance(x, tuple):
                 x = x[0]
@@ -118,19 +124,23 @@ if FLASH_ATTN_3_AVAILABLE or FLASH_ATTN_2_AVAILABLE:
                 q=q,
                 k=k,
                 v=v,
-                cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens]).cumsum(
-                    0, dtype=torch.int32).to(q.device, non_blocking=True),
-                cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens]).cumsum(
-                    0, dtype=torch.int32).to(q.device, non_blocking=True),
+                cu_seqlens_q=torch.cat([q_lens.new_zeros([1]), q_lens])
+                .cumsum(0, dtype=torch.int32)
+                .to(q.device, non_blocking=True),
+                cu_seqlens_k=torch.cat([k_lens.new_zeros([1]), k_lens])
+                .cumsum(0, dtype=torch.int32)
+                .to(q.device, non_blocking=True),
                 max_seqlen_q=lq,
                 max_seqlen_k=lk,
                 dropout_p=dropout_p,
                 softmax_scale=softmax_scale,
                 causal=causal,
                 window_size=window_size,
-                deterministic=deterministic).unflatten(0, (b, lq))
+                deterministic=deterministic,
+            ).unflatten(0, (b, lq))
 
         # output
         return x.type(out_dtype)
+
 else:
     flash_attention = None

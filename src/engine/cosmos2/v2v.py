@@ -108,7 +108,7 @@ class Cosmos2V2VEngine(Cosmos2Shared):
             sample_generator=generator,
             dtype=torch.float32,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         latents = self._get_latents(

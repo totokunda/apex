@@ -40,7 +40,7 @@ class MagiV2VEngine(MagiShared):
         kv_offload: bool = True,
         prefix_frames: int | None = 32,
         prefix_video_max_chunk: int = 5,
-        **kwargs
+        **kwargs,
     ):
         """Image-to-video generation using MAGI's chunk-based approach"""
 

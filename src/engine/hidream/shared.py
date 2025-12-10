@@ -37,8 +37,6 @@ class HidreamShared(BaseEngine):
         mu = image_seq_len * m + b
         return mu
 
-    
-
     def _get_latents(
         self,
         batch_size,
@@ -119,7 +117,7 @@ class HidreamShared(BaseEngine):
             output_type="text_embeds",
             **text_encoder_kwargs,
         )
-        
+
         if use_cfg_guidance and negative_prompt is None:
             negative_prompt = ""
 
@@ -147,7 +145,7 @@ class HidreamShared(BaseEngine):
 
         if not negative_prompt_2:
             negative_prompt_2 = negative_prompt
-            
+
         pooled_prompt_embeds_2 = self.text_encoder_2.encode(
             f"<|startoftext|>{prompt_2}<|endoftext|>",
             device=self.device,
@@ -200,7 +198,7 @@ class HidreamShared(BaseEngine):
 
         if offload:
             self._offload(self.text_encoder_3)
-            
+
         pooled_prompt_embeds = torch.cat(
             [pooled_prompt_embeds_1, pooled_prompt_embeds_2], dim=-1
         ).view(num_images, -1)
@@ -210,28 +208,35 @@ class HidreamShared(BaseEngine):
                 [negative_pooled_prompt_embeds_1, negative_pooled_prompt_embeds_2],
                 dim=-1,
             ).view(num_images, -1)
-            
 
         if not prompt_4:
             prompt_4 = prompt
-        
+
         if not negative_prompt_4:
             negative_prompt_4 = negative_prompt
-        
+
         llama_encoder = self.helpers["llama"]
         self.to_device(llama_encoder)
-        
-        llama_prompt_embeds = llama_encoder(prompt_4, device=self.device, dtype=prompt_embeds.dtype, num_images_per_prompt=num_images)
-        
+
+        llama_prompt_embeds = llama_encoder(
+            prompt_4,
+            device=self.device,
+            dtype=prompt_embeds.dtype,
+            num_images_per_prompt=num_images,
+        )
+
         if negative_prompt_4 is not None and use_cfg_guidance:
-            llama_negative_prompt_embeds = llama_encoder(negative_prompt_4, device=self.device, dtype=prompt_embeds.dtype, num_images_per_prompt=num_images)
+            llama_negative_prompt_embeds = llama_encoder(
+                negative_prompt_4,
+                device=self.device,
+                dtype=prompt_embeds.dtype,
+                num_images_per_prompt=num_images,
+            )
         else:
             llama_negative_prompt_embeds = None
-            
+
         if offload:
             self._offload(llama_encoder)
-
-
 
         return (
             prompt_embeds,
@@ -242,7 +247,9 @@ class HidreamShared(BaseEngine):
             negative_pooled_prompt_embeds,
         )
 
-    def resize_image(self, pil_image: Image.Image, image_size: int = 1024) -> Image.Image:
+    def resize_image(
+        self, pil_image: Image.Image, image_size: int = 1024
+    ) -> Image.Image:
         while min(*pil_image.size) >= 2 * image_size:
             pil_image = pil_image.resize(
                 tuple(x // 2 for x in pil_image.size), resample=Image.BOX
@@ -269,16 +276,20 @@ class HidreamShared(BaseEngine):
         s1 = width / new_size[0]
         s2 = height / new_size[1]
         if s1 < s2:
-            pil_image = pil_image.resize([new_size[0], round(height / s1)], resample=Image.BICUBIC)
+            pil_image = pil_image.resize(
+                [new_size[0], round(height / s1)], resample=Image.BICUBIC
+            )
             top = (round(height / s1) - new_size[1]) // 2
             pil_image = pil_image.crop((0, top, new_size[0], top + new_size[1]))
         else:
-            pil_image = pil_image.resize([round(width / s2), new_size[1]], resample=Image.BICUBIC)
+            pil_image = pil_image.resize(
+                [round(width / s2), new_size[1]], resample=Image.BICUBIC
+            )
             left = (round(width / s2) - new_size[0]) // 2
             pil_image = pil_image.crop((left, 0, left + new_size[0], new_size[1]))
 
         return pil_image
-    
+
     def _render_step(self, latents, render_on_step_callback):
         """Decode latents and render a preview image during denoising."""
         try:
@@ -286,9 +297,10 @@ class HidreamShared(BaseEngine):
             preview_width = getattr(self, "_preview_width", None)
             if preview_height is None or preview_width is None:
                 return super()._render_step(latents, render_on_step_callback)
-            tensor_image = self.vae_decode(latents, offload=getattr(self, "_preview_offload", True))
+            tensor_image = self.vae_decode(
+                latents, offload=getattr(self, "_preview_offload", True)
+            )
             image = self._tensor_to_frame(tensor_image)
             render_on_step_callback(image[0])
         except Exception:
             return super()._render_step(latents, render_on_step_callback)
-      

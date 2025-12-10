@@ -9,6 +9,7 @@ from src.engine.hunyuanvideo15.shared import HunyuanVideo15Shared
 from src.types.media import InputImage
 from src.helpers.hunyuanvideo15.cache import CacheHelper
 
+
 class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
     """HunyuanVideo 1.5 Text/Image-to-Video Engine Implementation"""
 
@@ -26,13 +27,17 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         self.byt5_encoder = None
         self._transformer_config = None
         self.glyph_byT5_v2 = bool(self.config.get("glyph_byT5_v2", True))
-        self.vision_num_semantic_tokens = self.config.get("vision_num_semantic_tokens", 729)
+        self.vision_num_semantic_tokens = self.config.get(
+            "vision_num_semantic_tokens", 729
+        )
         self.vision_states_dim = self.config.get("vision_states_dim", 1152)
         # Compression defaults fall back to model values once the VAE is loaded
         self.vae_scale_factor_temporal = 4
         self.vae_scale_factor_spatial = 16
         self.num_channels_latents = 16
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
         self.target_size_config = {
             "360p": {"bucket_hw_base_size": 480, "bucket_hw_bucket_stride": 16},
             "480p": {"bucket_hw_base_size": 640, "bucket_hw_bucket_stride": 16},
@@ -60,10 +65,14 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         self.num_channels_latents = getattr(
             self.vae.config, "latent_channels", self.num_channels_latents
         )
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
         vae_inference_config = self.get_vae_inference_config()
-        self.vae.set_tile_sample_min_size(vae_inference_config['sample_size'], vae_inference_config['tile_overlap_factor'])
-        
+        self.vae.set_tile_sample_min_size(
+            vae_inference_config["sample_size"],
+            vae_inference_config["tile_overlap_factor"],
+        )
 
     def _get_byt5_encoder(self):
         if self.byt5_encoder is None:
@@ -75,12 +84,12 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         byt5_component = self.get_component_by_name("byt5_encoder")
         byT5_ckpt_path = byt5_component.get("extra_model_paths", [])[0]
         byt5_state_dict = torch.load(byT5_ckpt_path, map_location=self.device)
-        if 'state_dict' in byt5_state_dict:
+        if "state_dict" in byt5_state_dict:
             sd = byt5_state_dict["state_dict"]
             newsd = {}
             for k, v in sd.items():
-                if k.startswith('module.text_tower.encoder.'):
-                    newsd[k[len('module.text_tower.encoder.'):]] = v
+                if k.startswith("module.text_tower.encoder."):
+                    newsd[k[len("module.text_tower.encoder.") :]] = v
             byt5_state_dict = newsd
         self.byt5_encoder.load_state_dict(byt5_state_dict)
         self.byt5_encoder.requires_grad_(False)
@@ -88,6 +97,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
     def _extract_glyph_texts(self, prompt: str) -> List[str]:
         import re
+
         pattern = r"\"(.*?)\"|“(.*?)”"
         matches = re.findall(pattern, prompt)
         result = [match[0] or match[1] for match in matches]
@@ -97,24 +107,45 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         self, prompt_text: str, device: torch.device
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         byt5_embeddings = torch.zeros((1, self.byt5_max_length, 1472), device=device)
-        byt5_mask = torch.zeros((1, self.byt5_max_length), device=device, dtype=torch.int64)
+        byt5_mask = torch.zeros(
+            (1, self.byt5_max_length), device=device, dtype=torch.int64
+        )
         self._get_prompt_format()
 
         glyph_texts = self._extract_glyph_texts(prompt_text)
         if len(glyph_texts) > 0 and self.prompt_format is not None:
-            text_styles = [{"color": None, "font-family": None} for _ in range(len(glyph_texts))]
+            text_styles = [
+                {"color": None, "font-family": None} for _ in range(len(glyph_texts))
+            ]
             formatted_text = self.prompt_format.format_prompt(glyph_texts, text_styles)
             self.load_component_by_name("byt5_encoder")
             if getattr(self, "byt5_encoder", None) is not None:
                 byt5_encoder = self.byt5_encoder
-                self._add_special_token(byt5_encoder, add_color=True, add_font=True, color_ann_path=self.prompt_format.color_path, font_ann_path=self.prompt_format.font_path, multilingual=True)
-                byt5_outputs = byt5_encoder.encode(formatted_text, clean_text=False, return_attention_mask=True, output_type="hidden_states", use_attention_mask=True, max_sequence_length=self.byt5_max_length, pad_with_zero=False)
+                self._add_special_token(
+                    byt5_encoder,
+                    add_color=True,
+                    add_font=True,
+                    color_ann_path=self.prompt_format.color_path,
+                    font_ann_path=self.prompt_format.font_path,
+                    multilingual=True,
+                )
+                byt5_outputs = byt5_encoder.encode(
+                    formatted_text,
+                    clean_text=False,
+                    return_attention_mask=True,
+                    output_type="hidden_states",
+                    use_attention_mask=True,
+                    max_sequence_length=self.byt5_max_length,
+                    pad_with_zero=False,
+                )
                 byt5_embeddings = byt5_outputs[0].to(device=device)
                 byt5_mask = byt5_outputs[1].to(device=device)
 
         return byt5_embeddings, byt5_mask
 
-    def _prepare_byt5_embeddings(self, prompts: Union[str, List[str]], device: torch.device) -> Dict[str, torch.Tensor]:
+    def _prepare_byt5_embeddings(
+        self, prompts: Union[str, List[str]], device: torch.device
+    ) -> Dict[str, torch.Tensor]:
         if not self.glyph_byT5_v2:
             return {}
 
@@ -180,10 +211,14 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        if prompt_embeds is None: 
-            text_inputs = text_encoder.text2tokens(prompt, data_type=data_type, max_length=text_encoder.max_length)
+        if prompt_embeds is None:
+            text_inputs = text_encoder.text2tokens(
+                prompt, data_type=data_type, max_length=text_encoder.max_length
+            )
             if clip_skip is None:
-                prompt_outputs = text_encoder.encode(text_inputs, data_type=data_type, device=device)
+                prompt_outputs = text_encoder.encode(
+                    text_inputs, data_type=data_type, device=device
+                )
                 prompt_embeds = prompt_outputs.hidden_state
             else:
                 prompt_outputs = text_encoder.encode(
@@ -193,21 +228,31 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                     device=device,
                 )
                 prompt_embeds = prompt_outputs.hidden_states_list[-(clip_skip + 1)]
-                prompt_embeds = text_encoder.model.text_model.final_layer_norm(prompt_embeds)
+                prompt_embeds = text_encoder.model.text_model.final_layer_norm(
+                    prompt_embeds
+                )
 
             attention_mask = prompt_outputs.attention_mask
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
                 bs_embed, seq_len = attention_mask.shape
                 attention_mask = attention_mask.repeat(1, num_videos_per_prompt)
-                attention_mask = attention_mask.view(bs_embed * num_videos_per_prompt, seq_len)
+                attention_mask = attention_mask.view(
+                    bs_embed * num_videos_per_prompt, seq_len
+                )
 
         if text_encoder is not None:
-            prompt_embeds_dtype = text_encoder.dtype or self.component_dtypes.get("text_encoder", None)
+            prompt_embeds_dtype = text_encoder.dtype or self.component_dtypes.get(
+                "text_encoder", None
+            )
         elif self.transformer is not None:
-            prompt_embeds_dtype = self.transformer.dtype or self.component_dtypes.get("transformer", None)
+            prompt_embeds_dtype = self.transformer.dtype or self.component_dtypes.get(
+                "transformer", None
+            )
         else:
-            prompt_embeds_dtype = prompt_embeds.dtype or self.component_dtypes.get("text_encoder", None)
+            prompt_embeds_dtype = prompt_embeds.dtype or self.component_dtypes.get(
+                "text_encoder", None
+            )
 
         prompt_embeds = prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
 
@@ -218,7 +263,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         else:
             bs_embed, seq_len, _ = prompt_embeds.shape
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            prompt_embeds = prompt_embeds.view(bs_embed * num_videos_per_prompt, seq_len, -1)
+            prompt_embeds = prompt_embeds.view(
+                bs_embed * num_videos_per_prompt, seq_len, -1
+            )
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             if negative_prompt is None:
@@ -239,31 +286,52 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             else:
                 uncond_tokens = negative_prompt
 
-            uncond_input = text_encoder.text2tokens(uncond_tokens, data_type=data_type, max_length=text_encoder.max_length)
-            negative_prompt_outputs = text_encoder.encode(uncond_input, data_type=data_type)
+            uncond_input = text_encoder.text2tokens(
+                uncond_tokens, data_type=data_type, max_length=text_encoder.max_length
+            )
+            negative_prompt_outputs = text_encoder.encode(
+                uncond_input, data_type=data_type
+            )
             negative_prompt_embeds = negative_prompt_outputs.hidden_state
 
             negative_attention_mask = negative_prompt_outputs.attention_mask
             if negative_attention_mask is not None:
                 negative_attention_mask = negative_attention_mask.to(device)
                 _, seq_len = negative_attention_mask.shape
-                negative_attention_mask = negative_attention_mask.repeat(1, num_videos_per_prompt)
-                negative_attention_mask = negative_attention_mask.view(batch_size * num_videos_per_prompt, seq_len)
+                negative_attention_mask = negative_attention_mask.repeat(
+                    1, num_videos_per_prompt
+                )
+                negative_attention_mask = negative_attention_mask.view(
+                    batch_size * num_videos_per_prompt, seq_len
+                )
 
         if do_classifier_free_guidance:
             seq_len = negative_prompt_embeds.shape[1]
-            negative_prompt_embeds = negative_prompt_embeds.to(dtype=prompt_embeds_dtype, device=device)
+            negative_prompt_embeds = negative_prompt_embeds.to(
+                dtype=prompt_embeds_dtype, device=device
+            )
 
             if negative_prompt_embeds.ndim == 2:
-                negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_videos_per_prompt)
-                negative_prompt_embeds = negative_prompt_embeds.view(batch_size * num_videos_per_prompt, -1)
+                negative_prompt_embeds = negative_prompt_embeds.repeat(
+                    1, num_videos_per_prompt
+                )
+                negative_prompt_embeds = negative_prompt_embeds.view(
+                    batch_size * num_videos_per_prompt, -1
+                )
             else:
-                negative_prompt_embeds = negative_prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+                negative_prompt_embeds = negative_prompt_embeds.repeat(
+                    1, num_videos_per_prompt, 1
+                )
                 negative_prompt_embeds = negative_prompt_embeds.view(
                     batch_size * num_videos_per_prompt, seq_len, -1
                 )
 
-        return prompt_embeds, negative_prompt_embeds, attention_mask, negative_attention_mask
+        return (
+            prompt_embeds,
+            negative_prompt_embeds,
+            attention_mask,
+            negative_attention_mask,
+        )
 
     @staticmethod
     def prepare_extra_func_kwargs(func, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -286,7 +354,13 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         generator: Optional[torch.Generator],
         latents: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        shape = (batch_size, num_channels_latents, video_length, latent_height, latent_width)
+        shape = (
+            batch_size,
+            num_channels_latents,
+            video_length,
+            latent_height,
+            latent_width,
+        )
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
@@ -318,15 +392,25 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 device=latents.device,
             )
         else:
-            reference_image = np.array(reference_image) if isinstance(reference_image, Image.Image) else reference_image
+            reference_image = (
+                np.array(reference_image)
+                if isinstance(reference_image, Image.Image)
+                else reference_image
+            )
             if len(reference_image.shape) == 4:
                 reference_image = reference_image[0]
 
-            height, width = self.get_closest_resolution_given_reference_image(reference_image, target_resolution)
+            height, width = self.get_closest_resolution_given_reference_image(
+                reference_image, target_resolution
+            )
             if self.vision_encoder is not None:
-                input_image_np = self._resize_and_center_crop(reference_image, target_width=width, target_height=height)
+                input_image_np = self._resize_and_center_crop(
+                    reference_image, target_width=width, target_height=height
+                )
                 vision_states = self.vision_encoder.encode_images(input_image_np)
-                vision_states = vision_states.last_hidden_state.to(device=device, dtype=self.target_dtype)
+                vision_states = vision_states.last_hidden_state.to(
+                    device=device, dtype=self.target_dtype
+                )
             else:
                 vision_states = None
 
@@ -335,7 +419,11 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         return vision_states
 
     def _prepare_cond_latents(
-        self, task_type: str, cond_latents: Optional[torch.Tensor], latents: torch.Tensor, multitask_mask: torch.Tensor
+        self,
+        task_type: str,
+        cond_latents: Optional[torch.Tensor],
+        latents: torch.Tensor,
+        multitask_mask: torch.Tensor,
     ) -> torch.Tensor:
         if cond_latents is not None and task_type == "i2v":
             latents_concat = cond_latents.repeat(1, 1, latents.shape[2], 1, 1)
@@ -343,11 +431,15 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         else:
             latents_concat = torch.zeros_like(latents)
 
-        mask_zeros = torch.zeros(latents.shape[0], 1, latents.shape[2], latents.shape[3], latents.shape[4])
-        mask_ones = torch.ones(latents.shape[0], 1, latents.shape[2], latents.shape[3], latents.shape[4])
-        mask_concat = self._merge_tensor_by_mask(mask_zeros, mask_ones, mask=multitask_mask.cpu(), dim=2).to(
-            device=latents.device
+        mask_zeros = torch.zeros(
+            latents.shape[0], 1, latents.shape[2], latents.shape[3], latents.shape[4]
         )
+        mask_ones = torch.ones(
+            latents.shape[0], 1, latents.shape[2], latents.shape[3], latents.shape[4]
+        )
+        mask_concat = self._merge_tensor_by_mask(
+            mask_zeros, mask_ones, mask=multitask_mask.cpu(), dim=2
+        ).to(device=latents.device)
 
         cond_latents = torch.concat([latents_concat, mask_concat], dim=1)
         return cond_latents
@@ -371,36 +463,59 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             height, width, _ = reference_image.shape
             origin_size = (width, height)
         else:
-            raise ValueError(f"Unsupported reference_image type: {type(reference_image)}. Must be PIL Image or numpy array")
+            raise ValueError(
+                f"Unsupported reference_image type: {type(reference_image)}. Must be PIL Image or numpy array"
+            )
 
-        return self.get_closest_resolution_given_original_size(origin_size, target_resolution)
+        return self.get_closest_resolution_given_original_size(
+            origin_size, target_resolution
+        )
 
     def get_closest_resolution_given_original_size(
         self, origin_size: Tuple[int, int], target_size: str
     ) -> Tuple[int, int]:
-        bucket_hw_base_size = self.target_size_config[target_size]["bucket_hw_base_size"]
-        bucket_hw_bucket_stride = self.target_size_config[target_size]["bucket_hw_bucket_stride"]
+        bucket_hw_base_size = self.target_size_config[target_size][
+            "bucket_hw_base_size"
+        ]
+        bucket_hw_bucket_stride = self.target_size_config[target_size][
+            "bucket_hw_bucket_stride"
+        ]
 
-        crop_size_list = self._generate_crop_size_list(bucket_hw_base_size, bucket_hw_bucket_stride)
-        aspect_ratios = np.array([round(float(h) / float(w), 5) for h, w in crop_size_list])
-        closest_size, _ = self._get_closest_ratio(origin_size[1], origin_size[0], aspect_ratios, crop_size_list)
+        crop_size_list = self._generate_crop_size_list(
+            bucket_hw_base_size, bucket_hw_bucket_stride
+        )
+        aspect_ratios = np.array(
+            [round(float(h) / float(w), 5) for h, w in crop_size_list]
+        )
+        closest_size, _ = self._get_closest_ratio(
+            origin_size[1], origin_size[0], aspect_ratios, crop_size_list
+        )
         height = closest_size[0]
         width = closest_size[1]
         return height, width
 
-    def get_latent_size(self, video_length: int, height: int, width: int) -> Tuple[int, int, int]:
+    def get_latent_size(
+        self, video_length: int, height: int, width: int
+    ) -> Tuple[int, int, int]:
         spatial_ratio = self.vae_scale_factor_spatial
         temporal_ratio = self.vae_scale_factor_temporal
         video_length = (video_length - 1) // temporal_ratio + 1
         height, width = height // spatial_ratio, width // spatial_ratio
 
         if height <= 0 or width <= 0 or video_length <= 0:
-            raise ValueError(f"height: {height}, width: {width}, video_length: {video_length}")
+            raise ValueError(
+                f"height: {height}, width: {width}, video_length: {video_length}"
+            )
 
         return video_length, height, width
 
     def get_image_condition_latents(
-        self, task_type: str, reference_image: InputImage, height: int, width: int, offload: bool = True
+        self,
+        task_type: str,
+        reference_image: InputImage,
+        height: int,
+        width: int,
+        offload: bool = True,
     ) -> Optional[torch.Tensor]:
         if task_type == "t2v":
             return None
@@ -414,21 +529,30 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         target_height, target_width = height, width
         original_width, original_height = origin_size
 
-        scale_factor = max(target_width / original_width, target_height / original_height)
+        scale_factor = max(
+            target_width / original_width, target_height / original_height
+        )
         resize_width = int(round(original_width * scale_factor))
         resize_height = int(round(original_height * scale_factor))
 
         ref_image_transform = transforms.Compose(
             [
-                transforms.Resize((resize_height, resize_width), interpolation=transforms.InterpolationMode.LANCZOS),
+                transforms.Resize(
+                    (resize_height, resize_width),
+                    interpolation=transforms.InterpolationMode.LANCZOS,
+                ),
                 transforms.CenterCrop((target_height, target_width)),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
-        
-        
-        ref_images_pixel_values = ref_image_transform(reference_image).unsqueeze(0).unsqueeze(2).to(self.device)
+
+        ref_images_pixel_values = (
+            ref_image_transform(reference_image)
+            .unsqueeze(0)
+            .unsqueeze(2)
+            .to(self.device)
+        )
         cond_latents = self.vae_encode(ref_images_pixel_values, offload=offload)
         return cond_latents
 
@@ -439,9 +563,11 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 self.vision_encoder = helper
                 self.to_device(self.vision_encoder)
             else:
-                logger.warning("Vision encoder helper 'hunyuan.vision_encoder' not configured.")
+                logger.warning(
+                    "Vision encoder helper 'hunyuan.vision_encoder' not configured."
+                )
         return self.vision_encoder
-    
+
     def _get_text_encoder(self):
         if self.text_encoder is None:
             helper = self.helpers["text_encoder"]
@@ -449,9 +575,11 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 self.text_encoder = helper
                 self.to_device(self.text_encoder)
             else:
-                logger.warning("Text encoder helper 'hunyuanvideo15.text_encoder' not configured.")
+                logger.warning(
+                    "Text encoder helper 'hunyuanvideo15.text_encoder' not configured."
+                )
         return self.text_encoder
-    
+
     def _get_text_encoder_2(self):
         if getattr(self, "text_encoder_2", None) is None:
             helper = self.helpers["text_encoder_2"]
@@ -459,7 +587,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 self.text_encoder_2 = helper
                 self.to_device(self.text_encoder_2)
             else:
-                logger.warning("Text encoder helper 'hunyuanvideo15.text_encoder_2' not configured.")
+                logger.warning(
+                    "Text encoder helper 'hunyuanvideo15.text_encoder_2' not configured."
+                )
         return getattr(self, "text_encoder_2", None)
 
     def _get_prompt_format(self):
@@ -469,7 +599,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 self.prompt_format = helper
                 self.to_device(self.prompt_format)
             else:
-                logger.warning("Prompt format helper 'hunyuanvideo15.prompt_format' not configured.")
+                logger.warning(
+                    "Prompt format helper 'hunyuanvideo15.prompt_format' not configured."
+                )
         return self.prompt_format
 
     # -------------------------
@@ -490,7 +622,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
     @property
     def do_classifier_free_guidance(self):
         return self._guidance_scale is not None and self._guidance_scale > 1
-    
+
     @property
     def transformer_config(self):
         if self._transformer_config is not None:
@@ -502,7 +634,6 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
     @property
     def ideal_resolution(self):
         return getattr(self.transformer_config, "ideal_resolution", None)
-        
 
     @property
     def ideal_task(self):
@@ -515,7 +646,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
     def run(
         self,
         prompt: Union[str, List[str]],
-        aspect_ratio: str  = '16:9',
+        aspect_ratio: str = "16:9",
         duration: str | int = 81,
         fps: int = 24,
         num_inference_steps: int = 50,
@@ -523,9 +654,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         width: Optional[int] = None,
         guidance_scale: Optional[float] = None,
         embedded_guidance_scale: Optional[float] = None,
-        negative_prompt: Optional[Union[str, List[str]]] = '',
+        negative_prompt: Optional[Union[str, List[str]]] = "",
         num_videos: int = 1,
-        resolution: str = "720p", # or 480p or #1080p
+        resolution: str = "720p",  # or 480p or #1080p
         sparse_attn: bool = False,
         enable_cache: bool = True,
         cache_start_step: int = 11,
@@ -548,7 +679,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         if generator is None and seed is not None:
             generator = torch.Generator(device=torch.device("cpu")).manual_seed(seed)
-        
+
         transformer_dtype = self.component_dtypes.get("transformer", self.target_dtype)
         self.target_dtype = transformer_dtype
 
@@ -557,7 +688,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         if embedded_guidance_scale is None:
             embedded_guidance_scale = self.config.get("embedded_guidance_scale", None)
         if flow_shift is None:
-            flow_shift = self.config.get("flow_shift", getattr(self.transformer_config, "flow_shift", 7.0))
+            flow_shift = self.config.get(
+                "flow_shift", getattr(self.transformer_config, "flow_shift", 7.0)
+            )
 
         target_resolution = resolution or self.ideal_resolution or "720p"
 
@@ -574,21 +707,27 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             )
 
         if reference_image is not None:
-            height, width = self.get_closest_resolution_given_reference_image(reference_image, target_resolution) 
+            height, width = self.get_closest_resolution_given_reference_image(
+                reference_image, target_resolution
+            )
         elif height is not None and width is not None:
             height, width = height, width
         else:
             if ":" not in aspect_ratio:
-                raise ValueError("aspect_ratio must be separated by a colon, e.g. '16:9'")
+                raise ValueError(
+                    "aspect_ratio must be separated by a colon, e.g. '16:9'"
+                )
             width_str, height_str = aspect_ratio.split(":")
             if not width_str.isdigit() or not height_str.isdigit():
                 raise ValueError("aspect_ratio must contain integer width and height")
             height, width = self.get_closest_resolution_given_original_size(
                 (int(width_str), int(height_str)), target_resolution
             )
-            
+
         video_length = self._parse_num_frames(duration=duration, fps=fps)
-        latent_target_length, latent_height, latent_width = self.get_latent_size(video_length, height, width)
+        latent_target_length, latent_height, latent_width = self.get_latent_size(
+            video_length, height, width
+        )
         n_tokens = latent_target_length * latent_height * latent_width
         multitask_mask = self.get_task_mask(task_type, latent_target_length)
 
@@ -656,8 +795,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             self._offload(self.text_encoder)
             if getattr(self, "text_encoder_2", None) is not None:
                 self._offload(self.text_encoder_2)
-                
-            
+
         extra_kwargs = self._prepare_byt5_embeddings(prompt, device)
 
         if self.do_classifier_free_guidance:
@@ -686,14 +824,16 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.set_timesteps, {"n_tokens": n_tokens}
         )
-        
+
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=self.scheduler,
             num_inference_steps=num_inference_steps,
             **extra_set_timesteps_kwargs,
         )
 
-        num_channels_latents = getattr(self.transformer_config, "in_channels", self.num_channels_latents)
+        num_channels_latents = getattr(
+            self.transformer_config, "in_channels", self.num_channels_latents
+        )
         latents = self.prepare_latents(
             batch_size * num_videos,
             num_channels_latents,
@@ -707,60 +847,77 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         self.load_component_by_type("vae")
         self.to_device(self.vae)
-        image_cond = self.get_image_condition_latents(task_type, reference_image, height, width, offload=offload)
-        cond_latents = self._prepare_cond_latents(task_type, image_cond, latents, multitask_mask)
-        vision_states = self._prepare_vision_states(reference_image, target_resolution, latents, device)
+        image_cond = self.get_image_condition_latents(
+            task_type, reference_image, height, width, offload=offload
+        )
+        cond_latents = self._prepare_cond_latents(
+            task_type, image_cond, latents, multitask_mask
+        )
+        vision_states = self._prepare_vision_states(
+            reference_image, target_resolution, latents, device
+        )
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step, {"generator": generator, "eta": eta}
         )
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
-        
+
         if getattr(self, "transformer", None) is None:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-        
-        
+
         if enable_cache:
-            no_cache_steps = list(range(0, cache_start_step)) + list(range(cache_start_step, cache_end_step, cache_step_interval)) + list(range(cache_end_step, total_steps))
+            no_cache_steps = (
+                list(range(0, cache_start_step))
+                + list(range(cache_start_step, cache_end_step, cache_step_interval))
+                + list(range(cache_end_step, total_steps))
+            )
             cache_helper = CacheHelper(
                 model=self.transformer,
-                no_cache_steps=no_cache_steps, 
-                no_cache_block_id={"double":[53]} # Added single block to skip caching
+                no_cache_steps=no_cache_steps,
+                no_cache_block_id={
+                    "double": [53]
+                },  # Added single block to skip caching
             )
             cache_helper.enable()
         else:
             cache_helper = None
-        
+
         if sparse_attn:
             if not self.is_sparse_attn_supported():
-                raise RuntimeError(f"Current GPU is {torch.cuda.get_device_properties(0).name}, which does not support sparse attention.")
-            if self.transformer.config.attn_mode != 'flex-block-attn':
+                raise RuntimeError(
+                    f"Current GPU is {torch.cuda.get_device_properties(0).name}, which does not support sparse attention."
+                )
+            if self.transformer.config.attn_mode != "flex-block-attn":
                 self.logger.warning(
                     f"The transformer loaded is not trained with sparse attention. Forcing to use sparse attention may lead to artifacts in the generated video."
                     f"To enable sparse attention, we recommend loading `{self.transformer_version}_distilled_sparse` instead."
                 )
-            self.transformer.set_attn_mode('flex-block-attn')
+            self.transformer.set_attn_mode("flex-block-attn")
 
         if cache_helper is not None:
             cache_helper.clear_cache()
             assert num_inference_steps == total_steps
-            
-        
-        with self._progress_bar(total=num_inference_steps, desc="Denoising HunyuanVideo1.5") as progress_bar:
+
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising HunyuanVideo1.5"
+        ) as progress_bar:
             for i, t in enumerate(timesteps):
                 if cache_helper is not None:
                     cache_helper.cur_timestep = i
                 latents_concat = torch.concat([latents, cond_latents], dim=1)
-                
 
                 latent_model_input = (
-                    torch.cat([latents_concat] * 2) if self.do_classifier_free_guidance else latents_concat
+                    torch.cat([latents_concat] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents_concat
                 )
 
                 if hasattr(self.scheduler, "scale_model_input"):
-                    latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                    latent_model_input = self.scheduler.scale_model_input(
+                        latent_model_input, t
+                    )
 
                 t_expand = t.repeat(latent_model_input.shape[0])
                 if self.use_meanflow:
@@ -805,15 +962,23 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + self.guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
                     if self.guidance_rescale > 0.0:
                         noise_pred = self._rescale_noise_cfg(
-                            noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale
+                            noise_pred,
+                            noise_pred_text,
+                            guidance_rescale=self.guidance_rescale,
                         )
 
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, **extra_step_kwargs, return_dict=False
+                )[0]
 
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     if progress_bar is not None:
                         progress_bar.update()
 
@@ -825,16 +990,22 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         video_latents = latents if latents.ndim == 5 else latents.unsqueeze(2)
         video_frames = self.vae_decode(video_latents, offload=offload)
-    
+
         if output_type == "np":
             video_frames = video_frames.numpy()
         elif output_type == "pil":
-            video_frames = self.video_processor.postprocess_video(video_frames, output_type="pil")
+            video_frames = self.video_processor.postprocess_video(
+                video_frames, output_type="pil"
+            )
 
         return video_frames
-    
+
     def vae_decode(self, latents, offload=True):
-        with torch.autocast(device_type=self.device.type, dtype=self.component_dtypes.get("vae", self.vae_dtype), enabled=True):
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=self.component_dtypes.get("vae", self.vae_dtype),
+            enabled=True,
+        ):
             self.load_component_by_type("vae")
             self.to_device(self.vae)
             self._refresh_vae_factors()
@@ -844,15 +1015,26 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         if offload:
             self._offload(self.vae)
         return out
-    
-    def vae_encode(self, frames, sample_mode="mode", sample_generator=None, offload=True):
-        
-        with torch.autocast(device_type=self.device.type, dtype=self.component_dtypes.get("vae", self.vae_dtype), enabled=True):
+
+    def vae_encode(
+        self, frames, sample_mode="mode", sample_generator=None, offload=True
+    ):
+
+        with torch.autocast(
+            device_type=self.device.type,
+            dtype=self.component_dtypes.get("vae", self.vae_dtype),
+            enabled=True,
+        ):
             self.load_component_by_type("vae")
             self.to_device(self.vae)
             self._refresh_vae_factors()
             self.vae.enable_tiling()
-            out = super().vae_encode(frames, sample_mode=sample_mode, sample_generator=sample_generator, offload=offload)
+            out = super().vae_encode(
+                frames,
+                sample_mode=sample_mode,
+                sample_generator=sample_generator,
+                offload=offload,
+            )
             self.vae.disable_tiling()
         if offload:
             self._offload(self.vae)

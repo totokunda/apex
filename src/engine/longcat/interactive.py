@@ -6,6 +6,7 @@ from .t2v import LongCatT2VEngine
 from .vc import LongCatVCEngine
 from .refine import LongCatRefineEngine
 
+
 class LongCatInteractiveEngine(LongCatShared):
     """
     LongCat interactive long-video engine.
@@ -50,7 +51,7 @@ class LongCatInteractiveEngine(LongCatShared):
         prompts: Optional[List[str]] = None,
         prompt: Optional[str] = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        duration: str  | int = 93,
+        duration: str | int = 93,
         fps: int = 15,
         num_cond_frames: int = 13,
         num_inference_steps: int = 50,
@@ -95,7 +96,7 @@ class LongCatInteractiveEngine(LongCatShared):
         num_frames = self._parse_num_frames(duration, fps)
         if prompt is not None and not prompts:
             prompts = self.split_into_sentences(prompt)
-            prompts = [prompt.strip() for prompt in prompts if prompt.strip()] 
+            prompts = [prompt.strip() for prompt in prompts if prompt.strip()]
         if not prompts:
             raise ValueError("`prompts` must contain at least one prompt.")
 
@@ -165,11 +166,10 @@ class LongCatInteractiveEngine(LongCatShared):
                     use_kv_cache=True,
                     offload_kv_cache=False,
                     enhance_hf=True,
-                    **kwargs
+                    **kwargs,
                 )
-                
-                new_video: List[Image.Image] = vc_output[0]
 
+                new_video: List[Image.Image] = vc_output[0]
 
                 # Append only the newly generated continuation frames
                 all_generated_frames.extend(new_video[num_cond_frames:])
@@ -194,11 +194,11 @@ class LongCatInteractiveEngine(LongCatShared):
                 self.logger.info(
                     f"[LongCatInteractive] Refining segment {segment_idx + 1}/{num_segments + 1}"
                 )
-    
+
                 segment_stage1 = all_generated_frames[start_id : start_id + num_frames]
                 if not segment_stage1:
                     break
-                
+
                 refine_output = refine_engine.run(
                     image=None,
                     video=cur_condition_video,
@@ -210,13 +210,13 @@ class LongCatInteractiveEngine(LongCatShared):
                     spatial_refine_only=spatial_refine_only,
                     **kwargs,
                 )
-    
+
                 refined_segment: List[Image.Image] = refine_output[0]
-    
+
                 # Append only newly refined frames beyond the conditioning window
                 all_refine_frames.extend(refined_segment[cur_num_cond_frames:])
                 cur_condition_video = refined_segment
-    
+
                 cur_num_cond_frames = (
                     num_cond_frames if spatial_refine_only else num_cond_frames * 2
                 )
@@ -235,5 +235,3 @@ class LongCatInteractiveEngine(LongCatShared):
 
         # Match other engines: outer list is batch dimension
         return [final_video]
-
-

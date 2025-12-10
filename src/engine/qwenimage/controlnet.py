@@ -3,8 +3,12 @@ from typing import Dict, Any, Callable, List, Union
 from .shared import QwenImageShared
 import numpy as np
 from PIL import Image
-from diffusers.models.controlnets.controlnet_qwenimage import QwenImageControlNetModel, QwenImageMultiControlNetModel
+from diffusers.models.controlnets.controlnet_qwenimage import (
+    QwenImageControlNetModel,
+    QwenImageMultiControlNetModel,
+)
 from src.utils.progress import make_mapped_progress
+
 
 class QwenImageControlNetEngine(QwenImageShared):
     """QwenImage ControlNet Engine Implementation"""
@@ -37,7 +41,7 @@ class QwenImageControlNetEngine(QwenImageShared):
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
-        
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -48,7 +52,7 @@ class QwenImageControlNetEngine(QwenImageShared):
             num_images_per_prompt=num_images,
             text_encoder_kwargs=text_encoder_kwargs,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
@@ -78,14 +82,21 @@ class QwenImageControlNetEngine(QwenImageShared):
                 self.device, dtype=transformer_dtype
             )
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
-        
+
         if not hasattr(self, "controlnet"):
             self.load_component_by_name("controlnet")
-            
+
         self.to_device(self.controlnet)
-        
+
         if isinstance(self.controlnet, QwenImageControlNetModel):
-            control_image = self.prepare_control_image(control_image, batch_size, height, width, transformer_dtype, use_cfg_guidance)
+            control_image = self.prepare_control_image(
+                control_image,
+                batch_size,
+                height,
+                width,
+                transformer_dtype,
+                use_cfg_guidance,
+            )
             control_image_latents = self.vae_encode(control_image, offload=offload)
             control_image_latents = control_image_latents.permute(0, 2, 1, 3, 4)
             control_image = self._pack_latents(
@@ -98,7 +109,14 @@ class QwenImageControlNetEngine(QwenImageShared):
         elif isinstance(self.controlnet, QwenImageMultiControlNetModel):
             control_images = []
             for control_image_ in control_image:
-                control_image_ = self.prepare_control_image(control_image_, batch_size, height, width, transformer_dtype, use_cfg_guidance)
+                control_image_ = self.prepare_control_image(
+                    control_image_,
+                    batch_size,
+                    height,
+                    width,
+                    transformer_dtype,
+                    use_cfg_guidance,
+                )
                 control_image_latents = self.vae_encode(control_image_, offload=offload)
                 control_image_latents = control_image_latents.permute(0, 2, 1, 3, 4)
                 control_image_ = self._pack_latents(
@@ -160,14 +178,18 @@ class QwenImageControlNetEngine(QwenImageShared):
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
-        
+
         controlnet_keep = []
         for i in range(len(timesteps)):
             keeps = [
                 1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
                 for s, e in zip(control_guidance_start, control_guidance_end)
             ]
-            controlnet_keep.append(keeps[0] if isinstance(self.controlnet, QwenImageControlNetModel) else keeps)
+            controlnet_keep.append(
+                keeps[0]
+                if isinstance(self.controlnet, QwenImageControlNetModel)
+                else keeps
+            )
 
         # handle guidance
         if self.transformer.config.guidance_embeds:
@@ -190,7 +212,7 @@ class QwenImageControlNetEngine(QwenImageShared):
         )
 
         self.scheduler.set_begin_index(0)
-        
+
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         total_steps = len(timesteps) if timesteps is not None else 0
@@ -199,20 +221,25 @@ class QwenImageControlNetEngine(QwenImageShared):
                 denoise_progress_callback(0.0, "Starting denoise")
             except Exception:
                 pass
-        
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-                
+
                 if isinstance(controlnet_keep[i], list):
-                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
+                    cond_scale = [
+                        c * s
+                        for c, s in zip(
+                            controlnet_conditioning_scale, controlnet_keep[i]
+                        )
+                    ]
                 else:
                     controlnet_cond_scale = controlnet_conditioning_scale
                     if isinstance(controlnet_cond_scale, list):
                         controlnet_cond_scale = controlnet_cond_scale[0]
                     cond_scale = controlnet_cond_scale * controlnet_keep[i]
-                    
+
                 controlnet_block_samples = self.controlnet(
                     hidden_states=latents,
                     controlnet_cond=control_image,
@@ -224,7 +251,7 @@ class QwenImageControlNetEngine(QwenImageShared):
                     txt_seq_lens=txt_seq_lens,
                     return_dict=False,
                 )
-                    
+
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
                         hidden_states=latents,
@@ -238,7 +265,7 @@ class QwenImageControlNetEngine(QwenImageShared):
                         attention_kwargs=attention_kwargs,
                         return_dict=False,
                     )[0]
- 
+
                 if use_cfg_guidance:
                     with self.transformer.cache_context("uncond"):
                         neg_noise_pred = self.transformer(
@@ -272,7 +299,12 @@ class QwenImageControlNetEngine(QwenImageShared):
                     if torch.backends.mps.is_available():
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
@@ -283,7 +315,10 @@ class QwenImageControlNetEngine(QwenImageShared):
 
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
 

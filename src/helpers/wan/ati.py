@@ -58,7 +58,7 @@ class WanATI:
         width: int,
         height: int,
         quant_multi: int = 8,
-        **kwargs
+        **kwargs,
     ):
         if isinstance(tracks, str):
             tracks = torch.load(tracks)

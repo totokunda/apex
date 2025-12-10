@@ -29,7 +29,7 @@ class LongCatT2VEngine(LongCatShared):
         max_sequence_length: int = 512,
         offload: bool = True,
         enable_refine: bool = False,
-        refine_num_inference_steps: int = 50,   
+        refine_num_inference_steps: int = 50,
         **kwargs,
     ):
         """Text-to-video generation following LongCatPipeline.
@@ -50,7 +50,10 @@ class LongCatT2VEngine(LongCatShared):
                 f"`num_frames - 1` has to be divisible by {self.vae_scale_factor_temporal}. Rounding to the nearest number."
             )
             num_frames = (
-                num_frames // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
+                num_frames
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
+                + 1
             )
         num_frames = max(num_frames, 1)
 
@@ -136,7 +139,9 @@ class LongCatT2VEngine(LongCatShared):
                 self._current_timestep = t
 
                 latent_model_input = (
-                    torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+                    torch.cat([latents] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents
                 )
                 latent_model_input = latent_model_input.to(dit_dtype)
 
@@ -168,7 +173,9 @@ class LongCatT2VEngine(LongCatShared):
                 noise_pred = -noise_pred
 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or (i + 1) % self.scheduler.order == 0:

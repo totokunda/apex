@@ -9,7 +9,8 @@ class BaseDepthModel(nn.Module):
         model_type = cfg.model.type
         # Use relative import approach - get the module dynamically
         from . import dense_pipeline
-        if model_type == 'DensePredModel':
+
+        if model_type == "DensePredModel":
             self.depth_model = dense_pipeline.DensePredModel(cfg)
         else:
             raise NotImplementedError(f"Model type {model_type} not implemented")
@@ -17,7 +18,7 @@ class BaseDepthModel(nn.Module):
     def forward(self, data):
         output = self.depth_model(**data)
 
-        return output['prediction'], output['confidence'], output
+        return output["prediction"], output["confidence"], output
 
     def inference(self, data):
         with torch.no_grad():

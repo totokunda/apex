@@ -6,6 +6,7 @@ from src.attention import attention_register
 import math
 from typing import Optional
 
+
 class HunyuanImageAttnProcessor:
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
@@ -29,7 +30,9 @@ class HunyuanImageAttnProcessor:
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
 
-        query = query.unflatten(2, (attn.heads, -1))  # batch_size, seq_len, heads, head_dim
+        query = query.unflatten(
+            2, (attn.heads, -1)
+        )  # batch_size, seq_len, heads, head_dim
         key = key.unflatten(2, (attn.heads, -1))
         value = value.unflatten(2, (attn.heads, -1))
 
@@ -47,7 +50,9 @@ class HunyuanImageAttnProcessor:
                 query = torch.cat(
                     [
                         apply_rotary_emb(
-                            query[:, : -encoder_hidden_states.shape[1]], image_rotary_emb, sequence_dim=1
+                            query[:, : -encoder_hidden_states.shape[1]],
+                            image_rotary_emb,
+                            sequence_dim=1,
                         ),
                         query[:, -encoder_hidden_states.shape[1] :],
                     ],
@@ -55,7 +60,11 @@ class HunyuanImageAttnProcessor:
                 )
                 key = torch.cat(
                     [
-                        apply_rotary_emb(key[:, : -encoder_hidden_states.shape[1]], image_rotary_emb, sequence_dim=1),
+                        apply_rotary_emb(
+                            key[:, : -encoder_hidden_states.shape[1]],
+                            image_rotary_emb,
+                            sequence_dim=1,
+                        ),
                         key[:, -encoder_hidden_states.shape[1] :],
                     ],
                     dim=1,

@@ -4,12 +4,16 @@ import argparse
 import math
 import torch
 from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.utils import *
-from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.encoder_decoder import AutoencoderKL
+from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.encoder_decoder import (
+    AutoencoderKL,
+)
+
 # from custom_controlnet_aux.diffusion_edge.denoising_diffusion_pytorch.transmodel import TransModel
 from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.uncond_unet import Unet
 from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.data import *
 from fvcore.common.config import CfgNode
 from pathlib import Path
+
 
 def load_conf(config_file, conf={}):
     with open(config_file) as f:
@@ -18,12 +22,14 @@ def load_conf(config_file, conf={}):
             conf[k] = v
     return conf
 
+
 def prepare_args(ckpt_path, sampling_timesteps=1):
     return argparse.Namespace(
         cfg=load_conf(Path(__file__).parent / "default.yaml"),
         pre_weight=ckpt_path,
-        sampling_timesteps=sampling_timesteps
+        sampling_timesteps=sampling_timesteps,
     )
+
 
 class DiffusionEdge:
     def __init__(self, args) -> None:
@@ -38,29 +44,35 @@ class DiffusionEdge:
             embed_dim=first_stage_cfg.embed_dim,
             ckpt_path=first_stage_cfg.ckpt_path,
         )
-        if model_cfg.model_name == 'cond_unet':
-            from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.mask_cond_unet import Unet
+        if model_cfg.model_name == "cond_unet":
+            from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.mask_cond_unet import (
+                Unet,
+            )
+
             unet_cfg = model_cfg.unet
-            unet = Unet(dim=unet_cfg.dim,
-                        channels=unet_cfg.channels,
-                        dim_mults=unet_cfg.dim_mults,
-                        learned_variance=unet_cfg.get('learned_variance', False),
-                        out_mul=unet_cfg.out_mul,
-                        cond_in_dim=unet_cfg.cond_in_dim,
-                        cond_dim=unet_cfg.cond_dim,
-                        cond_dim_mults=unet_cfg.cond_dim_mults,
-                        window_sizes1=unet_cfg.window_sizes1,
-                        window_sizes2=unet_cfg.window_sizes2,
-                        fourier_scale=unet_cfg.fourier_scale,
-                        cfg=unet_cfg,
-                        )
+            unet = Unet(
+                dim=unet_cfg.dim,
+                channels=unet_cfg.channels,
+                dim_mults=unet_cfg.dim_mults,
+                learned_variance=unet_cfg.get("learned_variance", False),
+                out_mul=unet_cfg.out_mul,
+                cond_in_dim=unet_cfg.cond_in_dim,
+                cond_dim=unet_cfg.cond_dim,
+                cond_dim_mults=unet_cfg.cond_dim_mults,
+                window_sizes1=unet_cfg.window_sizes1,
+                window_sizes2=unet_cfg.window_sizes2,
+                fourier_scale=unet_cfg.fourier_scale,
+                cfg=unet_cfg,
+            )
         else:
             raise NotImplementedError
-        if model_cfg.model_type == 'const_sde':
-            from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.ddm_const_sde import LatentDiffusion
+        if model_cfg.model_type == "const_sde":
+            from src.preprocess.diffusion_edge.denoising_diffusion_pytorch.ddm_const_sde import (
+                LatentDiffusion,
+            )
         else:
-            raise NotImplementedError(f'{model_cfg.model_type} is not surportted !')
-        
+            raise NotImplementedError(f"{model_cfg.model_type} is not surportted !")
+
         self.model = LatentDiffusion(
             model=unet,
             auto_encoder=first_stage_model,
@@ -73,21 +85,21 @@ class DiffusionEdge:
             scale_factor=model_cfg.scale_factor,
             scale_by_std=model_cfg.scale_by_std,
             scale_by_softsign=model_cfg.scale_by_softsign,
-            default_scale=model_cfg.get('default_scale', False),
+            default_scale=model_cfg.get("default_scale", False),
             input_keys=model_cfg.input_keys,
             ckpt_path=model_cfg.ckpt_path,
             ignore_keys=model_cfg.ignore_keys,
             only_model=model_cfg.only_model,
             start_dist=model_cfg.start_dist,
             perceptual_weight=model_cfg.perceptual_weight,
-            use_l1=model_cfg.get('use_l1', True),
+            use_l1=model_cfg.get("use_l1", True),
             cfg=model_cfg,
         )
         self.cfg.sampler.ckpt_path = args.pre_weight
 
         data = torch.load(self.cfg.sampler.ckpt_path, map_location="cpu")
         if self.cfg.sampler.use_ema:
-            sd = data['ema']
+            sd = data["ema"]
             new_sd = {}
             for k in sd.keys():
                 if k.startswith("ema_model."):
@@ -96,31 +108,42 @@ class DiffusionEdge:
             sd = new_sd
             self.model.load_state_dict(sd)
         else:
-            self.model.load_state_dict(data['model'])
-        if 'scale_factor' in data['model']:
-            self.model.scale_factor = data['model']['scale_factor']
+            self.model.load_state_dict(data["model"])
+        if "scale_factor" in data["model"]:
+            self.model.scale_factor = data["model"]["scale_factor"]
 
         self.model.eval()
         self.device = "cpu"
-    
+
     def to(self, device):
         self.model.to(device)
         self.device = device
         return self
-        
+
     def __call__(self, image, batch_size=8):
         image = normalize_to_neg_one_to_one(image).to(self.device)
         mask = None
-        if self.cfg.sampler.sample_type == 'whole':
+        if self.cfg.sampler.sample_type == "whole":
             return self.whole_sample(image, raw_size=image.shape[2:], mask=mask)
-        elif self.cfg.sampler.sample_type == 'slide':
-            return self.slide_sample(image, crop_size=self.cfg.sampler.get('crop_size', [320, 320]),
-                                            stride=self.cfg.sampler.stride, mask=mask, bs=batch_size)
-    
+        elif self.cfg.sampler.sample_type == "slide":
+            return self.slide_sample(
+                image,
+                crop_size=self.cfg.sampler.get("crop_size", [320, 320]),
+                stride=self.cfg.sampler.stride,
+                mask=mask,
+                bs=batch_size,
+            )
+
     def whole_sample(self, inputs, raw_size, mask=None):
-        inputs = F.interpolate(inputs, size=(416, 416), mode='bilinear', align_corners=True)
-        seg_logits = self.model.sample(batch_size=inputs.shape[0], cond=inputs, mask=mask)
-        seg_logits = F.interpolate(seg_logits, size=raw_size, mode='bilinear', align_corners=True)
+        inputs = F.interpolate(
+            inputs, size=(416, 416), mode="bilinear", align_corners=True
+        )
+        seg_logits = self.model.sample(
+            batch_size=inputs.shape[0], cond=inputs, mask=mask
+        )
+        seg_logits = F.interpolate(
+            seg_logits, size=raw_size, mode="bilinear", align_corners=True
+        )
         return seg_logits
 
     def slide_sample(self, inputs, crop_size, stride, mask=None, bs=8):
@@ -179,21 +202,24 @@ class DiffusionEdge:
         length = math.ceil(num_windows / bs)
         for i in range(length):
             if i == length - 1:
-                crop_imgs_temp = crop_imgs[bs * i:num_windows, ...]
+                crop_imgs_temp = crop_imgs[bs * i : num_windows, ...]
             else:
-                crop_imgs_temp = crop_imgs[bs * i:bs * (i + 1), ...]
+                crop_imgs_temp = crop_imgs[bs * i : bs * (i + 1), ...]
 
-            crop_seg_logits = self.model.sample(batch_size=crop_imgs_temp.shape[0], cond=crop_imgs_temp, mask=mask)
+            crop_seg_logits = self.model.sample(
+                batch_size=crop_imgs_temp.shape[0], cond=crop_imgs_temp, mask=mask
+            )
             crop_seg_logits_list.append(crop_seg_logits)
         crop_seg_logits = torch.cat(crop_seg_logits_list, dim=0)
         device = crop_seg_logits.device
         preds = preds.to(device)
         count_mat = count_mat.to(device)
         for crop_seg_logit, x1, x2, y1, y2 in zip(crop_seg_logits, x1s, x2s, y1s, y2s):
-            
-            preds += F.pad(crop_seg_logit,
-                           (int(x1), int(preds.shape[3] - x2), int(y1),
-                            int(preds.shape[2] - y2)))
+
+            preds += F.pad(
+                crop_seg_logit,
+                (int(x1), int(preds.shape[3] - x2), int(y1), int(preds.shape[2] - y2)),
+            )
             count_mat[:, :, y1:y2, x1:x2] += 1
 
         assert (count_mat == 0).sum() == 0

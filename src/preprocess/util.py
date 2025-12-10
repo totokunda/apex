@@ -20,7 +20,7 @@ DENSEPOSE_MODEL_NAME = "LayerNorm/DensePose-TorchScript-with-hint-image"
 MESH_GRAPHORMER_MODEL_NAME = "hr16/ControlNet-HandRefiner-pruned"
 SAM_MODEL_NAME = "dhkim2810/MobileSAM"
 UNIMATCH_MODEL_NAME = "hr16/Unimatch"
-DEPTH_ANYTHING_MODEL_NAME = "LiheYoung/Depth-Anything" #HF Space
+DEPTH_ANYTHING_MODEL_NAME = "LiheYoung/Depth-Anything"  # HF Space
 DIFFUSION_EDGE_MODEL_NAME = "hr16/Diffusion-Edge"
 METRIC3D_MODEL_NAME = "JUGGHM/Metric3D"
 POSE2D_MODEL_NAME = "Wan-AI/Wan2.2-Animate-14B"
@@ -31,7 +31,7 @@ DEPTH_ANYTHING_V2_MODEL_NAME_DICT = {
     "depth_anything_v2_vitl.pth": "depth-anything/Depth-Anything-V2-Large",
     "depth_anything_v2_vitg.pth": "depth-anything/Depth-Anything-V2-Giant",
     "depth_anything_v2_metric_vkitti_vitl.pth": "depth-anything/Depth-Anything-V2-Metric-VKITTI-Large",
-    "depth_anything_v2_metric_hypersim_vitl.pth": "depth-anything/Depth-Anything-V2-Metric-Hypersim-Large"
+    "depth_anything_v2_metric_hypersim_vitl.pth": "depth-anything/Depth-Anything-V2-Metric-Hypersim-Large",
 }
 
 temp_dir = tempfile.gettempdir()
@@ -42,9 +42,11 @@ USE_SYMLINKS = False
 DOWNLOAD_PROGRESS_CALLBACK = None
 
 try:
-    USE_SYMLINKS = literal_eval(os.environ['AUX_USE_SYMLINKS'])
+    USE_SYMLINKS = literal_eval(os.environ["AUX_USE_SYMLINKS"])
 except:
-    warnings.warn("USE_SYMLINKS not set successfully. Using default value: False to download models.")
+    warnings.warn(
+        "USE_SYMLINKS not set successfully. Using default value: False to download models."
+    )
     pass
 
 try:
@@ -57,6 +59,7 @@ except:
     pass
 
 here = Path(__file__).parent.resolve()
+
 
 def HWC3(x):
     assert x.dtype == np.uint8
@@ -83,7 +86,7 @@ def make_noise_disk(H, W, C, F, rng=None):
     else:
         noise = np.random.uniform(low=0, high=1, size=((H // F) + 2, (W // F) + 2, C))
     noise = cv2.resize(noise, (W + 2 * F, H + 2 * F), interpolation=cv2.INTER_CUBIC)
-    noise = noise[F: F + H, F: F + W]
+    noise = noise[F : F + H, F : F + W]
     noise -= np.min(noise)
     noise /= np.max(noise)
     if C == 1:
@@ -107,6 +110,7 @@ def nms(x, t, s):
     z = np.zeros_like(y, dtype=np.uint8)
     z[y > t] = 255
     return z
+
 
 def min_max_norm(x):
     x -= np.min(x)
@@ -136,21 +140,37 @@ def img2mask(img, H, W, low=10, high=90):
 
     return y < np.percentile(y, random.randrange(low, high))
 
+
 def safer_memory(x):
     # Fix many MAC/AMD problems
     return np.ascontiguousarray(x.copy()).copy()
 
-UPSCALE_METHODS = ["INTER_NEAREST", "INTER_LINEAR", "INTER_AREA", "INTER_CUBIC", "INTER_LANCZOS4"]
+
+UPSCALE_METHODS = [
+    "INTER_NEAREST",
+    "INTER_LINEAR",
+    "INTER_AREA",
+    "INTER_CUBIC",
+    "INTER_LANCZOS4",
+]
+
+
 def get_upscale_method(method_str):
-    assert method_str in UPSCALE_METHODS, f"Method {method_str} not found in {UPSCALE_METHODS}"
+    assert (
+        method_str in UPSCALE_METHODS
+    ), f"Method {method_str} not found in {UPSCALE_METHODS}"
     return getattr(cv2, method_str)
+
 
 def pad64(x):
     return int(np.ceil(float(x) / 64.0) * 64 - x)
 
-#https://github.com/Mikubill/sd-webui-controlnet/blob/main/scripts/processor.py#L17
-#Added upscale_method, mode params
-def resize_image_with_pad(input_image, resolution, upscale_method = "", skip_hwc3=False, mode='edge'):
+
+# https://github.com/Mikubill/sd-webui-controlnet/blob/main/scripts/processor.py#L17
+# Added upscale_method, mode params
+def resize_image_with_pad(
+    input_image, resolution, upscale_method="", skip_hwc3=False, mode="edge"
+):
     if skip_hwc3:
         img = input_image
     else:
@@ -161,7 +181,11 @@ def resize_image_with_pad(input_image, resolution, upscale_method = "", skip_hwc
     k = float(resolution) / float(min(H_raw, W_raw))
     H_target = int(np.round(float(H_raw) * k))
     W_target = int(np.round(float(W_raw) * k))
-    img = cv2.resize(img, (W_target, H_target), interpolation=get_upscale_method(upscale_method) if k > 1 else cv2.INTER_AREA)
+    img = cv2.resize(
+        img,
+        (W_target, H_target),
+        interpolation=get_upscale_method(upscale_method) if k > 1 else cv2.INTER_AREA,
+    )
     H_pad, W_pad = pad64(H_target), pad64(W_target)
     img_padded = np.pad(img, [[0, H_pad], [0, W_pad], [0, 0]], mode=mode)
 
@@ -169,18 +193,26 @@ def resize_image_with_pad(input_image, resolution, upscale_method = "", skip_hwc
         return safer_memory(x[:H_target, :W_target, ...])
 
     return safer_memory(img_padded), remove_pad
-    
+
+
 def common_input_validate(input_image, output_type, **kwargs):
     if "img" in kwargs:
-            warnings.warn("img is deprecated, please use `input_image=...` instead.", DeprecationWarning)
-            input_image = kwargs.pop("img")
-    
+        warnings.warn(
+            "img is deprecated, please use `input_image=...` instead.",
+            DeprecationWarning,
+        )
+        input_image = kwargs.pop("img")
+
     if "return_pil" in kwargs:
-            warnings.warn("return_pil is deprecated. Use output_type instead.", DeprecationWarning)
-            output_type = "pil" if kwargs["return_pil"] else "np"
-    
+        warnings.warn(
+            "return_pil is deprecated. Use output_type instead.", DeprecationWarning
+        )
+        output_type = "pil" if kwargs["return_pil"] else "np"
+
     if type(output_type) is bool:
-        warnings.warn("Passing `True` or `False` to `output_type` is deprecated and will raise an error in future versions")
+        warnings.warn(
+            "Passing `True` or `False` to `output_type` is deprecated and will raise an error in future versions"
+        )
         if output_type:
             output_type = "pil"
 
@@ -192,8 +224,9 @@ def common_input_validate(input_image, output_type, **kwargs):
         output_type = output_type or "pil"
     else:
         output_type = output_type or "np"
-    
+
     return (input_image, output_type)
+
 
 def torch_gc():
     if torch.cuda.is_available():
@@ -203,66 +236,185 @@ def torch_gc():
 
 def ade_palette():
     """ADE20K palette that maps each class to RGB values."""
-    return [[120, 120, 120], [180, 120, 120], [6, 230, 230], [80, 50, 50],
-            [4, 200, 3], [120, 120, 80], [140, 140, 140], [204, 5, 255],
-            [230, 230, 230], [4, 250, 7], [224, 5, 255], [235, 255, 7],
-            [150, 5, 61], [120, 120, 70], [8, 255, 51], [255, 6, 82],
-            [143, 255, 140], [204, 255, 4], [255, 51, 7], [204, 70, 3],
-            [0, 102, 200], [61, 230, 250], [255, 6, 51], [11, 102, 255],
-            [255, 7, 71], [255, 9, 224], [9, 7, 230], [220, 220, 220],
-            [255, 9, 92], [112, 9, 255], [8, 255, 214], [7, 255, 224],
-            [255, 184, 6], [10, 255, 71], [255, 41, 10], [7, 255, 255],
-            [224, 255, 8], [102, 8, 255], [255, 61, 6], [255, 194, 7],
-            [255, 122, 8], [0, 255, 20], [255, 8, 41], [255, 5, 153],
-            [6, 51, 255], [235, 12, 255], [160, 150, 20], [0, 163, 255],
-            [140, 140, 140], [250, 10, 15], [20, 255, 0], [31, 255, 0],
-            [255, 31, 0], [255, 224, 0], [153, 255, 0], [0, 0, 255],
-            [255, 71, 0], [0, 235, 255], [0, 173, 255], [31, 0, 255],
-            [11, 200, 200], [255, 82, 0], [0, 255, 245], [0, 61, 255],
-            [0, 255, 112], [0, 255, 133], [255, 0, 0], [255, 163, 0],
-            [255, 102, 0], [194, 255, 0], [0, 143, 255], [51, 255, 0],
-            [0, 82, 255], [0, 255, 41], [0, 255, 173], [10, 0, 255],
-            [173, 255, 0], [0, 255, 153], [255, 92, 0], [255, 0, 255],
-            [255, 0, 245], [255, 0, 102], [255, 173, 0], [255, 0, 20],
-            [255, 184, 184], [0, 31, 255], [0, 255, 61], [0, 71, 255],
-            [255, 0, 204], [0, 255, 194], [0, 255, 82], [0, 10, 255],
-            [0, 112, 255], [51, 0, 255], [0, 194, 255], [0, 122, 255],
-            [0, 255, 163], [255, 153, 0], [0, 255, 10], [255, 112, 0],
-            [143, 255, 0], [82, 0, 255], [163, 255, 0], [255, 235, 0],
-            [8, 184, 170], [133, 0, 255], [0, 255, 92], [184, 0, 255],
-            [255, 0, 31], [0, 184, 255], [0, 214, 255], [255, 0, 112],
-            [92, 255, 0], [0, 224, 255], [112, 224, 255], [70, 184, 160],
-            [163, 0, 255], [153, 0, 255], [71, 255, 0], [255, 0, 163],
-            [255, 204, 0], [255, 0, 143], [0, 255, 235], [133, 255, 0],
-            [255, 0, 235], [245, 0, 255], [255, 0, 122], [255, 245, 0],
-            [10, 190, 212], [214, 255, 0], [0, 204, 255], [20, 0, 255],
-            [255, 255, 0], [0, 153, 255], [0, 41, 255], [0, 255, 204],
-            [41, 0, 255], [41, 255, 0], [173, 0, 255], [0, 245, 255],
-            [71, 0, 255], [122, 0, 255], [0, 255, 184], [0, 92, 255],
-            [184, 255, 0], [0, 133, 255], [255, 214, 0], [25, 194, 194],
-            [102, 255, 0], [92, 0, 255]]
+    return [
+        [120, 120, 120],
+        [180, 120, 120],
+        [6, 230, 230],
+        [80, 50, 50],
+        [4, 200, 3],
+        [120, 120, 80],
+        [140, 140, 140],
+        [204, 5, 255],
+        [230, 230, 230],
+        [4, 250, 7],
+        [224, 5, 255],
+        [235, 255, 7],
+        [150, 5, 61],
+        [120, 120, 70],
+        [8, 255, 51],
+        [255, 6, 82],
+        [143, 255, 140],
+        [204, 255, 4],
+        [255, 51, 7],
+        [204, 70, 3],
+        [0, 102, 200],
+        [61, 230, 250],
+        [255, 6, 51],
+        [11, 102, 255],
+        [255, 7, 71],
+        [255, 9, 224],
+        [9, 7, 230],
+        [220, 220, 220],
+        [255, 9, 92],
+        [112, 9, 255],
+        [8, 255, 214],
+        [7, 255, 224],
+        [255, 184, 6],
+        [10, 255, 71],
+        [255, 41, 10],
+        [7, 255, 255],
+        [224, 255, 8],
+        [102, 8, 255],
+        [255, 61, 6],
+        [255, 194, 7],
+        [255, 122, 8],
+        [0, 255, 20],
+        [255, 8, 41],
+        [255, 5, 153],
+        [6, 51, 255],
+        [235, 12, 255],
+        [160, 150, 20],
+        [0, 163, 255],
+        [140, 140, 140],
+        [250, 10, 15],
+        [20, 255, 0],
+        [31, 255, 0],
+        [255, 31, 0],
+        [255, 224, 0],
+        [153, 255, 0],
+        [0, 0, 255],
+        [255, 71, 0],
+        [0, 235, 255],
+        [0, 173, 255],
+        [31, 0, 255],
+        [11, 200, 200],
+        [255, 82, 0],
+        [0, 255, 245],
+        [0, 61, 255],
+        [0, 255, 112],
+        [0, 255, 133],
+        [255, 0, 0],
+        [255, 163, 0],
+        [255, 102, 0],
+        [194, 255, 0],
+        [0, 143, 255],
+        [51, 255, 0],
+        [0, 82, 255],
+        [0, 255, 41],
+        [0, 255, 173],
+        [10, 0, 255],
+        [173, 255, 0],
+        [0, 255, 153],
+        [255, 92, 0],
+        [255, 0, 255],
+        [255, 0, 245],
+        [255, 0, 102],
+        [255, 173, 0],
+        [255, 0, 20],
+        [255, 184, 184],
+        [0, 31, 255],
+        [0, 255, 61],
+        [0, 71, 255],
+        [255, 0, 204],
+        [0, 255, 194],
+        [0, 255, 82],
+        [0, 10, 255],
+        [0, 112, 255],
+        [51, 0, 255],
+        [0, 194, 255],
+        [0, 122, 255],
+        [0, 255, 163],
+        [255, 153, 0],
+        [0, 255, 10],
+        [255, 112, 0],
+        [143, 255, 0],
+        [82, 0, 255],
+        [163, 255, 0],
+        [255, 235, 0],
+        [8, 184, 170],
+        [133, 0, 255],
+        [0, 255, 92],
+        [184, 0, 255],
+        [255, 0, 31],
+        [0, 184, 255],
+        [0, 214, 255],
+        [255, 0, 112],
+        [92, 255, 0],
+        [0, 224, 255],
+        [112, 224, 255],
+        [70, 184, 160],
+        [163, 0, 255],
+        [153, 0, 255],
+        [71, 255, 0],
+        [255, 0, 163],
+        [255, 204, 0],
+        [255, 0, 143],
+        [0, 255, 235],
+        [133, 255, 0],
+        [255, 0, 235],
+        [245, 0, 255],
+        [255, 0, 122],
+        [255, 245, 0],
+        [10, 190, 212],
+        [214, 255, 0],
+        [0, 204, 255],
+        [20, 0, 255],
+        [255, 255, 0],
+        [0, 153, 255],
+        [0, 41, 255],
+        [0, 255, 204],
+        [41, 0, 255],
+        [41, 255, 0],
+        [173, 0, 255],
+        [0, 245, 255],
+        [71, 0, 255],
+        [122, 0, 255],
+        [0, 255, 184],
+        [0, 92, 255],
+        [184, 255, 0],
+        [0, 133, 255],
+        [255, 214, 0],
+        [25, 194, 194],
+        [102, 255, 0],
+        [92, 0, 255],
+    ]
 
-#https://stackoverflow.com/a/44873382
-#Assume that the minimum version of Python ppl use is 3.9
+
+# https://stackoverflow.com/a/44873382
+# Assume that the minimum version of Python ppl use is 3.9
 def sha256sum(file_path):
     import hashlib
-    h  = hashlib.sha256()
-    b  = bytearray(128*1024)
+
+    h = hashlib.sha256()
+    b = bytearray(128 * 1024)
     mv = memoryview(b)
-    with open(file_path, 'rb', buffering=0) as f:
+    with open(file_path, "rb", buffering=0) as f:
         while n := f.readinto(mv):
             h.update(mv[:n])
     return h.hexdigest()
 
+
 def check_hash_from_torch_hub(file_path, filename):
-    basename, _ = filename.split('.')
-    _, ref_hash = basename.split('-')
+    basename, _ = filename.split(".")
+    _, ref_hash = basename.split("-")
     curr_hash = sha256sum(file_path)
-    return curr_hash[:len(ref_hash)] == ref_hash
+    return curr_hash[: len(ref_hash)] == ref_hash
+
 
 def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
     """Download PyTorch models using the shared DownloadMixin URL downloader."""
     from src.mixins.download_mixin import DownloadMixin
+
     model_url = "https://download.pytorch.org/models/" + filename
     local_dir = os.path.join(ckpts_dir, "torch")
     if not os.path.exists(local_dir):
@@ -273,12 +425,16 @@ def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
     # Use a cache directory for the raw download, then copy into final destination
     cache_dir_d = os.path.join(temp_dir, "ckpts", "torch")
     Path(cache_dir_d).mkdir(parents=True, exist_ok=True)
+
     def _progress_cb(downloaded: int, total: int, _label: str = None):
         if DOWNLOAD_PROGRESS_CALLBACK:
             try:
-                DOWNLOAD_PROGRESS_CALLBACK(int(downloaded or 0), int(total or 0), filename)
+                DOWNLOAD_PROGRESS_CALLBACK(
+                    int(downloaded or 0), int(total or 0), filename
+                )
             except Exception:
                 pass
+
     try:
         dl = DownloadMixin()
         downloaded_file = dl.download_from_url(
@@ -296,6 +452,7 @@ def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
             pass
         # Copy into final destination path
         import shutil
+
         Path(local_dir).mkdir(parents=True, exist_ok=True)
         shutil.copy2(downloaded_file, model_path)
         return model_path
@@ -303,21 +460,32 @@ def custom_torch_download(filename, ckpts_dir=annotator_ckpts_path):
         warnings.warn(f"Download failed with error: {e}")
         raise
 
-def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, ckpts_dir=annotator_ckpts_path, subfolder=''):
+
+def custom_hf_download(
+    pretrained_model_or_path,
+    filename,
+    cache_dir=temp_dir,
+    ckpts_dir=annotator_ckpts_path,
+    subfolder="",
+):
 
     # Build final path in ckpts directory
     local_dir = os.path.join(ckpts_dir, pretrained_model_or_path)
-    model_path = Path(local_dir).joinpath(*subfolder.split('/'), filename).__str__()
+    model_path = Path(local_dir).joinpath(*subfolder.split("/"), filename).__str__()
 
     if len(str(model_path)) >= 255:
-        warnings.warn(f"Path {model_path} is too long, \n please change annotator_ckpts_path in config.yaml")
+        warnings.warn(
+            f"Path {model_path} is too long, \n please change annotator_ckpts_path in config.yaml"
+        )
 
     # If already present at destination, return immediately
     if os.path.exists(model_path):
         return model_path
 
     print(f"Failed to find {model_path}.\n Downloading from huggingface.co")
-    print(f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml")
+    print(
+        f"cacher folder is {cache_dir}, you can change it by custom_tmp_path in config.yaml"
+    )
 
     # Choose a cache directory for temporary downloads
     cache_dir_d = os.path.join(cache_dir, "ckpts", pretrained_model_or_path)
@@ -326,6 +494,7 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
     # Use DownloadMixin to fetch from HF (single-file path)
     try:
         from src.mixins.download_mixin import DownloadMixin
+
         # Compose a repo path that targets the desired file
         repo_path = pretrained_model_or_path
         if subfolder:
@@ -337,7 +506,9 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
             if DOWNLOAD_PROGRESS_CALLBACK:
                 try:
                     # total can be None; use 0 to keep signature stable
-                    DOWNLOAD_PROGRESS_CALLBACK(int(downloaded or 0), int(total or 0), filename)
+                    DOWNLOAD_PROGRESS_CALLBACK(
+                        int(downloaded or 0), int(total or 0), filename
+                    )
                 except Exception:
                     pass
 
@@ -353,12 +524,13 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
         raise
 
     # Ensure destination directory exists
-    target_dir = Path(local_dir).joinpath(*subfolder.split('/')).__str__()
+    target_dir = Path(local_dir).joinpath(*subfolder.split("/")).__str__()
     Path(target_dir).mkdir(parents=True, exist_ok=True)
 
     # Place the file at the expected model_path
     try:
         import shutil
+
         if os.path.isdir(downloaded_path):
             shutil.copytree(downloaded_path, model_path)
         else:
@@ -366,6 +538,7 @@ def custom_hf_download(pretrained_model_or_path, filename, cache_dir=temp_dir, c
         # Clean temporary ckpts cache to reclaim space
         with suppress(Exception):
             import shutil as _shutil
+
             _shutil.rmtree(os.path.join(cache_dir, "ckpts"))
     except Exception as e:
         warnings.warn(f"Failed to finalize downloaded file to {model_path}: {e}")

@@ -1,4 +1,4 @@
-'''
+"""
 Copyright 2017 Javier Romero, Dimitrios Tzionas, Michael J Black and the Max Planck Gesellschaft.  All rights reserved.
 This software is provided for research purposes only.
 By using this software you agree to the terms of the MANO/SMPL+H Model license here http://mano.is.tue.mpg.de/license
@@ -16,8 +16,7 @@ Modules included:
   loads the MANO model from a given file location (i.e. a .pkl file location),
   or a dictionary object.
 
-'''
-
+"""
 
 import numpy as np
 import mano.webuser.lbs as lbs
@@ -26,26 +25,26 @@ import scipy.sparse as sp
 
 
 def ischumpy(x):
-    return hasattr(x, 'dterms')
+    return hasattr(x, "dterms")
 
 
-def verts_decorated(trans,
-                    pose,
-                    v_template,
-                    J_regressor,
-                    weights,
-                    kintree_table,
-                    bs_style,
-                    f,
-                    bs_type=None,
-                    posedirs=None,
-                    betas=None,
-                    shapedirs=None,
-                    want_Jtr=False):
+def verts_decorated(
+    trans,
+    pose,
+    v_template,
+    J_regressor,
+    weights,
+    kintree_table,
+    bs_style,
+    f,
+    bs_type=None,
+    posedirs=None,
+    betas=None,
+    shapedirs=None,
+    want_Jtr=False,
+):
 
-    for which in [
-            trans, pose, v_template, weights, posedirs, betas, shapedirs
-    ]:
+    for which in [trans, pose, v_template, weights, posedirs, betas, shapedirs]:
         if which is not None:
             assert ischumpy(which)
 
@@ -71,11 +70,12 @@ def verts_decorated(trans,
         J_tmpz = np.matmul(J_regressor, v_shaped[:, 2])
         J = np.vstack((J_tmpx, J_tmpy, J_tmpz)).T
     else:
-        assert (ischumpy(J))
+        assert ischumpy(J)
 
-    assert (bs_style == 'lbs')
+    assert bs_style == "lbs"
     result, Jtr = lbs.verts_core(
-        pose, v, J, weights, kintree_table, want_Jtr=True, xp=np)
+        pose, v, J, weights, kintree_table, want_Jtr=True, xp=np
+    )
 
     tr = trans.reshape((1, 3))
     result = result + tr
@@ -103,15 +103,8 @@ def verts_decorated(trans,
     return result
 
 
-def verts_core(pose,
-               v,
-               J,
-               weights,
-               kintree_table,
-               bs_style,
-               want_Jtr=False,
-               xp=np):
-    
-    assert (bs_style == 'lbs')
+def verts_core(pose, v, J, weights, kintree_table, bs_style, want_Jtr=False, xp=np):
+
+    assert bs_style == "lbs"
     result = lbs.verts_core(pose, v, J, weights, kintree_table, want_Jtr, xp)
     return result

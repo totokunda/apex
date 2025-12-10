@@ -12,11 +12,12 @@ OPTIMUS_LOAD_LIBRARIES = {
     "torch2.5": "https://huggingface.co/stepfun-ai/stepvideo-t2v/resolve/main/lib/liboptimus_ths-torch2.5-cu124.cpython-310-x86_64-linux-gnu.so",
 }
 
+
 class StepVideoShared(BaseEngine):
     """Base class for StepVideo engine implementations containing common functionality"""
 
     def __init__(self, yaml_path: str, **kwargs):
-        
+
         super().__init__(yaml_path, **kwargs)
 
         self.vae_scale_factor_temporal = (
@@ -192,7 +193,6 @@ class StepVideoShared(BaseEngine):
                 )
                 return False
 
-
     def _parse_num_frames(self, duration: int | str, fps: int = 16):
         """Accepts a duration in seconds or a string like "16" or "16s" and returns the number of frames.
 
@@ -215,7 +215,6 @@ class StepVideoShared(BaseEngine):
             duration = duration // 17 * 17
         duration = max(duration, 1)
         return duration
-
 
     @torch.no_grad()
     def vae_decode(
@@ -246,7 +245,6 @@ class StepVideoShared(BaseEngine):
         if offload:
             self._offload(self.vae)
         return video.to(dtype=dtype)
-
 
     def resize_to_desired_aspect_ratio(self, video, aspect_size):
         ## video is in shape [f, c, h, w]
@@ -328,7 +326,12 @@ class StepVideoShared(BaseEngine):
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
 

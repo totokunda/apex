@@ -1,6 +1,6 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
+from typing import Union, List, Optional, Dict, Any, Callable
 from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
 
@@ -28,7 +28,6 @@ class QwenImageShared(BaseEngine):
         self.prompt_template_encode_image_start_idx = 64
         self.prompt_template_encode_images_start_idx = 64
         self.default_sample_size = 128
-        
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
@@ -126,7 +125,9 @@ class QwenImageShared(BaseEngine):
             template = self.prompt_template_encode
             drop_idx = self.prompt_template_encode_start_idx
         elif isinstance(image, list):
-            img_prompt_template = "Picture {}: <|vision_start|><|image_pad|><|vision_end|>"
+            img_prompt_template = (
+                "Picture {}: <|vision_start|><|image_pad|><|vision_end|>"
+            )
             for i, img in enumerate(image):
                 base_img_prompt += img_prompt_template.format(i + 1)
             template = self.prompt_template_encode_images
@@ -134,91 +135,120 @@ class QwenImageShared(BaseEngine):
         else:
             template = self.prompt_template_encode_image
             drop_idx = self.prompt_template_encode_image_start_idx
-        
-        txt = [template.format(base_img_prompt + e) for e in prompt]
-        
-        if image is None:
-            input_kwargs = {
-                "text": txt,
-                "max_sequence_length": self.tokenizer_max_length + drop_idx,
-                "use_attention_mask": True,
-                "return_attention_mask": True,
-                "output_type": "raw",
-                **text_encoder_kwargs,
-            }
-        else:
-            processor = self.helpers["image.processor"]
-            model_inputs = processor(
-                text=txt,
-                images=image,
-                padding=True,
-                return_tensors="pt",
-            ).to(device)
 
-            input_kwargs = {
-                "input_ids": model_inputs.input_ids,
-                "attention_mask": model_inputs.attention_mask,
-                "pixel_values": model_inputs.pixel_values,
-                "image_grid_thw": model_inputs.image_grid_thw,
-                "output_hidden_states": True,
-                }
+        txt = [template.format(base_img_prompt + e) for e in prompt]
+
         
-        prompt_hash = self.text_encoder.hash(input_kwargs)
+
+        prompt_hash = self.text_encoder.hash({
+            "prompt": prompt,
+            "image": image,
+            "device": device,
+            "dtype": dtype,
+            "max_sequence_length": max_sequence_length,
+            "num_images_per_prompt": num_images_per_prompt,
+            "text_encoder_kwargs": text_encoder_kwargs,
+        })
 
         cached = None
         if self.text_encoder.enable_cache:
             cached = self.text_encoder.load_cached(prompt_hash)
-            
+
         if cached is not None:
             prompt_embeds, prompt_embeds_mask = cached
         else:
             if image is None:
+                input_kwargs = {
+                    "text": txt,
+                    "max_sequence_length": self.tokenizer_max_length + drop_idx,
+                    "use_attention_mask": True,
+                    "return_attention_mask": True,
+                    "output_type": "raw",
+                    **text_encoder_kwargs,
+                }
+            else:
+                processor = self.helpers["image.processor"]
+                model_inputs = processor(
+                    text=txt,
+                    images=image,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(device)
+
+                input_kwargs = {
+                    "input_ids": model_inputs.input_ids,
+                    "attention_mask": model_inputs.attention_mask,
+                    "pixel_values": model_inputs.pixel_values,
+                    "image_grid_thw": model_inputs.image_grid_thw,
+                    "output_hidden_states": True,
+                }
+            if image is None:
                 encoder_outputs, attention_mask = self.text_encoder.encode(
-                **input_kwargs,
-            )
-            else: 
+                    **input_kwargs,
+                )
+            else:
                 if not self.text_encoder.model_loaded:
-                    self.text_encoder.model = self.text_encoder.load_model(override_kwargs={"load_dtype": None})
+                    self.text_encoder.model = self.text_encoder.load_model(
+                        override_kwargs={"load_dtype": None}
+                    )
                     self.text_encoder.model = self.text_encoder.model.to(dtype)
                     self.text_encoder.model_loaded = True
-                
+
                 encoder_outputs = self.text_encoder.model(**input_kwargs)
                 attention_mask = model_inputs.attention_mask
-            
+
             hidden_states = encoder_outputs.hidden_states[-1]
             split_hidden_states = self._extract_masked_hidden(
                 hidden_states, attention_mask
             )
-            
+
             split_hidden_states = [e[drop_idx:] for e in split_hidden_states]
-            attn_mask_list = [torch.ones(e.size(0), dtype=torch.long, device=e.device) for e in split_hidden_states]
+            attn_mask_list = [
+                torch.ones(e.size(0), dtype=torch.long, device=e.device)
+                for e in split_hidden_states
+            ]
             max_seq_len = max([e.size(0) for e in split_hidden_states])
             prompt_embeds = torch.stack(
-                [torch.cat([u, u.new_zeros(max_seq_len - u.size(0), u.size(1))]) for u in split_hidden_states]
+                [
+                    torch.cat([u, u.new_zeros(max_seq_len - u.size(0), u.size(1))])
+                    for u in split_hidden_states
+                ]
             )
             prompt_embeds_mask = torch.stack(
-                [torch.cat([u, u.new_zeros(max_seq_len - u.size(0))]) for u in attn_mask_list]
+                [
+                    torch.cat([u, u.new_zeros(max_seq_len - u.size(0))])
+                    for u in attn_mask_list
+                ]
             )
-            
+
             prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-            batch_size = len(prompt) 
+            batch_size = len(prompt)
 
             if image is not None:
                 _, seq_len, _ = prompt_embeds.shape
                 prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-                prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
-                prompt_embeds_mask = prompt_embeds_mask.repeat(1, num_images_per_prompt, 1)
-                prompt_embeds_mask = prompt_embeds_mask.view(batch_size * num_images_per_prompt, seq_len)
+                prompt_embeds = prompt_embeds.view(
+                    batch_size * num_images_per_prompt, seq_len, -1
+                )
+                prompt_embeds_mask = prompt_embeds_mask.repeat(
+                    1, num_images_per_prompt, 1
+                )
+                prompt_embeds_mask = prompt_embeds_mask.view(
+                    batch_size * num_images_per_prompt, seq_len
+                )
             else:
                 prompt_embeds = prompt_embeds[:, :max_sequence_length]
                 prompt_embeds_mask = prompt_embeds_mask[:, :max_sequence_length]
                 _, seq_len, _ = prompt_embeds.shape
                 prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
                 prompt_embeds = prompt_embeds.view(num_images_per_prompt, seq_len, -1)
-                prompt_embeds_mask = prompt_embeds_mask.repeat(1, num_images_per_prompt, 1)
-                prompt_embeds_mask = prompt_embeds_mask.view(num_images_per_prompt, seq_len)
-            
-    
+                prompt_embeds_mask = prompt_embeds_mask.repeat(
+                    1, num_images_per_prompt, 1
+                )
+                prompt_embeds_mask = prompt_embeds_mask.view(
+                    num_images_per_prompt, seq_len
+                )
+
             if self.text_encoder.enable_cache:
                 self.text_encoder.cache(
                     prompt_hash,
@@ -235,25 +265,35 @@ class QwenImageShared(BaseEngine):
         split_result = torch.split(selected, valid_lengths.tolist(), dim=0)
 
         return split_result
-    
-    def prepare_control_image(self, control_image, batch_size, height, width, transformer_dtype, use_cfg_guidance):
+
+    def prepare_control_image(
+        self,
+        control_image,
+        batch_size,
+        height,
+        width,
+        transformer_dtype,
+        use_cfg_guidance,
+    ):
         control_image = self._load_image(control_image)
-        control_image = self.image_processor.preprocess(control_image, height=height, width=width)
+        control_image = self.image_processor.preprocess(
+            control_image, height=height, width=width
+        )
         control_image = control_image.repeat_interleave(batch_size, dim=0)
         control_image = control_image.to(device=self.device, dtype=transformer_dtype)
         if use_cfg_guidance:
             control_image = torch.cat([control_image] * 2)
-        
+
         if control_image.ndim == 4:
             control_image = control_image.unsqueeze(2)
-        
+
         return control_image
-    
+
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         """Override: unpack latents for image decoding and render a preview frame.
 
         Falls back to base implementation if preview dimensions are unavailable.
-        
+
         """
         self.logger.info(f"Rendering step {latents.shape} OVERRIDDEN")
         try:
@@ -275,7 +315,7 @@ class QwenImageShared(BaseEngine):
                 super()._render_step(latents, render_on_step_callback)
             except Exception:
                 pass
-    
+
     def base_denoise(self, *args, **kwargs):
         latents = kwargs.get("latents")
         timesteps = kwargs.get("timesteps")
@@ -313,12 +353,11 @@ class QwenImageShared(BaseEngine):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
-                
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1)
                 else:
                     latent_model_input = latents
-                
+
                 with self.transformer.cache_context("cond"):
                     noise_pred = self.transformer(
                         hidden_states=latent_model_input,
@@ -362,7 +401,7 @@ class QwenImageShared(BaseEngine):
                 latents = self.scheduler.step(
                     noise_pred, t, latents, return_dict=False
                 )[0]
-                
+
                 if mask_image_latents is not None and mask is not None:
                     init_latents_proper = mask_image_latents
                     init_mask = mask
@@ -372,13 +411,20 @@ class QwenImageShared(BaseEngine):
                             init_latents_proper, torch.tensor([noise_timestep]), noise
                         )
 
-                    latents = (1 - init_mask) * init_latents_proper + init_mask * latents
+                    latents = (
+                        1 - init_mask
+                    ) * init_latents_proper + init_mask * latents
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
@@ -389,7 +435,10 @@ class QwenImageShared(BaseEngine):
 
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
 

@@ -5,8 +5,8 @@ from torch.nn import Parameter
 
 def weight_quantization(b):
     def uniform_quant(x, b):
-        xdiv = x.mul((2 ** b - 1))
-        xhard = xdiv.round().div(2 ** b - 1)
+        xdiv = x.mul((2**b - 1))
+        xhard = xdiv.round().div(2**b - 1)
         return xhard
 
     class _pq(torch.autograd.Function):
@@ -25,7 +25,7 @@ def weight_quantization(b):
         def backward(ctx, grad_output):
             grad_input = grad_output.clone()  # grad for weights will not be clipped
             input, input_q = ctx.saved_tensors
-            i = (input.abs() > 1.).float()
+            i = (input.abs() > 1.0).float()
             sign = input.sign()
             grad_alpha = (grad_output * (sign * i + (input_q - input) * (1 - i))).sum()
             return grad_input, grad_alpha
@@ -40,7 +40,9 @@ class weight_quantize_fn(nn.Module):
 
         self.bit_w = bit_w - 1
         self.weight_q = weight_quantization(b=self.bit_w)
-        self.register_parameter('w_alpha', Parameter(torch.tensor(3.0), requires_grad=True))
+        self.register_parameter(
+            "w_alpha", Parameter(torch.tensor(3.0), requires_grad=True)
+        )
 
     def forward(self, weight):
         mean = weight.data.mean()
@@ -53,10 +55,11 @@ class weight_quantize_fn(nn.Module):
         self.bit_w = bit_w - 1
         self.weight_q = weight_quantization(b=self.bit_w)
 
+
 def act_quantization(b, signed=False):
     def uniform_quant(x, b=3):
-        xdiv = x.mul(2 ** b - 1)
-        xhard = xdiv.round().div(2 ** b - 1)
+        xdiv = x.mul(2**b - 1)
+        xhard = xdiv.round().div(2**b - 1)
         return xhard
 
     class _uq(torch.autograd.Function):
@@ -73,13 +76,14 @@ def act_quantization(b, signed=False):
         def backward(ctx, grad_output):
             grad_input = grad_output.clone()
             input, input_q = ctx.saved_tensors
-            i = (input.abs() > 1.).float()
+            i = (input.abs() > 1.0).float()
             sign = input.sign()
             grad_alpha = (grad_output * (sign * i + (input_q - input) * (1 - i))).sum()
             grad_input = grad_input * (1 - i)
             return grad_input, grad_alpha
 
     return _uq().apply
+
 
 class act_quantize_fn(nn.Module):
     def __init__(self, bit_a, signed=False):
@@ -91,7 +95,9 @@ class act_quantize_fn(nn.Module):
         assert bit_a > 0
 
         self.act_q = act_quantization(b=self.bit_a, signed=signed)
-        self.register_parameter('a_alpha', Parameter(torch.tensor(8.0), requires_grad=True))
+        self.register_parameter(
+            "a_alpha", Parameter(torch.tensor(8.0), requires_grad=True)
+        )
 
     def forward(self, x):
         return self.act_q(x, self.a_alpha)

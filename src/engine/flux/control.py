@@ -5,9 +5,10 @@ import numpy as np
 from .shared import FluxShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class FluxControlEngine(FluxShared):
     """Flux Control Engine Implementation"""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_channels_latents = (
@@ -44,9 +45,9 @@ class FluxControlEngine(FluxShared):
         timesteps: List[int] | None = None,
         **kwargs,
     ):
-        
+
         safe_emit_progress(progress_callback, 0.0, "Starting control pipeline")
-        
+
         if height is None and width is None and aspect_ratio is not None:
             height, width = self._aspect_ratio_to_height_width(aspect_ratio, resolution)
         elif height is None and width is None and resolution is not None:
@@ -56,10 +57,17 @@ class FluxControlEngine(FluxShared):
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-            
-        pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
+
+        (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             prompt_2,
@@ -70,31 +78,32 @@ class FluxControlEngine(FluxShared):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        
+
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
-        
+
         if offload:
             self._offload(self.text_encoder_2)
         safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
         batch_size = prompt_embeds.shape[0]
-        
+
         self.logger.info(f"Control image: {control_image}")
         self.logger.info(f"Height: {height}")
         self.logger.info(f"Width: {width}")
 
-        
         control_image = self._load_image(control_image)
-        control_image = self.image_processor.preprocess(control_image, height=height, width=width)
+        control_image = self.image_processor.preprocess(
+            control_image, height=height, width=width
+        )
         control_image = control_image.repeat_interleave(batch_size, dim=0)
-        
+
         if use_cfg_guidance:
             control_image = torch.cat([control_image] * 2)
-        
+
         control_image_latents = self.vae_encode(control_image, offload=offload)
         height_control_image, width_control_image = control_image_latents.shape[2:]
-        
+
         control_image_latents = self._pack_latents(
             control_image_latents,
             batch_size,
@@ -113,7 +122,7 @@ class FluxControlEngine(FluxShared):
             generator=generator,
         )
         safe_emit_progress(progress_callback, 0.38, "Initialized latent noise")
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
@@ -123,7 +132,7 @@ class FluxControlEngine(FluxShared):
             if sigmas is None
             else sigmas
         )
-        
+
         image_seq_len = latents.shape[1]
         mu = self.calculate_shift(
             image_seq_len,
@@ -140,7 +149,9 @@ class FluxControlEngine(FluxShared):
             timesteps=timesteps,
             mu=mu,
         )
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -159,12 +170,11 @@ class FluxControlEngine(FluxShared):
         else:
             guidance = None
 
-        
         self.scheduler.set_begin_index(0)
-        
+
         # Reserve a progress gap for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
-        
+
         # Set preview context for per-step rendering on the main engine (denoise runs there)
         self._preview_height = height
         self._preview_width = width

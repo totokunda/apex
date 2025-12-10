@@ -27,7 +27,10 @@ from diffusers.utils.accelerate_utils import apply_forward_hook
 from diffusers.models.activations import get_activation
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.autoencoders.vae import DecoderOutput, DiagonalGaussianDistribution
+from diffusers.models.autoencoders.vae import (
+    DecoderOutput,
+    DiagonalGaussianDistribution,
+)
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -43,19 +46,31 @@ class HunyuanImageResnetBlock(nn.Module):
         non_linearity (str, optional): Type of non-linearity to use. Default is "silu".
     """
 
-    def __init__(self, in_channels: int, out_channels: int, non_linearity: str = "silu") -> None:
+    def __init__(
+        self, in_channels: int, out_channels: int, non_linearity: str = "silu"
+    ) -> None:
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.nonlinearity = get_activation(non_linearity)
 
         # layers
-        self.norm1 = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = nn.GroupNorm(num_groups=32, num_channels=out_channels, eps=1e-6, affine=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm1 = nn.GroupNorm(
+            num_groups=32, num_channels=in_channels, eps=1e-6, affine=True
+        )
+        self.conv1 = nn.Conv2d(
+            in_channels, out_channels, kernel_size=3, stride=1, padding=1
+        )
+        self.norm2 = nn.GroupNorm(
+            num_groups=32, num_channels=out_channels, eps=1e-6, affine=True
+        )
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1
+        )
         if in_channels != out_channels:
-            self.conv_shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+            self.conv_shortcut = nn.Conv2d(
+                in_channels, out_channels, kernel_size=1, stride=1, padding=0
+            )
         else:
             self.conv_shortcut = None
 
@@ -90,7 +105,9 @@ class HunyuanImageAttentionBlock(nn.Module):
         super().__init__()
 
         # layers
-        self.norm = nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
+        self.norm = nn.GroupNorm(
+            num_groups=32, num_channels=in_channels, eps=1e-6, affine=True
+        )
         self.to_q = nn.Conv2d(in_channels, in_channels, 1)
         self.to_k = nn.Conv2d(in_channels, in_channels, 1)
         self.to_v = nn.Conv2d(in_channels, in_channels, 1)
@@ -106,9 +123,21 @@ class HunyuanImageAttentionBlock(nn.Module):
         value = self.to_v(x)
 
         batch_size, channels, height, width = query.shape
-        query = query.permute(0, 2, 3, 1).reshape(batch_size, height * width, channels).contiguous()
-        key = key.permute(0, 2, 3, 1).reshape(batch_size, height * width, channels).contiguous()
-        value = value.permute(0, 2, 3, 1).reshape(batch_size, height * width, channels).contiguous()
+        query = (
+            query.permute(0, 2, 3, 1)
+            .reshape(batch_size, height * width, channels)
+            .contiguous()
+        )
+        key = (
+            key.permute(0, 2, 3, 1)
+            .reshape(batch_size, height * width, channels)
+            .contiguous()
+        )
+        value = (
+            value.permute(0, 2, 3, 1)
+            .reshape(batch_size, height * width, channels)
+            .contiguous()
+        )
 
         # apply attention
         x = F.scaled_dot_product_attention(query, key, value)
@@ -135,7 +164,9 @@ class HunyuanImageDownsample(nn.Module):
         if out_channels % factor != 0:
             raise ValueError(f"out_channels % factor != 0: {out_channels % factor}")
 
-        self.conv = nn.Conv2d(in_channels, out_channels // factor, kernel_size=3, stride=1, padding=1)
+        self.conv = nn.Conv2d(
+            in_channels, out_channels // factor, kernel_size=3, stride=1, padding=1
+        )
         self.group_size = factor * in_channels // out_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -168,7 +199,9 @@ class HunyuanImageUpsample(nn.Module):
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
         factor = 4
-        self.conv = nn.Conv2d(in_channels, out_channels * factor, kernel_size=3, stride=1, padding=1)
+        self.conv = nn.Conv2d(
+            in_channels, out_channels * factor, kernel_size=3, stride=1, padding=1
+        )
         self.repeats = factor * out_channels // in_channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -200,12 +233,18 @@ class HunyuanImageMidBlock(nn.Module):
     def __init__(self, in_channels: int, num_layers: int = 1):
         super().__init__()
 
-        resnets = [HunyuanImageResnetBlock(in_channels=in_channels, out_channels=in_channels)]
+        resnets = [
+            HunyuanImageResnetBlock(in_channels=in_channels, out_channels=in_channels)
+        ]
 
         attentions = []
         for _ in range(num_layers):
             attentions.append(HunyuanImageAttentionBlock(in_channels))
-            resnets.append(HunyuanImageResnetBlock(in_channels=in_channels, out_channels=in_channels))
+            resnets.append(
+                HunyuanImageResnetBlock(
+                    in_channels=in_channels, out_channels=in_channels
+                )
+            )
 
         self.resnets = nn.ModuleList(resnets)
         self.attentions = nn.ModuleList(attentions)
@@ -260,7 +299,9 @@ class HunyuanImageEncoder2D(nn.Module):
         self.nonlinearity = get_activation(non_linearity)
 
         # init block
-        self.conv_in = nn.Conv2d(in_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1)
+        self.conv_in = nn.Conv2d(
+            in_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1
+        )
 
         # downsample blocks
         self.down_blocks = nn.ModuleList([])
@@ -271,26 +312,39 @@ class HunyuanImageEncoder2D(nn.Module):
             # residual blocks
             for _ in range(num_res_blocks):
                 self.down_blocks.append(
-                    HunyuanImageResnetBlock(in_channels=block_in_channel, out_channels=block_out_channel)
+                    HunyuanImageResnetBlock(
+                        in_channels=block_in_channel, out_channels=block_out_channel
+                    )
                 )
                 block_in_channel = block_out_channel
 
             # downsample block
-            if i < np.log2(spatial_compression_ratio) and i != len(block_out_channels) - 1:
+            if (
+                i < np.log2(spatial_compression_ratio)
+                and i != len(block_out_channels) - 1
+            ):
                 if downsample_match_channel:
                     block_out_channel = block_out_channels[i + 1]
                 self.down_blocks.append(
-                    HunyuanImageDownsample(in_channels=block_in_channel, out_channels=block_out_channel)
+                    HunyuanImageDownsample(
+                        in_channels=block_in_channel, out_channels=block_out_channel
+                    )
                 )
                 block_in_channel = block_out_channel
 
         # middle blocks
-        self.mid_block = HunyuanImageMidBlock(in_channels=block_out_channels[-1], num_layers=1)
+        self.mid_block = HunyuanImageMidBlock(
+            in_channels=block_out_channels[-1], num_layers=1
+        )
 
         # output blocks
         # Output layers
-        self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_out_channels[-1], eps=1e-6, affine=True)
-        self.conv_out = nn.Conv2d(block_out_channels[-1], 2 * z_channels, kernel_size=3, stride=1, padding=1)
+        self.norm_out = nn.GroupNorm(
+            num_groups=32, num_channels=block_out_channels[-1], eps=1e-6, affine=True
+        )
+        self.conv_out = nn.Conv2d(
+            block_out_channels[-1], 2 * z_channels, kernel_size=3, stride=1, padding=1
+        )
 
         self.gradient_checkpointing = False
 
@@ -363,10 +417,14 @@ class HunyuanImageDecoder2D(nn.Module):
         self.spatial_compression_ratio = spatial_compression_ratio
         self.nonlinearity = get_activation(non_linearity)
 
-        self.conv_in = nn.Conv2d(z_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1)
+        self.conv_in = nn.Conv2d(
+            z_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1
+        )
 
         # Middle blocks with attention
-        self.mid_block = HunyuanImageMidBlock(in_channels=block_out_channels[0], num_layers=1)
+        self.mid_block = HunyuanImageMidBlock(
+            in_channels=block_out_channels[0], num_layers=1
+        )
 
         # Upsampling blocks
         block_in_channel = block_out_channels[0]
@@ -375,19 +433,30 @@ class HunyuanImageDecoder2D(nn.Module):
             block_out_channel = block_out_channels[i]
             for _ in range(self.num_res_blocks + 1):
                 self.up_blocks.append(
-                    HunyuanImageResnetBlock(in_channels=block_in_channel, out_channels=block_out_channel)
+                    HunyuanImageResnetBlock(
+                        in_channels=block_in_channel, out_channels=block_out_channel
+                    )
                 )
                 block_in_channel = block_out_channel
 
-            if i < np.log2(spatial_compression_ratio) and i != len(block_out_channels) - 1:
+            if (
+                i < np.log2(spatial_compression_ratio)
+                and i != len(block_out_channels) - 1
+            ):
                 if upsample_match_channel:
                     block_out_channel = block_out_channels[i + 1]
-                self.up_blocks.append(HunyuanImageUpsample(block_in_channel, block_out_channel))
+                self.up_blocks.append(
+                    HunyuanImageUpsample(block_in_channel, block_out_channel)
+                )
                 block_in_channel = block_out_channel
 
         # Output layers
-        self.norm_out = nn.GroupNorm(num_groups=32, num_channels=block_out_channels[-1], eps=1e-6, affine=True)
-        self.conv_out = nn.Conv2d(block_out_channels[-1], out_channels, kernel_size=3, stride=1, padding=1)
+        self.norm_out = nn.GroupNorm(
+            num_groups=32, num_channels=block_out_channels[-1], eps=1e-6, affine=True
+        )
+        self.conv_out = nn.Conv2d(
+            block_out_channels[-1], out_channels, kernel_size=3, stride=1, padding=1
+        )
 
         self.gradient_checkpointing = False
 

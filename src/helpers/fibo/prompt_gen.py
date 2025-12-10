@@ -7,24 +7,32 @@ from PIL import Image
 import ujson
 from boltons.iterutils import remap
 from transformers import AutoProcessor
-from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration
+from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+    Qwen3VLForConditionalGeneration,
+)
+
 try:
     # HF helper for detecting FlashAttention-2 availability (if present in this transformers version).
     from transformers.utils import is_flash_attn_2_available  # type: ignore
 except Exception:  # pragma: no cover - best-effort optional import
+
     def is_flash_attn_2_available() -> bool:
         return False
+
+
 from src.helpers.base import BaseHelper
 from src.utils.defaults import get_components_path, DEFAULT_CACHE_PATH, get_torch_device
 from src.mixins.cache_mixin import CacheMixin
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 import os
 
+
 def clean_json(caption):
     caption["pickascore"] = 1.0
     caption["aesthetic_score"] = 10.0
     caption = prepare_clean_caption(caption)
     return caption
+
 
 def parse_aesthetic_score(record: dict) -> str:
     ae = record["aesthetic_score"]
@@ -99,7 +107,9 @@ def prepare_clean_caption(record: dict) -> str:
             clean_caption_dict["aesthetics"].update(scores)
 
         # Dumps clean structured caption as minimal json string (i.e. no newlines\whitespaces seps)
-        clean_caption_str = ujson.dumps(clean_caption_dict, escape_forward_slashes=False)
+        clean_caption_str = ujson.dumps(
+            clean_caption_dict, escape_forward_slashes=False
+        )
         return clean_caption_str
     except Exception as ex:
         print("Error: ", ex)
@@ -161,7 +171,7 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         self.enable_cache = enable_cache
         self.cache_file = cache_file
         self.max_cache_size = max_cache_size
-       
+
         # Ensure this helper has an explicit torch device (GPU when available)
         # so that it runs on GPU even when instantiated outside a BaseEngine.
         self.device = get_torch_device()
@@ -180,8 +190,7 @@ class PromptGenHelper(BaseHelper, CacheMixin):
                 DEFAULT_CACHE_PATH,
                 f"prompt_gen_{model_path.replace('/', '_')}.safetensors",
             )
-            
-        
+
         super(PromptGenHelper, self).__init__()
         model_path = self._download(model_path, save_path)
         self.processor = AutoProcessor.from_pretrained(model_path, **processor_kwargs)
@@ -193,7 +202,6 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         )
         self.model.eval()
         self.to_device(self.model, device=self.device)
-       
 
         tokenizer_obj = self.processor.tokenizer
         if tokenizer_obj.pad_token_id is None:
@@ -213,10 +221,10 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         top_p: float,
         temperature: float,
         max_tokens: int,
-    stop: Optional[List[str]] = None,
-    progress_callback: Optional[Callable] = None,
+        stop: Optional[List[str]] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> str:
-    
+
         return self._generate_with_transformers(
             messages=messages,
             top_p=top_p,
@@ -236,22 +244,38 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         progress_callback: Optional[Callable] = None,
     ) -> str:
         # Map this helper's internal progress to the caller's overall progress range if provided.
-        local_progress = make_mapped_progress(progress_callback, 0.0, 1.0) if progress_callback else None
+        local_progress = (
+            make_mapped_progress(progress_callback, 0.0, 1.0)
+            if progress_callback
+            else None
+        )
 
-        safe_emit_progress(local_progress, 0.0, "Starting prompt generation with Qwen3-VL")
+        safe_emit_progress(
+            local_progress, 0.0, "Starting prompt generation with Qwen3-VL"
+        )
 
-        prompt_hash = self.hash({k: v for k, v in locals().items() if k not in {"progress_callback", "local_progress"}})
+        prompt_hash = self.hash(
+            {
+                k: v
+                for k, v in locals().items()
+                if k not in {"progress_callback", "local_progress"}
+            }
+        )
         cached = self.load_cached(prompt_hash)
         if cached is not None:
             cached_prompt = cached[0]
-            decoded = self.processor.tokenizer.batch_decode(cached_prompt, skip_special_tokens=True)
+            decoded = self.processor.tokenizer.batch_decode(
+                cached_prompt, skip_special_tokens=True
+            )
             if decoded:
                 text = decoded[0]
                 stripped_text = _strip_stop_sequences(text, stop)
                 json_prompt = json.loads(stripped_text)
-                safe_emit_progress(local_progress, 1.0, "Loaded structured prompt from cache")
+                safe_emit_progress(
+                    local_progress, 1.0, "Loaded structured prompt from cache"
+                )
                 return prepare_clean_caption(json_prompt)
-        
+
         tokenizer = self.processor.tokenizer
         prompt_text = tokenizer.apply_chat_template(
             messages,
@@ -266,13 +290,13 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         images = _collect_images(messages)
         if images:
             processor_inputs["images"] = images
-        
+
         safe_emit_progress(local_progress, 0.2, "Prepared inputs for prompt generation")
 
         inputs = self.processor(**processor_inputs)
         device = self.model.device
         inputs = {key: value.to(device) for key, value in inputs.items()}
-        
+
         generation_kwargs: Dict[str, Any] = {
             "max_new_tokens": max_tokens,
             "temperature": temperature,
@@ -282,10 +306,12 @@ class PromptGenHelper(BaseHelper, CacheMixin):
             "pad_token_id": self._pad_token_id,
             "use_cache": True,
         }
-        
+
         input_ids = inputs.get("input_ids")
         if input_ids is None:
-            raise RuntimeError("Processor did not return input_ids; cannot compute new tokens.")
+            raise RuntimeError(
+                "Processor did not return input_ids; cannot compute new tokens."
+            )
 
         # Use non-streaming generation to avoid per-token printing overhead,
         # which can dominate latency even when the model itself is fast.
@@ -302,10 +328,12 @@ class PromptGenHelper(BaseHelper, CacheMixin):
         new_token_ids = generated_ids[:, input_ids.shape[-1] :]
         if self.enable_cache:
             self.cache(prompt_hash, new_token_ids)
-        
+
         decoded = tokenizer.batch_decode(new_token_ids, skip_special_tokens=True)
         if not decoded:
-            safe_emit_progress(local_progress, 1.0, "Prompt generation produced no output")
+            safe_emit_progress(
+                local_progress, 1.0, "Prompt generation produced no output"
+            )
             return ""
         text = decoded[0]
         stripped_text = _strip_stop_sequences(text, stop)

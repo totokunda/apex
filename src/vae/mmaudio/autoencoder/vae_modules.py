@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from .edm2_utils import (MPConv1D, mp_silu, mp_sum, normalize)
+from .edm2_utils import MPConv1D, mp_silu, mp_sum, normalize
 
 
 def nonlinearity(x):
@@ -13,7 +13,9 @@ def nonlinearity(x):
 
 class ResnetBlock1D(nn.Module):
 
-    def __init__(self, *, in_dim, out_dim=None, conv_shortcut=False, kernel_size=3, use_norm=True):
+    def __init__(
+        self, *, in_dim, out_dim=None, conv_shortcut=False, kernel_size=3, use_norm=True
+    ):
         super().__init__()
         self.in_dim = in_dim
         out_dim = in_dim if out_dim is None else out_dim
@@ -67,12 +69,12 @@ class AttnBlock1D(nn.Module):
         y = y.reshape(y.shape[0], self.num_heads, -1, 3, y.shape[-1])
         q, k, v = normalize(y, dim=2).unbind(3)
 
-        q = rearrange(q, 'b h c l -> b h l c')
-        k = rearrange(k, 'b h c l -> b h l c')
-        v = rearrange(v, 'b h c l -> b h l c')
+        q = rearrange(q, "b h c l -> b h l c")
+        k = rearrange(k, "b h c l -> b h l c")
+        v = rearrange(v, "b h c l -> b h l c")
 
         h = F.scaled_dot_product_attention(q, k, v)
-        h = rearrange(h, 'b h l c -> b (h c) l')
+        h = rearrange(h, "b h l c -> b (h c) l")
 
         h = self.proj_out(h)
 
@@ -88,7 +90,9 @@ class Upsample1D(nn.Module):
             self.conv = MPConv1D(in_channels, in_channels, kernel_size=3)
 
     def forward(self, x):
-        x = F.interpolate(x, scale_factor=2.0, mode='nearest-exact')  # support 3D tensor(B,C,T)
+        x = F.interpolate(
+            x, scale_factor=2.0, mode="nearest-exact"
+        )  # support 3D tensor(B,C,T)
         if self.with_conv:
             x = self.conv(x)
         return x

@@ -7,6 +7,7 @@
 # This preprocessor is licensed by CMU for non-commercial use only.
 
 import os
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import json
@@ -20,7 +21,12 @@ from .types import PoseResult, HandResult, FaceResult, AnimalPoseResult
 from huggingface_hub import hf_hub_download
 from .wholebody import Wholebody
 import warnings
-from src.preprocess.util import HWC3, resize_image_with_pad, custom_hf_download, DWPOSE_MODEL_NAME
+from src.preprocess.util import (
+    HWC3,
+    resize_image_with_pad,
+    custom_hf_download,
+    DWPOSE_MODEL_NAME,
+)
 from src.types import InputImage, OutputImage
 from src.preprocess.base_preprocessor import BasePreprocessor
 import cv2
@@ -93,7 +99,15 @@ def draw_animalpose(canvas: np.ndarray, keypoints: list[Keypoint]) -> np.ndarray
     return canvas
 
 
-def draw_poses(poses: List[PoseResult], H, W, draw_body=True, draw_hand=True, draw_face=True, xinsr_stick_scaling=False):
+def draw_poses(
+    poses: List[PoseResult],
+    H,
+    W,
+    draw_body=True,
+    draw_hand=True,
+    draw_face=True,
+    xinsr_stick_scaling=False,
+):
     """
     Draw the detected poses on an empty canvas.
 
@@ -112,7 +126,9 @@ def draw_poses(poses: List[PoseResult], H, W, draw_body=True, draw_hand=True, dr
 
     for pose in poses:
         if draw_body:
-            canvas = util.draw_bodypose(canvas, pose.body.keypoints, xinsr_stick_scaling)
+            canvas = util.draw_bodypose(
+                canvas, pose.body.keypoints, xinsr_stick_scaling
+            )
 
         if draw_hand:
             canvas = util.draw_handpose(canvas, pose.left_hand)
@@ -182,14 +198,19 @@ def decode_json_as_poses(
     )
 
 
-def encode_poses_as_dict(poses: List[PoseResult], canvas_height: int, canvas_width: int) -> str:
-    """ Encode the pose as a dict following openpose JSON output format:
+def encode_poses_as_dict(
+    poses: List[PoseResult], canvas_height: int, canvas_width: int
+) -> str:
+    """Encode the pose as a dict following openpose JSON output format:
     https://github.com/CMU-Perceptual-Computing-Lab/openpose/blob/master/doc/02_output.md
     """
-    def compress_keypoints(keypoints: Union[List[Keypoint], None]) -> Union[List[float], None]:
+
+    def compress_keypoints(
+        keypoints: Union[List[Keypoint], None],
+    ) -> Union[List[float], None]:
         if not keypoints:
             return None
-        
+
         return [
             value
             for keypoint in keypoints
@@ -201,20 +222,22 @@ def encode_poses_as_dict(poses: List[PoseResult], canvas_height: int, canvas_wid
         ]
 
     return {
-        'people': [
+        "people": [
             {
-                'pose_keypoints_2d': compress_keypoints(pose.body.keypoints),
+                "pose_keypoints_2d": compress_keypoints(pose.body.keypoints),
                 "face_keypoints_2d": compress_keypoints(pose.face),
                 "hand_left_keypoints_2d": compress_keypoints(pose.left_hand),
-                "hand_right_keypoints_2d":compress_keypoints(pose.right_hand),
+                "hand_right_keypoints_2d": compress_keypoints(pose.right_hand),
             }
             for pose in poses
         ],
-        'canvas_height': canvas_height,
-        'canvas_width': canvas_width,
+        "canvas_height": canvas_height,
+        "canvas_width": canvas_width,
     }
 
+
 global_cached_dwpose = Wholebody()
+
 
 class DwposeDetector(BasePreprocessor):
     """
@@ -223,30 +246,50 @@ class DwposeDetector(BasePreprocessor):
     Attributes:
         model_dir (str): Path to the directory where the pose models are stored.
     """
+
     def __init__(self, dw_pose_estimation):
         super().__init__()
         self.dw_pose_estimation = dw_pose_estimation
-    
+
     @classmethod
-    def from_pretrained(cls, pretrained_model_or_path=DWPOSE_MODEL_NAME, pretrained_det_model_or_path=None, det_filename=None, pose_filename=None, torchscript_device="cpu"):
+    def from_pretrained(
+        cls,
+        pretrained_model_or_path=DWPOSE_MODEL_NAME,
+        pretrained_det_model_or_path=None,
+        det_filename=None,
+        pose_filename=None,
+        torchscript_device="cpu",
+    ):
         global global_cached_dwpose
-        pretrained_det_model_or_path = pretrained_det_model_or_path or pretrained_model_or_path
+        pretrained_det_model_or_path = (
+            pretrained_det_model_or_path or pretrained_model_or_path
+        )
 
         pose_filename = pose_filename or "dw-ll_ucoco_384.onnx"
-        
+
         det_model_path = None
         if det_filename is not None:
-            det_model_path = custom_hf_download(pretrained_det_model_or_path, det_filename)
+            det_model_path = custom_hf_download(
+                pretrained_det_model_or_path, det_filename
+            )
         pose_model_path = custom_hf_download(pretrained_model_or_path, pose_filename)
-        
-        print(f"\nDWPose: Using {det_filename} for bbox detection and {pose_filename} for pose estimation")
-        if global_cached_dwpose.det is None or global_cached_dwpose.det_filename != det_filename:
+
+        print(
+            f"\nDWPose: Using {det_filename} for bbox detection and {pose_filename} for pose estimation"
+        )
+        if (
+            global_cached_dwpose.det is None
+            or global_cached_dwpose.det_filename != det_filename
+        ):
             t = Wholebody(det_model_path, None, torchscript_device=torchscript_device)
             t.pose = global_cached_dwpose.pose
             t.pose_filename = global_cached_dwpose.pose
             global_cached_dwpose = t
-        
-        if global_cached_dwpose.pose is None or global_cached_dwpose.pose_filename != pose_filename:
+
+        if (
+            global_cached_dwpose.pose is None
+            or global_cached_dwpose.pose_filename != pose_filename
+        ):
             t = Wholebody(None, pose_model_path, torchscript_device=torchscript_device)
             t.det = global_cached_dwpose.det
             t.det_filename = global_cached_dwpose.det_filename
@@ -257,33 +300,64 @@ class DwposeDetector(BasePreprocessor):
         with torch.no_grad():
             keypoints_info = self.dw_pose_estimation(oriImg.copy())
             return Wholebody.format_result(keypoints_info)
-    
-    def process(self, input_image: InputImage, detect_resolution=512, include_body=True, include_hand=False, include_face=False, hand_and_face=None, image_and_json=False, upscale_method="INTER_CUBIC", xinsr_stick_scaling=False, **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        detect_resolution=512,
+        include_body=True,
+        include_hand=False,
+        include_face=False,
+        hand_and_face=None,
+        image_and_json=False,
+        upscale_method="INTER_CUBIC",
+        xinsr_stick_scaling=False,
+        **kwargs,
+    ) -> OutputImage:
         if hand_and_face is not None:
-            warnings.warn("hand_and_face is deprecated. Use include_hand and include_face instead.", DeprecationWarning)
+            warnings.warn(
+                "hand_and_face is deprecated. Use include_hand and include_face instead.",
+                DeprecationWarning,
+            )
             include_hand = hand_and_face
             include_face = hand_and_face
 
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
+
         input_image, _ = resize_image_with_pad(input_image, 0, upscale_method)
         poses = self.detect_poses(input_image)
-        
-        canvas = draw_poses(poses, input_image.shape[0], input_image.shape[1], draw_body=include_body, draw_hand=include_hand, draw_face=include_face, xinsr_stick_scaling=xinsr_stick_scaling)
-        canvas, remove_pad = resize_image_with_pad(canvas, detect_resolution, upscale_method)
+
+        canvas = draw_poses(
+            poses,
+            input_image.shape[0],
+            input_image.shape[1],
+            draw_body=include_body,
+            draw_hand=include_hand,
+            draw_face=include_face,
+            xinsr_stick_scaling=xinsr_stick_scaling,
+        )
+        canvas, remove_pad = resize_image_with_pad(
+            canvas, detect_resolution, upscale_method
+        )
         detected_map = HWC3(remove_pad(canvas))
         detected_map = detected_map.astype(np.uint8)
         detected_map = Image.fromarray(detected_map)
-        
+
         if image_and_json:
-            return (detected_map, encode_poses_as_dict(poses, input_image.shape[0], input_image.shape[1]))
-        
+            return (
+                detected_map,
+                encode_poses_as_dict(poses, input_image.shape[0], input_image.shape[1]),
+            )
+
         return detected_map
 
+
 global_cached_animalpose = AnimalPoseImage()
+
+
 class AnimalPoseDetector(BasePreprocessor):
     """
     A class for detecting animal poses in images using the RTMPose AP10k model.
@@ -291,55 +365,83 @@ class AnimalPoseDetector(BasePreprocessor):
     Attributes:
         model_dir (str): Path to the directory where the pose models are stored.
     """
+
     def __init__(self, animal_pose_estimation):
         super().__init__()
         self.animal_pose_estimation = animal_pose_estimation
-    
+
     @classmethod
-    def from_pretrained(cls, pretrained_model_or_path=DWPOSE_MODEL_NAME, pretrained_det_model_or_path=None, det_filename="yolox_l.onnx", pose_filename="dw-ll_ucoco_384.onnx"):
+    def from_pretrained(
+        cls,
+        pretrained_model_or_path=DWPOSE_MODEL_NAME,
+        pretrained_det_model_or_path=None,
+        det_filename="yolox_l.onnx",
+        pose_filename="dw-ll_ucoco_384.onnx",
+    ):
         global global_cached_animalpose
-        pretrained_det_model_or_path = pretrained_det_model_or_path or pretrained_model_or_path
+        pretrained_det_model_or_path = (
+            pretrained_det_model_or_path or pretrained_model_or_path
+        )
         det_filename = det_filename or "yolox_l.onnx"
         pose_filename = pose_filename or "dw-ll_ucoco_384.onnx"
-        
+
         det_model_path = custom_hf_download(pretrained_det_model_or_path, det_filename)
         pose_model_path = custom_hf_download(pretrained_model_or_path, pose_filename)
         torchscript_device = get_torch_device()
-        
-        if global_cached_animalpose.det is None or global_cached_animalpose.det_filename != det_filename:
-            t = AnimalPoseImage(det_model_path, None, torchscript_device=torchscript_device)
+
+        if (
+            global_cached_animalpose.det is None
+            or global_cached_animalpose.det_filename != det_filename
+        ):
+            t = AnimalPoseImage(
+                det_model_path, None, torchscript_device=torchscript_device
+            )
             t.pose = global_cached_animalpose.pose
             t.pose_filename = global_cached_animalpose.pose
             global_cached_animalpose = t
-        
-        if global_cached_animalpose.pose is None or global_cached_animalpose.pose_filename != pose_filename:
-            t = AnimalPoseImage(None, pose_model_path, torchscript_device=torchscript_device)
+
+        if (
+            global_cached_animalpose.pose is None
+            or global_cached_animalpose.pose_filename != pose_filename
+        ):
+            t = AnimalPoseImage(
+                None, pose_model_path, torchscript_device=torchscript_device
+            )
             t.det = global_cached_animalpose.det
             t.det_filename = global_cached_animalpose.det_filename
             global_cached_animalpose = t
         return cls(global_cached_animalpose)
-    
-    def process(self, input_image: InputImage, detect_resolution=512, image_and_json=False, upscale_method="INTER_CUBIC", **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        detect_resolution=512,
+        image_and_json=False,
+        upscale_method="INTER_CUBIC",
+        **kwargs,
+    ) -> OutputImage:
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
-        input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
+
+        input_image, remove_pad = resize_image_with_pad(
+            input_image, detect_resolution, upscale_method
+        )
         result = self.animal_pose_estimation(input_image)
         if result is None:
             detected_map = np.zeros_like(input_image)
             openpose_dict = {
-                'version': 'ap10k',
-                'animals': [],
-                'canvas_height': input_image.shape[0],
-                'canvas_width': input_image.shape[1]
+                "version": "ap10k",
+                "animals": [],
+                "canvas_height": input_image.shape[0],
+                "canvas_width": input_image.shape[1],
             }
         else:
             detected_map, openpose_dict = result
         detected_map = remove_pad(detected_map)
         detected_map = Image.fromarray(detected_map)
-        
+
         if image_and_json:
             return (detected_map, openpose_dict)
 

@@ -156,14 +156,13 @@ def load_transformer_gguf(
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
-    
+
     for tensor in tqdm(reader.tensors):
         name = tensor.name
         shape = get_orig_shape(reader, name)
         if shape is None:
             # GGUF stores dims reversed
             shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
-        
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -191,7 +190,6 @@ def load_transformer_gguf(
         tensor_type_str = getattr(tensor.tensor_type, "name", repr(tensor.tensor_type))
         qtype_dict[tensor_type_str] = qtype_dict.get(tensor_type_str, 0) + 1
 
-        
     return state_dict, qtype_dict
 
 

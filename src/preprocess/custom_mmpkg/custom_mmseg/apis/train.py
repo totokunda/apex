@@ -3,11 +3,17 @@ import warnings
 
 import numpy as np
 import torch
-from src.preprocess.custom_mmpkg.custom_mmcv.parallel import MMDataParallel, MMDistributedDataParallel
+from src.preprocess.custom_mmpkg.custom_mmcv.parallel import (
+    MMDataParallel,
+    MMDistributedDataParallel,
+)
 from src.preprocess.custom_mmpkg.custom_mmcv.runner import build_optimizer, build_runner
 
 from src.preprocess.custom_mmpkg.custom_mmseg.core import DistEvalHook, EvalHook
-from src.preprocess.custom_mmpkg.custom_mmseg.datasets import build_dataloader, build_dataset
+from src.preprocess.custom_mmpkg.custom_mmseg.datasets import (
+    build_dataloader,
+    build_dataset,
+)
 from src.preprocess.custom_mmpkg.custom_mmseg.utils import get_root_logger
 
 
@@ -30,13 +36,9 @@ def set_random_seed(seed, deterministic=False):
         torch.backends.cudnn.benchmark = False
 
 
-def train_segmentor(model,
-                    dataset,
-                    cfg,
-                    distributed=False,
-                    validate=False,
-                    timestamp=None,
-                    meta=None):
+def train_segmentor(
+    model, dataset, cfg, distributed=False, validate=False, timestamp=None, meta=None
+):
     """Launch segmentor training."""
     logger = get_root_logger(cfg.log_level)
 
@@ -51,31 +53,35 @@ def train_segmentor(model,
             len(cfg.gpu_ids),
             dist=distributed,
             seed=cfg.seed,
-            drop_last=True) for ds in dataset
+            drop_last=True,
+        )
+        for ds in dataset
     ]
 
     # put model on gpus
     if distributed:
-        find_unused_parameters = cfg.get('find_unused_parameters', False)
+        find_unused_parameters = cfg.get("find_unused_parameters", False)
         # Sets the `find_unused_parameters` parameter in
         # torch.nn.parallel.DistributedDataParallel
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],
             broadcast_buffers=False,
-            find_unused_parameters=find_unused_parameters)
+            find_unused_parameters=find_unused_parameters,
+        )
     else:
-        model = MMDataParallel(
-            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+        model = MMDataParallel(model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
     # build runner
     optimizer = build_optimizer(model, cfg.optimizer)
 
-    if cfg.get('runner') is None:
-        cfg.runner = {'type': 'IterBasedRunner', 'max_iters': cfg.total_iters}
+    if cfg.get("runner") is None:
+        cfg.runner = {"type": "IterBasedRunner", "max_iters": cfg.total_iters}
         warnings.warn(
-            'config is now expected to have a `runner` section, '
-            'please set `runner` in your config.', UserWarning)
+            "config is now expected to have a `runner` section, "
+            "please set `runner` in your config.",
+            UserWarning,
+        )
 
     runner = build_runner(
         cfg.runner,
@@ -85,12 +91,18 @@ def train_segmentor(model,
             optimizer=optimizer,
             work_dir=cfg.work_dir,
             logger=logger,
-            meta=meta))
+            meta=meta,
+        ),
+    )
 
     # register hooks
-    runner.register_training_hooks(cfg.lr_config, cfg.optimizer_config,
-                                   cfg.checkpoint_config, cfg.log_config,
-                                   cfg.get('momentum_config', None))
+    runner.register_training_hooks(
+        cfg.lr_config,
+        cfg.optimizer_config,
+        cfg.checkpoint_config,
+        cfg.log_config,
+        cfg.get("momentum_config", None),
+    )
 
     # an ugly walkaround to make the .log and .log.json filenames the same
     runner.timestamp = timestamp
@@ -103,11 +115,12 @@ def train_segmentor(model,
             samples_per_gpu=1,
             workers_per_gpu=cfg.data.workers_per_gpu,
             dist=distributed,
-            shuffle=False)
-        eval_cfg = cfg.get('evaluation', {})
-        eval_cfg['by_epoch'] = cfg.runner['type'] != 'IterBasedRunner'
+            shuffle=False,
+        )
+        eval_cfg = cfg.get("evaluation", {})
+        eval_cfg["by_epoch"] = cfg.runner["type"] != "IterBasedRunner"
         eval_hook = DistEvalHook if distributed else EvalHook
-        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority='LOW')
+        runner.register_hook(eval_hook(val_dataloader, **eval_cfg), priority="LOW")
 
     if cfg.resume_from:
         runner.resume(cfg.resume_from)

@@ -107,9 +107,15 @@ MANIFEST_SCHEMA_V1: dict = {
                                                 "resource_requirements": {
                                                     "type": "object",
                                                     "properties": {
-                                                        "min_vram_gb": {"type": "number"},
-                                                        "recommended_vram_gb": {"type": "number"},
-                                                        "compute_capability": {"type": "string"},
+                                                        "min_vram_gb": {
+                                                            "type": "number"
+                                                        },
+                                                        "recommended_vram_gb": {
+                                                            "type": "number"
+                                                        },
+                                                        "compute_capability": {
+                                                            "type": "string"
+                                                        },
                                                     },
                                                     "additional_properties": True,
                                                 },
@@ -312,7 +318,12 @@ MANIFEST_SCHEMA_V1: dict = {
                                             "label": {"type": "string"},
                                             "type": {
                                                 "type": "string",
-                                                "enum": ["number", "text", "boolean", "select"],
+                                                "enum": [
+                                                    "number",
+                                                    "text",
+                                                    "boolean",
+                                                    "select",
+                                                ],
                                             },
                                             "default": {},
                                             "icon": {"type": "string"},

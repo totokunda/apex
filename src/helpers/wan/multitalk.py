@@ -284,7 +284,9 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
                 duration_seconds = num_frames / 25.0  # Assume 25 fps
                 audio_array = np.zeros(int(duration_seconds * 16000))
             else:
-                audio_array = self._load_audio(audio_file, sample_rate=16000, normalize=True)
+                audio_array = self._load_audio(
+                    audio_file, sample_rate=16000, normalize=True
+                )
             audio_arrays.append(audio_array)
 
         # Combine audio based on type
@@ -327,8 +329,6 @@ class WanMultiTalk(nn.Module, LoaderMixin, OffloadMixin):
             embedding = audio_embeddings[person_key]
             embeddings_list.append(embedding)
         return embeddings_list
-
-
 
     def _extract_audio_features(
         self, audio_array: np.ndarray, sr: int = 16000

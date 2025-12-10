@@ -14,33 +14,41 @@ import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin
 from diffusers.models.attention_processor import Attention, AttentionProcessor
-from diffusers.models.embeddings import (TimestepEmbedding, Timesteps,
-                                         apply_rotary_emb,
-                                         get_1d_rotary_pos_embed)
+from diffusers.models.embeddings import (
+    TimestepEmbedding,
+    Timesteps,
+    apply_rotary_emb,
+    get_1d_rotary_pos_embed,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_npu_available,
-                             is_torch_version, logging, scale_lora_layers,
-                             unscale_lora_layers)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    is_torch_npu_available,
+    is_torch_version,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
 
-from .base_model import (
-                                  Flux2Transformer2DModel,
-                                  Flux2TransformerBlock)
+from .base_model import Flux2Transformer2DModel, Flux2TransformerBlock
 
 
 class Flux2ControlTransformerBlock(Flux2TransformerBlock):
     def __init__(
-        self, 
+        self,
         dim: int,
         num_attention_heads: int,
         attention_head_dim: int,
         mlp_ratio: float = 3.0,
         eps: float = 1e-6,
         bias: bool = False,
-        block_id=0
+        block_id=0,
     ):
-        super().__init__(dim, num_attention_heads, attention_head_dim, mlp_ratio, eps, bias)
+        super().__init__(
+            dim, num_attention_heads, attention_head_dim, mlp_ratio, eps, bias
+        )
         self.block_id = block_id
         if block_id == 0:
             self.before_proj = nn.Linear(dim, dim)
@@ -63,20 +71,22 @@ class Flux2ControlTransformerBlock(Flux2TransformerBlock):
         all_c += [c_skip, c]
         c = torch.stack(all_c)
         return encoder_hidden_states, c
-    
-    
+
+
 class BaseFlux2TransformerBlock(Flux2TransformerBlock):
     def __init__(
-        self, 
+        self,
         dim: int,
         num_attention_heads: int,
         attention_head_dim: int,
         mlp_ratio: float = 3.0,
         eps: float = 1e-6,
         bias: bool = False,
-        block_id=0
+        block_id=0,
     ):
-        super().__init__(dim, num_attention_heads, attention_head_dim, mlp_ratio, eps, bias)
+        super().__init__(
+            dim, num_attention_heads, attention_head_dim, mlp_ratio, eps, bias
+        )
         self.block_id = block_id
 
     def forward(self, hidden_states, hints=None, context_scale=1.0, **kwargs):
@@ -107,12 +117,26 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
         eps: float = 1e-6,
     ):
         super().__init__(
-            patch_size, in_channels, out_channels, num_layers, num_single_layers, attention_head_dim, 
-            num_attention_heads, joint_attention_dim, timestep_guidance_channels, mlp_ratio, axes_dims_rope, 
-            rope_theta, eps
+            patch_size,
+            in_channels,
+            out_channels,
+            num_layers,
+            num_single_layers,
+            attention_head_dim,
+            num_attention_heads,
+            joint_attention_dim,
+            timestep_guidance_channels,
+            mlp_ratio,
+            axes_dims_rope,
+            rope_theta,
+            eps,
         )
 
-        self.control_layers = [i for i in range(0, self.num_layers, 2)] if control_layers is None else control_layers
+        self.control_layers = (
+            [i for i in range(0, self.num_layers, 2)]
+            if control_layers is None
+            else control_layers
+        )
         self.control_in_dim = self.in_dim if control_in_dim is None else control_in_dim
 
         assert 0 in self.control_layers
@@ -128,7 +152,11 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
                     attention_head_dim=attention_head_dim,
                     mlp_ratio=mlp_ratio,
                     eps=eps,
-                    block_id=self.control_layers_mapping[i] if i in self.control_layers else None
+                    block_id=(
+                        self.control_layers_mapping[i]
+                        if i in self.control_layers
+                        else None
+                    ),
                 )
                 for i in range(num_layers)
             ]
@@ -143,7 +171,7 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
                     attention_head_dim=attention_head_dim,
                     mlp_ratio=mlp_ratio,
                     eps=eps,
-                    block_id=i
+                    block_id=i,
                 )
                 for i in self.control_layers
             ]
@@ -152,12 +180,7 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
         # control patch embeddings
         self.control_img_in = nn.Linear(self.control_in_dim, self.inner_dim)
 
-    def forward_control(
-        self,
-        x,
-        control_context,
-        kwargs
-    ):
+    def forward_control(self, x, control_context, kwargs):
         # embeddings
         c = self.control_img_in(control_context)
         # Context Parallel
@@ -167,14 +190,19 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
         # arguments
         new_kwargs = dict(x=x)
         new_kwargs.update(kwargs)
-        
+
         for block in self.control_transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
+
                 def create_custom_forward(module, **static_kwargs):
                     def custom_forward(*inputs):
                         return module(*inputs, **static_kwargs)
+
                     return custom_forward
-                ckpt_kwargs = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+
+                ckpt_kwargs = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
                 encoder_hidden_states, c = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block, **new_kwargs),
                     c,
@@ -183,7 +211,7 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
             else:
                 encoder_hidden_states, c = block(c, **new_kwargs)
             new_kwargs["encoder_hidden_states"] = encoder_hidden_states
- 
+
         hints = torch.unbind(c)[:-1]
         return hints
 
@@ -245,9 +273,7 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
             image_rotary_emb=concat_rotary_emb,
             joint_attention_kwargs=joint_attention_kwargs,
         )
-        hints = self.forward_control(
-            hidden_states, control_context, kwargs
-        )
+        hints = self.forward_control(hidden_states, control_context, kwargs)
 
         for index_block, block in enumerate(self.transformer_blocks):
             # Arguments
@@ -258,40 +284,52 @@ class Flux2ControlTransformer2DModel(Flux2Transformer2DModel):
                 image_rotary_emb=concat_rotary_emb,
                 joint_attention_kwargs=joint_attention_kwargs,
                 hints=hints,
-                context_scale=control_context_scale
+                context_scale=control_context_scale,
             )
             if torch.is_grad_enabled() and self.gradient_checkpointing:
+
                 def create_custom_forward(module, **static_kwargs):
                     def custom_forward(*inputs):
                         return module(*inputs, **static_kwargs)
+
                     return custom_forward
 
-                ckpt_kwargs = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                ckpt_kwargs = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
 
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block, **kwargs),
-                    hidden_states,
-                    **ckpt_kwargs,
+                encoder_hidden_states, hidden_states = (
+                    torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block, **kwargs),
+                        hidden_states,
+                        **ckpt_kwargs,
+                    )
                 )
             else:
                 encoder_hidden_states, hidden_states = block(hidden_states, **kwargs)
 
         for index_block, block in enumerate(self.single_transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    single_stream_mod,
-                    concat_rotary_emb,
-                    joint_attention_kwargs,
-                    **ckpt_kwargs,
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
+                encoder_hidden_states, hidden_states = (
+                    torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        encoder_hidden_states,
+                        single_stream_mod,
+                        concat_rotary_emb,
+                        joint_attention_kwargs,
+                        **ckpt_kwargs,
+                    )
                 )
             else:
                 encoder_hidden_states, hidden_states = block(

@@ -113,9 +113,11 @@ class WanFunCamera:
             pass
         else:
             raise ValueError(f"Invalid poses type: {type(poses)}")
-    
+
         sample_wh_ratio = W / H
-        pose_wh_ratio = original_W / original_H  # Assuming placeholder ratios, change as needed
+        pose_wh_ratio = (
+            original_W / original_H
+        )  # Assuming placeholder ratios, change as needed
 
         if pose_wh_ratio > sample_wh_ratio:
             resized_ori_w = H * pose_wh_ratio
@@ -126,16 +128,22 @@ class WanFunCamera:
             for cam_param in poses:
                 cam_param.fy = resized_ori_h * cam_param.fy / H
 
-        intrinsic = np.asarray([[cam_param.fx * W,
-                                cam_param.fy * H,
-                                cam_param.cx * W,
-                                cam_param.cy * H]
-                                for cam_param in poses], dtype=np.float32)
+        intrinsic = np.asarray(
+            [
+                [cam_param.fx * W, cam_param.fy * H, cam_param.cx * W, cam_param.cy * H]
+                for cam_param in poses
+            ],
+            dtype=np.float32,
+        )
 
         K = torch.as_tensor(intrinsic)[None]  # [1, 1, 4]
         c2ws = get_relative_pose(poses)  # Assuming this function is defined elsewhere
         c2ws = torch.as_tensor(c2ws)[None]  # [1, n_frame, 4, 4]
-        plucker_embedding = ray_condition(K, c2ws, H, W, device=device)[0].permute(0, 3, 1, 2).contiguous()  # V, 6, H, W
+        plucker_embedding = (
+            ray_condition(K, c2ws, H, W, device=device)[0]
+            .permute(0, 3, 1, 2)
+            .contiguous()
+        )  # V, 6, H, W
         plucker_embedding = plucker_embedding[None]
         plucker_embedding = rearrange(plucker_embedding, "b f c h w -> b f h w c")[0]
         return plucker_embedding.permute([3, 0, 1, 2]).unsqueeze(0)

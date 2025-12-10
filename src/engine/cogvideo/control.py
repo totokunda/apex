@@ -7,9 +7,10 @@ from .shared import CogVideoShared
 import torch.nn.functional as F
 from einops import rearrange
 
+
 class CogVideoControlEngine(CogVideoShared):
     """CogVideo Fun Engine Implementation"""
-    
+
     def _prepare_control_latents(
         self,
         mask: Optional[torch.Tensor] = None,

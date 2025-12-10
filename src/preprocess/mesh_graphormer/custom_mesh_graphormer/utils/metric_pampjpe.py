@@ -4,10 +4,12 @@ Functions for compuing Procrustes alignment and reconstruction error
 Parts of the code are adapted from https://github.com/akanazawa/hmr
 
 """
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 import numpy as np
+
 
 def compute_similarity_transform(S1, S2):
     """Computes a similarity transform (sR, t) that takes
@@ -20,7 +22,7 @@ def compute_similarity_transform(S1, S2):
         S1 = S1.T
         S2 = S2.T
         transposed = True
-    assert(S2.shape[1] == S1.shape[1])
+    assert S2.shape[1] == S1.shape[1]
 
     # 1. Remove mean.
     mu1 = S1.mean(axis=1, keepdims=True)
@@ -48,15 +50,16 @@ def compute_similarity_transform(S1, S2):
     scale = np.trace(R.dot(K)) / var1
 
     # 6. Recover translation.
-    t = mu2 - scale*(R.dot(mu1))
+    t = mu2 - scale * (R.dot(mu1))
 
     # 7. Error:
-    S1_hat = scale*R.dot(S1) + t
+    S1_hat = scale * R.dot(S1) + t
 
     if transposed:
         S1_hat = S1_hat.T
 
     return S1_hat
+
 
 def compute_similarity_transform_batch(S1, S2):
     """Batched version of compute_similarity_transform."""
@@ -65,35 +68,37 @@ def compute_similarity_transform_batch(S1, S2):
         S1_hat[i] = compute_similarity_transform(S1[i], S2[i])
     return S1_hat
 
-def reconstruction_error(S1, S2, reduction='mean'):
+
+def reconstruction_error(S1, S2, reduction="mean"):
     """Do Procrustes alignment and compute reconstruction error."""
     S1_hat = compute_similarity_transform_batch(S1, S2)
-    re = np.sqrt( ((S1_hat - S2)** 2).sum(axis=-1)).mean(axis=-1)
-    if reduction == 'mean':
+    re = np.sqrt(((S1_hat - S2) ** 2).sum(axis=-1)).mean(axis=-1)
+    if reduction == "mean":
         re = re.mean()
-    elif reduction == 'sum':
+    elif reduction == "sum":
         re = re.sum()
     return re
 
 
-def reconstruction_error_v2(S1, S2, J24_TO_J14, reduction='mean'):
+def reconstruction_error_v2(S1, S2, J24_TO_J14, reduction="mean"):
     """Do Procrustes alignment and compute reconstruction error."""
     S1_hat = compute_similarity_transform_batch(S1, S2)
-    S1_hat = S1_hat[:,J24_TO_J14,:]
-    S2 = S2[:,J24_TO_J14,:]
-    re = np.sqrt( ((S1_hat - S2)** 2).sum(axis=-1)).mean(axis=-1)
-    if reduction == 'mean':
+    S1_hat = S1_hat[:, J24_TO_J14, :]
+    S2 = S2[:, J24_TO_J14, :]
+    re = np.sqrt(((S1_hat - S2) ** 2).sum(axis=-1)).mean(axis=-1)
+    if reduction == "mean":
         re = re.mean()
-    elif reduction == 'sum':
+    elif reduction == "sum":
         re = re.sum()
     return re
 
-def get_alignMesh(S1, S2, reduction='mean'):
+
+def get_alignMesh(S1, S2, reduction="mean"):
     """Do Procrustes alignment and compute reconstruction error."""
     S1_hat = compute_similarity_transform_batch(S1, S2)
-    re = np.sqrt( ((S1_hat - S2)** 2).sum(axis=-1)).mean(axis=-1)
-    if reduction == 'mean':
+    re = np.sqrt(((S1_hat - S2) ** 2).sum(axis=-1)).mean(axis=-1)
+    if reduction == "mean":
         re = re.mean()
-    elif reduction == 'sum':
+    elif reduction == "sum":
         re = re.sum()
     return re, S1_hat, S2
