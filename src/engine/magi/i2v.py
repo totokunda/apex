@@ -38,7 +38,7 @@ class MagiI2VEngine(MagiShared):
         window_size: int = 4,
         distill: bool = False,
         kv_offload: bool = True,
-        **kwargs
+        **kwargs,
     ):
         """Image-to-video generation using MAGI's chunk-based approach"""
 

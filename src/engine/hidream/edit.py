@@ -5,6 +5,7 @@ from diffusers.schedulers import UniPCMultistepScheduler
 from .shared import HidreamShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class HidreamEditEngine(HidreamShared):
     """Hidream Edit Engine Implementation"""
 
@@ -54,8 +55,9 @@ class HidreamEditEngine(HidreamShared):
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
         use_cfg_guidance = guidance_scale > 1.0
-        batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images
-
+        batch_size = (
+            num_images * len(prompt) if isinstance(prompt, list) else num_images
+        )
 
         (
             prompt_embeds_t5,
@@ -81,16 +83,16 @@ class HidreamEditEngine(HidreamShared):
             offload=offload,
         )
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
-        
+
         if "Target Image Description:" in prompt:
             target_prompt = prompt.split("Target Image Description:")[1].strip()
             (
-            target_prompt_embeds_t5,
-            target_negative_prompt_embeds_t5,
-            target_prompt_embeds_llama3,
-            target_negative_prompt_embeds_llama3,
-            target_pooled_prompt_embeds,
-            target_negative_pooled_prompt_embeds,
+                target_prompt_embeds_t5,
+                target_negative_prompt_embeds_t5,
+                target_prompt_embeds_llama3,
+                target_negative_prompt_embeds_llama3,
+                target_pooled_prompt_embeds,
+                target_negative_pooled_prompt_embeds,
             ) = self.encode_prompt(
                 prompt=target_prompt,
                 prompt_2=None,
@@ -113,49 +115,96 @@ class HidreamEditEngine(HidreamShared):
             target_prompt_embeds_llama3 = prompt_embeds_llama3
             target_negative_prompt_embeds_llama3 = negative_prompt_embeds_llama3
             target_pooled_prompt_embeds = pooled_prompt_embeds
-            target_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds 
+            target_negative_pooled_prompt_embeds = negative_pooled_prompt_embeds
         safe_emit_progress(progress_callback, 0.25, "Prepared target prompt embeddings")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 
         if use_cfg_guidance:
             if clip_cfg_norm:
-                prompt_embeds_t5 = torch.cat([prompt_embeds_t5, negative_prompt_embeds_t5, prompt_embeds_t5], dim=0)
-                prompt_embeds_llama3 = torch.cat([prompt_embeds_llama3, negative_prompt_embeds_llama3, prompt_embeds_llama3], dim=1)
-                pooled_prompt_embeds = torch.cat([pooled_prompt_embeds, negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
+                prompt_embeds_t5 = torch.cat(
+                    [prompt_embeds_t5, negative_prompt_embeds_t5, prompt_embeds_t5],
+                    dim=0,
+                )
+                prompt_embeds_llama3 = torch.cat(
+                    [
+                        prompt_embeds_llama3,
+                        negative_prompt_embeds_llama3,
+                        prompt_embeds_llama3,
+                    ],
+                    dim=1,
+                )
+                pooled_prompt_embeds = torch.cat(
+                    [
+                        pooled_prompt_embeds,
+                        negative_pooled_prompt_embeds,
+                        pooled_prompt_embeds,
+                    ],
+                    dim=0,
+                )
             else:
-                prompt_embeds_t5 = torch.cat([negative_prompt_embeds_t5, negative_prompt_embeds_t5, prompt_embeds_t5], dim=0)
-                prompt_embeds_llama3 = torch.cat([negative_prompt_embeds_llama3, negative_prompt_embeds_llama3, prompt_embeds_llama3], dim=1)
-                pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
-            
-            target_prompt_embeds_t5 = torch.cat([target_negative_prompt_embeds_t5, target_prompt_embeds_t5], dim=0)
-            target_prompt_embeds_llama3 = torch.cat([target_negative_prompt_embeds_llama3, target_prompt_embeds_llama3], dim=1)
-            target_pooled_prompt_embeds = torch.cat([target_negative_pooled_prompt_embeds, target_pooled_prompt_embeds], dim=0)
-        
+                prompt_embeds_t5 = torch.cat(
+                    [
+                        negative_prompt_embeds_t5,
+                        negative_prompt_embeds_t5,
+                        prompt_embeds_t5,
+                    ],
+                    dim=0,
+                )
+                prompt_embeds_llama3 = torch.cat(
+                    [
+                        negative_prompt_embeds_llama3,
+                        negative_prompt_embeds_llama3,
+                        prompt_embeds_llama3,
+                    ],
+                    dim=1,
+                )
+                pooled_prompt_embeds = torch.cat(
+                    [
+                        negative_pooled_prompt_embeds,
+                        negative_pooled_prompt_embeds,
+                        pooled_prompt_embeds,
+                    ],
+                    dim=0,
+                )
+
+            target_prompt_embeds_t5 = torch.cat(
+                [target_negative_prompt_embeds_t5, target_prompt_embeds_t5], dim=0
+            )
+            target_prompt_embeds_llama3 = torch.cat(
+                [target_negative_prompt_embeds_llama3, target_prompt_embeds_llama3],
+                dim=1,
+            )
+            target_pooled_prompt_embeds = torch.cat(
+                [target_negative_pooled_prompt_embeds, target_pooled_prompt_embeds],
+                dim=0,
+            )
+
         safe_emit_progress(progress_callback, 0.28, "Applied guidance packing")
 
         image = self._load_image(image)
         image = self.resize_image(image, image_size=resize_to)
         image = self.image_processor.preprocess(image)
         safe_emit_progress(progress_callback, 0.30, "Loaded and preprocessed image")
-        
+
         image_latents = self.vae_encode(image, offload=offload)
         latent_height, latent_width = image_latents.shape[2:]
         height = latent_height * self.vae_scale_factor
         width = latent_width * self.vae_scale_factor
-        
 
         if image_latents.shape[0] != batch_size:
             additional_image_per_prompt = batch_size // image_latents.shape[0]
             image_latents = torch.cat([image_latents] * additional_image_per_prompt)
         else:
             image_latents = torch.cat([image_latents])
-        
+
         if use_cfg_guidance:
             uncond_image_latents = torch.zeros_like(image_latents)
-            image_latents = torch.cat([uncond_image_latents, image_latents, image_latents], dim=0)
+            image_latents = torch.cat(
+                [uncond_image_latents, image_latents, image_latents], dim=0
+            )
         safe_emit_progress(progress_callback, 0.35, "Prepared image latents")
-        
+
         latents = self._get_latents(
             batch_size=batch_size,
             num_channels_latents=self.num_channels_latents,
@@ -166,7 +215,7 @@ class HidreamEditEngine(HidreamShared):
             generator=generator,
         )
         safe_emit_progress(progress_callback, 0.40, "Initialized latent noise")
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
@@ -196,12 +245,14 @@ class HidreamEditEngine(HidreamShared):
             timesteps=timesteps,
             mu=mu,
         )
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
-        
+
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
@@ -218,45 +269,50 @@ class HidreamEditEngine(HidreamShared):
         self._preview_width = width
         self._preview_offload = offload
 
-
         total_steps = len(timesteps) if timesteps is not None else 0
         if denoise_progress_callback is not None:
             try:
                 denoise_progress_callback(0.0, "Starting denoise")
             except Exception:
                 pass
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-        
+
         self.transformer.max_seq = 8192
-            
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # === STAGE DETERMINATION ===
                 # Check if we need to switch from editing stage to refining stage
                 if i == int(num_inference_steps * (1.0 - refine_strength)):
                     refine_stage = True
-                
+
                 # === INPUT PREPARATION ===
                 if refine_stage:
                     # Refining stage: Use target prompts and simpler input (no image conditioning)
-                    latent_model_input_with_condition = torch.cat([latents] * 2) if use_cfg_guidance else latents
+                    latent_model_input_with_condition = (
+                        torch.cat([latents] * 2) if use_cfg_guidance else latents
+                    )
                     current_prompt_embeds_t5 = target_prompt_embeds_t5
                     current_prompt_embeds_llama3 = target_prompt_embeds_llama3
                     current_pooled_prompt_embeds = target_pooled_prompt_embeds
                 else:
                     # Editing stage: Use original prompts and include image conditioning
-                    latent_model_input = torch.cat([latents] * 3) if use_cfg_guidance else latents
-                    latent_model_input_with_condition = torch.cat([latent_model_input, image_latents], dim=-1)
+                    latent_model_input = (
+                        torch.cat([latents] * 3) if use_cfg_guidance else latents
+                    )
+                    latent_model_input_with_condition = torch.cat(
+                        [latent_model_input, image_latents], dim=-1
+                    )
                     current_prompt_embeds_t5 = prompt_embeds_t5
                     current_prompt_embeds_llama3 = prompt_embeds_llama3
                     current_pooled_prompt_embeds = pooled_prompt_embeds
 
                 # === TRANSFORMER SELECTION ===
                 # Choose which transformer to use for this step
-                
+
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input_with_condition.shape[0])
 
@@ -269,7 +325,7 @@ class HidreamEditEngine(HidreamShared):
                     return_dict=False,
                 )[0]
                 # perform guidance
-                noise_pred = -1.0 * noise_pred[..., :latents.shape[-1]]
+                noise_pred = -1.0 * noise_pred[..., : latents.shape[-1]]
                 if use_cfg_guidance:
                     if refine_stage:
                         uncond, full_cond = noise_pred.chunk(2)
@@ -277,40 +333,61 @@ class HidreamEditEngine(HidreamShared):
                     else:
                         if clip_cfg_norm:
                             uncond, image_cond, full_cond = noise_pred.chunk(3)
-                            pred_text_ = image_cond + guidance_scale * (full_cond - image_cond)
+                            pred_text_ = image_cond + guidance_scale * (
+                                full_cond - image_cond
+                            )
                             norm_full_cond = torch.norm(full_cond, dim=1, keepdim=True)
                             norm_pred_text = torch.norm(pred_text_, dim=1, keepdim=True)
-                            scale = (norm_full_cond / (norm_pred_text + 1e-8)).clamp(min=0.0, max=1.0)
+                            scale = (norm_full_cond / (norm_pred_text + 1e-8)).clamp(
+                                min=0.0, max=1.0
+                            )
                             pred_text = pred_text_ * scale
-                            noise_pred = uncond + image_guidance_scale * (pred_text - uncond)
+                            noise_pred = uncond + image_guidance_scale * (
+                                pred_text - uncond
+                            )
                         else:
                             uncond, image_cond, full_cond = noise_pred.chunk(3)
-                            noise_pred = uncond + image_guidance_scale * (image_cond - uncond) + guidance_scale * (
-                                        full_cond - image_cond)
+                            noise_pred = (
+                                uncond
+                                + image_guidance_scale * (image_cond - uncond)
+                                + guidance_scale * (full_cond - image_cond)
+                            )
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
-                
+
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
-        
+
         if offload:
             self._offload(self.transformer)
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")

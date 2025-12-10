@@ -4,28 +4,37 @@ import numpy as np
 
 
 class InputPadder:
-    """ Pads images such that dimensions are divisible by 8 """
+    """Pads images such that dimensions are divisible by 8"""
 
-    def __init__(self, dims, mode='sintel', padding_factor=8):
+    def __init__(self, dims, mode="sintel", padding_factor=8):
         self.ht, self.wd = dims[-2:]
-        pad_ht = (((self.ht // padding_factor) + 1) * padding_factor - self.ht) % padding_factor
-        pad_wd = (((self.wd // padding_factor) + 1) * padding_factor - self.wd) % padding_factor
-        if mode == 'sintel':
-            self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, pad_ht // 2, pad_ht - pad_ht // 2]
+        pad_ht = (
+            ((self.ht // padding_factor) + 1) * padding_factor - self.ht
+        ) % padding_factor
+        pad_wd = (
+            ((self.wd // padding_factor) + 1) * padding_factor - self.wd
+        ) % padding_factor
+        if mode == "sintel":
+            self._pad = [
+                pad_wd // 2,
+                pad_wd - pad_wd // 2,
+                pad_ht // 2,
+                pad_ht - pad_ht // 2,
+            ]
         else:
             self._pad = [pad_wd // 2, pad_wd - pad_wd // 2, 0, pad_ht]
 
     def pad(self, *inputs):
-        return [F.pad(x, self._pad, mode='replicate') for x in inputs]
+        return [F.pad(x, self._pad, mode="replicate") for x in inputs]
 
     def unpad(self, x):
         ht, wd = x.shape[-2:]
         c = [self._pad[2], ht - self._pad[3], self._pad[0], wd - self._pad[1]]
-        return x[..., c[0]:c[1], c[2]:c[3]]
+        return x[..., c[0] : c[1], c[2] : c[3]]
 
 
-def bilinear_sampler(img, coords, mode='bilinear', mask=False, padding_mode='zeros'):
-    """ Wrapper for grid_sample, uses pixel coordinates """
+def bilinear_sampler(img, coords, mode="bilinear", mask=False, padding_mode="zeros"):
+    """Wrapper for grid_sample, uses pixel coordinates"""
     if coords.size(-1) != 2:  # [B, 2, H, W] -> [B, H, W, 2]
         coords = coords.permute(0, 2, 3, 1)
 
@@ -47,9 +56,9 @@ def bilinear_sampler(img, coords, mode='bilinear', mask=False, padding_mode='zer
     ygrid = 2 * ygrid / (H - 1) - 1
 
     grid = torch.cat([xgrid, ygrid], dim=-1)
-    img = F.grid_sample(img, grid, mode=mode,
-                        padding_mode=padding_mode,
-                        align_corners=True)
+    img = F.grid_sample(
+        img, grid, mode=mode, padding_mode=padding_mode, align_corners=True
+    )
 
     if mask:
         mask = (xgrid > -1) & (ygrid > -1) & (xgrid < 1) & (ygrid < 1)
@@ -60,8 +69,9 @@ def bilinear_sampler(img, coords, mode='bilinear', mask=False, padding_mode='zer
 
 def coords_grid(batch, ht, wd, normalize=False):
     if normalize:  # [-1, 1]
-        coords = torch.meshgrid(2 * torch.arange(ht) / (ht - 1) - 1,
-                                2 * torch.arange(wd) / (wd - 1) - 1)
+        coords = torch.meshgrid(
+            2 * torch.arange(ht) / (ht - 1) - 1, 2 * torch.arange(wd) / (wd - 1) - 1
+        )
     else:
         coords = torch.meshgrid(torch.arange(ht), torch.arange(wd))
     coords = torch.stack(coords[::-1], dim=0).float()
@@ -69,8 +79,9 @@ def coords_grid(batch, ht, wd, normalize=False):
 
 
 def coords_grid_np(h, w):  # used for accumulating high speed sintel flow testdata
-    coords = np.meshgrid(np.arange(h, dtype=np.float32),
-                         np.arange(w, dtype=np.float32), indexing='ij')
+    coords = np.meshgrid(
+        np.arange(h, dtype=np.float32), np.arange(w, dtype=np.float32), indexing="ij"
+    )
     coords = np.stack(coords[::-1], axis=-1)  # [H, W, 2]
 
     return coords
@@ -93,7 +104,12 @@ def compute_out_of_boundary_mask(flow, downsample_factor=None):
         max_w = w - 1
         max_h = h - 1
 
-    valid_mask = (corres[:, 0] >= 0) & (corres[:, 0] <= max_w) & (corres[:, 1] >= 0) & (corres[:, 1] <= max_h)
+    valid_mask = (
+        (corres[:, 0] >= 0)
+        & (corres[:, 0] <= max_w)
+        & (corres[:, 1] >= 0)
+        & (corres[:, 1] <= max_h)
+    )
 
     # in case very large flow
     flow_mask = (flow[:, 0].abs() <= max_w) & (flow[:, 1].abs() <= max_h)
@@ -116,7 +132,7 @@ def normalize_coords(grid):
     return grid
 
 
-def flow_warp(feature, flow, mask=False, padding_mode='zeros'):
+def flow_warp(feature, flow, mask=False, padding_mode="zeros"):
     b, c, h, w = feature.size()
     assert flow.size(1) == 2
 
@@ -125,15 +141,19 @@ def flow_warp(feature, flow, mask=False, padding_mode='zeros'):
     return bilinear_sampler(feature, grid, mask=mask, padding_mode=padding_mode)
 
 
-def upflow8(flow, mode='bilinear'):
+def upflow8(flow, mode="bilinear"):
     new_size = (8 * flow.shape[2], 8 * flow.shape[3])
     return 8 * F.interpolate(flow, size=new_size, mode=mode, align_corners=True)
 
 
 def bilinear_upflow(flow, scale_factor=8):
     assert flow.size(1) == 2
-    flow = F.interpolate(flow, scale_factor=scale_factor,
-                         mode='bilinear', align_corners=True) * scale_factor
+    flow = (
+        F.interpolate(
+            flow, scale_factor=scale_factor, mode="bilinear", align_corners=True
+        )
+        * scale_factor
+    )
 
     return flow
 
@@ -141,8 +161,12 @@ def bilinear_upflow(flow, scale_factor=8):
 def upsample_flow(flow, img):
     if flow.size(-1) != img.size(-1):
         scale_factor = img.size(-1) / flow.size(-1)
-        flow = F.interpolate(flow, size=img.size()[-2:],
-                             mode='bilinear', align_corners=True) * scale_factor
+        flow = (
+            F.interpolate(
+                flow, size=img.size()[-2:], mode="bilinear", align_corners=True
+            )
+            * scale_factor
+        )
     return flow
 
 
@@ -153,5 +177,5 @@ def count_parameters(model):
 
 def set_bn_eval(m):
     classname = m.__class__.__name__
-    if classname.find('BatchNorm') != -1:
+    if classname.find("BatchNorm") != -1:
         m.eval()

@@ -3,7 +3,12 @@ import psutil
 from typing import Any, Dict, List, Optional
 
 # Reuse helpers to detect device type and query GPU memory info
-from .ray_resources import _on_mps, _gpu_mem_info_torch, _gpu_mem_info_nvml, _gpu_mem_info_nvidia_smi
+from .ray_resources import (
+    _on_mps,
+    _gpu_mem_info_torch,
+    _gpu_mem_info_nvml,
+    _gpu_mem_info_nvidia_smi,
+)
 import subprocess
 import re
 
@@ -27,7 +32,9 @@ def _collect_gpu_memory_info() -> Optional[Dict[str, Any]]:
     """
 
     # Prefer torch (fast, no extra deps), fall back to NVML or nvidia-smi
-    infos: Optional[List[Dict[str, int]]] = _gpu_mem_info_torch() or _gpu_mem_info_nvml() or _gpu_mem_info_nvidia_smi()
+    infos: Optional[List[Dict[str, int]]] = (
+        _gpu_mem_info_torch() or _gpu_mem_info_nvml() or _gpu_mem_info_nvidia_smi()
+    )
     if not infos:
         return None
 
@@ -39,13 +46,15 @@ def _collect_gpu_memory_info() -> Optional[Dict[str, Any]]:
         free = int(info.get("free", 0))
         used = max(total - free, 0)
         percent = (used / total * 100.0) if total > 0 else 0.0
-        adapters.append({
-            "index": int(info.get("index", 0)),
-            "total": total,
-            "free": free,
-            "used": used,
-            "percent": percent,
-        })
+        adapters.append(
+            {
+                "index": int(info.get("index", 0)),
+                "total": total,
+                "free": free,
+                "used": used,
+                "percent": percent,
+            }
+        )
         total_total += total
         total_used += used
 
@@ -133,5 +142,3 @@ def get_system_memory() -> Dict[str, Any]:
         "gpu": gpu,
         "device_type": ("cuda" if gpu else "cpu"),
     }
-
-

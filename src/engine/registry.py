@@ -9,6 +9,7 @@ from src.manifest.resolver import resolve_manifest_reference
 from loguru import logger
 import traceback
 
+
 class EngineRegistry:
     """Central registry for all engine implementations.
 
@@ -29,8 +30,6 @@ class EngineRegistry:
         #   engine_type (folder name) → model_type (filename) → engine class
         # All keys are stored lowercase for consistency.
         self._discovered: Dict[str, Dict[str, Type[BaseEngine]]] = {}
-
-
 
         self._auto_discover_engines()
 
@@ -72,14 +71,17 @@ class EngineRegistry:
                     if (
                         inspect.isclass(attr)
                         and issubclass(attr, BaseEngine)
-                        and attr is not BaseEngine # ignore classes with shared in name
-                        and not (attr_name.lower().startswith("shared") or attr_name.lower().endswith("shared"))
+                        and attr is not BaseEngine  # ignore classes with shared in name
+                        and not (
+                            attr_name.lower().startswith("shared")
+                            or attr_name.lower().endswith("shared")
+                        )
                     ):
                         model_type = stem.lower()
                         engine_map = self._discovered.setdefault(engine_type, {})
                         # First one wins for a given (engine_type, model_type)
                         engine_map.setdefault(model_type, attr)
- 
+
     def get_engine_class(
         self, engine_type: str, model_type: Optional[str] = None
     ) -> Optional[Type[BaseEngine]]:
@@ -97,7 +99,6 @@ class EngineRegistry:
             family = self._discovered.get(engine_key, {})
             if model_key in family:
                 return family[model_key]
-
 
         return None
 
@@ -131,23 +132,29 @@ class EngineRegistry:
         """
 
         resolved = resolve_manifest_reference(yaml_path) or yaml_path
-        
+        engine_kwargs = {}
+
         if engine_type is None or model_type is None:
             # read from yaml_path
             data = load_yaml(resolved)
             spec = data.get("spec", {})
             engine_type = spec.get("engine")
             model_type = spec.get("model_type")
+            engine_kwargs = spec.get("engine_kwargs", {})
             if engine_type is None or model_type is None:
-                raise ValueError(f"Engine type and model type must be provided in the yaml file: {resolved}")
+                raise ValueError(
+                    f"Engine type and model type must be provided in the yaml file: {resolved}"
+                )
 
         # Prefer auto‑discovered concrete engines when model_type is given.
-        impl_class = self.get_engine_class(engine_type, model_type) if model_type else None
+        impl_class = (
+            self.get_engine_class(engine_type, model_type) if model_type else None
+        )
 
-
-        
         if impl_class is not None and impl_class is not BaseEngine:
-            return impl_class(yaml_path=resolved, model_type=model_type, **kwargs)
+            return impl_class(
+                yaml_path=resolved, model_type=model_type, **{**engine_kwargs, **kwargs}
+            )
 
         # No autodiscovered implementation found
         raise ValueError(
@@ -169,7 +176,7 @@ class UniversalEngine:
         **kwargs,
     ):
         self.registry = EngineRegistry()
-        self.engine:BaseEngine = self.registry.create_engine(
+        self.engine: BaseEngine = self.registry.create_engine(
             engine_type=engine_type,
             yaml_path=yaml_path,
             model_type=model_type,
@@ -177,7 +184,7 @@ class UniversalEngine:
         )
         self.engine_type = engine_type
         self.model_type = model_type
-        
+
         if not self.engine_type:
             self.engine_type = self.engine.config.get("engine", None)
         if not self.model_type:

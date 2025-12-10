@@ -3,6 +3,7 @@ from typing import Dict, Any, Callable, List, Union, Optional
 import numpy as np
 from src.engine.base_engine import BaseEngine
 
+
 def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=None):
     if linear_steps is None:
         linear_steps = num_steps // 2
@@ -29,6 +30,7 @@ def linear_quadratic_schedule(num_steps, threshold_noise=0.025, linear_steps=Non
 
 class MochiT2VEngine(BaseEngine):
     """Mochi Text-to-Video Engine Implementation"""
+
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, model_type=ModelType.T2V, **kwargs)
         self.vae_scale_factor_spatial = (
@@ -42,7 +44,7 @@ class MochiT2VEngine(BaseEngine):
         self.num_channels_latents = (
             self.transformer.config.in_channels if self.transformer else 12
         )
-    
+
     def vae_decode(
         self, latents: torch.Tensor, offload: bool = False, dtype: torch.dtype = None
     ):
@@ -231,7 +233,12 @@ class MochiT2VEngine(BaseEngine):
                     noise_pred, t, latents.to(torch.float32), return_dict=False
                 )[0].to(transformer_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 if i == len(timesteps) - 1 or (

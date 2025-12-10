@@ -31,15 +31,18 @@ from src.helpers.helpers import BaseHelper
 from src.utils.defaults import get_components_path, get_cache_path
 from src.mixins.cache_mixin import CacheMixin
 
+
 def use_default(value, default):
     """Utility: return value if not None, else default."""
     return value if value is not None else default
+
 
 # Prompt templates for different models and tasks
 
 
 __all__ = [
-    "C_SCALE", "PROMPT_TEMPLATE",
+    "C_SCALE",
+    "PROMPT_TEMPLATE",
     "MODEL_BASE",
 ]
 
@@ -49,26 +52,38 @@ __all__ = [
 C_SCALE = 1_000_000_000_000_000
 
 PROMPT_TEMPLATE_ENCODE_IMAGE_JSON = [
-    {"role": "system", "content": "You are a helpful assistant. Describe the image by detailing the following aspects: \
+    {
+        "role": "system",
+        "content": "You are a helpful assistant. Describe the image by detailing the following aspects: \
         1. The main content and theme of the image. \
         2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects. \
-        3. The background environment, light, style and atmosphere."},
-    {"role": "user", "content": "{}"}
+        3. The background environment, light, style and atmosphere.",
+    },
+    {"role": "user", "content": "{}"},
 ]
 
 PROMPT_TEMPLATE_ENCODE_VIDEO_JSON = [
-    {"role": "system", "content": "You are a helpful assistant. Describe the video by detailing the following aspects: \
+    {
+        "role": "system",
+        "content": "You are a helpful assistant. Describe the video by detailing the following aspects: \
         1. The main content and theme of the video. \
         2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects. \
         3. Actions, events, behaviors temporal relationships, physical movement changes of the objects. \
         4. background environment, light, style and atmosphere. \
-        5. camera angles, movements, and transitions used in the video."},
-    {"role": "user", "content": "{}"}
+        5. camera angles, movements, and transitions used in the video.",
+    },
+    {"role": "user", "content": "{}"},
 ]
 
 PROMPT_TEMPLATE = {
-    "li-dit-encode-image-json": {"template": PROMPT_TEMPLATE_ENCODE_IMAGE_JSON, "crop_start": -1}, # auto-calculate crop_start
-    "li-dit-encode-video-json": {"template": PROMPT_TEMPLATE_ENCODE_VIDEO_JSON, "crop_start": -1}, # auto-calculate crop_start
+    "li-dit-encode-image-json": {
+        "template": PROMPT_TEMPLATE_ENCODE_IMAGE_JSON,
+        "crop_start": -1,
+    },  # auto-calculate crop_start
+    "li-dit-encode-video-json": {
+        "template": PROMPT_TEMPLATE_ENCODE_VIDEO_JSON,
+        "crop_start": -1,
+    },  # auto-calculate crop_start
 }
 
 
@@ -77,9 +92,9 @@ TEXT_ENCODER_PATH = {}
 TOKENIZER_PATH = {}
 
 PRECISION_TO_TYPE = {
-    'fp32': torch.float32,
-    'fp16': torch.float16,
-    'bf16': torch.bfloat16,
+    "fp32": torch.float32,
+    "fp16": torch.float16,
+    "bf16": torch.bfloat16,
 }
 
 
@@ -96,11 +111,11 @@ def load_text_encoder(
         text_encoder_path = TEXT_ENCODER_PATH[text_encoder_type]
 
     text_encoder = AutoModel.from_pretrained(text_encoder_path, low_cpu_mem_usage=True)
-    
-    if hasattr(text_encoder, 'language_model'):
+
+    if hasattr(text_encoder, "language_model"):
         text_encoder = text_encoder.language_model
     text_encoder.final_layer_norm = text_encoder.norm
-    
+
     # from_pretrained will ensure that the model is in eval mode.
     if text_encoder_precision is not None:
         text_encoder = text_encoder.to(dtype=PRECISION_TO_TYPE[text_encoder_precision])
@@ -122,9 +137,7 @@ def load_tokenizer(
             raise ValueError(f"Unsupported tokenizer type: {tokenizer_type}")
         tokenizer_path = TOKENIZER_PATH[tokenizer_type]
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_path, padding_side=padding_side
-    )
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, padding_side=padding_side)
 
     return tokenizer, tokenizer_path, processor
 
@@ -152,7 +165,6 @@ class TextEncoderModelOutput(ModelOutput):
     hidden_states_list: Optional[Tuple[torch.FloatTensor, ...]] = None
     text_outputs: Optional[list] = None
     image_features: Optional[list] = None
-
 
 
 class TextEncoder(BaseHelper, CacheMixin):
@@ -209,7 +221,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                 f"hunyuanvideo15_text_encoder_{self.model_path.replace('/', '_')}.safetensors",
             )
             os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
-        
+
         self.use_template = self.prompt_template is not None
         if self.use_template:
             assert (
@@ -267,7 +279,7 @@ class TextEncoder(BaseHelper, CacheMixin):
         )
         self._device = device
         return self.model
-        
+
     @property
     def dtype(self):
         if self.model is not None:
@@ -308,7 +320,9 @@ class TextEncoder(BaseHelper, CacheMixin):
             for item in template_copy:
                 if isinstance(item, dict) and "content" in item:
                     # Replace placeholder with text in the content field
-                    item["content"] = item["content"].format(text if text else (" " if prevent_empty_text else ""))
+                    item["content"] = item["content"].format(
+                        text if text else (" " if prevent_empty_text else "")
+                    )
             return template_copy
         else:
             raise TypeError(f"Unsupported template type: {type(template)}")
@@ -316,35 +330,37 @@ class TextEncoder(BaseHelper, CacheMixin):
     def calculate_crop_start(self, tokenized_input):
         """
         Automatically calculate the crop_start position based on identifying user tokens.
-        
+
         Args:
             tokenized_input: The output from the tokenizer containing input_ids
-            
+
         Returns:
             int: The position where the actual prompt content begins (after user markers)
         """
-        input_ids = tokenized_input["input_ids"][0].tolist()  # Get the first example's tokens
-        
+        input_ids = tokenized_input["input_ids"][
+            0
+        ].tolist()  # Get the first example's tokens
+
         marker = "<|im_start|>user\n"
-            
+
         # Tokenize just the marker to get its token IDs
         marker_tokens = self.tokenizer(marker, add_special_tokens=False)["input_ids"]
-        
+
         # Find the end position of the marker in the input sequence
         for i in range(len(input_ids) - len(marker_tokens) + 1):
-            if input_ids[i:i+len(marker_tokens)] == marker_tokens:
+            if input_ids[i : i + len(marker_tokens)] == marker_tokens:
                 # Return the position after the marker
                 return i + len(marker_tokens)
-                
+
         # If marker not found, try to find based on special tokens
-        if hasattr(self.tokenizer, 'special_tokens_map'):
+        if hasattr(self.tokenizer, "special_tokens_map"):
             # Check for user token or any other special token that might indicate user input start
             for token_name, token_value in self.tokenizer.special_tokens_map.items():
-                if 'user' in token_name.lower():
+                if "user" in token_name.lower():
                     user_token_id = self.tokenizer.convert_tokens_to_ids(token_value)
                     if user_token_id in input_ids:
                         return input_ids.index(user_token_id) + 1
-        
+
         # Default fallback: return 0 (no cropping)
         return 0
 
@@ -378,7 +394,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                     tokenize_input_type = "list"
             else:
                 raise TypeError(f"Unsupported text type: {type(text)}")
-        
+
             # First pass: tokenize with arbitrary max_length to find crop_start
             if crop_start == -1:
                 # Use temporary max_length for the first pass (large enough)
@@ -388,7 +404,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                     padding="max_length",
                     return_tensors="pt",
                 )
-                
+
                 # First tokenization pass to calculate crop_start
                 if tokenize_input_type == "str":
                     temp_tokenized = self.tokenizer(
@@ -406,10 +422,10 @@ class TextEncoder(BaseHelper, CacheMixin):
                         return_dict=True,
                         **temp_kwargs,
                     )
-                
+
                 # Calculate the crop_start from this first pass
                 crop_start = self.calculate_crop_start(temp_tokenized)
-                
+
                 # Store the calculated crop_start for future use
                 if data_type == "image":
                     self.prompt_template["crop_start"] = crop_start
@@ -417,7 +433,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                     self.prompt_template_video["crop_start"] = crop_start
         else:
             crop_start = 0
-        
+
         # Second pass: tokenize with the proper max_length using the found crop_start
         kwargs = dict(
             truncation=True,
@@ -425,7 +441,7 @@ class TextEncoder(BaseHelper, CacheMixin):
             padding="max_length",
             return_tensors="pt",
         )
-        
+
         if tokenize_input_type == "str":
             tokenized_output = self.tokenizer(
                 text,
@@ -444,7 +460,7 @@ class TextEncoder(BaseHelper, CacheMixin):
             )
         else:
             raise ValueError(f"Unsupported tokenize_input_type: {tokenize_input_type}")
-                
+
         return tokenized_output
 
     def encode(
@@ -455,7 +471,7 @@ class TextEncoder(BaseHelper, CacheMixin):
         do_sample=None,
         hidden_state_skip_layer=None,
         data_type="image",
-        device=None
+        device=None,
     ):
         """
         Args:
@@ -471,8 +487,7 @@ class TextEncoder(BaseHelper, CacheMixin):
                 If None, self.output_key will be used. Defaults to None.
             return_texts (bool): Whether to return the decoded texts. Defaults to False.
         """
-        
-        
+
         kwargs = dict(
             use_attention_mask=use_attention_mask,
             output_hidden_states=output_hidden_states,
@@ -481,7 +496,7 @@ class TextEncoder(BaseHelper, CacheMixin):
             data_type=data_type,
             **batch_encoding,
         )
-        
+
         device = self.device if device is None else device
         prompt_hash = self.hash(kwargs)
         if self.enable_cache:
@@ -489,13 +504,15 @@ class TextEncoder(BaseHelper, CacheMixin):
             if cached is not None:
                 if output_hidden_states:
                     last_hidden_state, attention_mask, hidden_states = cached
-                    return TextEncoderModelOutput(last_hidden_state, attention_mask, hidden_states)
+                    return TextEncoderModelOutput(
+                        last_hidden_state, attention_mask, hidden_states
+                    )
                 else:
                     last_hidden_state, attention_mask = cached
                     return TextEncoderModelOutput(last_hidden_state, attention_mask)
-            
+
         self._load_model(device)
-                
+
         use_attention_mask = use_default(use_attention_mask, self.use_attention_mask)
         hidden_state_skip_layer = use_default(
             hidden_state_skip_layer, self.hidden_state_skip_layer
@@ -505,7 +522,7 @@ class TextEncoder(BaseHelper, CacheMixin):
         attention_mask = (
             batch_encoding["attention_mask"].to(device) if use_attention_mask else None
         )
-        
+
         outputs = self.model(
             input_ids=batch_encoding["input_ids"].to(device),
             attention_mask=attention_mask,
@@ -535,10 +552,15 @@ class TextEncoder(BaseHelper, CacheMixin):
                 attention_mask = (
                     attention_mask[:, crop_start:] if use_attention_mask else None
                 )
-                
+
         if self.enable_cache:
             if output_hidden_states:
-                self.cache(prompt_hash, last_hidden_state, attention_mask, torch.stack(outputs.hidden_states))
+                self.cache(
+                    prompt_hash,
+                    last_hidden_state,
+                    attention_mask,
+                    torch.stack(outputs.hidden_states),
+                )
             else:
                 self.cache(prompt_hash, last_hidden_state, attention_mask)
 
@@ -546,9 +568,8 @@ class TextEncoder(BaseHelper, CacheMixin):
             return TextEncoderModelOutput(
                 last_hidden_state, attention_mask, outputs.hidden_states
             )
-        
-        return TextEncoderModelOutput(last_hidden_state, attention_mask)
 
+        return TextEncoderModelOutput(last_hidden_state, attention_mask)
 
     def forward(
         self,

@@ -6,9 +6,10 @@ import math
 from copy import deepcopy
 from src.engine.base_engine import BaseEngine
 
+
 class SkyReelsDFEngine(BaseEngine):
     """SkyReels Diffusion Forcing Engine Implementation"""
-    
+
     def generate_timestep_matrix(
         self,
         num_frames,
@@ -107,7 +108,7 @@ class SkyReelsDFEngine(BaseEngine):
             ]
 
         return step_matrix, step_index, step_update_mask, valid_interval
-    
+
     def denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents", None)
         transformer_dtype = kwargs.get("transformer_dtype", None)
@@ -206,7 +207,12 @@ class SkyReelsDFEngine(BaseEngine):
                         )[0]
                         schedulers_counter[idx] += 1
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 pbar.update(1)

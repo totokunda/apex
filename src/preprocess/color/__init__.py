@@ -6,6 +6,7 @@ from PIL import Image
 from src.preprocess.util import HWC3, safer_memory, common_input_validate
 from src.preprocess.base_preprocessor import BasePreprocessor
 
+
 def cv2_resize_shortest_edge(image, size):
     h, w = image.shape[:2]
     if h < w:
@@ -17,25 +18,29 @@ def cv2_resize_shortest_edge(image, size):
     resized_image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
     return resized_image
 
+
 def apply_color(img, res=512):
     img = cv2_resize_shortest_edge(img, res)
     h, w = img.shape[:2]
 
-    input_img_color = cv2.resize(img, (w//64, h//64), interpolation=cv2.INTER_CUBIC)  
-    input_img_color = cv2.resize(input_img_color, (w, h), interpolation=cv2.INTER_NEAREST)
+    input_img_color = cv2.resize(img, (w // 64, h // 64), interpolation=cv2.INTER_CUBIC)
+    input_img_color = cv2.resize(
+        input_img_color, (w, h), interpolation=cv2.INTER_NEAREST
+    )
     return input_img_color
 
-#Color T2I like multiples-of-64, upscale methods are fixed.
+
+# Color T2I like multiples-of-64, upscale methods are fixed.
 class ColorDetector(BasePreprocessor):
     @classmethod
     def from_pretrained(cls):
         return cls()
-    
+
     def process(self, input_image=None, detect_resolution=512, **kwargs):
         input_image, output_type = common_input_validate(input_image, None, **kwargs)
         input_image = HWC3(input_image)
         detected_map = HWC3(apply_color(input_image, detect_resolution))
-        
+
         detected_map = Image.fromarray(detected_map)
-            
+
         return detected_map

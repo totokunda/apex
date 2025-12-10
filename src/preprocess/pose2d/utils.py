@@ -5,6 +5,7 @@ import math
 import random
 import numpy as np
 
+
 def get_mask_boxes(mask):
     """
 
@@ -40,7 +41,8 @@ def get_aug_mask(body_mask, w_len=10, h_len=20):
                 body_mask[h_start:h_end, w_start:w_end] = 1
 
     return body_mask
-    
+
+
 def get_mask_body_img(img_copy, hand_mask, k=7, iterations=1):
     kernel = np.ones((k, k), np.uint8)
     dilation = cv2.dilate(hand_mask, kernel, iterations=iterations)
@@ -55,7 +57,6 @@ def get_face_bboxes(kp2ds, scale, image_shape, ratio_aug):
 
     min_x, min_y = np.min(kp2ds_face, axis=0)
     max_x, max_y = np.max(kp2ds_face, axis=0)
-
 
     initial_width = max_x - min_x
     initial_height = max_y - min_y
@@ -81,7 +82,12 @@ def get_face_bboxes(kp2ds, scale, image_shape, ratio_aug):
     expanded_min_y = max(min_y - 3 * delta_height, 0)
     expanded_max_y = min(max_y + delta_height, h)
 
-    return [int(expanded_min_x), int(expanded_max_x), int(expanded_min_y), int(expanded_max_y)]
+    return [
+        int(expanded_min_x),
+        int(expanded_max_x),
+        int(expanded_min_y),
+        int(expanded_max_y),
+    ]
 
 
 def calculate_new_size(orig_w, orig_h, target_area, divisor=64):
@@ -92,9 +98,7 @@ def calculate_new_size(orig_w, orig_h, target_area, divisor=64):
 
         if w <= 0 or h <= 0:
             return False
-        return (w * h <= target_area and  
-                w % divisor == 0 and  
-                h % divisor == 0)  
+        return w * h <= target_area and w % divisor == 0 and h % divisor == 0
 
     def get_ratio_diff(w, h):
 
@@ -133,7 +137,9 @@ def calculate_new_size(orig_w, orig_h, target_area, divisor=64):
     return int(best_w), int(best_h)
 
 
-def resize_by_area(image, target_area, keep_aspect_ratio=True, divisor=64, padding_color=(0, 0, 0)):
+def resize_by_area(
+    image, target_area, keep_aspect_ratio=True, divisor=64, padding_color=(0, 0, 0)
+):
     h, w = image.shape[:2]
     try:
         new_w, new_h = calculate_new_size(w, h, target_area, divisor)
@@ -146,16 +152,29 @@ def resize_by_area(image, target_area, keep_aspect_ratio=True, divisor=64, paddi
         else:
             new_w = new_h = math.sqrt(target_area)
 
-        new_w, new_h = int((new_w // divisor) * divisor), int((new_h // divisor) * divisor)
+        new_w, new_h = int((new_w // divisor) * divisor), int(
+            (new_h // divisor) * divisor
+        )
 
     interpolation = cv2.INTER_AREA if (new_w * new_h < w * h) else cv2.INTER_LINEAR
 
-    resized_image = padding_resize(image, height=new_h, width=new_w, padding_color=padding_color,
-                                    interpolation=interpolation)
+    resized_image = padding_resize(
+        image,
+        height=new_h,
+        width=new_w,
+        padding_color=padding_color,
+        interpolation=interpolation,
+    )
     return resized_image
 
 
-def padding_resize(img_ori, height=512, width=512, padding_color=(0, 0, 0), interpolation=cv2.INTER_LINEAR):
+def padding_resize(
+    img_ori,
+    height=512,
+    width=512,
+    padding_color=(0, 0, 0),
+    interpolation=cv2.INTER_LINEAR,
+):
     ori_height = img_ori.shape[0]
     ori_width = img_ori.shape[1]
     channel = img_ori.shape[2]
@@ -173,15 +192,15 @@ def padding_resize(img_ori, height=512, width=512, padding_color=(0, 0, 0), inte
         img = cv2.resize(img_ori, (new_width, height), interpolation=interpolation)
         padding = int((width - new_width) / 2)
         if len(img.shape) == 2:
-            img = img[:, :, np.newaxis]  
-        img_pad[:, padding: padding + new_width, :] = img
+            img = img[:, :, np.newaxis]
+        img_pad[:, padding : padding + new_width, :] = img
     else:
         new_height = int(width / ori_width * ori_height)
         img = cv2.resize(img_ori, (width, new_height), interpolation=interpolation)
         padding = int((height - new_height) / 2)
         if len(img.shape) == 2:
-            img = img[:, :, np.newaxis]  
-        img_pad[padding: padding + new_height, :, :] = img
+            img = img[:, :, np.newaxis]
+        img_pad[padding : padding + new_height, :, :] = img
 
     img_pad = np.uint8(img_pad)
 
@@ -223,4 +242,9 @@ def get_face_bboxes(kp2ds, scale, image_shape):
     expanded_min_y = max(min_y - 3 * delta_height, 0)
     expanded_max_y = min(max_y + delta_height, h)
 
-    return [int(expanded_min_x), int(expanded_max_x), int(expanded_min_y), int(expanded_max_y)]
+    return [
+        int(expanded_min_x),
+        int(expanded_max_x),
+        int(expanded_min_y),
+        int(expanded_max_y),
+    ]

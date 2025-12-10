@@ -33,7 +33,17 @@ from src.converters.utils import (
     strip_common_prefix,
 )
 
-from src.converters.vae_converters import LTXVAEConverter, MagiVAEConverter, NoOpVAEConverter, MMAudioVAEConverter
+from src.converters.vae_converters import (
+    LTXVAEConverter,
+    MagiVAEConverter,
+    NoOpVAEConverter,
+    MMAudioVAEConverter,
+)
+
+
+class NoOpConverter:
+    def convert(self, state_dict: Dict[str, Any]):
+        return state_dict
 
 
 def get_transformer_converter(model_base: str):
@@ -126,6 +136,7 @@ def load_safetensors(dir: pathlib.Path):
     for shard in shards:
         shard_state_dict = load_file(shard)
         state_dict.update(shard_state_dict)
+
     return state_dict
 
 
@@ -160,6 +171,7 @@ def is_safetensors_file(file_path: str):
 def load_state_dict(ckpt_path: str, model_key: str = None, pattern: str | None = None):
     pt_extensions = tuple(["pt", "bin", "pth", "ckpt"])
     state_dict = {}
+
     if is_safetensors_file(ckpt_path):
         state_dict = load_safetensors(pathlib.Path(ckpt_path))
     elif ckpt_path.endswith(pt_extensions):
@@ -331,7 +343,7 @@ def convert_vae(
 
     return model
 
- 
+
 def get_transformer_keys(model_base: str, config: dict):
 
     using_mlx = False

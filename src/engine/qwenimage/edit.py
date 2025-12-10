@@ -3,9 +3,10 @@ import math
 from typing import Dict, Any, Callable, List
 from .shared import QwenImageShared
 import numpy as np
-from PIL import Image   
+from PIL import Image
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from loguru import logger
+
 
 class QwenImageEditEngine(QwenImageShared):
     """QwenImage Edit Engine Implementation"""
@@ -34,23 +35,25 @@ class QwenImageEditEngine(QwenImageShared):
         timesteps: List[int] | None = None,
         attention_kwargs: Dict[str, Any] = {},
         **kwargs,
-    ):  
+    ):
 
         safe_emit_progress(progress_callback, 0.0, "Starting edit pipeline")
         safe_emit_progress(progress_callback, 0.05, "Loading image and resizing")
-        
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
         self.to_device(self.text_encoder)
-        
+
         if image is None or prompt is None:
             raise ValueError("Image and prompt are required")
-        
+
         batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
         loaded_image = self._load_image(image)
         max_area = height * width if height is not None and width is not None else None
-        loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(loaded_image, max_area=max_area, mod_value=32)
+        loaded_image, calculated_height, calculated_width = self._aspect_ratio_resize(
+            loaded_image, max_area=max_area, mod_value=32
+        )
         safe_emit_progress(progress_callback, 0.10, "Image loaded and resized")
 
         preprocessed_image = self.image_processor.preprocess(loaded_image).unsqueeze(2)
@@ -58,9 +61,11 @@ class QwenImageEditEngine(QwenImageShared):
             height = calculated_height
         if width is None:
             width = calculated_width
-        safe_emit_progress(progress_callback, 0.15, "Resolved target dimensions and preprocessed image")
-        
-        # get dtype 
+        safe_emit_progress(
+            progress_callback, 0.15, "Resolved target dimensions and preprocessed image"
+        )
+
+        # get dtype
         dtype = self.component_dtypes["text_encoder"]
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
@@ -70,10 +75,9 @@ class QwenImageEditEngine(QwenImageShared):
             text_encoder_kwargs=text_encoder_kwargs,
             dtype=dtype,
         )
-        
 
         safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
-        
+
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds, negative_prompt_embeds_mask = self.encode_prompt(
                 negative_prompt,
@@ -86,8 +90,15 @@ class QwenImageEditEngine(QwenImageShared):
         else:
             negative_prompt_embeds = None
             negative_prompt_embeds_mask = None
-        safe_emit_progress(progress_callback, 0.23, "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds")
-            
+        safe_emit_progress(
+            progress_callback,
+            0.23,
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
+        )
 
         if offload:
             self._offload(self.text_encoder)
@@ -96,27 +107,25 @@ class QwenImageEditEngine(QwenImageShared):
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         prompt_embeds_mask = prompt_embeds_mask.to(self.device)
-        
-        
+
         image_latents = self.vae_encode(preprocessed_image, offload=offload)
         image_latents = torch.cat([image_latents] * batch_size, dim=0)
         image_latent_height, image_latent_width = image_latents.shape[3:]
         image_latents = self._pack_latents(
-                image_latents, batch_size, self.num_channels_latents, image_latent_height, image_latent_width
-            )
+            image_latents,
+            batch_size,
+            self.num_channels_latents,
+            image_latent_height,
+            image_latent_width,
+        )
         safe_emit_progress(progress_callback, 0.30, "Prepared image latents")
-        
 
-        
         if not self.transformer:
             self.load_component_by_type("transformer")
-            
-        
+
         self.to_device(self.transformer)
         safe_emit_progress(progress_callback, 0.32, "Transformer ready")
-        
-       
-        
+
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
@@ -138,8 +147,16 @@ class QwenImageEditEngine(QwenImageShared):
 
         img_shapes = [
             [
-                (1, height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2),
-                (1, calculated_height // self.vae_scale_factor // 2, calculated_width // self.vae_scale_factor // 2),
+                (
+                    1,
+                    height // self.vae_scale_factor // 2,
+                    width // self.vae_scale_factor // 2,
+                ),
+                (
+                    1,
+                    calculated_height // self.vae_scale_factor // 2,
+                    calculated_width // self.vae_scale_factor // 2,
+                ),
             ]
         ] * batch_size
         safe_emit_progress(progress_callback, 0.40, "Prepared shape metadata")
@@ -167,7 +184,9 @@ class QwenImageEditEngine(QwenImageShared):
             mu=mu,
             timesteps=timesteps,
         )
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -225,7 +244,7 @@ class QwenImageEditEngine(QwenImageShared):
             denoise_progress_callback=denoise_progress_callback,
             render_on_step_interval=render_on_step_interval,
         )
-        
+
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
@@ -241,5 +260,3 @@ class QwenImageEditEngine(QwenImageShared):
         image = self._tensor_to_frame(tensor_image)
         safe_emit_progress(progress_callback, 1.0, "Completed edit pipeline")
         return image
-
-    

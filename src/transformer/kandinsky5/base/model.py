@@ -33,12 +33,20 @@ from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from src.attention import attention_register
 from torch.nn.attention.flex_attention import BlockMask
-from diffusers.models.attention_dispatch import _CAN_USE_FLEX_ATTN, dispatch_attention_fn
+from diffusers.models.attention_dispatch import (
+    _CAN_USE_FLEX_ATTN,
+    dispatch_attention_fn,
+)
+
 logger = logging.get_logger(__name__)
 
 
 def get_freqs(dim, max_period=10000.0):
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=dim, dtype=torch.float32) / dim)
+    freqs = torch.exp(
+        -math.log(max_period)
+        * torch.arange(start=0, end=dim, dtype=torch.float32)
+        / dim
+    )
     return freqs
 
 
@@ -128,7 +136,9 @@ def nablaT_v2(
     if _CAN_USE_FLEX_ATTN:
         from torch.nn.attention.flex_attention import BlockMask
     else:
-        raise ValueError("Nabla attention is not supported with this version of PyTorch")
+        raise ValueError(
+            "Nabla attention is not supported with this version of PyTorch"
+        )
 
     q = q.transpose(1, 2).contiguous()
     k = k.transpose(1, 2).contiguous()
@@ -152,7 +162,9 @@ def nablaT_v2(
     # BlockMask creation
     kv_nb = mask.sum(-1).to(torch.int32)
     kv_inds = mask.argsort(dim=-1, descending=True).to(torch.int32)
-    return BlockMask.from_kv_blocks(torch.zeros_like(kv_nb), kv_inds, kv_nb, kv_inds, BLOCK_SIZE=64, mask_mod=None)
+    return BlockMask.from_kv_blocks(
+        torch.zeros_like(kv_nb), kv_inds, kv_nb, kv_inds, BLOCK_SIZE=64, mask_mod=None
+    )
 
 
 class Kandinsky5TimeEmbeddings(nn.Module):
@@ -249,9 +261,15 @@ class Kandinsky5RoPE3D(nn.Module):
 
         args = torch.cat(
             [
-                args_t.view(1, duration, 1, 1, -1).repeat(batch_size, 1, height, width, 1),
-                args_h.view(1, 1, height, 1, -1).repeat(batch_size, duration, 1, width, 1),
-                args_w.view(1, 1, 1, width, -1).repeat(batch_size, duration, height, 1, 1),
+                args_t.view(1, duration, 1, 1, -1).repeat(
+                    batch_size, 1, height, width, 1
+                ),
+                args_h.view(1, 1, height, 1, -1).repeat(
+                    batch_size, duration, 1, width, 1
+                ),
+                args_w.view(1, 1, 1, width, -1).repeat(
+                    batch_size, duration, height, 1, 1
+                ),
             ],
             dim=-1,
         )
@@ -281,9 +299,18 @@ class Kandinsky5AttnProcessor:
 
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError(f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version.")
+            raise ImportError(
+                f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version."
+            )
 
-    def __call__(self, attn, hidden_states, encoder_hidden_states=None, rotary_emb=None, sparse_params=None):
+    def __call__(
+        self,
+        attn,
+        hidden_states,
+        encoder_hidden_states=None,
+        rotary_emb=None,
+        sparse_params=None,
+    ):
         # query, key, value = self.get_qkv(x)
         query = attn.to_query(hidden_states)
 
@@ -308,7 +335,7 @@ class Kandinsky5AttnProcessor:
         # query, key = self.norm_qk(query, key)
         query = attn.query_norm(query.float()).type_as(query)
         key = attn.key_norm(key.float()).type_as(key)
-        
+
         def apply_rotary(x, rope):
             x_ = x.reshape(*x.shape[:-1], -1, 1, 2).to(torch.float32)
             x_out = (rope * x_).sum(dim=-1)
@@ -337,7 +364,7 @@ class Kandinsky5AttnProcessor:
             backend=self._attention_backend,
             parallel_config=self._parallel_config,
         )
-        
+
         hidden_states = hidden_states.flatten(-2, -1)
 
         attn_out = attn.out_layer(hidden_states)
@@ -374,9 +401,15 @@ class Kandinsky5Attention(nn.Module, AttentionModuleMixin):
         rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ) -> torch.Tensor:
-        attn_parameters = set(inspect.signature(self.processor.__call__).parameters.keys())
+        attn_parameters = set(
+            inspect.signature(self.processor.__call__).parameters.keys()
+        )
         quiet_attn_parameters = {}
-        unused_kwargs = [k for k, _ in kwargs.items() if k not in attn_parameters and k not in quiet_attn_parameters]
+        unused_kwargs = [
+            k
+            for k, _ in kwargs.items()
+            if k not in attn_parameters and k not in quiet_attn_parameters
+        ]
         if len(unused_kwargs) > 0:
             logger.warning(
                 f"attention_processor_kwargs {unused_kwargs} are not expected by {self.processor.__class__.__name__} and will be ignored."
@@ -410,13 +443,18 @@ class Kandinsky5OutLayer(nn.Module):
         self.patch_size = patch_size
         self.modulation = Kandinsky5Modulation(time_dim, model_dim, 2)
         self.norm = nn.LayerNorm(model_dim, elementwise_affine=False)
-        self.out_layer = nn.Linear(model_dim, math.prod(patch_size) * visual_dim, bias=True)
+        self.out_layer = nn.Linear(
+            model_dim, math.prod(patch_size) * visual_dim, bias=True
+        )
 
     def forward(self, visual_embed, text_embed, time_embed):
-        shift, scale = torch.chunk(self.modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
+        shift, scale = torch.chunk(
+            self.modulation(time_embed).unsqueeze(dim=1), 2, dim=-1
+        )
 
         visual_embed = (
-            self.norm(visual_embed.float()) * (scale.float()[:, None, None] + 1.0) + shift.float()[:, None, None]
+            self.norm(visual_embed.float()) * (scale.float()[:, None, None] + 1.0)
+            + shift.float()[:, None, None]
         ).type_as(visual_embed)
 
         x = self.out_layer(visual_embed)
@@ -447,20 +485,28 @@ class Kandinsky5TransformerEncoderBlock(nn.Module):
         self.text_modulation = Kandinsky5Modulation(time_dim, model_dim, 6)
 
         self.self_attention_norm = nn.LayerNorm(model_dim, elementwise_affine=False)
-        self.self_attention = Kandinsky5Attention(model_dim, head_dim, processor=Kandinsky5AttnProcessor())
+        self.self_attention = Kandinsky5Attention(
+            model_dim, head_dim, processor=Kandinsky5AttnProcessor()
+        )
 
         self.feed_forward_norm = nn.LayerNorm(model_dim, elementwise_affine=False)
         self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
 
     def forward(self, x, time_embed, rope):
-        self_attn_params, ff_params = torch.chunk(self.text_modulation(time_embed).unsqueeze(dim=1), 2, dim=-1)
+        self_attn_params, ff_params = torch.chunk(
+            self.text_modulation(time_embed).unsqueeze(dim=1), 2, dim=-1
+        )
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
-        out = (self.self_attention_norm(x.float()) * (scale.float() + 1.0) + shift.float()).type_as(x)
+        out = (
+            self.self_attention_norm(x.float()) * (scale.float() + 1.0) + shift.float()
+        ).type_as(x)
         out = self.self_attention(out, rotary_emb=rope)
         x = (x.float() + gate.float() * out.float()).type_as(x)
 
         shift, scale, gate = torch.chunk(ff_params, 3, dim=-1)
-        out = (self.feed_forward_norm(x.float()) * (scale.float() + 1.0) + shift.float()).type_as(x)
+        out = (
+            self.feed_forward_norm(x.float()) * (scale.float() + 1.0) + shift.float()
+        ).type_as(x)
         out = self.feed_forward(out)
         x = (x.float() + gate.float() * out.float()).type_as(x)
 
@@ -473,10 +519,14 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
         self.visual_modulation = Kandinsky5Modulation(time_dim, model_dim, 9)
 
         self.self_attention_norm = nn.LayerNorm(model_dim, elementwise_affine=False)
-        self.self_attention = Kandinsky5Attention(model_dim, head_dim, processor=Kandinsky5AttnProcessor())
+        self.self_attention = Kandinsky5Attention(
+            model_dim, head_dim, processor=Kandinsky5AttnProcessor()
+        )
 
         self.cross_attention_norm = nn.LayerNorm(model_dim, elementwise_affine=False)
-        self.cross_attention = Kandinsky5Attention(model_dim, head_dim, processor=Kandinsky5AttnProcessor())
+        self.cross_attention = Kandinsky5Attention(
+            model_dim, head_dim, processor=Kandinsky5AttnProcessor()
+        )
 
         self.feed_forward_norm = nn.LayerNorm(model_dim, elementwise_affine=False)
         self.feed_forward = Kandinsky5FeedForward(model_dim, ff_dim)
@@ -487,25 +537,36 @@ class Kandinsky5TransformerDecoderBlock(nn.Module):
         )
 
         shift, scale, gate = torch.chunk(self_attn_params, 3, dim=-1)
-        visual_out = (self.self_attention_norm(visual_embed.float()) * (scale.float() + 1.0) + shift.float()).type_as(
-            visual_embed
+        visual_out = (
+            self.self_attention_norm(visual_embed.float()) * (scale.float() + 1.0)
+            + shift.float()
+        ).type_as(visual_embed)
+        visual_out = self.self_attention(
+            visual_out, rotary_emb=rope, sparse_params=sparse_params
         )
-        visual_out = self.self_attention(visual_out, rotary_emb=rope, sparse_params=sparse_params)
-        visual_embed = (visual_embed.float() + gate.float() * visual_out.float()).type_as(visual_embed)
+        visual_embed = (
+            visual_embed.float() + gate.float() * visual_out.float()
+        ).type_as(visual_embed)
 
         shift, scale, gate = torch.chunk(cross_attn_params, 3, dim=-1)
-        visual_out = (self.cross_attention_norm(visual_embed.float()) * (scale.float() + 1.0) + shift.float()).type_as(
-            visual_embed
-        )
+        visual_out = (
+            self.cross_attention_norm(visual_embed.float()) * (scale.float() + 1.0)
+            + shift.float()
+        ).type_as(visual_embed)
         visual_out = self.cross_attention(visual_out, encoder_hidden_states=text_embed)
-        visual_embed = (visual_embed.float() + gate.float() * visual_out.float()).type_as(visual_embed)
+        visual_embed = (
+            visual_embed.float() + gate.float() * visual_out.float()
+        ).type_as(visual_embed)
 
         shift, scale, gate = torch.chunk(ff_params, 3, dim=-1)
-        visual_out = (self.feed_forward_norm(visual_embed.float()) * (scale.float() + 1.0) + shift.float()).type_as(
-            visual_embed
-        )
+        visual_out = (
+            self.feed_forward_norm(visual_embed.float()) * (scale.float() + 1.0)
+            + shift.float()
+        ).type_as(visual_embed)
         visual_out = self.feed_forward(visual_out)
-        visual_embed = (visual_embed.float() + gate.float() * visual_out.float()).type_as(visual_embed)
+        visual_embed = (
+            visual_embed.float() + gate.float() * visual_out.float()
+        ).type_as(visual_embed)
 
         return visual_embed
 
@@ -570,7 +631,9 @@ class Kandinsky5Transformer3DModel(
         self.time_embeddings = Kandinsky5TimeEmbeddings(model_dim, time_dim)
         self.text_embeddings = Kandinsky5TextEmbeddings(in_text_dim, model_dim)
         self.pooled_text_embeddings = Kandinsky5TextEmbeddings(in_text_dim2, time_dim)
-        self.visual_embeddings = Kandinsky5VisualEmbeddings(visual_embed_dim, model_dim, patch_size)
+        self.visual_embeddings = Kandinsky5VisualEmbeddings(
+            visual_embed_dim, model_dim, patch_size
+        )
 
         # Initialize positional embeddings
         self.text_rope_embeddings = Kandinsky5RoPE1D(head_dim)
@@ -578,7 +641,10 @@ class Kandinsky5Transformer3DModel(
 
         # Initialize transformer blocks
         self.text_transformer_blocks = nn.ModuleList(
-            [Kandinsky5TransformerEncoderBlock(model_dim, time_dim, ff_dim, head_dim) for _ in range(num_text_blocks)]
+            [
+                Kandinsky5TransformerEncoderBlock(model_dim, time_dim, ff_dim, head_dim)
+                for _ in range(num_text_blocks)
+            ]
         )
 
         self.visual_transformer_blocks = nn.ModuleList(
@@ -589,7 +655,9 @@ class Kandinsky5Transformer3DModel(
         )
 
         # Initialize output layer
-        self.out_layer = Kandinsky5OutLayer(model_dim, time_dim, out_visual_dim, patch_size)
+        self.out_layer = Kandinsky5OutLayer(
+            model_dim, time_dim, out_visual_dim, patch_size
+        )
         self.gradient_checkpointing = False
 
     def forward(
@@ -642,9 +710,13 @@ class Kandinsky5Transformer3DModel(
                 text_embed = text_transformer_block(text_embed, time_embed, text_rope)
 
         visual_shape = visual_embed.shape[:-1]
-        visual_rope = self.visual_rope_embeddings(visual_shape, visual_rope_pos, scale_factor)
+        visual_rope = self.visual_rope_embeddings(
+            visual_shape, visual_rope_pos, scale_factor
+        )
         to_fractal = sparse_params["to_fractal"] if sparse_params is not None else False
-        visual_embed, visual_rope = fractal_flatten(visual_embed, visual_rope, visual_shape, block_mask=to_fractal)
+        visual_embed, visual_rope = fractal_flatten(
+            visual_embed, visual_rope, visual_shape, block_mask=to_fractal
+        )
 
         for visual_transformer_block in self.visual_transformer_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
@@ -661,7 +733,9 @@ class Kandinsky5Transformer3DModel(
                     visual_embed, text_embed, time_embed, visual_rope, sparse_params
                 )
 
-        visual_embed = fractal_unflatten(visual_embed, visual_shape, block_mask=to_fractal)
+        visual_embed = fractal_unflatten(
+            visual_embed, visual_shape, block_mask=to_fractal
+        )
         x = self.out_layer(visual_embed, text_embed, time_embed)
 
         if not return_dict:

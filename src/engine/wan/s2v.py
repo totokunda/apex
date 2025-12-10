@@ -11,15 +11,18 @@ import math
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 
+
 class WanS2VEngine(WanShared):
     """WAN Sound-to-Video Engine Implementation"""
-    
+
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial, resample="bilinear")
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial, resample="bilinear"
+        )
         self.motion_frames = 73
         self.drop_first_motion = True
-    
+
     def load_pose_condition(
         self, pose_video, num_chunks, num_frames_per_chunk, height, width
     ):
@@ -31,14 +34,24 @@ class WanS2VEngine(WanShared):
             pose_video = torch.cat(
                 [
                     pose_video,
-                    -torch.ones([1, 3, padding_frame_num, height, width], dtype=dtype, device=device),
+                    -torch.ones(
+                        [1, 3, padding_frame_num, height, width],
+                        dtype=dtype,
+                        device=device,
+                    ),
                 ],
                 dim=2,
             )
 
             pose_video = torch.chunk(pose_video, num_chunks, dim=2)
         else:
-            pose_video = [-torch.ones([1, 3, num_frames_per_chunk, height, width], dtype=dtype, device=device)]
+            pose_video = [
+                -torch.ones(
+                    [1, 3, num_frames_per_chunk, height, width],
+                    dtype=dtype,
+                    device=device,
+                )
+            ]
 
         # Vectorized processing: concatenate all chunks along batch dimension
         all_poses = torch.cat(
@@ -48,7 +61,7 @@ class WanS2VEngine(WanShared):
         pose_condition = self.vae_encode(all_poses, sample_mode="mode")[:, :, 1:]
 
         return pose_condition
-        
+
     def prepare_latents(
         self,
         image: InputImage,
@@ -66,17 +79,26 @@ class WanS2VEngine(WanShared):
         init_first_frame: bool = False,
         num_chunks: int = 1,
         offload: bool = True,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[torch.Tensor]]]:
-        
+    ) -> Union[
+        torch.Tensor,
+        Tuple[
+            torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[torch.Tensor]
+        ],
+    ]:
+
         num_latent_frames = (
             num_frames_per_chunk + 3 + self.motion_frames
         ) // self.vae_scale_factor_temporal - latent_motion_frames
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
 
-
-
-        shape = (batch_size, num_channels_latents, num_latent_frames, latent_height, latent_width)
+        shape = (
+            batch_size,
+            num_channels_latents,
+            num_latent_frames,
+            latent_height,
+            latent_width,
+        )
         dtype = self.component_dtypes["vae"]
         device = device or self.device
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -86,7 +108,9 @@ class WanS2VEngine(WanShared):
             )
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
         else:
             latents = latents.to(device=device, dtype=dtype)
 
@@ -103,8 +127,10 @@ class WanS2VEngine(WanShared):
             else:
                 latent_condition = self.vae_encode(video_condition, offload=offload)
                 latent_condition = latent_condition.repeat(batch_size, 1, 1, 1, 1)
-        
-            motion_pixels = torch.zeros([1, 3, self.motion_frames, height, width], dtype=dtype, device=device)
+
+            motion_pixels = torch.zeros(
+                [1, 3, self.motion_frames, height, width], dtype=dtype, device=device
+            )
             # Get pose condition input if needed
             pose_condition = self.load_pose_condition(
                 pose_video, num_chunks, num_frames_per_chunk, height, width
@@ -117,14 +143,21 @@ class WanS2VEngine(WanShared):
                 motion_pixels[:, :, -6:] = video_condition
             motion_latents = self.vae_encode(motion_pixels, offload=offload)
 
-
-            return latents, latent_condition, videos_last_pixels, motion_latents, pose_condition
+            return (
+                latents,
+                latent_condition,
+                videos_last_pixels,
+                motion_latents,
+                pose_condition,
+            )
 
         else:
             return latents
-    
+
     @staticmethod
-    def get_sample_indices(original_fps, total_frames, target_fps, num_sample, fixed_start=None):
+    def get_sample_indices(
+        original_fps, total_frames, target_fps, num_sample, fixed_start=None
+    ):
         required_duration = num_sample / target_fps
         required_origin_frames = int(np.ceil(required_duration * original_fps))
         if required_duration > total_frames / original_fps:
@@ -163,7 +196,6 @@ class WanS2VEngine(WanShared):
         )  # [1, 512, output_len]
         return output_features.transpose(1, 2)  # [1, output_len, 512]
 
-    
     def encode_audio(
         self,
         audio: InputAudio,
@@ -177,23 +209,23 @@ class WanS2VEngine(WanShared):
         video_rate = 30
         audio_sample_m = 0
 
-
-
         audio = self._load_audio(audio, sampling_rate)
 
-        input_values = self.helpers["audio_processor"](audio, sampling_rate=sampling_rate, return_tensors="pt").input_values
+        input_values = self.helpers["audio_processor"](
+            audio, sampling_rate=sampling_rate, return_tensors="pt"
+        ).input_values
 
         # retrieve logits & take argmax
-        res = self.helpers["audio_encoder"](input_values.to(device), output_hidden_states=True)
+        res = self.helpers["audio_encoder"](
+            input_values.to(device), output_hidden_states=True
+        )
         feat = torch.cat(res.hidden_states)
 
         feat = self.linear_interpolation(feat, input_fps=50, output_fps=video_rate)
 
         audio_embed = feat.to(torch.float32)  # Encoding for the motion
 
-
         num_layers, audio_frame_num, audio_dim = audio_embed.shape
-
 
         if num_layers > 1:
             return_all_layers = True
@@ -205,15 +237,15 @@ class WanS2VEngine(WanShared):
         print(num_frames)
         print(audio_frame_num)
         print(scale)
-        
 
         num_repeat = int(audio_frame_num / (num_frames * scale)) + 1
         print(num_repeat)
 
         bucket_num = num_repeat * num_frames
-        padd_audio_num = math.ceil(num_repeat * num_frames / fps * video_rate) - audio_frame_num
+        padd_audio_num = (
+            math.ceil(num_repeat * num_frames / fps * video_rate) - audio_frame_num
+        )
         print(padd_audio_num)
-
 
         batch_idx = self.get_sample_indices(
             original_fps=video_rate,
@@ -234,17 +266,28 @@ class WanS2VEngine(WanShared):
                     )
                 )
                 chosen_idx = [0 if c < 0 else c for c in chosen_idx]
-                chosen_idx = [audio_frame_num - 1 if c >= audio_frame_num else c for c in chosen_idx]
+                chosen_idx = [
+                    audio_frame_num - 1 if c >= audio_frame_num else c
+                    for c in chosen_idx
+                ]
 
                 if return_all_layers:
-                    frame_audio_embed = audio_embed[:, chosen_idx].flatten(start_dim=-2, end_dim=-1)
+                    frame_audio_embed = audio_embed[:, chosen_idx].flatten(
+                        start_dim=-2, end_dim=-1
+                    )
                 else:
                     frame_audio_embed = audio_embed[0][chosen_idx].flatten()
             else:
                 frame_audio_embed = (
-                    torch.zeros([audio_dim * (2 * audio_sample_m + 1)], device=audio_embed.device)
+                    torch.zeros(
+                        [audio_dim * (2 * audio_sample_m + 1)],
+                        device=audio_embed.device,
+                    )
                     if not return_all_layers
-                    else torch.zeros([num_layers, audio_dim * (2 * audio_sample_m + 1)], device=audio_embed.device)
+                    else torch.zeros(
+                        [num_layers, audio_dim * (2 * audio_sample_m + 1)],
+                        device=audio_embed.device,
+                    )
                 )
             batch_audio_eb.append(frame_audio_embed)
         audio_embed_bucket = torch.cat([c.unsqueeze(0) for c in batch_audio_eb], dim=0)
@@ -255,21 +298,18 @@ class WanS2VEngine(WanShared):
             audio_embed_bucket = audio_embed_bucket.permute(0, 2, 1)
         elif len(audio_embed_bucket.shape) == 4:
             audio_embed_bucket = audio_embed_bucket.permute(0, 2, 3, 1)
-            
+
         if offload:
             self._offload(self.helpers["audio_encoder"])
-        
 
-            
         return audio_embed_bucket, num_repeat
-    
-    
 
-    def run(self,
+    def run(
+        self,
         prompt: List[str] | str,
         audio: InputAudio,
         image: InputImage,
-        sampling_rate:int,
+        sampling_rate: int,
         negative_prompt: List[str] | str = None,
         pose_video: InputVideo = None,
         height: int = 480,
@@ -294,23 +334,24 @@ class WanS2VEngine(WanShared):
         attention_kwargs: Dict[str, Any] = {},
         render_on_step_interval: int = 3,
         num_chunks: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ):
-        
+
         if return_latents:
             self.logger.warning("Returning latents is not supported for WanS2VEngine")
             return None
-        
 
         if num_frames_per_chunk % self.vae_scale_factor_temporal != 0:
             num_frames_per_chunk = (
-                num_frames_per_chunk // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal
+                num_frames_per_chunk
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
             )
             self.logger.warning(
                 f"`num_frames_per_chunk` had to be divisible by {self.vae_scale_factor_temporal}. Rounding to the nearest number: {num_frames_per_chunk}"
             )
         num_frames_per_chunk = max(num_frames_per_chunk, 1)
-        
+
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -320,57 +361,56 @@ class WanS2VEngine(WanShared):
             progress_callback=progress_callback,
             offload=offload,
         )
-        
+
         if negative_prompt_embeds is None:
             use_cfg_guidance = False
-        
+
         batch_size = prompt_embeds.shape[0]
         transformer_dtype = self.component_dtypes["transformer"]
-        
+
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
         audio_embeds, num_chunks_audio = self.encode_audio(
-                audio, sampling_rate, num_frames_per_chunk, fps, offload=offload
-            )    
+            audio, sampling_rate, num_frames_per_chunk, fps, offload=offload
+        )
         if num_chunks is None or num_chunks > num_chunks_audio:
             num_chunks = num_chunks_audio
         audio_embeds = audio_embeds.to(transformer_dtype)
 
-        latent_motion_frames = (self.motion_frames + 3) // self.vae_scale_factor_temporal
-        
+        latent_motion_frames = (
+            self.motion_frames + 3
+        ) // self.vae_scale_factor_temporal
+
         image = self._load_image(image)
-        image, height, width = self._aspect_ratio_resize(image, max_area=height*width)
+        image, height, width = self._aspect_ratio_resize(image, max_area=height * width)
         image, height, width = self._center_crop_resize(image, height, width)
 
-        image = self.video_processor.preprocess(
-            image, height=height, width=width
-        ).to(self.device, dtype=torch.float32)
-        
+        image = self.video_processor.preprocess(image, height=height, width=width).to(
+            self.device, dtype=torch.float32
+        )
+
         if pose_video is not None:
             num_frames = num_frames_per_chunk * num_chunks
             pose_video = self._load_video(
-                pose_video,
-                num_frames=num_frames,
-                reverse=True,
-                fps=fps
+                pose_video, num_frames=num_frames, reverse=True, fps=fps
             )
             for idx, frame in enumerate(pose_video):
-                frame, _, _ = self._aspect_ratio_resize(frame, max_area=height*width)
+                frame, _, _ = self._aspect_ratio_resize(frame, max_area=height * width)
                 frame, _, _ = self._center_crop_resize(frame, height, width)
                 pose_video[idx] = frame
             pose_video = self.video_processor.preprocess_video(
                 pose_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-        
+
         video_chunks = []
         self._current_chunk = 0
         self._preview_video_chunks = []
-    
+
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -391,19 +431,31 @@ class WanS2VEngine(WanShared):
                 pose_video,
                 init_first_frame,
                 num_chunks,
-                offload=offload, 
+                offload=offload,
             )
 
             if r == 0:
-                latents, condition, videos_last_pixels, motion_latents, pose_condition = latents_outputs
+                (
+                    latents,
+                    condition,
+                    videos_last_pixels,
+                    motion_latents,
+                    pose_condition,
+                ) = latents_outputs
             else:
                 latents = latents_outputs
 
             with torch.no_grad():
                 left_idx = r * num_frames_per_chunk
                 right_idx = r * num_frames_per_chunk + num_frames_per_chunk
-                pose_latents = pose_condition[r] if pose_video is not None else pose_condition[0] * 0
-                pose_latents = pose_latents.to(dtype=transformer_dtype, device=self.device)
+                pose_latents = (
+                    pose_condition[r]
+                    if pose_video is not None
+                    else pose_condition[0] * 0
+                )
+                pose_latents = pose_latents.to(
+                    dtype=transformer_dtype, device=self.device
+                )
                 audio_embeds_input = audio_embeds[..., left_idx:right_idx]
             motion_latents_input = motion_latents.to(transformer_dtype).clone()
 
@@ -416,7 +468,9 @@ class WanS2VEngine(WanShared):
                 num_inference_steps=num_inference_steps,
             )
 
-            num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+            num_warmup_steps = (
+                len(timesteps) - num_inference_steps * self.scheduler.order
+            )
             self._num_timesteps = len(timesteps)
 
             with self._progress_bar(total=num_inference_steps) as progress_bar:
@@ -453,30 +507,44 @@ class WanS2VEngine(WanShared):
                                 image_latents=condition,
                                 pose_latents=pose_latents,
                                 audio_embeds=0.0 * audio_embeds_input,
-                                motion_frames=[self.motion_frames, latent_motion_frames],
+                                motion_frames=[
+                                    self.motion_frames,
+                                    latent_motion_frames,
+                                ],
                                 drop_motion_frames=self.drop_first_motion and r == 0,
                                 attention_kwargs=attention_kwargs,
                                 return_dict=False,
                             )[0]
-                            noise_pred = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
+                            noise_pred = noise_uncond + guidance_scale * (
+                                noise_pred - noise_uncond
+                            )
 
                     # compute the previous noisy sample x_t -> x_t-1
-                    latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                    latents = self.scheduler.step(
+                        noise_pred, t, latents, return_dict=False
+                    )[0]
 
-                    if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                    if (
+                        render_on_step
+                        and render_on_step_callback
+                        and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                        and i != len(timesteps) - 1
+                    ):
                         self._render_step(latents, render_on_step_callback)
 
                     # call the callback, if provided
-                    if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    if i == len(timesteps) - 1 or (
+                        (i + 1) > num_warmup_steps
+                        and (i + 1) % self.scheduler.order == 0
+                    ):
                         progress_bar.update()
-                        
+
             if not (self.drop_first_motion and r == 0):
                 decode_latents = torch.cat([motion_latents, latents], dim=2)
             else:
                 decode_latents = torch.cat([condition, latents], dim=2)
 
             decode_latents = decode_latents.to(self.vae.dtype)
-
 
             video = self.vae_decode(decode_latents, offload=offload)
             video = video[:, :, -(num_frames_per_chunk):]
@@ -487,24 +555,28 @@ class WanS2VEngine(WanShared):
             num_overlap_frames = min(self.motion_frames, video.shape[2])
 
             videos_last_pixels = torch.cat(
-                [videos_last_pixels[:, :, num_overlap_frames:], video[:, :, -num_overlap_frames:]], dim=2
+                [
+                    videos_last_pixels[:, :, num_overlap_frames:],
+                    video[:, :, -num_overlap_frames:],
+                ],
+                dim=2,
             )
 
-             # Update motion_latents for next iteration
-            motion_latents = self.vae_encode(videos_last_pixels, sample_mode="mode", offload=offload)
+            # Update motion_latents for next iteration
+            motion_latents = self.vae_encode(
+                videos_last_pixels, sample_mode="mode", offload=offload
+            )
 
             video_chunks.append(video)
             self._preview_video_chunks.append(video)
-
 
             break
 
         if offload:
             self._offload(self.transformer)
-            
+
         video_chunks = torch.cat(video_chunks, dim=2)
         return self._tensor_to_frames(video_chunks)
-
 
     def _render_step(self, latents, render_on_step_callback):
         video = self.vae_decode(latents)

@@ -5,6 +5,7 @@ import torch
 from typing import Optional
 from warnings import warn
 
+
 class QwenImageTransformer2DModel(NunchakuQwenImageTransformer2DModel):
     """
     Apex wrapper around Nunchaku's quantized QwenImage transformer.
@@ -45,9 +46,9 @@ class QwenImageTransformer2DModel(NunchakuQwenImageTransformer2DModel):
         """
 
         # Detect whether a device / dtype is being requested.
-        device_arg_or_kwarg_present = any(
-            isinstance(arg, torch.device) for arg in args
-        ) or "device" in kwargs
+        device_arg_or_kwarg_present = (
+            any(isinstance(arg, torch.device) for arg in args) or "device" in kwargs
+        )
         dtype_present_in_args = "dtype" in kwargs
 
         # Strings that can be parsed as a device also count as a device request.
@@ -83,4 +84,3 @@ class QwenImageTransformer2DModel(NunchakuQwenImageTransformer2DModel):
         # Important: bypass the buggy upstream `to()` that uses `super(type(self), self)`
         # and delegate directly to the base `torch.nn.Module.to`.
         return torch.nn.Module.to(self, *args, **kwargs)
-

@@ -4,6 +4,8 @@ import numpy as np
 from PIL import Image
 
 from .shared import ZImageShared
+
+
 class ZImageT2IEngine(ZImageShared):
 
     @property
@@ -25,10 +27,9 @@ class ZImageT2IEngine(ZImageShared):
     @property
     def interrupt(self):
         return self._interrupt
-    
 
-
-    def run(self,
+    def run(
+        self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -55,7 +56,7 @@ class ZImageT2IEngine(ZImageShared):
         render_on_step_interval: int = 3,
         **kwargs,
     ):
-    
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -74,7 +75,7 @@ class ZImageT2IEngine(ZImageShared):
                 f"Please adjust the width to a multiple of {vae_scale}."
             )
 
-        device = self.device  
+        device = self.device
 
         self._guidance_scale = guidance_scale
         self._joint_attention_kwargs = joint_attention_kwargs
@@ -109,11 +110,10 @@ class ZImageT2IEngine(ZImageShared):
                 device=device,
                 max_sequence_length=max_sequence_length,
             )
-            
+
         if offload:
             self._offload(self.text_encoder)
-            
-        
+
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
@@ -134,13 +134,19 @@ class ZImageT2IEngine(ZImageShared):
 
         # Repeat prompt_embeds for num_images_per_prompt
         if num_images_per_prompt > 1:
-            prompt_embeds = [pe for pe in prompt_embeds for _ in range(num_images_per_prompt)]
+            prompt_embeds = [
+                pe for pe in prompt_embeds for _ in range(num_images_per_prompt)
+            ]
             if self.do_classifier_free_guidance and negative_prompt_embeds:
-                negative_prompt_embeds = [npe for npe in negative_prompt_embeds for _ in range(num_images_per_prompt)]
+                negative_prompt_embeds = [
+                    npe
+                    for npe in negative_prompt_embeds
+                    for _ in range(num_images_per_prompt)
+                ]
 
         actual_batch_size = batch_size * num_images_per_prompt
         image_seq_len = (latents.shape[2] // 2) * (latents.shape[3] // 2)
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
@@ -153,19 +159,21 @@ class ZImageT2IEngine(ZImageShared):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
-        
+
         self.scheduler.sigma_min = 0.0
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
             timesteps=timesteps,
-            mu=mu
+            mu=mu,
         )
-        
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
-        
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -188,7 +196,9 @@ class ZImageT2IEngine(ZImageShared):
                         current_guidance_scale = 0.0
 
                 # Run CFG only if configured AND scale is non-zero
-                apply_cfg = self.do_classifier_free_guidance and current_guidance_scale > 0
+                apply_cfg = (
+                    self.do_classifier_free_guidance and current_guidance_scale > 0
+                )
 
                 if apply_cfg:
                     latents_typed = latents.to(self.transformer.dtype)
@@ -204,7 +214,10 @@ class ZImageT2IEngine(ZImageShared):
                 latent_model_input_list = list(latent_model_input.unbind(dim=0))
 
                 model_out_list = self.transformer(
-                    latent_model_input_list, timestep_model_input, prompt_embeds_model_input, return_dict=False
+                    latent_model_input_list,
+                    timestep_model_input,
+                    prompt_embeds_model_input,
+                    return_dict=False,
                 )[0]
 
                 if apply_cfg:
@@ -220,7 +233,10 @@ class ZImageT2IEngine(ZImageShared):
                         pred = pos + current_guidance_scale * (pos - neg)
 
                         # Renormalization
-                        if self._cfg_normalization and float(self._cfg_normalization) > 0.0:
+                        if (
+                            self._cfg_normalization
+                            and float(self._cfg_normalization) > 0.0
+                        ):
                             ori_pos_norm = torch.linalg.vector_norm(pos)
                             new_pos_norm = torch.linalg.vector_norm(pred)
                             max_new_norm = ori_pos_norm * float(self._cfg_normalization)
@@ -237,16 +253,20 @@ class ZImageT2IEngine(ZImageShared):
                 noise_pred = -noise_pred
 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred.to(torch.float32), t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred.to(torch.float32), t, latents, return_dict=False
+                )[0]
                 assert latents.dtype == torch.float32
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
-        
+
         if offload:
             self._offload(self.transformer)
-            
+
         if return_latents:
             return latents
         else:

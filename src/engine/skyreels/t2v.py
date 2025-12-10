@@ -1,5 +1,6 @@
 from src.engine.wan.t2v import WanT2VEngine
 
+
 class SkyReelsT2VEngine(WanT2VEngine):
     """SkyReels Text-to-Video Engine Implementation"""
 

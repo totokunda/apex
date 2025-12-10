@@ -9,9 +9,10 @@ import numpy as np
 from src.engine.flux2.shared import Flux2Shared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class Flux2T2IEngine(Flux2Shared):
     """Flux2 Text-to-Image Image-to-Image Engine Implementation"""
-    
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -31,8 +32,9 @@ class Flux2T2IEngine(Flux2Shared):
     @property
     def interrupt(self):
         return self._interrupt
-        
-    def run(self,
+
+    def run(
+        self,
         image: InputImage | List[InputImage] = None,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
@@ -51,8 +53,8 @@ class Flux2T2IEngine(Flux2Shared):
         offload: bool = True,
         seed: int = None,
         progress_callback: Callable = None,
-        **kwargs
-        ):
+        **kwargs,
+    ):
         safe_emit_progress(progress_callback, 0.0, "Starting ti2i pipeline")
 
         if seed is not None:
@@ -83,7 +85,7 @@ class Flux2T2IEngine(Flux2Shared):
             text_encoder_out_layers=text_encoder_out_layers,
         )
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
-        
+
         if offload:
             self._offload(self.text_encoder)
         safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
@@ -91,10 +93,10 @@ class Flux2T2IEngine(Flux2Shared):
         # 4. process images
         if image is not None and not isinstance(image, list):
             image = [image]
-        
+
         if image is not None:
             image = [self._load_image(img) for img in image]
-            
+
         condition_images = None
         if image is not None:
             for img in image:
@@ -110,7 +112,9 @@ class Flux2T2IEngine(Flux2Shared):
                 multiple_of = self.vae_scale_factor * 2
                 image_width = (image_width // multiple_of) * multiple_of
                 image_height = (image_height // multiple_of) * multiple_of
-                img = self.image_processor.preprocess(img, height=image_height, width=image_width, resize_mode="crop")
+                img = self.image_processor.preprocess(
+                    img, height=image_height, width=image_width, resize_mode="crop"
+                )
                 condition_images.append(img)
                 height = height or image_height
                 width = width or image_width
@@ -143,12 +147,11 @@ class Flux2T2IEngine(Flux2Shared):
                 device=device,
                 dtype=self.component_dtypes["vae"],
             )
-            
-        
+
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-            
+
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
@@ -156,21 +159,34 @@ class Flux2T2IEngine(Flux2Shared):
         safe_emit_progress(progress_callback, 0.45, "Scheduler prepared")
 
         # 6. Prepare timesteps
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
-        if hasattr(self.scheduler.config, "use_flow_sigmas") and self.scheduler.config.use_flow_sigmas:
+        sigmas = (
+            np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+            if sigmas is None
+            else sigmas
+        )
+        if (
+            hasattr(self.scheduler.config, "use_flow_sigmas")
+            and self.scheduler.config.use_flow_sigmas
+        ):
             sigmas = None
         image_seq_len = latents.shape[1]
-        mu = self.compute_empirical_mu(image_seq_len=image_seq_len, num_steps=num_inference_steps)
+        mu = self.compute_empirical_mu(
+            image_seq_len=image_seq_len, num_steps=num_inference_steps
+        )
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
             mu=mu,
         )
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
 
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         # handle guidance
         guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
@@ -197,7 +213,9 @@ class Flux2T2IEngine(Flux2Shared):
                 latent_image_ids = latent_ids
 
                 if image_latents is not None:
-                    latent_model_input = torch.cat([latents, image_latents], dim=1).to(self.transformer.dtype)
+                    latent_model_input = torch.cat([latents, image_latents], dim=1).to(
+                        self.transformer.dtype
+                    )
                     latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
 
                 noise_pred = self.transformer(
@@ -215,21 +233,24 @@ class Flux2T2IEngine(Flux2Shared):
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
-                    
+
         self._current_timestep = None
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
-        
+
         if offload:
             self._offload(self.transformer)
 
@@ -241,13 +262,13 @@ class Flux2T2IEngine(Flux2Shared):
             if not self.vae:
                 self.load_component_by_type("vae")
             self.to_device(self.vae)
-            
+
             latents = self.vae.denormalize_latents(latents)
-                
+
             latents = self._unpatchify_latents(latents)
 
             image = self.vae_decode(latents, offload=offload, denormalize_latents=False)
             image = self._tensor_to_frame(image)
             safe_emit_progress(progress_callback, 1.0, "Completed ti2i pipeline")
-        
+
         return image

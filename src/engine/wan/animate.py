@@ -9,13 +9,20 @@ from diffusers.video_processor import VideoProcessor
 from diffusers.pipelines.wan.image_processor import WanAnimateImageProcessor
 from copy import deepcopy
 
+
 class WanAnimateEngine(WanShared):
     """WAN Animate Engine Implementation"""
 
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial, resample="bilinear")
-        spatial_patch_size = self.transformer.config.patch_size[-2:] if self.transformer is not None else (2, 2)
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial, resample="bilinear"
+        )
+        spatial_patch_size = (
+            self.transformer.config.patch_size[-2:]
+            if self.transformer is not None
+            else (2, 2)
+        )
         self.vae_image_processor = WanAnimateImageProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial,
             spatial_patch_size=spatial_patch_size,
@@ -23,10 +30,11 @@ class WanAnimateEngine(WanShared):
             fill_color=0,
         )
         self.video_processor_for_mask = VideoProcessor(
-            vae_scale_factor=self.vae_scale_factor_spatial, do_normalize=False, do_convert_grayscale=True
+            vae_scale_factor=self.vae_scale_factor_spatial,
+            do_normalize=False,
+            do_convert_grayscale=True,
         )
 
-        
     def get_i2v_mask(
         self,
         batch_size: int,
@@ -41,18 +49,28 @@ class WanAnimateEngine(WanShared):
         # mask_pixel_values shape (if supplied): [B, C = 1, T, latent_h, latent_w]
         if mask_pixel_values is None:
             mask_lat_size = torch.zeros(
-                batch_size, 1, (latent_t - 1) * 4 + 1, latent_h, latent_w, dtype=dtype, device=device
+                batch_size,
+                1,
+                (latent_t - 1) * 4 + 1,
+                latent_h,
+                latent_w,
+                dtype=dtype,
+                device=device,
             )
         else:
             mask_lat_size = mask_pixel_values.clone().to(device=device, dtype=dtype)
         mask_lat_size[:, :, :mask_len] = 1
         first_frame_mask = mask_lat_size[:, :, 0:1]
         # Repeat first frame mask self.vae_scale_factor_temporal (= 4) times in the frame dimension
-        first_frame_mask = torch.repeat_interleave(first_frame_mask, dim=2, repeats=self.vae_scale_factor_temporal)
+        first_frame_mask = torch.repeat_interleave(
+            first_frame_mask, dim=2, repeats=self.vae_scale_factor_temporal
+        )
         mask_lat_size = torch.concat([first_frame_mask, mask_lat_size[:, :, 1:]], dim=2)
         mask_lat_size = mask_lat_size.view(
             batch_size, -1, self.vae_scale_factor_temporal, latent_h, latent_w
-        ).transpose(1, 2)  # [B, C = 1, 4 * T_lat, H_lat, W_lat] --> [B, C = 4, T_lat, H_lat, W_lat]
+        ).transpose(
+            1, 2
+        )  # [B, C = 1, 4 * T_lat, H_lat, W_lat] --> [B, C = 4, T_lat, H_lat, W_lat]
 
         return mask_lat_size
 
@@ -82,19 +100,31 @@ class WanAnimateEngine(WanShared):
         if isinstance(generator, list):
             # Like in prepare_latents, assume len(generator) == batch_size
             ref_image_latents = [
-                self.vae_encode(image, sample_generator=g, sample_mode=sample_mode, offload=offload) for g in generator
+                self.vae_encode(
+                    image, sample_generator=g, sample_mode=sample_mode, offload=offload
+                )
+                for g in generator
             ]
             ref_image_latents = torch.cat(ref_image_latents)
         else:
-            ref_image_latents = self.vae_encode(image, sample_generator=generator, sample_mode=sample_mode, offload=offload)
+            ref_image_latents = self.vae_encode(
+                image,
+                sample_generator=generator,
+                sample_mode=sample_mode,
+                offload=offload,
+            )
         # Handle the case where we supply one image and one generator, but batch_size > 1 (e.g. generating multiple
         # videos per prompt)
         if ref_image_latents.shape[0] == 1 and batch_size > 1:
             ref_image_latents = ref_image_latents.expand(batch_size, -1, -1, -1, -1)
 
         # Prepare I2V mask in latent space and prepend to the reference image latents along channel dim
-        reference_image_mask = self.get_i2v_mask(batch_size, 1, latent_height, latent_width, 1, None, dtype, device)
-        reference_image_latents = torch.cat([reference_image_mask, ref_image_latents], dim=1)
+        reference_image_mask = self.get_i2v_mask(
+            batch_size, 1, latent_height, latent_width, 1, None, dtype, device
+        )
+        reference_image_latents = torch.cat(
+            [reference_image_mask, ref_image_latents], dim=1
+        )
 
         return reference_image_latents
 
@@ -111,7 +141,7 @@ class WanAnimateEngine(WanShared):
         prev_segment_cond_frames: int = 1,
         task: str = "animate",
         interpolation_mode: str = "bicubic",
-        sample_mode: str = "mode",    
+        sample_mode: str = "mode",
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         dtype: Optional[torch.dtype] = None,
         device: Optional[torch.device] = None,
@@ -124,14 +154,28 @@ class WanAnimateEngine(WanShared):
         dtype = dtype or self.component_dtypes["vae"]
         if prev_segment_cond_video is None:
             if task == "replace":
-                prev_segment_cond_video = background_video[:, :, :prev_segment_cond_frames].to(dtype)
+                prev_segment_cond_video = background_video[
+                    :, :, :prev_segment_cond_frames
+                ].to(dtype)
             else:
-                cond_frames_shape = (batch_size, 3, prev_segment_cond_frames, height, width)  # In pixel space
+                cond_frames_shape = (
+                    batch_size,
+                    3,
+                    prev_segment_cond_frames,
+                    height,
+                    width,
+                )  # In pixel space
 
-                prev_segment_cond_video = torch.zeros(cond_frames_shape, dtype=dtype, device=device)
+                prev_segment_cond_video = torch.zeros(
+                    cond_frames_shape, dtype=dtype, device=device
+                )
 
-        data_batch_size, channels, _, segment_height, segment_width = prev_segment_cond_video.shape
-        num_latent_frames = (segment_frame_length - 1) // self.vae_scale_factor_temporal + 1
+        data_batch_size, channels, _, segment_height, segment_width = (
+            prev_segment_cond_video.shape
+        )
+        num_latent_frames = (
+            segment_frame_length - 1
+        ) // self.vae_scale_factor_temporal + 1
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
         if segment_height != height or segment_width != width:
@@ -139,36 +183,61 @@ class WanAnimateEngine(WanShared):
                 f"Interpolating prev segment cond video from ({segment_width}, {segment_height}) to ({width}, {height})"
             )
             # Perform a 4D (spatial) rather than a 5D (spatiotemporal) reshape, following the original code
-            prev_segment_cond_video = prev_segment_cond_video.transpose(1, 2).flatten(0, 1)  # [B * T, C, H, W]
+            prev_segment_cond_video = prev_segment_cond_video.transpose(1, 2).flatten(
+                0, 1
+            )  # [B * T, C, H, W]
             prev_segment_cond_video = F.interpolate(
                 prev_segment_cond_video, size=(height, width), mode=interpolation_mode
             )
-            prev_segment_cond_video = prev_segment_cond_video.unflatten(0, (batch_size, -1)).transpose(1, 2)
+            prev_segment_cond_video = prev_segment_cond_video.unflatten(
+                0, (batch_size, -1)
+            ).transpose(1, 2)
 
         # Fill the remaining part of the cond video segment with zeros (if animating) or the background video (if
         # replacing).
         if task == "replace":
-            remaining_segment = background_video[:, :, prev_segment_cond_frames:].to(dtype)
+            remaining_segment = background_video[:, :, prev_segment_cond_frames:].to(
+                dtype
+            )
         else:
             remaining_segment_frames = segment_frame_length - prev_segment_cond_frames
             remaining_segment = torch.zeros(
-                batch_size, channels, remaining_segment_frames, height, width, dtype=dtype, device=device
+                batch_size,
+                channels,
+                remaining_segment_frames,
+                height,
+                width,
+                dtype=dtype,
+                device=device,
             )
 
         # Prepend the conditioning frames from the previous segment to the remaining segment video in the frame dim
         prev_segment_cond_video = prev_segment_cond_video.to(dtype=dtype)
-        full_segment_cond_video = torch.cat([prev_segment_cond_video, remaining_segment], dim=2)
+        full_segment_cond_video = torch.cat(
+            [prev_segment_cond_video, remaining_segment], dim=2
+        )
 
         if isinstance(generator, list):
             if data_batch_size == len(generator):
                 prev_segment_cond_latents = [
-                    self.vae_encode(full_segment_cond_video[i].unsqueeze(0), sample_generator=g, sample_mode=sample_mode, offload=offload)
+                    self.vae_encode(
+                        full_segment_cond_video[i].unsqueeze(0),
+                        sample_generator=g,
+                        sample_mode=sample_mode,
+                        offload=offload,
+                    )
                     for i, g in enumerate(generator)
                 ]
             elif data_batch_size == 1:
                 # Like prepare_latents, assume len(generator) == batch_size
                 prev_segment_cond_latents = [
-                    self.vae_encode(full_segment_cond_video, sample_mode=sample_mode, generator=g, offload=offload) for g in generator
+                    self.vae_encode(
+                        full_segment_cond_video,
+                        sample_mode=sample_mode,
+                        generator=g,
+                        offload=offload,
+                    )
+                    for g in generator
                 ]
             else:
                 raise ValueError(
@@ -178,7 +247,10 @@ class WanAnimateEngine(WanShared):
             prev_segment_cond_latents = torch.cat(prev_segment_cond_latents)
         else:
             prev_segment_cond_latents = self.vae_encode(
-                full_segment_cond_video, sample_generator=generator, sample_mode=sample_mode, offload=offload
+                full_segment_cond_video,
+                sample_generator=generator,
+                sample_mode=sample_mode,
+                offload=offload,
             )
 
         # Prepare I2V mask
@@ -186,9 +258,13 @@ class WanAnimateEngine(WanShared):
             mask_video = 1 - mask_video
             mask_video = mask_video.permute(0, 2, 1, 3, 4)
             mask_video = mask_video.flatten(0, 1)
-            mask_video = F.interpolate(mask_video, size=(latent_height, latent_width), mode="nearest")
+            mask_video = F.interpolate(
+                mask_video, size=(latent_height, latent_width), mode="nearest"
+            )
             mask_pixel_values = mask_video.unflatten(0, (batch_size, -1))
-            mask_pixel_values = mask_pixel_values.permute(0, 2, 1, 3, 4)  # output shape: [B, C = 1, T, H_lat, W_lat]
+            mask_pixel_values = mask_pixel_values.permute(
+                0, 2, 1, 3, 4
+            )  # output shape: [B, C = 1, T, H_lat, W_lat]
         else:
             mask_pixel_values = None
         prev_segment_cond_mask = self.get_i2v_mask(
@@ -203,23 +279,24 @@ class WanAnimateEngine(WanShared):
         )
 
         # Prepend cond I2V mask to prev segment cond latents along channel dimension
-        prev_segment_cond_latents = torch.cat([prev_segment_cond_mask, prev_segment_cond_latents], dim=1)
+        prev_segment_cond_latents = torch.cat(
+            [prev_segment_cond_mask, prev_segment_cond_latents], dim=1
+        )
         return prev_segment_cond_latents
-    
+
     def encode_image(
         self,
         image: InputImage,
         offload: bool = True,
     ):
-        image_processor = self.helpers['image_processor']
-        image_encoder = self.helpers['image_encoder']
+        image_processor = self.helpers["image_processor"]
+        image_encoder = self.helpers["image_encoder"]
         image = image_processor(images=image, return_tensors="pt").to(self.device)
         image_embeds = image_encoder(**image, output_hidden_states=True)
         if offload:
             self._offload(image_encoder)
         return image_embeds.hidden_states[-2]
-    
-    
+
     def prepare_pose_latents(
         self,
         pose_video: torch.Tensor,
@@ -234,15 +311,26 @@ class WanAnimateEngine(WanShared):
         device = device or self.device
         if isinstance(generator, list):
             pose_latents = [
-                self.vae_encode(pose_video, sample_generator=g, sample_mode=sample_mode, offload=offload) for g in generator
+                self.vae_encode(
+                    pose_video,
+                    sample_generator=g,
+                    sample_mode=sample_mode,
+                    offload=offload,
+                )
+                for g in generator
             ]
             pose_latents = torch.cat(pose_latents)
         else:
-            pose_latents = self.vae_encode(pose_video, sample_generator=generator, sample_mode=sample_mode, offload=offload)
+            pose_latents = self.vae_encode(
+                pose_video,
+                sample_generator=generator,
+                sample_mode=sample_mode,
+                offload=offload,
+            )
         if pose_latents.shape[0] == 1 and batch_size > 1:
             pose_latents = pose_latents.expand(batch_size, -1, -1, -1, -1)
         return pose_latents
-    
+
     def pad_video_frames(self, frames: List[Any], num_target_frames: int) -> List[Any]:
         """
         Pads an array-like video `frames` to `num_target_frames` using a "reflect"-like strategy. The frame dimension
@@ -281,7 +369,13 @@ class WanAnimateEngine(WanShared):
         latent_height = height // self.vae_scale_factor_spatial
         latent_width = width // self.vae_scale_factor_spatial
 
-        shape = (batch_size, num_channels_latents, num_latent_frames + 1, latent_height, latent_width)
+        shape = (
+            batch_size,
+            num_channels_latents,
+            num_latent_frames + 1,
+            latent_height,
+            latent_width,
+        )
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
@@ -289,13 +383,16 @@ class WanAnimateEngine(WanShared):
             )
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
         else:
             latents = latents.to(device=device, dtype=dtype)
 
         return latents
-    
-    def run(self,
+
+    def run(
+        self,
         image: InputImage,
         pose_video: Optional[InputVideo] = None,
         face_video: Optional[InputVideo] = None,
@@ -323,8 +420,8 @@ class WanAnimateEngine(WanShared):
         render_step_interval: int = 3,
         attention_kwargs: Dict[str, Any] = None,
         **kwargs,
-        ) -> OutputVideo:
-        
+    ) -> OutputVideo:
+
         safe_emit_progress(progress_callback, 0.0, "Starting animate pipeline")
         if mode == "animate":
             if pose_video is None:
@@ -342,14 +439,16 @@ class WanAnimateEngine(WanShared):
                 f" nearest number."
             )
             segment_frame_length = (
-                segment_frame_length // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
+                segment_frame_length
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
+                + 1
             )
         segment_frame_length = max(segment_frame_length, 1)
         use_cfg_guidance = guidance_scale > 1.0
-        
-        image = self._load_image(image)
-        image, height, width = self._aspect_ratio_resize(image, max_area=height*width)
 
+        image = self._load_image(image)
+        image, height, width = self._aspect_ratio_resize(image, max_area=height * width)
 
         pose_video = self._load_video(pose_video)
         face_video = self._load_video(face_video)
@@ -374,15 +473,18 @@ class WanAnimateEngine(WanShared):
         # of the effective segment length greater than or equal to the length of `pose_video`.
         cond_video_frames = len(pose_video)
 
-        effective_segment_length = segment_frame_length - prev_segment_conditioning_frames
-        last_segment_frames = (cond_video_frames - prev_segment_conditioning_frames) % effective_segment_length
+        effective_segment_length = (
+            segment_frame_length - prev_segment_conditioning_frames
+        )
+        last_segment_frames = (
+            cond_video_frames - prev_segment_conditioning_frames
+        ) % effective_segment_length
         if last_segment_frames == 0:
             num_padding_frames = 0
         else:
             num_padding_frames = effective_segment_length - last_segment_frames
         num_target_frames = cond_video_frames + num_padding_frames
         num_segments = num_target_frames // effective_segment_length
-
 
         # 3. Encode input prompt
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
@@ -404,10 +506,12 @@ class WanAnimateEngine(WanShared):
         # 4. Preprocess and encode the reference (character) image
         image_height, image_width = self.video_processor.get_default_height_width(image)
         if image_height != height or image_width != width:
-            self.logger.warning(f"Reshaping reference image from ({image_width}, {image_height}) to ({width}, {height})")
-        image_pixels = self.vae_image_processor.preprocess(image, height=height, width=width, resize_mode="fill").to(
-            device, dtype=torch.float32
-        )
+            self.logger.warning(
+                f"Reshaping reference image from ({image_width}, {image_height}) to ({width}, {height})"
+            )
+        image_pixels = self.vae_image_processor.preprocess(
+            image, height=height, width=width, resize_mode="fill"
+        ).to(device, dtype=torch.float32)
 
         # Get CLIP features from the reference image
         if image_embeds is None:
@@ -415,8 +519,7 @@ class WanAnimateEngine(WanShared):
         safe_emit_progress(progress_callback, 0.20, "Encoded reference image")
         image_embeds = image_embeds.repeat(batch_size * num_videos, 1, 1)
         image_embeds = image_embeds.to(transformer_dtype)
-        
-        
+
         if self.transformer is None:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
@@ -432,13 +535,16 @@ class WanAnimateEngine(WanShared):
             self.logger.warning(
                 f"Reshaping pose video from ({pose_video_width}, {pose_video_height}) to ({width}, {height})"
             )
-        pose_video = self.video_processor.preprocess_video(pose_video, height=height, width=width).to(
-            device, dtype=torch.float32
-        )
+        pose_video = self.video_processor.preprocess_video(
+            pose_video, height=height, width=width
+        ).to(device, dtype=torch.float32)
 
         face_video_width, face_video_height = face_video[0].size
         expected_face_size = self.transformer.motion_encoder_size
-        if face_video_width != expected_face_size or face_video_height != expected_face_size:
+        if (
+            face_video_width != expected_face_size
+            or face_video_height != expected_face_size
+        ):
             self.logger.warning(
                 f"Reshaping face video from ({face_video_width}, {face_video_height}) to ({expected_face_size},"
                 f" {expected_face_size})"
@@ -448,16 +554,18 @@ class WanAnimateEngine(WanShared):
         ).to(device, dtype=torch.float32)
 
         if mode == "replace":
-            background_video = self.pad_video_frames(background_video, num_target_frames)
+            background_video = self.pad_video_frames(
+                background_video, num_target_frames
+            )
             mask_video = self.pad_video_frames(mask_video, num_target_frames)
 
-            background_video = self.video_processor.preprocess_video(background_video, height=height, width=width).to(
-                device, dtype=torch.float32
-            )
-            mask_video = self.video_processor_for_mask.preprocess_video(mask_video, height=height, width=width).to(
-                device, dtype=torch.float32
-            )
-        
+            background_video = self.video_processor.preprocess_video(
+                background_video, height=height, width=width
+            ).to(device, dtype=torch.float32)
+            mask_video = self.video_processor_for_mask.preprocess_video(
+                mask_video, height=height, width=width
+            ).to(device, dtype=torch.float32)
+
         safe_emit_progress(progress_callback, 0.30, "Processed conditioning videos")
 
         if self.scheduler is None:
@@ -472,7 +580,11 @@ class WanAnimateEngine(WanShared):
 
         # Get VAE-encoded latents of the reference (character) image
         reference_image_latents = self.prepare_reference_image_latents(
-            image_pixels, batch_size * num_videos, generator=generator, device=device, offload=offload
+            image_pixels,
+            batch_size * num_videos,
+            generator=generator,
+            device=device,
+            offload=offload,
         )
 
         # 8. Loop over video inference segments
@@ -488,13 +600,15 @@ class WanAnimateEngine(WanShared):
             # Calculate progress for this segment
             segment_start_progress = 0.40 + (i / num_segments) * 0.50
             segment_end_progress = 0.40 + ((i + 1) / num_segments) * 0.50
-            denoise_progress_callback = make_mapped_progress(progress_callback, segment_start_progress, segment_end_progress)
+            denoise_progress_callback = make_mapped_progress(
+                progress_callback, segment_start_progress, segment_end_progress
+            )
 
             assert start + prev_segment_conditioning_frames < cond_video_frames
 
             # Sample noisy latents from prior for the current inference segment
             latents = self.prepare_latents(
-                batch_size * num_videos, 
+                batch_size * num_videos,
                 num_channels_latents=self.num_channels_latents,
                 height=height,
                 width=width,
@@ -502,19 +616,25 @@ class WanAnimateEngine(WanShared):
                 dtype=torch.float32,
                 device=device,
                 generator=generator,
-                latents=latents if start == 0 else None,  # Only use pre-calculated latents for first segment
+                latents=(
+                    latents if start == 0 else None
+                ),  # Only use pre-calculated latents for first segment
             )
-
-
 
             pose_video_segment = pose_video[:, :, start:end]
             face_video_segment = face_video[:, :, start:end]
 
-            face_video_segment = face_video_segment.expand(batch_size * num_videos, -1, -1, -1, -1)
+            face_video_segment = face_video_segment.expand(
+                batch_size * num_videos, -1, -1, -1, -1
+            )
             face_video_segment = face_video_segment.to(dtype=transformer_dtype)
 
             if start > 0:
-                prev_segment_cond_video = out_frames[:, :, -prev_segment_conditioning_frames:].clone().detach()
+                prev_segment_cond_video = (
+                    out_frames[:, :, -prev_segment_conditioning_frames:]
+                    .clone()
+                    .detach()
+                )
             else:
                 prev_segment_cond_video = None
 
@@ -525,13 +645,19 @@ class WanAnimateEngine(WanShared):
                 background_video_segment = background_video_segment.expand(
                     batch_size * num_videos, -1, -1, -1, -1
                 )
-                mask_video_segment = mask_video_segment.expand(batch_size * num_videos, -1, -1, -1, -1)
+                mask_video_segment = mask_video_segment.expand(
+                    batch_size * num_videos, -1, -1, -1, -1
+                )
             else:
                 background_video_segment = None
                 mask_video_segment = None
 
             pose_latents = self.prepare_pose_latents(
-                pose_video_segment, batch_size * num_videos, generator=generator, device=device, offload=offload
+                pose_video_segment,
+                batch_size * num_videos,
+                generator=generator,
+                device=device,
+                offload=offload,
             )
             pose_latents = pose_latents.to(dtype=transformer_dtype)
 
@@ -552,12 +678,16 @@ class WanAnimateEngine(WanShared):
             )
 
             # Concatenate the reference latents in the frame dimension
-            reference_latents = torch.cat([reference_image_latents, prev_segment_cond_latents], dim=2)
+            reference_latents = torch.cat(
+                [reference_image_latents, prev_segment_cond_latents], dim=2
+            )
 
             # 8.1 Denoising loop
-            num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+            num_warmup_steps = (
+                len(timesteps) - num_inference_steps * self.scheduler.order
+            )
             self._num_timesteps = len(timesteps)
-            
+
             latents = self.denoise(
                 timesteps=timesteps,
                 latents=latents,
@@ -585,11 +715,9 @@ class WanAnimateEngine(WanShared):
                 ),
                 transformer_dtype=transformer_dtype,
                 use_cfg_guidance=use_cfg_guidance,
-                render_on_step=render_on_step
+                render_on_step=render_on_step,
             )
 
-
-            
             out_frames = self.vae_decode(latents[:, :, 1:], offload=offload)
             if start > 0:
                 out_frames = out_frames[:, :, prev_segment_conditioning_frames:]
@@ -604,26 +732,26 @@ class WanAnimateEngine(WanShared):
                 scheduler=self.scheduler,
                 num_inference_steps=num_inference_steps,
             )
-            
-        if offload: 
+
+        if offload:
             self._offload(self.transformer)
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
-            
+
         if return_latents:
             return latents
-
-
 
         video = torch.cat(all_out_frames, dim=2)[:, :, :cond_video_frames]
 
         video = self._tensor_to_frames(video)
         safe_emit_progress(progress_callback, 1.0, "Completed animate pipeline")
-  
+
         return video
-    
+
     def _render_step(self, latents, render_on_step_callback):
         video = self.vae_decode(latents)
-        total_video = torch.cat(self._preview_all_out_frames + [video], dim=2)[:, :, :self._cond_video_frames]
+        total_video = torch.cat(self._preview_all_out_frames + [video], dim=2)[
+            :, :, : self._cond_video_frames
+        ]
 
         rendered_video = self._tensor_to_frames(total_video)
         render_on_step_callback(rendered_video[0])

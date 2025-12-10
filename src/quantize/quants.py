@@ -579,9 +579,7 @@ class Q2_K(__Quant, qtype=GGMLQuantizationType.Q2_K):
 
         # Initial codes and error (use MAD as in ref: use_mad = true)
         l_current = (
-            np_roundf(iscale * (sub_blocks - min_v))
-            .clip(0, nmax)
-            .astype(np.uint8)
+            np_roundf(iscale * (sub_blocks - min_v)).clip(0, nmax).astype(np.uint8)
         )
         diff = scale * l_current + min_v - sub_blocks
         best_error = np.sum(weights * np.abs(diff), axis=-1)
@@ -639,17 +637,11 @@ class Q2_K(__Quant, qtype=GGMLQuantizationType.Q2_K):
             diff = this_scale * l_aux + this_min - sub_blocks
             current_error = np.sum(weights * np.abs(diff), axis=-1)
 
-            improvement_mask = valid_D_mask.squeeze(-1) & (
-                current_error < best_error
-            )
+            improvement_mask = valid_D_mask.squeeze(-1) & (current_error < best_error)
             if np.any(improvement_mask):
                 best_error[improvement_mask] = current_error[improvement_mask]
-                scale_best[improvement_mask] = this_scale.squeeze(-1)[
-                    improvement_mask
-                ]
-                min_best[improvement_mask] = this_min.squeeze(-1)[
-                    improvement_mask
-                ]
+                scale_best[improvement_mask] = this_scale.squeeze(-1)[improvement_mask]
+                min_best[improvement_mask] = this_min.squeeze(-1)[improvement_mask]
 
         scales_all = scale_best  # (n_blocks, QK_K // 16)
         mins_all = -min_best  # store positive mins as in ref
@@ -712,7 +704,7 @@ class Q2_K(__Quant, qtype=GGMLQuantizationType.Q2_K):
 
         # Assemble final block: [scales (QK_K//16), qs (QK_K//4), d (2), dmin (2)]
         return np.concatenate([scales_packed, qs_bytes, d, dmin], axis=1)
-    
+
     @classmethod
     def dequantize_blocks(cls, blocks: np.ndarray) -> np.ndarray:
         n_blocks = blocks.shape[0]

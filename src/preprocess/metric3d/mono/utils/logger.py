@@ -6,7 +6,10 @@ import time
 import torch
 from termcolor import colored
 
-__all__ = ["setup_logger", ]
+__all__ = [
+    "setup_logger",
+]
+
 
 class _ColorfulFormatter(logging.Formatter):
     def __init__(self, *args, **kwargs):
@@ -27,8 +30,9 @@ class _ColorfulFormatter(logging.Formatter):
             return log
         return prefix + " " + log
 
+
 def setup_logger(
-    output=None, distributed_rank=0, *, name='metricdepth', color=True, abbrev_name=None
+    output=None, distributed_rank=0, *, name="metricdepth", color=True, abbrev_name=None
 ):
     """
     Initialize the detectron2 logger and set its verbosity level to "DEBUG".
@@ -44,19 +48,19 @@ def setup_logger(
         logging.Logger: a logger
     """
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO) # NOTE: if more detailed, change it to logging.DEBUG
+    logger.setLevel(logging.INFO)  # NOTE: if more detailed, change it to logging.DEBUG
     logger.propagate = False
 
     if abbrev_name is None:
         abbrev_name = "d2"
-        
+
     plain_formatter = logging.Formatter(
         "[%(asctime)s] %(name)s %(levelname)s %(message)s ", datefmt="%m/%d %H:%M:%S"
     )
     # stdout logging: master  only
     if distributed_rank == 0:
         ch = logging.StreamHandler(stream=sys.stdout)
-        ch.setLevel(logging.INFO) # NOTE: if more detailed, change it to logging.DEBUG
+        ch.setLevel(logging.INFO)  # NOTE: if more detailed, change it to logging.DEBUG
         if color:
             formatter = _ColorfulFormatter(
                 colored("[%(asctime)s %(name)s]: ", "green") + "%(message)s",
@@ -68,7 +72,7 @@ def setup_logger(
             formatter = plain_formatter
         ch.setFormatter(formatter)
         logger.addHandler(ch)
-    
+
     # file logging: all workers
     if output is not None:
         if output.endswith(".txt") or output.endswith(".log"):
@@ -80,17 +84,18 @@ def setup_logger(
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
         fh = logging.StreamHandler(_cached_log_stream(filename))
-        fh.setLevel(logging.INFO) # NOTE: if more detailed, change it to logging.DEBUG
+        fh.setLevel(logging.INFO)  # NOTE: if more detailed, change it to logging.DEBUG
         fh.setFormatter(plain_formatter)
         logger.addHandler(fh)
-    
 
     return logger
+
 
 from iopath.common.file_io import PathManager as PathManagerBase
 
 
 PathManager = PathManagerBase()
+
 
 # cache the opened file object, so that different calls to 'setup_logger
 # with the same file name can safely write to the same file.
@@ -98,5 +103,4 @@ def _cached_log_stream(filename):
     # use 1K buffer if writting to cloud storage
     io = PathManager.open(filename, "a", buffering=1024 if "://" in filename else -1)
     atexit.register(io.close)
-    return io    
-    
+    return io

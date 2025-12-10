@@ -68,6 +68,4 @@ def _auto_register_transformers():
 # Ensure all transformers are registered on import.
 _auto_register_transformers()
 
-__all__ = [
-    "TRANSFORMERS_REGISTRY"
-]
+__all__ = ["TRANSFORMERS_REGISTRY"]

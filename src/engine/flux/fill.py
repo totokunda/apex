@@ -51,7 +51,7 @@ class FluxFillEngine(FluxShared):
         safe_emit_progress(progress_callback, 0.05, "Preparing inputs and RNG")
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         mask_processor = VaeImageProcessor(
             vae_scale_factor=self.image_processor.config.vae_scale_factor,
             vae_latent_channels=self.image_processor.config.vae_latent_channels,
@@ -59,11 +59,18 @@ class FluxFillEngine(FluxShared):
             do_binarize=True,
             do_convert_grayscale=True,
         )
-            
+
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-        
+
         safe_emit_progress(progress_callback, 0.10, "Encoding prompts")
-        pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
+        (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             prompt_2,
@@ -74,19 +81,21 @@ class FluxFillEngine(FluxShared):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        
+        q
         if offload:
             self._offload(self.text_encoder)
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
-        
+
         safe_emit_progress(progress_callback, 0.15, "Loading and preprocessing images")
         image = self._load_image(image)
         init_image = self.image_processor.preprocess(image, height=height, width=width)
         init_image = init_image.to(dtype=torch.float32)
-        
-        image_seq_len = (int(height) // self.vae_scale_factor // 2) * (int(width) // self.vae_scale_factor // 2)
+
+        image_seq_len = (int(height) // self.vae_scale_factor // 2) * (
+            int(width) // self.vae_scale_factor // 2
+        )
         sigmas = (
             np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
             if sigmas is None
@@ -95,7 +104,7 @@ class FluxFillEngine(FluxShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-        
+
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -103,7 +112,7 @@ class FluxFillEngine(FluxShared):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
-        
+
         safe_emit_progress(progress_callback, 0.25, "Preparing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
@@ -129,7 +138,7 @@ class FluxFillEngine(FluxShared):
             generator=generator,
             timestep=latent_timestep,
         )
-        
+
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
@@ -146,16 +155,15 @@ class FluxFillEngine(FluxShared):
             guidance = guidance.expand(latents.shape[0])
         else:
             guidance = None
-        
+
         safe_emit_progress(progress_callback, 0.35, "Preparing mask and masked image")
         mask_image = self._load_image(mask_image)
-        
+
         mask_image = mask_processor.preprocess(mask_image, height=height, width=width)
 
         masked_image = init_image * (1 - mask_image)
-        
-        masked_image = masked_image.to(device=self.device, dtype=transformer_dtype)
 
+        masked_image = masked_image.to(device=self.device, dtype=transformer_dtype)
 
         height, width = init_image.shape[-2:]
         mask, masked_image_latents = self.prepare_mask_latents(
@@ -170,7 +178,7 @@ class FluxFillEngine(FluxShared):
             self.device,
             offload,
         )
-        
+
         masked_image_latents = torch.cat((masked_image_latents, mask), dim=-1)
 
         # Reserve a progress gap for denoising [0.50, 0.90]

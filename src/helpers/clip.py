@@ -14,6 +14,7 @@ from transformers import CLIPImageProcessor
 from src.utils.module import find_class_recursive
 import importlib
 
+
 @helpers("clip")
 class CLIP(BaseHelper):
 
@@ -30,14 +31,16 @@ class CLIP(BaseHelper):
         dtype: torch.dtype = torch.float32,
         **kwargs,
     ):
-        super().__init__(model_path=model_path, save_path=save_path, config_path=model_config_path)
+        super().__init__(
+            model_path=model_path, save_path=save_path, config_path=model_config_path
+        )
         self.config_save_path = config_save_path
         self.processor_class = processor_class
         self.model_class = model_class
         processor_class = find_class_recursive(
-                importlib.import_module("transformers"), processor_class
-            )
-        
+            importlib.import_module("transformers"), processor_class
+        )
+
         self.processor = processor_class.from_pretrained(preprocessor_path)
 
         self.model = self._load_model(

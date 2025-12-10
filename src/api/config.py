@@ -25,26 +25,34 @@ from src.utils.defaults import (
 
 router = APIRouter(prefix="/config", tags=["config"])
 
+
 class HomeDirectoryRequest(BaseModel):
     home_dir: str
+
 
 class HomeDirectoryResponse(BaseModel):
     home_dir: str
 
+
 class TorchDeviceRequest(BaseModel):
     device: str
+
 
 class TorchDeviceResponse(BaseModel):
     device: str
 
+
 class CachePathRequest(BaseModel):
     cache_path: str
+
 
 class CachePathResponse(BaseModel):
     cache_path: str
 
+
 class ComponentsPathRequest(BaseModel):
     components_path: str
+
 
 class ComponentsPathResponse(BaseModel):
     components_path: str
@@ -98,17 +106,21 @@ class CivitaiApiKeyRequest(BaseModel):
 class CivitaiApiKeyResponse(BaseModel):
     is_set: bool
     masked_token: Optional[str] = None
-    
+
+
 class MaskModelRequest(BaseModel):
     mask_model: str
-    
+
+
 class MaskModelResponse(BaseModel):
     mask_model: str
+
 
 @router.get("/home-dir", response_model=HomeDirectoryResponse)
 def get_home_directory():
     """Get the current apex home directory"""
     return HomeDirectoryResponse(home_dir=str(HOME_DIR))
+
 
 @router.post("/home-dir", response_model=HomeDirectoryResponse)
 def set_home_directory(request: HomeDirectoryRequest):
@@ -117,11 +129,14 @@ def set_home_directory(request: HomeDirectoryRequest):
         home_path = Path(request.home_dir).expanduser().resolve()
         if not home_path.exists():
             home_path.mkdir(parents=True, exist_ok=True)
-        
+
         os.environ["APEX_HOME_DIR"] = str(home_path)
         return HomeDirectoryResponse(home_dir=str(home_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set home directory: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set home directory: {str(e)}"
+        )
+
 
 @router.get("/torch-device", response_model=TorchDeviceResponse)
 def get_device():
@@ -129,19 +144,22 @@ def get_device():
     device = get_torch_device()
     return TorchDeviceResponse(device=str(device))
 
+
 @router.post("/torch-device", response_model=TorchDeviceResponse)
 def set_device(request: TorchDeviceRequest):
     """Set the torch device (cpu, cuda, mps, cuda:0, etc.)"""
     try:
         valid_devices = ["cpu", "cuda", "mps"]
         device_str = request.device.lower()
-        
+
         if device_str.startswith("cuda:"):
             device_index = int(device_str.split(":")[1])
             if not torch.cuda.is_available():
                 raise HTTPException(status_code=400, detail="CUDA is not available")
             if device_index >= torch.cuda.device_count():
-                raise HTTPException(status_code=400, detail=f"CUDA device {device_index} not found")
+                raise HTTPException(
+                    status_code=400, detail=f"CUDA device {device_index} not found"
+                )
         elif device_str == "cuda":
             if not torch.cuda.is_available():
                 raise HTTPException(status_code=400, detail="CUDA is not available")
@@ -149,8 +167,11 @@ def set_device(request: TorchDeviceRequest):
             if not torch.backends.mps.is_available():
                 raise HTTPException(status_code=400, detail="MPS is not available")
         elif device_str != "cpu":
-            raise HTTPException(status_code=400, detail=f"Invalid device: {device_str}. Must be one of {valid_devices} or cuda:N")
-        
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid device: {device_str}. Must be one of {valid_devices} or cuda:N",
+            )
+
         set_torch_device(device_str)
         return TorchDeviceResponse(device=device_str)
     except HTTPException:
@@ -158,10 +179,12 @@ def set_device(request: TorchDeviceRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to set device: {str(e)}")
 
+
 @router.get("/cache-path", response_model=CachePathResponse)
 def get_cache_path():
     """Get the current cache path for media-related cache items"""
     return CachePathResponse(cache_path=str(get_cache_path_default()))
+
 
 @router.post("/cache-path", response_model=CachePathResponse)
 def set_cache_path(request: CachePathRequest):
@@ -174,13 +197,16 @@ def set_cache_path(request: CachePathRequest):
         _update_persisted_config(cache_path=str(cache_path))
         return CachePathResponse(cache_path=str(cache_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set cache path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set cache path: {str(e)}"
+        )
 
 
 @router.get("/components-path", response_model=ComponentsPathResponse)
 def get_components_path():
     """Get the current components path"""
     return ComponentsPathResponse(components_path=str(get_components_path_default()))
+
 
 @router.post("/components-path", response_model=ComponentsPathResponse)
 def set_components_path(request: ComponentsPathRequest):
@@ -192,7 +218,9 @@ def set_components_path(request: ComponentsPathRequest):
         _update_persisted_config(components_path=str(components_path))
         return ComponentsPathResponse(components_path=str(components_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set components path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set components path: {str(e)}"
+        )
 
 
 @router.get("/config-path", response_model=ConfigPathResponse)
@@ -211,7 +239,9 @@ def set_config_path_api(request: ConfigPathRequest):
         _update_persisted_config(config_path=str(config_path))
         return ConfigPathResponse(config_path=str(config_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set config path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set config path: {str(e)}"
+        )
 
 
 @router.get("/lora-path", response_model=LoraPathResponse)
@@ -230,7 +260,9 @@ def set_lora_path_api(request: LoraPathRequest):
         _update_persisted_config(lora_path=str(lora_path))
         return LoraPathResponse(lora_path=str(lora_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set LoRA path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set LoRA path: {str(e)}"
+        )
 
 
 @router.get("/preprocessor-path", response_model=PreprocessorPathResponse)
@@ -249,7 +281,9 @@ def set_preprocessor_path_api(request: PreprocessorPathRequest):
         _update_persisted_config(preprocessor_path=str(pre_path))
         return PreprocessorPathResponse(preprocessor_path=str(pre_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set preprocessor path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set preprocessor path: {str(e)}"
+        )
 
 
 @router.get("/postprocessor-path", response_model=PostprocessorPathResponse)
@@ -268,7 +302,10 @@ def set_postprocessor_path_api(request: PostprocessorPathRequest):
         _update_persisted_config(postprocessor_path=str(post_path))
         return PostprocessorPathResponse(postprocessor_path=str(post_path))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set postprocessor path: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set postprocessor path: {str(e)}"
+        )
+
 
 @router.get("/hf-token", response_model=HuggingFaceTokenResponse)
 def get_huggingface_token():
@@ -278,6 +315,7 @@ def get_huggingface_token():
         masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
         return HuggingFaceTokenResponse(is_set=True, masked_token=masked)
     return HuggingFaceTokenResponse(is_set=False, masked_token=None)
+
 
 @router.post("/hf-token", response_model=HuggingFaceTokenResponse)
 def set_huggingface_token(request: HuggingFaceTokenRequest):
@@ -293,7 +331,9 @@ def set_huggingface_token(request: HuggingFaceTokenRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set HUGGING_FACE_HUB_TOKEN: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set HUGGING_FACE_HUB_TOKEN: {str(e)}"
+        )
 
 
 @router.get("/civitai-api-key", response_model=CivitaiApiKeyResponse)
@@ -320,25 +360,40 @@ def set_civitai_api_key(request: CivitaiApiKeyRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set CIVITAI_API_KEY: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set CIVITAI_API_KEY: {str(e)}"
+        )
+
 
 @router.get("/mask-model", response_model=MaskModelResponse)
 def get_mask_model():
     """Get the current mask model"""
     return MaskModelResponse(mask_model=os.environ.get("MASK_MODEL", "sam2_base_plus"))
 
+
 @router.post("/mask-model", response_model=MaskModelResponse)
 def set_mask_model(request: MaskModelRequest):
     """Set the mask model"""
     try:
         mask_model = request.mask_model.lower()
-        if mask_model not in ["sam2_tiny", "sam2_small", "sam2_base_plus", "sam2_large"]:
-            raise HTTPException(status_code=400, detail="Invalid mask model. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large")
+        if mask_model not in [
+            "sam2_tiny",
+            "sam2_small",
+            "sam2_base_plus",
+            "sam2_large",
+        ]:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid mask model. Must be one of: sam2_tiny, sam2_small, sam2_base_plus, sam2_large",
+            )
         os.environ["MASK_MODEL"] = mask_model
         _update_persisted_config(mask_model=request.mask_model)
         return MaskModelResponse(mask_model=request.mask_model)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to set mask model: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to set mask model: {str(e)}"
+        )
+
 
 def _update_persisted_config(**updates: str) -> None:
     """

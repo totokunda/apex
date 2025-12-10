@@ -60,7 +60,10 @@ class LongCatI2VEngine(LongCatShared):
                 f"`num_frames - 1` has to be divisible by {self.vae_scale_factor_temporal}. Rounding to the nearest number."
             )
             num_frames = (
-                num_frames // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
+                num_frames
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
+                + 1
             )
         num_frames = max(num_frames, 1)
 
@@ -123,7 +126,9 @@ class LongCatI2VEngine(LongCatShared):
             sigmas=sigmas,
         )
 
-        image_tensor = self.video_processor.preprocess(image, height=height, width=width)
+        image_tensor = self.video_processor.preprocess(
+            image, height=height, width=width
+        )
         image_tensor = image_tensor.to(device=device, dtype=prompt_embeds.dtype)
 
         # 5. Prepare latent variables
@@ -151,7 +156,9 @@ class LongCatI2VEngine(LongCatShared):
                 self._current_timestep = t
 
                 latent_model_input = (
-                    torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+                    torch.cat([latents] * 2)
+                    if self.do_classifier_free_guidance
+                    else latents
                 )
                 latent_model_input = latent_model_input.to(dit_dtype)
 
@@ -249,7 +256,8 @@ class LongCatI2VEngine(LongCatShared):
                 # Match the official demo: resize back to the original image size if available
                 if target_size is not None:
                     refined_video = [
-                        frame.resize(target_size, Image.BICUBIC) for frame in refined_video
+                        frame.resize(target_size, Image.BICUBIC)
+                        for frame in refined_video
                     ]
 
                 refined_batch.append(refined_video)

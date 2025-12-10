@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
 
+
 class Cosmos2Shared(BaseEngine):
     """Base class for Cosmos engine implementations containing common functionality"""
 
@@ -29,8 +30,7 @@ class Cosmos2Shared(BaseEngine):
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial
         )
-        
-    
+
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         latents = kwargs.get("latents")
         timesteps = kwargs.get("timesteps")
@@ -132,7 +132,12 @@ class Cosmos2Shared(BaseEngine):
                     noise_pred, t, latents, return_dict=False
                 )[0]
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 pbar.update(1)

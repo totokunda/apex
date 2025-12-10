@@ -5,11 +5,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.vae.mmaudio.autoencoder import AutoEncoderModule
-from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution, DecoderOutput
+from diffusers.models.autoencoders.vae import (
+    DiagonalGaussianDistribution,
+    DecoderOutput,
+)
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from .mel_encoder import get_mel_converter
 from diffusers import ModelMixin, ConfigMixin
 from diffusers.configuration_utils import register_to_config
+
 
 def patch_clip(clip_model):
     # a hack to make it output last hidden states
@@ -62,7 +66,7 @@ class AutoencoderMMAudio(ModelMixin, ConfigMixin):
 
     @torch.inference_mode()
     def encode_audio(self, x) -> DiagonalGaussianDistribution:
-        assert self.tod is not None, 'VAE is not loaded'
+        assert self.tod is not None, "VAE is not loaded"
         # x: (B * L)
         mel = self.mel_converter(x)
         dist = self.tod.encode(mel)
@@ -71,7 +75,7 @@ class AutoencoderMMAudio(ModelMixin, ConfigMixin):
 
     @torch.inference_mode()
     def vocode(self, mel: torch.Tensor) -> torch.Tensor:
-        assert self.tod is not None, 'VAE is not loaded'
+        assert self.tod is not None, "VAE is not loaded"
         return self.tod.vocode(mel)
 
     @property
@@ -98,17 +102,17 @@ class AutoencoderMMAudio(ModelMixin, ConfigMixin):
 
     @torch.no_grad()
     def encode(self, audio, return_dict: bool = False):
-        with torch.amp.autocast('cuda', dtype=self.dtype):
+        with torch.amp.autocast("cuda", dtype=self.dtype):
             dist = self.encode_audio(audio)
             if return_dict:
                 return AutoencoderKLOutput(latent_dist=dist)
             else:
                 return (dist.mean,)
-        
+
     def normalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         # Pass through
         return latents
-    
+
     def denormalize_latents(self, latents: torch.Tensor) -> torch.Tensor:
         # Pass through
         return latents

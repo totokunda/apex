@@ -149,7 +149,7 @@ class HunyuanI2VEngine(HunyuanVideoShared):
         num_frames = self._parse_num_frames(duration, fps)
         num_latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
         image_latents = image_latents.repeat(1, 1, num_latent_frames, 1, 1)
-        
+
         batch_size = prompt_embeds.shape[0]
 
         # 5. Prepare latents

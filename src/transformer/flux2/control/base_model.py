@@ -25,17 +25,26 @@ import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin
 from diffusers.models.attention_processor import Attention, AttentionProcessor
-from diffusers.models.embeddings import (TimestepEmbedding, Timesteps,
-                                         apply_rotary_emb,
-                                         get_1d_rotary_pos_embed)
+from diffusers.models.embeddings import (
+    TimestepEmbedding,
+    Timesteps,
+    apply_rotary_emb,
+    get_1d_rotary_pos_embed,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_npu_available,
-                             is_torch_version, logging, scale_lora_layers,
-                             unscale_lora_layers)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    is_torch_npu_available,
+    is_torch_version,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
 
-from src.attention import attention_register    
+from src.attention import attention_register
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -53,7 +62,9 @@ def _get_projections(attn: "Flux2Attention", hidden_states, encoder_hidden_state
     return query, key, value, encoder_query, encoder_key, encoder_value
 
 
-def _get_qkv_projections(attn: "Flux2Attention", hidden_states, encoder_hidden_states=None):
+def _get_qkv_projections(
+    attn: "Flux2Attention", hidden_states, encoder_hidden_states=None
+):
     return _get_projections(attn, hidden_states, encoder_hidden_states)
 
 
@@ -93,14 +104,20 @@ def apply_rotary_emb(
 
         if use_real_unbind_dim == -1:
             # Used for flux, cogvideox, hunyuan-dit
-            x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, H, S, D//2]
+            x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(
+                -1
+            )  # [B, H, S, D//2]
             x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(3)
         elif use_real_unbind_dim == -2:
             # Used for Stable Audio, OmniGen, CogView4 and Cosmos
-            x_real, x_imag = x.reshape(*x.shape[:-1], 2, -1).unbind(-2)  # [B, H, S, D//2]
+            x_real, x_imag = x.reshape(*x.shape[:-1], 2, -1).unbind(
+                -2
+            )  # [B, H, S, D//2]
             x_rotated = torch.cat([-x_imag, x_real], dim=-1)
         else:
-            raise ValueError(f"`use_real_unbind_dim={use_real_unbind_dim}` but should be -1 or -2.")
+            raise ValueError(
+                f"`use_real_unbind_dim={use_real_unbind_dim}` but should be -1 or -2."
+            )
 
         out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
 
@@ -162,7 +179,9 @@ class Flux2AttnProcessor:
 
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError(f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version.")
+            raise ImportError(
+                f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version."
+            )
 
     def __call__(
         self,
@@ -175,21 +194,23 @@ class Flux2AttnProcessor:
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Unified processor for both Flux2Attention and Flux2ParallelSelfAttention.
-        
+
         Args:
             attn: Attention module (either Flux2Attention or Flux2ParallelSelfAttention)
             hidden_states: Input hidden states
             encoder_hidden_states: Optional encoder hidden states (only for Flux2Attention)
             attention_mask: Optional attention mask
             image_rotary_emb: Optional rotary embeddings
-            
+
         Returns:
             For Flux2Attention with encoder_hidden_states: (hidden_states, encoder_hidden_states)
             For Flux2Attention without encoder_hidden_states: hidden_states
             For Flux2ParallelSelfAttention: hidden_states
         """
         # Determine which type of attention we're processing
-        is_parallel_self_attn = hasattr(attn, 'to_qkv_mlp_proj') and attn.to_qkv_mlp_proj is not None
+        is_parallel_self_attn = (
+            hasattr(attn, "to_qkv_mlp_proj") and attn.to_qkv_mlp_proj is not None
+        )
 
         if is_parallel_self_attn:
             # ============================================
@@ -198,18 +219,20 @@ class Flux2AttnProcessor:
             # Parallel in (QKV + MLP in) projection
             hidden_states = attn.to_qkv_mlp_proj(hidden_states)
             qkv, mlp_hidden_states = torch.split(
-                hidden_states, [3 * attn.inner_dim, attn.mlp_hidden_dim * attn.mlp_mult_factor], dim=-1
+                hidden_states,
+                [3 * attn.inner_dim, attn.mlp_hidden_dim * attn.mlp_mult_factor],
+                dim=-1,
             )
 
             # Handle the attention logic
             query, key, value = qkv.chunk(3, dim=-1)
-            
+
         else:
             # ============================================
             # Standard Attention Path (possibly with encoder)
             # ============================================
-            query, key, value, encoder_query, encoder_key, encoder_value = _get_qkv_projections(
-                attn, hidden_states, encoder_hidden_states
+            query, key, value, encoder_query, encoder_key, encoder_value = (
+                _get_qkv_projections(attn, hidden_states, encoder_hidden_states)
             )
 
         # Common processing for query, key, value
@@ -258,9 +281,9 @@ class Flux2AttnProcessor:
             # Concatenate and parallel output projection
             hidden_states = torch.cat([hidden_states, mlp_hidden_states], dim=-1)
             hidden_states = attn.to_out(hidden_states)
-            
+
             return hidden_states
-            
+
         else:
             # ============================================
             # Standard Attention Output Path
@@ -268,7 +291,11 @@ class Flux2AttnProcessor:
             # Split encoder and latent hidden states if encoder was used
             if encoder_hidden_states is not None:
                 encoder_hidden_states, hidden_states = hidden_states.split_with_sizes(
-                    [encoder_hidden_states.shape[1], hidden_states.shape[1] - encoder_hidden_states.shape[1]], dim=1
+                    [
+                        encoder_hidden_states.shape[1],
+                        hidden_states.shape[1] - encoder_hidden_states.shape[1],
+                    ],
+                    dim=1,
                 )
                 encoder_hidden_states = attn.to_add_out(encoder_hidden_states)
 
@@ -320,8 +347,12 @@ class Flux2Attention(torch.nn.Module):
         self.to_v = torch.nn.Linear(query_dim, self.inner_dim, bias=bias)
 
         # QK Norm
-        self.norm_q = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
-        self.norm_k = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
+        self.norm_q = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.norm_k = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
 
         self.to_out = torch.nn.ModuleList([])
         self.to_out.append(torch.nn.Linear(self.inner_dim, self.out_dim, bias=out_bias))
@@ -330,9 +361,15 @@ class Flux2Attention(torch.nn.Module):
         if added_kv_proj_dim is not None:
             self.norm_added_q = torch.nn.RMSNorm(dim_head, eps=eps)
             self.norm_added_k = torch.nn.RMSNorm(dim_head, eps=eps)
-            self.add_q_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
-            self.add_k_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
-            self.add_v_proj = torch.nn.Linear(added_kv_proj_dim, self.inner_dim, bias=added_proj_bias)
+            self.add_q_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
+            self.add_k_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
+            self.add_v_proj = torch.nn.Linear(
+                added_kv_proj_dim, self.inner_dim, bias=added_proj_bias
+            )
             self.to_add_out = torch.nn.Linear(self.inner_dim, query_dim, bias=out_bias)
 
         if processor is None:
@@ -354,12 +391,16 @@ class Flux2Attention(torch.nn.Module):
             and isinstance(self.processor, torch.nn.Module)
             and not isinstance(processor, torch.nn.Module)
         ):
-            logger.info(f"You are removing possibly trained weights of {self.processor} with {processor}")
+            logger.info(
+                f"You are removing possibly trained weights of {self.processor} with {processor}"
+            )
             self._modules.pop("processor")
 
         self.processor = processor
 
-    def get_processor(self, return_deprecated_lora: bool = False) -> "AttentionProcessor":
+    def get_processor(
+        self, return_deprecated_lora: bool = False
+    ) -> "AttentionProcessor":
         """
         Get the attention processor in use.
 
@@ -381,14 +422,23 @@ class Flux2Attention(torch.nn.Module):
         image_rotary_emb: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        attn_parameters = set(inspect.signature(self.processor.__call__).parameters.keys())
+        attn_parameters = set(
+            inspect.signature(self.processor.__call__).parameters.keys()
+        )
         unused_kwargs = [k for k, _ in kwargs.items() if k not in attn_parameters]
         if len(unused_kwargs) > 0:
             logger.warning(
                 f"joint_attention_kwargs {unused_kwargs} are not expected by {self.processor.__class__.__name__} and will be ignored."
             )
         kwargs = {k: w for k, w in kwargs.items() if k in attn_parameters}
-        return self.processor(self, hidden_states, encoder_hidden_states, attention_mask, image_rotary_emb, **kwargs)
+        return self.processor(
+            self,
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            image_rotary_emb,
+            **kwargs,
+        )
 
 
 class Flux2ParallelSelfAttention(torch.nn.Module):
@@ -437,16 +487,24 @@ class Flux2ParallelSelfAttention(torch.nn.Module):
 
         # Fused QKV projections + MLP input projection
         self.to_qkv_mlp_proj = torch.nn.Linear(
-            self.query_dim, self.inner_dim * 3 + self.mlp_hidden_dim * self.mlp_mult_factor, bias=bias
+            self.query_dim,
+            self.inner_dim * 3 + self.mlp_hidden_dim * self.mlp_mult_factor,
+            bias=bias,
         )
         self.mlp_act_fn = Flux2SwiGLU()
 
         # QK Norm
-        self.norm_q = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
-        self.norm_k = torch.nn.RMSNorm(dim_head, eps=eps, elementwise_affine=elementwise_affine)
+        self.norm_q = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
+        self.norm_k = torch.nn.RMSNorm(
+            dim_head, eps=eps, elementwise_affine=elementwise_affine
+        )
 
         # Fused attention output projection + MLP output projection
-        self.to_out = torch.nn.Linear(self.inner_dim + self.mlp_hidden_dim, self.out_dim, bias=out_bias)
+        self.to_out = torch.nn.Linear(
+            self.inner_dim + self.mlp_hidden_dim, self.out_dim, bias=out_bias
+        )
 
         if processor is None:
             processor = self._default_processor_cls()
@@ -467,12 +525,16 @@ class Flux2ParallelSelfAttention(torch.nn.Module):
             and isinstance(self.processor, torch.nn.Module)
             and not isinstance(processor, torch.nn.Module)
         ):
-            logger.info(f"You are removing possibly trained weights of {self.processor} with {processor}")
+            logger.info(
+                f"You are removing possibly trained weights of {self.processor} with {processor}"
+            )
             self._modules.pop("processor")
 
         self.processor = processor
 
-    def get_processor(self, return_deprecated_lora: bool = False) -> "AttentionProcessor":
+    def get_processor(
+        self, return_deprecated_lora: bool = False
+    ) -> "AttentionProcessor":
         """
         Get the attention processor in use.
 
@@ -494,14 +556,23 @@ class Flux2ParallelSelfAttention(torch.nn.Module):
         image_rotary_emb: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        attn_parameters = set(inspect.signature(self.processor.__call__).parameters.keys())
+        attn_parameters = set(
+            inspect.signature(self.processor.__call__).parameters.keys()
+        )
         unused_kwargs = [k for k, _ in kwargs.items() if k not in attn_parameters]
         if len(unused_kwargs) > 0:
             logger.warning(
                 f"joint_attention_kwargs {unused_kwargs} are not expected by {self.processor.__class__.__name__} and will be ignored."
             )
         kwargs = {k: w for k, w in kwargs.items() if k in attn_parameters}
-        return self.processor(self, hidden_states, encoder_hidden_states, attention_mask, image_rotary_emb, **kwargs)
+        return self.processor(
+            self,
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            image_rotary_emb,
+            **kwargs,
+        )
 
 
 class Flux2SingleTransformerBlock(nn.Module):
@@ -565,7 +636,10 @@ class Flux2SingleTransformerBlock(nn.Module):
         if hidden_states.dtype == torch.float16:
             hidden_states = hidden_states.clip(-65504, 65504)
 
-        encoder_hidden_states, hidden_states = hidden_states[:, :text_seq_len], hidden_states[:, text_seq_len:]
+        encoder_hidden_states, hidden_states = (
+            hidden_states[:, :text_seq_len],
+            hidden_states[:, text_seq_len:],
+        )
         return encoder_hidden_states, hidden_states
 
 
@@ -602,22 +676,34 @@ class Flux2TransformerBlock(nn.Module):
         self.ff = Flux2FeedForward(dim=dim, dim_out=dim, mult=mlp_ratio, bias=bias)
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=eps)
-        self.ff_context = Flux2FeedForward(dim=dim, dim_out=dim, mult=mlp_ratio, bias=bias)
+        self.ff_context = Flux2FeedForward(
+            dim=dim, dim_out=dim, mult=mlp_ratio, bias=bias
+        )
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        temb_mod_params_img: Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...],
-        temb_mod_params_txt: Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...],
+        temb_mod_params_img: Tuple[
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...
+        ],
+        temb_mod_params_txt: Tuple[
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...
+        ],
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         joint_attention_kwargs = joint_attention_kwargs or {}
 
         # Modulation parameters shape: [1, 1, self.dim]
-        (shift_msa, scale_msa, gate_msa), (shift_mlp, scale_mlp, gate_mlp) = temb_mod_params_img
-        (c_shift_msa, c_scale_msa, c_gate_msa), (c_shift_mlp, c_scale_mlp, c_gate_mlp) = temb_mod_params_txt
+        (shift_msa, scale_msa, gate_msa), (shift_mlp, scale_mlp, gate_mlp) = (
+            temb_mod_params_img
+        )
+        (c_shift_msa, c_scale_msa, c_gate_msa), (
+            c_shift_mlp,
+            c_scale_mlp,
+            c_gate_mlp,
+        ) = temb_mod_params_txt
 
         # Img stream
         norm_hidden_states = self.norm1(hidden_states)
@@ -625,7 +711,9 @@ class Flux2TransformerBlock(nn.Module):
 
         # Conditioning txt stream
         norm_encoder_hidden_states = self.norm1_context(encoder_hidden_states)
-        norm_encoder_hidden_states = (1 + c_scale_msa) * norm_encoder_hidden_states + c_shift_msa
+        norm_encoder_hidden_states = (
+            1 + c_scale_msa
+        ) * norm_encoder_hidden_states + c_shift_msa
 
         # Attention on concatenated img + txt stream
         attention_outputs = self.attn(
@@ -652,7 +740,9 @@ class Flux2TransformerBlock(nn.Module):
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
-        norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
+        norm_encoder_hidden_states = (
+            norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
+        )
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
         encoder_hidden_states = encoder_hidden_states + c_gate_mlp * context_ff_output
@@ -695,10 +785,14 @@ class Flux2PosEmbed(nn.Module):
 
 
 class Flux2TimestepGuidanceEmbeddings(nn.Module):
-    def __init__(self, in_channels: int = 256, embedding_dim: int = 6144, bias: bool = False):
+    def __init__(
+        self, in_channels: int = 256, embedding_dim: int = 6144, bias: bool = False
+    ):
         super().__init__()
 
-        self.time_proj = Timesteps(num_channels=in_channels, flip_sin_to_cos=True, downscale_freq_shift=0)
+        self.time_proj = Timesteps(
+            num_channels=in_channels, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
         self.timestep_embedder = TimestepEmbedding(
             in_channels=in_channels, time_embed_dim=embedding_dim, sample_proj_bias=bias
         )
@@ -709,10 +803,14 @@ class Flux2TimestepGuidanceEmbeddings(nn.Module):
 
     def forward(self, timestep: torch.Tensor, guidance: torch.Tensor) -> torch.Tensor:
         timesteps_proj = self.time_proj(timestep)
-        timesteps_emb = self.timestep_embedder(timesteps_proj.to(timestep.dtype))  # (N, D)
+        timesteps_emb = self.timestep_embedder(
+            timesteps_proj.to(timestep.dtype)
+        )  # (N, D)
 
         guidance_proj = self.time_proj(guidance)
-        guidance_emb = self.guidance_embedder(guidance_proj.to(guidance.dtype))  # (N, D)
+        guidance_emb = self.guidance_embedder(
+            guidance_proj.to(guidance.dtype)
+        )  # (N, D)
 
         time_guidance_emb = timesteps_emb + guidance_emb
 
@@ -727,7 +825,9 @@ class Flux2Modulation(nn.Module):
         self.linear = nn.Linear(dim, dim * 3 * self.mod_param_sets, bias=bias)
         self.act_fn = nn.SiLU()
 
-    def forward(self, temb: torch.Tensor) -> Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]:
+    def forward(
+        self, temb: torch.Tensor
+    ) -> Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ...]:
         mod = self.act_fn(temb)
         mod = self.linear(mod)
 
@@ -735,7 +835,9 @@ class Flux2Modulation(nn.Module):
             mod = mod.unsqueeze(1)
         mod_params = torch.chunk(mod, 3 * self.mod_param_sets, dim=-1)
         # Return tuple of 3-tuples of modulation params shift/scale/gate
-        return tuple(mod_params[3 * i : 3 * (i + 1)] for i in range(self.mod_param_sets))
+        return tuple(
+            mod_params[3 * i : 3 * (i + 1)] for i in range(self.mod_param_sets)
+        )
 
 
 class Flux2Transformer2DModel(
@@ -805,19 +907,29 @@ class Flux2Transformer2DModel(
 
         # 2. Combined timestep + guidance embedding
         self.time_guidance_embed = Flux2TimestepGuidanceEmbeddings(
-            in_channels=timestep_guidance_channels, embedding_dim=self.inner_dim, bias=False
+            in_channels=timestep_guidance_channels,
+            embedding_dim=self.inner_dim,
+            bias=False,
         )
 
         # 3. Modulation (double stream and single stream blocks share modulation parameters, resp.)
         # Two sets of shift/scale/gate modulation parameters for the double stream attn and FF sub-blocks
-        self.double_stream_modulation_img = Flux2Modulation(self.inner_dim, mod_param_sets=2, bias=False)
-        self.double_stream_modulation_txt = Flux2Modulation(self.inner_dim, mod_param_sets=2, bias=False)
+        self.double_stream_modulation_img = Flux2Modulation(
+            self.inner_dim, mod_param_sets=2, bias=False
+        )
+        self.double_stream_modulation_txt = Flux2Modulation(
+            self.inner_dim, mod_param_sets=2, bias=False
+        )
         # Only one set of modulation parameters as the attn and FF sub-blocks are run in parallel for single stream
-        self.single_stream_modulation = Flux2Modulation(self.inner_dim, mod_param_sets=1, bias=False)
+        self.single_stream_modulation = Flux2Modulation(
+            self.inner_dim, mod_param_sets=1, bias=False
+        )
 
         # 4. Input projections
         self.x_embedder = nn.Linear(in_channels, self.inner_dim, bias=False)
-        self.context_embedder = nn.Linear(joint_attention_dim, self.inner_dim, bias=False)
+        self.context_embedder = nn.Linear(
+            joint_attention_dim, self.inner_dim, bias=False
+        )
 
         # 5. Double Stream Transformer Blocks
         self.transformer_blocks = nn.ModuleList(
@@ -851,9 +963,15 @@ class Flux2Transformer2DModel(
 
         # 7. Output layers
         self.norm_out = AdaLayerNormContinuous(
-            self.inner_dim, self.inner_dim, elementwise_affine=False, eps=eps, bias=False
+            self.inner_dim,
+            self.inner_dim,
+            elementwise_affine=False,
+            eps=eps,
+            bias=False,
         )
-        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=False)
+        self.proj_out = nn.Linear(
+            self.inner_dim, patch_size * patch_size * self.out_channels, bias=False
+        )
 
         self.gradient_checkpointing = False
 
@@ -868,7 +986,6 @@ class Flux2Transformer2DModel(
         else:
             raise ValueError("Invalid set gradient checkpointing")
 
-
     @property
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors
     def attn_processors(self) -> Dict[str, AttentionProcessor]:
@@ -880,7 +997,11 @@ class Flux2Transformer2DModel(
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(
+            name: str,
+            module: torch.nn.Module,
+            processors: Dict[str, AttentionProcessor],
+        ):
             if hasattr(module, "get_processor"):
                 processors[f"{name}.processor"] = module.get_processor()
 
@@ -895,7 +1016,9 @@ class Flux2Transformer2DModel(
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(
+        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
+    ):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -1008,25 +1131,30 @@ class Flux2Transformer2DModel(
             torch.cat([text_rotary_emb[1], image_rotary_emb[1]], dim=0),
         )
 
-
         # 4. Double Stream Transformer Blocks
         for index_block, block in enumerate(self.transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    double_stream_mod_img,
-                    double_stream_mod_txt,
-                    concat_rotary_emb,
-                    joint_attention_kwargs,
-                    **ckpt_kwargs,
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
+                encoder_hidden_states, hidden_states = (
+                    torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        encoder_hidden_states,
+                        double_stream_mod_img,
+                        double_stream_mod_txt,
+                        concat_rotary_emb,
+                        joint_attention_kwargs,
+                        **ckpt_kwargs,
+                    )
                 )
             else:
                 encoder_hidden_states, hidden_states = block(
@@ -1041,20 +1169,26 @@ class Flux2Transformer2DModel(
         # 5. Single Stream Transformer Blocks
         for index_block, block in enumerate(self.single_transformer_blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                encoder_hidden_states, hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    single_stream_mod,
-                    concat_rotary_emb,
-                    joint_attention_kwargs,
-                    **ckpt_kwargs,
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
+                encoder_hidden_states, hidden_states = (
+                    torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(block),
+                        hidden_states,
+                        encoder_hidden_states,
+                        single_stream_mod,
+                        concat_rotary_emb,
+                        joint_attention_kwargs,
+                        **ckpt_kwargs,
+                    )
                 )
             else:
                 encoder_hidden_states, hidden_states = block(
@@ -1079,42 +1213,55 @@ class Flux2Transformer2DModel(
 
     @classmethod
     def from_pretrained(
-        cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={},
-        low_cpu_mem_usage=False, torch_dtype=torch.bfloat16
+        cls,
+        pretrained_model_path,
+        subfolder=None,
+        transformer_additional_kwargs={},
+        low_cpu_mem_usage=False,
+        torch_dtype=torch.bfloat16,
     ):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
-        print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
+        print(
+            f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ..."
+        )
 
-        config_file = os.path.join(pretrained_model_path, 'config.json')
+        config_file = os.path.join(pretrained_model_path, "config.json")
         if not os.path.isfile(config_file):
             raise RuntimeError(f"{config_file} does not exist")
         with open(config_file, "r") as f:
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
 
         if "dict_mapping" in transformer_additional_kwargs.keys():
             for key in transformer_additional_kwargs["dict_mapping"]:
-                transformer_additional_kwargs[transformer_additional_kwargs["dict_mapping"][key]] = config[key]
+                transformer_additional_kwargs[
+                    transformer_additional_kwargs["dict_mapping"][key]
+                ] = config[key]
 
         if low_cpu_mem_usage:
             try:
                 import re
 
                 from diffusers import __version__ as diffusers_version
+
                 if diffusers_version >= "0.33.0":
-                    from diffusers.models.model_loading_utils import \
-                        load_model_dict_into_meta
+                    from diffusers.models.model_loading_utils import (
+                        load_model_dict_into_meta,
+                    )
                 else:
-                    from diffusers.models.modeling_utils import \
-                        load_model_dict_into_meta
+                    from diffusers.models.modeling_utils import (
+                        load_model_dict_into_meta,
+                    )
                 from diffusers.utils import is_accelerate_available
+
                 if is_accelerate_available():
                     import accelerate
-                
+
                 # Instantiate model with empty weights
                 with accelerate.init_empty_weights():
                     model = cls.from_config(config, **transformer_additional_kwargs)
@@ -1124,10 +1271,14 @@ class Flux2Transformer2DModel(
                     state_dict = torch.load(model_file, map_location="cpu")
                 elif os.path.exists(model_file_safetensors):
                     from safetensors.torch import load_file, safe_open
+
                     state_dict = load_file(model_file_safetensors)
                 else:
                     from safetensors.torch import load_file, safe_open
-                    model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+                    model_files_safetensors = glob.glob(
+                        os.path.join(pretrained_model_path, "*.safetensors")
+                    )
                     state_dict = {}
                     print(model_files_safetensors)
                     for _model_file_safetensors in model_files_safetensors:
@@ -1137,59 +1288,115 @@ class Flux2Transformer2DModel(
 
                 filtered_state_dict = {}
                 for key in state_dict:
-                    if key in model.state_dict() and model.state_dict()[key].size() == state_dict[key].size():
+                    if (
+                        key in model.state_dict()
+                        and model.state_dict()[key].size() == state_dict[key].size()
+                    ):
                         filtered_state_dict[key] = state_dict[key]
                     else:
-                        print(f"Skipping key '{key}' due to size mismatch or absence in model.")
-                        
+                        print(
+                            f"Skipping key '{key}' due to size mismatch or absence in model."
+                        )
+
                 model_keys = set(model.state_dict().keys())
                 loaded_keys = set(filtered_state_dict.keys())
                 missing_keys = model_keys - loaded_keys
 
-                def initialize_missing_parameters(missing_keys, model_state_dict, torch_dtype=None):
+                def initialize_missing_parameters(
+                    missing_keys, model_state_dict, torch_dtype=None
+                ):
                     initialized_dict = {}
-                    
+
                     with torch.no_grad():
                         for key in missing_keys:
                             param_shape = model_state_dict[key].shape
-                            param_dtype = torch_dtype if torch_dtype is not None else model_state_dict[key].dtype
-                            if "control" in key and key.replace("control_", "") in filtered_state_dict.keys():
-                                initialized_dict[key] = filtered_state_dict[key.replace("control_", "")].clone()
-                                print(f"Initializing missing parameter '{key}' with model.state_dict().")
+                            param_dtype = (
+                                torch_dtype
+                                if torch_dtype is not None
+                                else model_state_dict[key].dtype
+                            )
+                            if (
+                                "control" in key
+                                and key.replace("control_", "")
+                                in filtered_state_dict.keys()
+                            ):
+                                initialized_dict[key] = filtered_state_dict[
+                                    key.replace("control_", "")
+                                ].clone()
+                                print(
+                                    f"Initializing missing parameter '{key}' with model.state_dict()."
+                                )
                             elif "after_proj" in key or "before_proj" in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                                print(f"Initializing missing parameter '{key}' with zero.")
-                            elif 'weight' in key:
-                                if any(norm_type in key for norm_type in ['norm', 'ln_', 'layer_norm', 'group_norm', 'batch_norm']):
-                                    initialized_dict[key] = torch.ones(param_shape, dtype=param_dtype)
-                                elif 'embedding' in key or 'embed' in key:
-                                    initialized_dict[key] = torch.randn(param_shape, dtype=param_dtype) * 0.02
-                                elif 'head' in key or 'output' in key or 'proj_out' in key:
-                                    initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                                print(
+                                    f"Initializing missing parameter '{key}' with zero."
+                                )
+                            elif "weight" in key:
+                                if any(
+                                    norm_type in key
+                                    for norm_type in [
+                                        "norm",
+                                        "ln_",
+                                        "layer_norm",
+                                        "group_norm",
+                                        "batch_norm",
+                                    ]
+                                ):
+                                    initialized_dict[key] = torch.ones(
+                                        param_shape, dtype=param_dtype
+                                    )
+                                elif "embedding" in key or "embed" in key:
+                                    initialized_dict[key] = (
+                                        torch.randn(param_shape, dtype=param_dtype)
+                                        * 0.02
+                                    )
+                                elif (
+                                    "head" in key
+                                    or "output" in key
+                                    or "proj_out" in key
+                                ):
+                                    initialized_dict[key] = torch.zeros(
+                                        param_shape, dtype=param_dtype
+                                    )
                                 elif len(param_shape) >= 2:
-                                    initialized_dict[key] = torch.empty(param_shape, dtype=param_dtype)
+                                    initialized_dict[key] = torch.empty(
+                                        param_shape, dtype=param_dtype
+                                    )
                                     nn.init.xavier_uniform_(initialized_dict[key])
                                 else:
-                                    initialized_dict[key] = torch.randn(param_shape, dtype=param_dtype) * 0.02
-                            elif 'bias' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            elif 'running_mean' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            elif 'running_var' in key:
-                                initialized_dict[key] = torch.ones(param_shape, dtype=param_dtype)
-                            elif 'num_batches_tracked' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=torch.long)
+                                    initialized_dict[key] = (
+                                        torch.randn(param_shape, dtype=param_dtype)
+                                        * 0.02
+                                    )
+                            elif "bias" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "running_mean" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "running_var" in key:
+                                initialized_dict[key] = torch.ones(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "num_batches_tracked" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=torch.long
+                                )
                             else:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+
                     return initialized_dict
 
                 if missing_keys:
                     print(f"Missing keys will be initialized: {sorted(missing_keys)}")
                     initialized_params = initialize_missing_parameters(
-                        missing_keys, 
-                        model.state_dict(), 
-                        torch_dtype
+                        missing_keys, model.state_dict(), torch_dtype
                     )
                     filtered_state_dict.update(initialized_params)
 
@@ -1214,57 +1421,73 @@ class Flux2Transformer2DModel(
 
                     if cls._keys_to_ignore_on_load_unexpected is not None:
                         for pat in cls._keys_to_ignore_on_load_unexpected:
-                            unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+                            unexpected_keys = [
+                                k for k in unexpected_keys if re.search(pat, k) is None
+                            ]
 
                     if len(unexpected_keys) > 0:
                         print(
                             f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}"
                         )
-                
-                params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
+
+                params = [
+                    p.numel() if "." in n else 0 for n, p in model.named_parameters()
+                ]
                 print(f"### All Parameters: {sum(params) / 1e6} M")
 
-                params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+                params = [
+                    p.numel() if "attn1." in n else 0
+                    for n, p in model.named_parameters()
+                ]
                 print(f"### attn1 Parameters: {sum(params) / 1e6} M")
                 return model
             except Exception as e:
                 print(
                     f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead."
                 )
-        
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         if os.path.exists(model_file):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             from safetensors.torch import load_file, safe_open
-            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+            model_files_safetensors = glob.glob(
+                os.path.join(pretrained_model_path, "*.safetensors")
+            )
             state_dict = {}
             for _model_file_safetensors in model_files_safetensors:
                 _state_dict = load_file(_model_file_safetensors)
                 for key in _state_dict:
                     state_dict[key] = _state_dict[key]
-        
-        tmp_state_dict = {} 
+
+        tmp_state_dict = {}
         for key in state_dict:
-            if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
+            if (
+                key in model.state_dict().keys()
+                and model.state_dict()[key].size() == state_dict[key].size()
+            ):
                 tmp_state_dict[key] = state_dict[key]
             else:
                 print(key, "Size don't match, skip")
-                
+
         state_dict = tmp_state_dict
 
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
-        
+
         params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
         print(f"### All Parameters: {sum(params) / 1e6} M")
 
-        params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+        params = [
+            p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()
+        ]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
-        
+
         model = model.to(torch_dtype)
         return model

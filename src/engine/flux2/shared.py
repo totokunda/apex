@@ -4,22 +4,33 @@ from typing import Union, List, Optional, Dict, Any, Callable, Tuple
 from PIL import Image
 from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
-from src.engine.base_engine import BaseEngine 
+from src.engine.base_engine import BaseEngine
 from src.utils.progress import safe_emit_progress
 from diffusers.pipelines.flux2.image_processor import Flux2ImageProcessor
 
 
 class Flux2Shared(BaseEngine):
-    
+
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1)
+            if getattr(self, "vae", None)
+            else 8
+        )
         # Flux latents are turned into 2x2 patches and packed. This means the latent width and height has to be divisible
         # by the patch size. So the vae scale factor is multiplied by the patch size to account for this
-        self.image_processor = Flux2ImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
-        self.diffusers_image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
+        self.image_processor = Flux2ImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
+        self.diffusers_image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
         self.mask_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae_scale_factor, do_normalize=False, do_binarize=True, do_convert_grayscale=True
+            vae_scale_factor=self.vae_scale_factor,
+            do_normalize=False,
+            do_binarize=True,
+            do_convert_grayscale=True,
         )
         self.tokenizer_max_length = 512
         self.default_sample_size = 128
@@ -27,7 +38,7 @@ class Flux2Shared(BaseEngine):
         # fmt: off
         self.system_message = "You are an AI that reasons about image descriptions. You give structured responses focusing on object relationships, object attribution and actions without speculation."
         # fmt: on
-        
+
     def encode_prompt(
         self,
         prompt: Union[str, List[str]],
@@ -52,21 +63,30 @@ class Flux2Shared(BaseEngine):
                 system_message=self.system_message,
                 hidden_states_layers=text_encoder_out_layers,
             )
-            
 
         batch_size, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
-        prompt_embeds = prompt_embeds.view(batch_size * num_images_per_prompt, seq_len, -1)
+        prompt_embeds = prompt_embeds.view(
+            batch_size * num_images_per_prompt, seq_len, -1
+        )
 
         text_ids = self._prepare_text_ids(prompt_embeds)
         text_ids = text_ids.to(device)
         return prompt_embeds, text_ids
 
-    def _encode_vae_image(self, image: torch.Tensor, generator: torch.Generator, offload: bool = True):
+    def _encode_vae_image(
+        self, image: torch.Tensor, generator: torch.Generator, offload: bool = True
+    ):
         if image.ndim != 4:
             raise ValueError(f"Expected image dims 4, got {image.ndim}.")
 
-        image_latents = self.vae_encode(image, sample_generator=generator, sample_mode="mode", offload=offload, normalize_latents=False)
+        image_latents = self.vae_encode(
+            image,
+            sample_generator=generator,
+            sample_mode="mode",
+            offload=offload,
+            normalize_latents=False,
+        )
         image_latents = self._patchify_latents(image_latents)
         if not self.vae:
             self.load_component_by_type("vae")
@@ -75,7 +95,7 @@ class Flux2Shared(BaseEngine):
         if offload:
             self._offload(self.vae)
         return image_latents
-    
+
     @staticmethod
     def compute_empirical_mu(image_seq_len: int, num_steps: int) -> float:
         a1, b1 = 8.73809524e-05, 1.89833333
@@ -111,8 +131,7 @@ class Flux2Shared(BaseEngine):
             ]
             for prompt in cleaned_txt
         ]
-        
-    
+
     def prepare_latents(
         self,
         batch_size,
@@ -136,7 +155,9 @@ class Flux2Shared(BaseEngine):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
         else:
             latents = latents.to(device=device, dtype=dtype)
 
@@ -163,8 +184,10 @@ class Flux2Shared(BaseEngine):
         prompt = [prompt] if isinstance(prompt, str) else prompt
 
         # Format input messages
-        messages_batch = self.format_text_input(prompts=prompt, system_message=system_message)
-        
+        messages_batch = self.format_text_input(
+            prompts=prompt, system_message=system_message
+        )
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -181,26 +204,28 @@ class Flux2Shared(BaseEngine):
             truncation=True,
             max_length=max_sequence_length,
         )
-        
-        # check if inputs in cache 
-        
+
+        # check if inputs in cache
+
         if self.text_encoder.enable_cache:
-            hash = self.text_encoder.hash({
-                "input_ids": inputs["input_ids"],
-                "attention_mask": inputs["attention_mask"],
-                "max_sequence_length": max_sequence_length,
-                "system_message": system_message,
-                "hidden_states_layers": hidden_states_layers,
-            })
+            hash = self.text_encoder.hash(
+                {
+                    "input_ids": inputs["input_ids"],
+                    "attention_mask": inputs["attention_mask"],
+                    "max_sequence_length": max_sequence_length,
+                    "system_message": system_message,
+                    "hidden_states_layers": hidden_states_layers,
+                }
+            )
             cached = self.text_encoder.load_cached(hash)
             if cached is not None:
                 return cached[0].to(device=device, dtype=dtype)
         else:
             hash = None
-            
+
         if not self.text_encoder.model_loaded:
             self.text_encoder.model = self.text_encoder.load_model(no_weights=False)
-        
+
         self.to_device(self.text_encoder, device=device)
 
         # Move to device
@@ -216,12 +241,16 @@ class Flux2Shared(BaseEngine):
         )
 
         # Only use outputs from intermediate layers and stack them
-        out = torch.stack([output.hidden_states[k] for k in hidden_states_layers], dim=1)
+        out = torch.stack(
+            [output.hidden_states[k] for k in hidden_states_layers], dim=1
+        )
         out = out.to(dtype=dtype, device=device)
 
         batch_size, num_channels, seq_len, hidden_dim = out.shape
-        prompt_embeds = out.permute(0, 2, 1, 3).reshape(batch_size, seq_len, num_channels * hidden_dim)
-        
+        prompt_embeds = out.permute(0, 2, 1, 3).reshape(
+            batch_size, seq_len, num_channels * hidden_dim
+        )
+
         if self.text_encoder.enable_cache and hash is not None:
             self.text_encoder.cache(hash, prompt_embeds)
 
@@ -309,7 +338,9 @@ class Flux2Shared(BaseEngine):
         """
 
         if not isinstance(image_latents, list):
-            raise ValueError(f"Expected `image_latents` to be a list, got {type(image_latents)}.")
+            raise ValueError(
+                f"Expected `image_latents` to be a list, got {type(image_latents)}."
+            )
 
         # create time offset for each reference image
         t_coords = [scale + scale * t for t in torch.arange(0, len(image_latents))]
@@ -320,7 +351,9 @@ class Flux2Shared(BaseEngine):
             x = x.squeeze(0)
             _, height, width = x.shape
 
-            x_ids = torch.cartesian_prod(t, torch.arange(height), torch.arange(width), torch.arange(1))
+            x_ids = torch.cartesian_prod(
+                t, torch.arange(height), torch.arange(width), torch.arange(1)
+            )
             image_latent_ids.append(x_ids)
 
         image_latent_ids = torch.cat(image_latent_ids, dim=0)
@@ -331,17 +364,25 @@ class Flux2Shared(BaseEngine):
     @staticmethod
     def _patchify_latents(latents):
         batch_size, num_channels_latents, height, width = latents.shape
-        latents = latents.view(batch_size, num_channels_latents, height // 2, 2, width // 2, 2)
+        latents = latents.view(
+            batch_size, num_channels_latents, height // 2, 2, width // 2, 2
+        )
         latents = latents.permute(0, 1, 3, 5, 2, 4)
-        latents = latents.reshape(batch_size, num_channels_latents * 4, height // 2, width // 2)
+        latents = latents.reshape(
+            batch_size, num_channels_latents * 4, height // 2, width // 2
+        )
         return latents
 
     @staticmethod
     def _unpatchify_latents(latents):
         batch_size, num_channels_latents, height, width = latents.shape
-        latents = latents.reshape(batch_size, num_channels_latents // (2 * 2), 2, 2, height, width)
+        latents = latents.reshape(
+            batch_size, num_channels_latents // (2 * 2), 2, 2, height, width
+        )
         latents = latents.permute(0, 1, 4, 2, 5, 3)
-        latents = latents.reshape(batch_size, num_channels_latents // (2 * 2), height * 2, width * 2)
+        latents = latents.reshape(
+            batch_size, num_channels_latents // (2 * 2), height * 2, width * 2
+        )
         return latents
 
     @staticmethod
@@ -351,12 +392,16 @@ class Flux2Shared(BaseEngine):
         """
 
         batch_size, num_channels, height, width = latents.shape
-        latents = latents.reshape(batch_size, num_channels, height * width).permute(0, 2, 1)
+        latents = latents.reshape(batch_size, num_channels, height * width).permute(
+            0, 2, 1
+        )
 
         return latents
 
     @staticmethod
-    def _unpack_latents_with_ids(x: torch.Tensor, x_ids: torch.Tensor) -> list[torch.Tensor]:
+    def _unpack_latents_with_ids(
+        x: torch.Tensor, x_ids: torch.Tensor
+    ) -> list[torch.Tensor]:
         """
         using position ids to scatter tokens into place
         """
@@ -380,8 +425,7 @@ class Flux2Shared(BaseEngine):
             x_list.append(out)
 
         return torch.stack(x_list, dim=0)
-    
-    
+
     def prepare_image_latents(
         self,
         images: List[torch.Tensor],
@@ -394,7 +438,9 @@ class Flux2Shared(BaseEngine):
         image_latents = []
         for image in images:
             image = image.to(device=device, dtype=dtype)
-            imagge_latent = self._encode_vae_image(image=image, generator=generator, offload=offload)
+            imagge_latent = self._encode_vae_image(
+                image=image, generator=generator, offload=offload
+            )
             image_latents.append(imagge_latent)  # (1, 128, 32, 32)
 
         image_latent_ids = self._prepare_image_ids(image_latents)

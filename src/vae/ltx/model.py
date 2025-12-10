@@ -834,8 +834,6 @@ class AutoencoderKLWrapper(ModelMixin, ConfigMixin):
     ) -> Union[DecoderOutput, torch.FloatTensor]:
         z = self._unnormalize_latent_channels(z)
         z = self.post_quant_conv(z)
-        
-
 
         if "timestep" in self.decoder_params:
             dec = self.decoder(z, target_shape=target_shape, timestep=timestep)
@@ -891,7 +889,7 @@ class AutoencoderKLWrapper(ModelMixin, ConfigMixin):
                 self._hw_tiled_decode(z, target_shape)
                 if self.use_hw_tiling
                 else self._decode(z, target_shape=target_shape, timestep=timestep)
-              )
+            )
 
         if not return_dict:
             return (decoded,)

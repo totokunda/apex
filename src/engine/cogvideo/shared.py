@@ -12,6 +12,7 @@ from contextlib import nullcontext
 from src.utils.type import EnumType
 import math
 
+
 class CogVideoShared(BaseEngine):
     """Base class for CogVideo engine implementations containing common functionality"""
 
@@ -260,7 +261,6 @@ class CogVideoShared(BaseEngine):
         else:
             raise AttributeError("Could not access latents of provided encoder_output")
 
-
     def _add_noise_to_reference_video(self, image, ratio=None):
         if ratio is None:
             sigma = torch.normal(mean=-3.0, std=0.5, size=(image.shape[0],)).to(
@@ -274,8 +274,6 @@ class CogVideoShared(BaseEngine):
         image_noise = torch.where(image == -1, torch.zeros_like(image), image_noise)
         image = image + image_noise
         return image
-
-    
 
     def _resize_mask(self, mask, latent, process_first_frame_only=True):
         latent_size = latent.size()
@@ -334,9 +332,7 @@ class CogVideoShared(BaseEngine):
             len(timesteps) - num_inference_steps * scheduler.order, 0
         )
 
-        with self._progress_bar(
-            total=num_inference_steps, desc=f"Denoising"
-        ) as pbar:
+        with self._progress_bar(total=num_inference_steps, desc=f"Denoising") as pbar:
             old_pred_original_sample = None
             for i, t in enumerate(timesteps):
                 # Expand latents if doing classifier free guidance
@@ -424,7 +420,12 @@ class CogVideoShared(BaseEngine):
 
                 latents = latents.to(transformer_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 if i == len(timesteps) - 1 or (

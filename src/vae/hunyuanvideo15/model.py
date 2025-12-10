@@ -31,7 +31,6 @@ from diffusers.models.modeling_outputs import AutoencoderKLOutput
 from diffusers.models.modeling_utils import ModelMixin
 
 
-
 @dataclass
 class DecoderOutput(BaseOutput):
     sample: torch.FloatTensor
@@ -45,13 +44,17 @@ def swish(x: Tensor, inplace=False) -> Tensor:
 
 def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
     """Forward with optional gradient checkpointing."""
+
     def create_custom_forward(module):
         def custom_forward(*inputs):
             return module(*inputs)
+
         return custom_forward
 
     if use_checkpointing:
-        return torch.utils.checkpoint.checkpoint(create_custom_forward(module), *inputs, use_reentrant=False)
+        return torch.utils.checkpoint.checkpoint(
+            create_custom_forward(module), *inputs, use_reentrant=False
+        )
     else:
         return module(*inputs)
 
@@ -60,13 +63,16 @@ def forward_with_checkpointing(module, *inputs, use_checkpointing=False):
 # https://github.com/huggingface/diffusers/blob/c9ff360966327ace3faad3807dc871a4e5447501/src/diffusers/models/autoencoders/autoencoder_kl_cogvideox.py#L38
 class PatchCausalConv3d(nn.Conv3d):
     r"""Causal Conv3d with efficient patch processing for large tensors."""
+
     def find_split_indices(self, seq_len, part_num):
         ideal_interval = seq_len / part_num
         possible_indices = list(range(0, seq_len, self.stride[0]))
         selected_indices = []
 
         for i in range(1, part_num):
-            closest = min(possible_indices, key=lambda x: abs(x - round(i * ideal_interval)))
+            closest = min(
+                possible_indices, key=lambda x: abs(x - round(i * ideal_interval))
+            )
             if closest not in selected_indices:
                 selected_indices.append(closest)
 
@@ -86,10 +92,20 @@ class PatchCausalConv3d(nn.Conv3d):
             kernel_size = self.kernel_size[0]
             part_num = int(memory_count / 2) + 1
             split_indices = self.find_split_indices(T, part_num)
-            input_chunks = torch.tensor_split(input, split_indices, dim=2) if len(split_indices) > 0 else [input]
+            input_chunks = (
+                torch.tensor_split(input, split_indices, dim=2)
+                if len(split_indices) > 0
+                else [input]
+            )
             if kernel_size > 1:
                 input_chunks = [input_chunks[0]] + [
-                    torch.cat((input_chunks[i - 1][:, :, -kernel_size + 1:], input_chunks[i]), dim=2)
+                    torch.cat(
+                        (
+                            input_chunks[i - 1][:, :, -kernel_size + 1 :],
+                            input_chunks[i],
+                        ),
+                        dim=2,
+                    )
                     for i in range(1, len(input_chunks))
                 ]
             output_chunks = []
@@ -99,8 +115,6 @@ class PatchCausalConv3d(nn.Conv3d):
             return output
         else:
             return super().forward(input)
-
-
 
 
 class RMS_norm(nn.Module):
@@ -114,12 +128,15 @@ class RMS_norm(nn.Module):
         self.channel_first = channel_first
         self.scale = dim**0.5
         self.gamma = nn.Parameter(torch.ones(shape))
-        self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.
+        self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x):
-        return F.normalize(
-            x, dim=(1 if self.channel_first else -1)
-        ) * self.scale * self.gamma + self.bias
+        return (
+            F.normalize(x, dim=(1 if self.channel_first else -1))
+            * self.scale
+            * self.gamma
+            + self.bias
+        )
 
 
 class CausalConv3d(nn.Module):
@@ -132,31 +149,61 @@ class CausalConv3d(nn.Module):
         kernel_size: Union[int, Tuple[int, int, int]],
         stride: Union[int, Tuple[int, int, int]] = 1,
         dilation: Union[int, Tuple[int, int, int]] = 1,
-        pad_mode='replicate',
+        pad_mode="replicate",
         disable_causal=False,
         enable_patch_conv=False,
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
         self.pad_mode = pad_mode
         if disable_causal:
-            padding = (kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2)
+            padding = (
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+            )
         else:
-            padding = (kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size - 1, 0)  # W, H, T
+            padding = (
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size // 2,
+                kernel_size - 1,
+                0,
+            )  # W, H, T
         self.time_causal_padding = padding
 
         if enable_patch_conv:
-            self.conv = PatchCausalConv3d(chan_in, chan_out, kernel_size, stride=stride, dilation=dilation, **kwargs)
+            self.conv = PatchCausalConv3d(
+                chan_in,
+                chan_out,
+                kernel_size,
+                stride=stride,
+                dilation=dilation,
+                **kwargs,
+            )
         else:
-            self.conv = nn.Conv3d(chan_in, chan_out, kernel_size, stride=stride, dilation=dilation, **kwargs)
+            self.conv = nn.Conv3d(
+                chan_in,
+                chan_out,
+                kernel_size,
+                stride=stride,
+                dilation=dilation,
+                **kwargs,
+            )
 
     def forward(self, x):
         x = F.pad(x, self.time_causal_padding, mode=self.pad_mode)
         return self.conv(x)
 
 
-def prepare_causal_attention_mask(n_frame: int, n_hw: int, dtype, device, batch_size: int = None):
+def prepare_causal_attention_mask(
+    n_frame: int, n_hw: int, dtype, device, batch_size: int = None
+):
     """Prepare a causal attention mask for 3D videos.
 
     Args:
@@ -203,8 +250,12 @@ class AttnBlock(nn.Module):
         q = rearrange(q, "b c f h w -> b 1 (f h w) c").contiguous()
         k = rearrange(k, "b c f h w -> b 1 (f h w) c").contiguous()
         v = rearrange(v, "b c f h w -> b 1 (f h w) c").contiguous()
-        attention_mask = prepare_causal_attention_mask(f, h * w, h_.dtype, h_.device, batch_size=b)
-        h_ = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask.unsqueeze(1))
+        attention_mask = prepare_causal_attention_mask(
+            f, h * w, h_.dtype, h_.device, batch_size=b
+        )
+        h_ = nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=attention_mask.unsqueeze(1)
+        )
 
         return rearrange(h_, "b 1 (f h w) c -> b c f h w", f=f, h=h, w=w, c=c, b=b)
 
@@ -227,7 +278,9 @@ class ResnetBlock(nn.Module):
         self.norm2 = RMS_norm(out_channels, images=False)
         self.conv2 = CausalConv3d(out_channels, out_channels, kernel_size=3)
         if self.in_channels != self.out_channels:
-            self.nin_shortcut = Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+            self.nin_shortcut = Conv3d(
+                in_channels, out_channels, kernel_size=1, stride=1, padding=0
+            )
 
     def forward(self, x):
         h = x
@@ -246,7 +299,9 @@ class ResnetBlock(nn.Module):
 
 class Downsample(nn.Module):
 
-    def __init__(self, in_channels: int, out_channels: int, add_temporal_downsample: bool = True):
+    def __init__(
+        self, in_channels: int, out_channels: int, add_temporal_downsample: bool = True
+    ):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_downsample else 1 * 2 * 2
         assert out_channels % factor == 0
@@ -259,37 +314,61 @@ class Downsample(nn.Module):
         h = self.conv(x)
         if self.add_temporal_downsample:
             h_first = h[:, :, :1, :, :]
-            h_first = rearrange(h_first, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2)
+            h_first = rearrange(
+                h_first, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2
+            )
             h_first = torch.cat([h_first, h_first], dim=1)
             h_next = h[:, :, 1:, :, :]
-            h_next = rearrange(h_next, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2)
+            h_next = rearrange(
+                h_next,
+                "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w",
+                r1=r1,
+                r2=2,
+                r3=2,
+            )
             h = torch.cat([h_first, h_next], dim=2)
             # shortcut computation
             x_first = x[:, :, :1, :, :]
-            x_first = rearrange(x_first, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2)
+            x_first = rearrange(
+                x_first, "b c f (h r2) (w r3) -> b (r2 r3 c) f h w", r2=2, r3=2
+            )
             B, C, T, H, W = x_first.shape
-            x_first = x_first.view(B, h.shape[1], self.group_size // 2, T, H, W).mean(dim=2)
+            x_first = x_first.view(B, h.shape[1], self.group_size // 2, T, H, W).mean(
+                dim=2
+            )
 
             x_next = x[:, :, 1:, :, :]
-            x_next = rearrange(x_next, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2)
+            x_next = rearrange(
+                x_next,
+                "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w",
+                r1=r1,
+                r2=2,
+                r3=2,
+            )
             B, C, T, H, W = x_next.shape
             x_next = x_next.view(B, h.shape[1], self.group_size, T, H, W).mean(dim=2)
             shortcut = torch.cat([x_first, x_next], dim=2)
         else:
-            h = rearrange(h, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2)
-            shortcut = rearrange(x, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2)
+            h = rearrange(
+                h, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2
+            )
+            shortcut = rearrange(
+                x, "b c (f r1) (h r2) (w r3) -> b (r1 r2 r3 c) f h w", r1=r1, r2=2, r3=2
+            )
             B, C, T, H, W = shortcut.shape
-            shortcut = shortcut.view(B, h.shape[1], self.group_size, T, H, W).mean(dim=2)
+            shortcut = shortcut.view(B, h.shape[1], self.group_size, T, H, W).mean(
+                dim=2
+            )
 
         return h + shortcut
-
-
 
 
 class Upsample(nn.Module):
     """Hierarchical upsampling with temporal/ spatial support."""
 
-    def __init__(self, in_channels: int, out_channels: int, add_temporal_upsample: bool = True):
+    def __init__(
+        self, in_channels: int, out_channels: int, add_temporal_upsample: bool = True
+    ):
         super().__init__()
         factor = 2 * 2 * 2 if add_temporal_upsample else 1 * 2 * 2
         self.conv = CausalConv3d(in_channels, out_channels * factor, kernel_size=3)
@@ -301,26 +380,50 @@ class Upsample(nn.Module):
         h = self.conv(x)
         if self.add_temporal_upsample:
             h_first = h[:, :, :1, :, :]
-            h_first = rearrange(h_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
+            h_first = rearrange(
+                h_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2
+            )
             h_first = h_first[:, : h_first.shape[1] // 2]
             h_next = h[:, :, 1:, :, :]
-            h_next = rearrange(h_next, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
+            h_next = rearrange(
+                h_next,
+                "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)",
+                r1=r1,
+                r2=2,
+                r3=2,
+            )
             h = torch.cat([h_first, h_next], dim=2)
 
             # shortcut computation
             x_first = x[:, :, :1, :, :]
-            x_first = rearrange(x_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2)
+            x_first = rearrange(
+                x_first, "b (r2 r3 c) f h w -> b c f (h r2) (w r3)", r2=2, r3=2
+            )
             x_first = x_first.repeat_interleave(repeats=self.repeats // 2, dim=1)
 
             x_next = x[:, :, 1:, :, :]
-            x_next = rearrange(x_next, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
+            x_next = rearrange(
+                x_next,
+                "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)",
+                r1=r1,
+                r2=2,
+                r3=2,
+            )
             x_next = x_next.repeat_interleave(repeats=self.repeats, dim=1)
             shortcut = torch.cat([x_first, x_next], dim=2)
 
         else:
-            h = rearrange(h, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
+            h = rearrange(
+                h, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2
+            )
             shortcut = x.repeat_interleave(repeats=self.repeats, dim=1)
-            shortcut = rearrange(shortcut, "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)", r1=r1, r2=2, r3=2)
+            shortcut = rearrange(
+                shortcut,
+                "b (r1 r2 r3 c) f h w -> b c (f r1) (h r2) (w r3)",
+                r1=r1,
+                r2=2,
+                r3=2,
+            )
         return h + shortcut
 
 
@@ -359,11 +462,19 @@ class Encoder(nn.Module):
             down.block = block
 
             add_spatial_downsample = bool(i_level < np.log2(ffactor_spatial))
-            add_temporal_downsample = add_spatial_downsample and bool(i_level >= np.log2(ffactor_spatial // ffactor_temporal))
+            add_temporal_downsample = add_spatial_downsample and bool(
+                i_level >= np.log2(ffactor_spatial // ffactor_temporal)
+            )
             if add_spatial_downsample or add_temporal_downsample:
                 assert i_level < len(block_out_channels) - 1
-                block_out = block_out_channels[i_level + 1] if downsample_match_channel else block_in
-                down.downsample = Downsample(block_in, block_out, add_temporal_downsample)
+                block_out = (
+                    block_out_channels[i_level + 1]
+                    if downsample_match_channel
+                    else block_in
+                )
+                down.downsample = Downsample(
+                    block_in, block_out, add_temporal_downsample
+                )
                 block_in = block_out
             self.down.append(down)
 
@@ -387,18 +498,34 @@ class Encoder(nn.Module):
         h = self.conv_in(x)
         for i_level in range(len(self.block_out_channels)):
             for i_block in range(self.num_res_blocks):
-                h = forward_with_checkpointing(self.down[i_level].block[i_block], h, use_checkpointing=use_checkpointing)
+                h = forward_with_checkpointing(
+                    self.down[i_level].block[i_block],
+                    h,
+                    use_checkpointing=use_checkpointing,
+                )
             if hasattr(self.down[i_level], "downsample"):
-                h = forward_with_checkpointing(self.down[i_level].downsample, h, use_checkpointing=use_checkpointing)
+                h = forward_with_checkpointing(
+                    self.down[i_level].downsample,
+                    h,
+                    use_checkpointing=use_checkpointing,
+                )
 
         # middle
-        h = forward_with_checkpointing(self.mid.block_1, h, use_checkpointing=use_checkpointing)
-        h = forward_with_checkpointing(self.mid.attn_1, h, use_checkpointing=use_checkpointing)
-        h = forward_with_checkpointing(self.mid.block_2, h, use_checkpointing=use_checkpointing)
+        h = forward_with_checkpointing(
+            self.mid.block_1, h, use_checkpointing=use_checkpointing
+        )
+        h = forward_with_checkpointing(
+            self.mid.attn_1, h, use_checkpointing=use_checkpointing
+        )
+        h = forward_with_checkpointing(
+            self.mid.block_2, h, use_checkpointing=use_checkpointing
+        )
 
         # end
         group_size = self.block_out_channels[-1] // (2 * self.z_channels)
-        shortcut = rearrange(h, "b (c r) f h w -> b c r f h w", r=group_size).mean(dim=2)
+        shortcut = rearrange(h, "b (c r) f h w -> b c r f h w", r=group_size).mean(
+            dim=2
+        )
         h = self.norm_out(h)
         h = swish(h, inplace=True)
         h = self.conv_out(h)
@@ -450,7 +577,11 @@ class Decoder(nn.Module):
             add_temporal_upsample = bool(i_level < np.log2(ffactor_temporal))
             if add_spatial_upsample or add_temporal_upsample:
                 assert i_level < len(block_out_channels) - 1
-                block_out = block_out_channels[i_level + 1] if upsample_match_channel else block_in
+                block_out = (
+                    block_out_channels[i_level + 1]
+                    if upsample_match_channel
+                    else block_in
+                )
                 up.upsample = Upsample(block_in, block_out, add_temporal_upsample)
                 block_in = block_out
             self.up.append(up)
@@ -470,16 +601,28 @@ class Decoder(nn.Module):
         h = self.conv_in(z) + z.repeat_interleave(repeats=repeats, dim=1)
 
         # middle
-        h = forward_with_checkpointing(self.mid.block_1, h, use_checkpointing=use_checkpointing)
-        h = forward_with_checkpointing(self.mid.attn_1, h, use_checkpointing=use_checkpointing)
-        h = forward_with_checkpointing(self.mid.block_2, h, use_checkpointing=use_checkpointing)
+        h = forward_with_checkpointing(
+            self.mid.block_1, h, use_checkpointing=use_checkpointing
+        )
+        h = forward_with_checkpointing(
+            self.mid.attn_1, h, use_checkpointing=use_checkpointing
+        )
+        h = forward_with_checkpointing(
+            self.mid.block_2, h, use_checkpointing=use_checkpointing
+        )
 
         # upsampling
         for i_level in range(len(self.block_out_channels)):
             for i_block in range(self.num_res_blocks + 1):
-                h = forward_with_checkpointing(self.up[i_level].block[i_block], h, use_checkpointing=use_checkpointing)
+                h = forward_with_checkpointing(
+                    self.up[i_level].block[i_block],
+                    h,
+                    use_checkpointing=use_checkpointing,
+                )
             if hasattr(self.up[i_level], "upsample"):
-                h = forward_with_checkpointing(self.up[i_level].upsample, h, use_checkpointing=use_checkpointing)
+                h = forward_with_checkpointing(
+                    self.up[i_level].upsample, h, use_checkpointing=use_checkpointing
+                )
 
         # end
         h = self.norm_out(h)
@@ -490,6 +633,7 @@ class Decoder(nn.Module):
 
 class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
     """KL regularized 3D Conv VAE with advanced tiling and slicing strategies."""
+
     _supports_gradient_checkpointing = True
 
     @register_to_config
@@ -547,23 +691,24 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
 
         self._tile_parallelism_enabled = False
 
-    def set_tile_sample_min_size(self, sample_size: int, tile_overlap_factor: float = 0.2):
+    def set_tile_sample_min_size(
+        self, sample_size: int, tile_overlap_factor: float = 0.2
+    ):
         self.tile_sample_min_size = sample_size
         self.tile_latent_min_size = sample_size // self.ffactor_spatial
         self.tile_overlap_factor = tile_overlap_factor
 
-        assert (self.tile_latent_min_size * self.tile_overlap_factor).is_integer(), \
-            "self.tile_latent_min_size multiplied by tile_overlap_factor must be an integer"
-
+        assert (
+            self.tile_latent_min_size * self.tile_overlap_factor
+        ).is_integer(), "self.tile_latent_min_size multiplied by tile_overlap_factor must be an integer"
 
     def _set_gradient_checkpointing(self, module, value=False):
         """Enable or disable gradient checkpointing on encoder and decoder."""
         if isinstance(module, (Encoder, Decoder)):
             module.gradient_checkpointing = value
 
-
     def enable_temporal_tiling(self, use_tiling: bool = True):
-        raise RuntimeError('Temporal tiling is not supported for this VAE.')
+        raise RuntimeError("Temporal tiling is not supported for this VAE.")
         self.use_temporal_tiling = use_tiling
 
     def disable_temporal_tiling(self):
@@ -591,21 +736,27 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         """Blend tensor b horizontally into a at blend_extent region."""
         blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
         for x in range(blend_extent):
-            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, :, x] * (x / blend_extent)
+            b[:, :, :, :, x] = a[:, :, :, :, -blend_extent + x] * (
+                1 - x / blend_extent
+            ) + b[:, :, :, :, x] * (x / blend_extent)
         return b
 
     def blend_v(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int):
         """Blend tensor b vertically into a at blend_extent region."""
         blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
         for y in range(blend_extent):
-            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (1 - y / blend_extent) + b[:, :, :, y, :] * (y / blend_extent)
+            b[:, :, :, y, :] = a[:, :, :, -blend_extent + y, :] * (
+                1 - y / blend_extent
+            ) + b[:, :, :, y, :] * (y / blend_extent)
         return b
 
     def blend_t(self, a: torch.Tensor, b: torch.Tensor, blend_extent: int):
         """Blend tensor b temporally into a at blend_extent region."""
         blend_extent = min(a.shape[-3], b.shape[-3], blend_extent)
         for x in range(blend_extent):
-            b[:, :, x, :, :] = a[:, :, -blend_extent + x, :, :] * (1 - x / blend_extent) + b[:, :, x, :, :] * (x / blend_extent)
+            b[:, :, x, :, :] = a[:, :, -blend_extent + x, :, :] * (
+                1 - x / blend_extent
+            ) + b[:, :, x, :, :] * (x / blend_extent)
         return b
 
     def spatial_tiled_encode(self, x: torch.Tensor):
@@ -619,7 +770,13 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         for i in range(0, H, overlap_size):
             row = []
             for j in range(0, W, overlap_size):
-                tile = x[:, :, :, i: i + self.tile_sample_min_size, j: j + self.tile_sample_min_size]
+                tile = x[
+                    :,
+                    :,
+                    :,
+                    i : i + self.tile_sample_min_size,
+                    j : j + self.tile_sample_min_size,
+                ]
                 tile = self.encoder(tile)
                 row.append(tile)
             rows.append(row)
@@ -638,7 +795,7 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
 
     def temporal_tiled_encode(self, x: torch.Tensor):
         """Tiled temporal encoding for large video sequences."""
-        raise RuntimeError('Temporal tiling is not supported for this VAE.')
+        raise RuntimeError("Temporal tiling is not supported for this VAE.")
         B, C, T, H, W = x.shape
         overlap_size = int(self.tile_sample_min_tsize * (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_latent_min_tsize * self.tile_overlap_factor)
@@ -646,8 +803,11 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
 
         row = []
         for i in range(0, T, overlap_size):
-            tile = x[:, :, i: i + self.tile_sample_min_tsize + 1, :, :]
-            if self.use_spatial_tiling and (tile.shape[-1] > self.tile_sample_min_size or tile.shape[-2] > self.tile_sample_min_size):
+            tile = x[:, :, i : i + self.tile_sample_min_tsize + 1, :, :]
+            if self.use_spatial_tiling and (
+                tile.shape[-1] > self.tile_sample_min_size
+                or tile.shape[-2] > self.tile_sample_min_size
+            ):
                 tile = self.spatial_tiled_encode(tile)
             else:
                 tile = self.encoder(tile)
@@ -660,13 +820,13 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
                 tile = self.blend_t(row[i - 1], tile, blend_extent)
                 result_row.append(tile[:, :, :t_limit, :, :])
             else:
-                result_row.append(tile[:, :, :t_limit + 1, :, :])
+                result_row.append(tile[:, :, : t_limit + 1, :, :])
         moments = torch.cat(result_row, dim=-3)
         return moments
 
     def enable_tile_parallelism(self):
         self._tile_parallelism_enabled = True
-    
+
     def disable_tile_parallelism(self):
         self._tile_parallelism_enabled = False
 
@@ -681,7 +841,13 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         for i in range(0, H, overlap_size):
             row = []
             for j in range(0, W, overlap_size):
-                tile = z[:, :, :, i: i + self.tile_latent_min_size, j: j + self.tile_latent_min_size]
+                tile = z[
+                    :,
+                    :,
+                    :,
+                    i : i + self.tile_latent_min_size,
+                    j : j + self.tile_latent_min_size,
+                ]
                 decoded = self.decoder(tile)
                 row.append(decoded)
             rows.append(row)
@@ -701,7 +867,7 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
 
     def temporal_tiled_decode(self, z: torch.Tensor):
         """Tiled temporal decoding for long sequence latents."""
-        raise RuntimeError('Temporal tiling is not supported for this VAE.')
+        raise RuntimeError("Temporal tiling is not supported for this VAE.")
         B, C, T, H, W = z.shape
         overlap_size = int(self.tile_latent_min_tsize * (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_sample_min_tsize * self.tile_overlap_factor)
@@ -710,8 +876,11 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
 
         row = []
         for i in range(0, T, overlap_size):
-            tile = z[:, :, i: i + self.tile_latent_min_tsize + 1, :, :]
-            if self.use_spatial_tiling and (tile.shape[-1] > self.tile_latent_min_size or tile.shape[-2] > self.tile_latent_min_size):
+            tile = z[:, :, i : i + self.tile_latent_min_tsize + 1, :, :]
+            if self.use_spatial_tiling and (
+                tile.shape[-1] > self.tile_latent_min_size
+                or tile.shape[-2] > self.tile_latent_min_size
+            ):
                 decoded = self.spatial_tiled_decode(tile)
             else:
                 decoded = self.decoder(tile)
@@ -725,7 +894,7 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
                 tile = self.blend_t(row[i - 1], tile, blend_extent)
                 result_row.append(tile[:, :, :t_limit, :, :])
             else:
-                result_row.append(tile[:, :, :t_limit + 1, :, :])
+                result_row.append(tile[:, :, : t_limit + 1, :, :])
         dec = torch.cat(result_row, dim=-3)
         return dec
 
@@ -734,7 +903,10 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         def _encode(x):
             if self.use_temporal_tiling and x.shape[-3] > self.tile_sample_min_tsize:
                 return self.temporal_tiled_encode(x)
-            if self.use_spatial_tiling and (x.shape[-1] > self.tile_sample_min_size or x.shape[-2] > self.tile_sample_min_size):
+            if self.use_spatial_tiling and (
+                x.shape[-1] > self.tile_sample_min_size
+                or x.shape[-2] > self.tile_sample_min_size
+            ):
                 return self.spatial_tiled_encode(x)
             return self.encoder(x)
 
@@ -757,7 +929,10 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         def _decode(z):
             if self.use_temporal_tiling and z.shape[-3] > self.tile_latent_min_tsize:
                 return self.temporal_tiled_decode(z)
-            if self.use_spatial_tiling and (z.shape[-1] > self.tile_latent_min_size or z.shape[-2] > self.tile_latent_min_size):
+            if self.use_spatial_tiling and (
+                z.shape[-1] > self.tile_latent_min_size
+                or z.shape[-2] > self.tile_latent_min_size
+            ):
                 return self.spatial_tiled_decode(z)
             return self.decoder(z)
 
@@ -777,21 +952,25 @@ class AutoencoderKLConv3D(ModelMixin, ConfigMixin):
         sample: torch.Tensor,
         sample_posterior: bool = False,
         return_posterior: bool = True,
-        return_dict: bool = True
+        return_dict: bool = True,
     ):
         """Forward autoencoder pass. Returns both reconstruction and optionally the posterior."""
         posterior = self.encode(sample).latent_dist
         z = posterior.sample() if sample_posterior else posterior.mode()
         dec = self.decode(z).sample
-        return DecoderOutput(sample=dec, posterior=posterior) if return_dict else (dec, posterior)
-    
+        return (
+            DecoderOutput(sample=dec, posterior=posterior)
+            if return_dict
+            else (dec, posterior)
+        )
+
     def denormalize_latents(self, latents: torch.Tensor):
         if hasattr(self.config, "shift_factor") and self.config.shift_factor:
             latents = latents / self.config.scaling_factor + self.config.shift_factor
         else:
             latents = latents / self.config.scaling_factor
         return latents
-    
+
     def normalize_latents(self, latents: torch.Tensor):
         if hasattr(self.config, "shift_factor") and self.config.shift_factor:
             latents = (latents - self.config.shift_factor) * self.config.scaling_factor

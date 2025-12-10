@@ -6,7 +6,7 @@ from omegaconf import OmegaConf
 
 from .models import BigVGANVocoder
 
-_bigvgan_vocoder_path = Path(__file__).parent / 'bigvgan_vocoder.yml'
+_bigvgan_vocoder_path = Path(__file__).parent / "bigvgan_vocoder.yml"
 
 
 class BigVGAN(nn.Module):
@@ -18,7 +18,7 @@ class BigVGAN(nn.Module):
 
     @torch.inference_mode()
     def forward(self, x):
-        assert self.weight_norm_removed, 'call remove_weight_norm() before inference'
+        assert self.weight_norm_removed, "call remove_weight_norm() before inference"
         return self.vocoder(x)
 
     def remove_weight_norm(self):

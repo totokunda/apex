@@ -533,7 +533,6 @@ class FluxTransformer2DModel(
         timestep = timestep.to(hidden_states.dtype) * 1000
         if guidance is not None:
             guidance = guidance.to(hidden_states.dtype) * 1000
-        
 
         temb = (
             self.time_text_embed(timestep, pooled_projections)

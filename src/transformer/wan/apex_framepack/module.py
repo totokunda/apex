@@ -211,7 +211,7 @@ class Schedule_F2K1_G9_F1K1F2K2F16K4F32K8(BaseSchedule):
         latent: torch.Tensor,
         denoising_mask: torch.BoolTensor,
         reverse=False,
-        **kwargs
+        **kwargs,
     ):
         B, C, T, H, W = latent.shape
 

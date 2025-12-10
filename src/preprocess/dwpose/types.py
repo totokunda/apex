@@ -1,5 +1,6 @@
 from typing import NamedTuple, List, Optional
 
+
 class Keypoint(NamedTuple):
     x: float
     y: float

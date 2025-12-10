@@ -40,7 +40,7 @@ from transformers.utils import (
     logging,
 )
 
-     
+
 try:
     import flashinfer
 except Exception as e:
@@ -83,10 +83,14 @@ class SparseMoERouterState:
             Tensor of shape [num_experts, expert_capacity, hidden_size].
         """
         hidden_size = inputs.shape[-1]
-        dispatch_buffer = inputs.new_zeros((self.num_experts * self.expert_capacity, hidden_size))
+        dispatch_buffer = inputs.new_zeros(
+            (self.num_experts * self.expert_capacity, hidden_size)
+        )
 
         if self.num_assignments > 0 and self.expert_capacity > 0:
-            flat_indices = self.expert_indices * self.expert_capacity + self.slot_indices
+            flat_indices = (
+                self.expert_indices * self.expert_capacity + self.slot_indices
+            )
             token_values = inputs.index_select(0, self.token_indices)
             dispatch_buffer.index_copy_(0, flat_indices, token_values)
 
@@ -104,8 +108,12 @@ class SparseMoERouterState:
         combined = expert_outputs.new_zeros((self.num_tokens, hidden_size))
 
         if self.num_assignments > 0 and self.expert_capacity > 0:
-            flat_indices = self.expert_indices * self.expert_capacity + self.slot_indices
-            gathered = expert_outputs.view(self.num_experts * self.expert_capacity, hidden_size).index_select(0, flat_indices)
+            flat_indices = (
+                self.expert_indices * self.expert_capacity + self.slot_indices
+            )
+            gathered = expert_outputs.view(
+                self.num_experts * self.expert_capacity, hidden_size
+            ).index_select(0, flat_indices)
             weights = self.combine_weights.to(expert_outputs.dtype).unsqueeze(-1)
             gathered = gathered * weights
             combined.index_add_(0, self.token_indices, gathered)
@@ -135,6 +143,7 @@ Hunyuan_START_DOCSTRING = r"""
 #     Helper Functions
 # =======================================================
 
+
 def default(val, d):
     return val if val is not None else d
 
@@ -158,20 +167,25 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
-    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    hidden_states = hidden_states[:, :, None, :, :].expand(
+        batch, num_key_value_heads, n_rep, slen, head_dim
+    )
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
 def real_batched_index_select(t, dim, idx):
-    """ index_select for batched index and batched t """
+    """index_select for batched index and batched t"""
     assert t.ndim >= 2 and idx.ndim >= 2, f"{t.ndim=} {idx.ndim=}"
     assert len(t) == len(idx), f"{len(t)=} != {len(idx)=}"
-    return torch.stack([torch.index_select(t[i], dim - 1, idx[i]) for i in range(len(t))])
+    return torch.stack(
+        [torch.index_select(t[i], dim - 1, idx[i]) for i in range(len(t))]
+    )
 
 
 # =======================================================
 #     Module Functions
 # =======================================================
+
 
 def timestep_embedding(t, dim, max_period=10000):
     """
@@ -196,9 +210,7 @@ def timestep_embedding(t, dim, max_period=10000):
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
-        embedding = torch.cat(
-            [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
-        )
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
 
 
@@ -255,37 +267,29 @@ def normalization(channels, **kwargs):
 
 
 def topkgating(
-        logits: Tensor,
-        topk: int,
-        group_limited_greedy: bool = False,
-        n_group: int = None,
-        topk_group: int = None,
-        norm_topk_prob: bool = True,
-        routed_scaling_factor: float = 1.0,
-        capacity_factor: float = 1.0,
-        drop_tokens: bool = False,
+    logits: Tensor,
+    topk: int,
+    group_limited_greedy: bool = False,
+    n_group: int = None,
+    topk_group: int = None,
+    norm_topk_prob: bool = True,
+    routed_scaling_factor: float = 1.0,
+    capacity_factor: float = 1.0,
+    drop_tokens: bool = False,
 ):
     logits = logits.float()
     gates = F.softmax(logits, dim=1)
 
     if group_limited_greedy:
         group_shape = list(gates.shape[:-1]) + [n_group, gates.shape[-1] // n_group]
-        group_scores = (
-            gates.reshape(group_shape).max(dim=-1).values
-        )  # [n, n_group]
-        group_idx = torch.topk(
-            group_scores, topk_group, dim=-1, sorted=False
-        )[
+        group_scores = gates.reshape(group_shape).max(dim=-1).values  # [n, n_group]
+        group_idx = torch.topk(group_scores, topk_group, dim=-1, sorted=False)[
             1
         ]  # [n, top_k_group]
         group_mask = torch.zeros_like(group_scores)  # [n, n_group]
         group_mask.scatter_(1, group_idx, 1)  # [n, n_group]
         score_mask = (
-            group_mask.unsqueeze(-1)
-            .expand(
-                group_shape
-            )
-            .reshape(list(gates.shape))
+            group_mask.unsqueeze(-1).expand(group_shape).reshape(list(gates.shape))
         )  # [n, e]
         gates = gates.masked_fill(~score_mask.bool(), 0.0)
 
@@ -299,10 +303,14 @@ def topkgating(
     expert_mask_aux = expert_mask.max(dim=-2)[0]
     tokens_per_group_and_expert = torch.mean(expert_mask_aux.float(), dim=-2)
     router_prob_per_group_and_expert = torch.mean(gates.float(), dim=-2)
-    l_aux = num_experts ** 2 * torch.mean(tokens_per_group_and_expert * router_prob_per_group_and_expert)
+    l_aux = num_experts**2 * torch.mean(
+        tokens_per_group_and_expert * router_prob_per_group_and_expert
+    )
 
     if drop_tokens:
-        expert_capacity = int(max(topk, topk * gates.shape[0] // gates.shape[1]) * capacity_factor)
+        expert_capacity = int(
+            max(topk, topk * gates.shape[0] // gates.shape[1]) * capacity_factor
+        )
     else:
         expert_index_flat = expert_index.flatten()
         tokens_per_expert = torch.bincount(expert_index_flat, minlength=num_experts)
@@ -310,7 +318,8 @@ def topkgating(
 
     if norm_topk_prob and topk > 1:
         gates_s = torch.clamp(
-            torch.matmul(expert_mask.float(), gates.unsqueeze(-1)).sum(dim=1), min=torch.finfo(gates.dtype).eps
+            torch.matmul(expert_mask.float(), gates.unsqueeze(-1)).sum(dim=1),
+            min=torch.finfo(gates.dtype).eps,
         )
         router_probs = gates / gates_s
     else:
@@ -345,7 +354,9 @@ def topkgating(
 
     # Token T can only be routed to expert E if its priority is positive and
     # less than the expert capacity. Record only the sparse assignments.
-    valid_mask = torch.logical_and(token_priority >= 0, token_priority < expert_capacity)
+    valid_mask = torch.logical_and(
+        token_priority >= 0, token_priority < expert_capacity
+    )
     token_priority = torch.masked_fill(token_priority, ~valid_mask, 0).to(torch.long)
 
     nonzero = torch.nonzero(valid_mask, as_tuple=False)
@@ -373,7 +384,9 @@ def topkgating(
     exp_counts_capacity = token_indices.shape[0]
     exp_capacity_rate = torch.tensor(0.0, dtype=gates.dtype, device=logits.device)
     if topk > 0:
-        exp_capacity_rate = routing_state.combine_weights.new_tensor(exp_counts_capacity) / (logits.shape[0] * topk)
+        exp_capacity_rate = routing_state.combine_weights.new_tensor(
+            exp_counts_capacity
+        ) / (logits.shape[0] * topk)
 
     return [l_aux, exp_capacity_rate], routing_state, exp_counts
 
@@ -381,6 +394,7 @@ def topkgating(
 # =======================================================
 #     Multi-Dimensional RoPE
 # =======================================================
+
 
 def _to_tuple(x, dim=2):
     if isinstance(x, int):
@@ -418,13 +432,15 @@ def get_meshgrid_nd(start, *args, dim=2):
         num = [stop[i] - start[i] for i in range(dim)]
         # assert num are all integers
         num_int = [int(x) for x in num]
-        assert (torch.tensor(num) == torch.tensor(num_int)).all(), f"num should be int, but got {num}"
+        assert (
+            torch.tensor(num) == torch.tensor(num_int)
+        ).all(), f"num should be int, but got {num}"
         num = num_int
     elif len(args) == 2:
         # start is start, args[0] is stop, args[1] is num
-        start = _to_tuple(start, dim=dim)       # Left-Top       eg: 12,0
-        stop = _to_tuple(args[0], dim=dim)      # Right-Bottom   eg: 20,32
-        num = _to_tuple(args[1], dim=dim)       # Target Size    eg: 32,124
+        start = _to_tuple(start, dim=dim)  # Left-Top       eg: 12,0
+        stop = _to_tuple(args[0], dim=dim)  # Right-Bottom   eg: 20,32
+        num = _to_tuple(args[1], dim=dim)  # Target Size    eg: 32,124
     else:
         raise ValueError(f"len(args) should be 0, 1 or 2, but got {len(args)}")
 
@@ -434,16 +450,20 @@ def get_meshgrid_nd(start, *args, dim=2):
         a, b, n = start[i], stop[i], num[i]
         g = torch.linspace(a, b, n + 1, dtype=torch.float32)[:n]
         axis_grid.append(g)
-    grid = torch.meshgrid(*axis_grid, indexing="ij")   # dim x [H, W]
-    grid = torch.stack(grid, dim=0)     # [dim, H, W]
+    grid = torch.meshgrid(*axis_grid, indexing="ij")  # dim x [H, W]
+    grid = torch.stack(grid, dim=0)  # [dim, H, W]
 
     return grid
 
 
 def build_2d_rope(
-        seq_len: int, n_elem: int, image_infos: Optional[List[Tuple[slice, Tuple[int, int]]]] = None,
-        device: Optional[torch.device] = None, base: int = 10000, base_rescale_factor: float = 1.0,
-        return_all_pos: bool = False,
+    seq_len: int,
+    n_elem: int,
+    image_infos: Optional[List[Tuple[slice, Tuple[int, int]]]] = None,
+    device: Optional[torch.device] = None,
+    base: int = 10000,
+    base_rescale_factor: float = 1.0,
+    return_all_pos: bool = False,
 ):
     """
     Reference: https://kexue.fm/archives/10352
@@ -463,7 +483,7 @@ def build_2d_rope(
     if base_rescale_factor != 1.0:
         base *= base_rescale_factor ** (n_elem / (n_elem - 2))
     theta = 1.0 / (base ** (torch.arange(0, n_elem, 2, device=device).float() / n_elem))
-    theta = theta.reshape(1, n_elem // 4, 2)    # [1, half_d, 2]
+    theta = theta.reshape(1, n_elem // 4, 2)  # [1, half_d, 2]
 
     # position indices
     if image_infos is None:
@@ -478,7 +498,7 @@ def build_2d_rope(
     for sample_id, sample_image_infos in enumerate(image_infos_list):
         last_pos = 0
         for sec_slice, (h, w) in sample_image_infos:
-            L = sec_slice.start   # start from 0, so image_slice.start is just L
+            L = sec_slice.start  # start from 0, so image_slice.start is just L
             # previous text
             if last_pos < L:
                 y_sections.append(torch.arange(last_pos, L))
@@ -495,7 +515,9 @@ def build_2d_rope(
             # current image
             beta_y = L + (w * h - h) / 2
             beta_x = L + (w * h - w) / 2
-            grid = get_meshgrid_nd((beta_y, beta_x), (beta_y + h, beta_x + w))  # [2, h, w]
+            grid = get_meshgrid_nd(
+                (beta_y, beta_x), (beta_y + h, beta_x + w)
+            )  # [2, h, w]
             grid = grid.reshape(2, -1)  # (y, x)
             y_sections.append(grid[0])
             x_sections.append(grid[1])
@@ -510,7 +532,9 @@ def build_2d_rope(
     # If there are overlap positions, we need to remove them.
     x_pos = x_pos[:seq_len]
     y_pos = y_pos[:seq_len]
-    all_pos = torch.stack((y_pos, x_pos), dim=1).unsqueeze(1).to(device)    # [seq_len, 1, 2]
+    all_pos = (
+        torch.stack((y_pos, x_pos), dim=1).unsqueeze(1).to(device)
+    )  # [seq_len, 1, 2]
 
     # calc rope
     idx_theta = (all_pos * theta).reshape(all_pos.shape[0], n_elem // 2).repeat(1, 2)
@@ -525,17 +549,25 @@ def build_2d_rope(
 
 
 def build_batch_2d_rope(
-        seq_len: int, n_elem: int, image_infos: Optional[List[List[Tuple[slice, Tuple[int, int]]]]] = None,
-        device: Optional[torch.device] = None, base: int = 10000, base_rescale_factor: float = 1.0,
-        return_all_pos: bool = False,
+    seq_len: int,
+    n_elem: int,
+    image_infos: Optional[List[List[Tuple[slice, Tuple[int, int]]]]] = None,
+    device: Optional[torch.device] = None,
+    base: int = 10000,
+    base_rescale_factor: float = 1.0,
+    return_all_pos: bool = False,
 ):
     cos_list, sin_list, all_pos_list = [], [], []
     if image_infos is None:
         image_infos = [None]
     for i, image_info in enumerate(image_infos):
         res = build_2d_rope(
-            seq_len, n_elem, image_infos=image_info, device=device,
-            base=base, base_rescale_factor=base_rescale_factor,
+            seq_len,
+            n_elem,
+            image_infos=image_info,
+            device=device,
+            base=base,
+            base_rescale_factor=base_rescale_factor,
             return_all_pos=return_all_pos,
         )
         if return_all_pos:
@@ -559,7 +591,7 @@ def build_batch_2d_rope(
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2:]
+    x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
 
@@ -600,20 +632,23 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 #     Modules for Image Generation
 # =======================================================
 
+
 class TimestepEmbedder(nn.Module):
     """
     Embeds scalar timesteps into vector representations.
     """
-    def __init__(self,
-                 hidden_size,
-                 act_layer=nn.GELU,
-                 frequency_embedding_size=256,
-                 max_period=10000,
-                 out_size=None,
-                 dtype=None,
-                 device=None
-                 ):
-        factory_kwargs = {'dtype': dtype, 'device': device}
+
+    def __init__(
+        self,
+        hidden_size,
+        act_layer=nn.GELU,
+        frequency_embedding_size=256,
+        max_period=10000,
+        out_size=None,
+        dtype=None,
+        device=None,
+    ):
+        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.frequency_embedding_size = frequency_embedding_size
         self.max_period = max_period
@@ -621,7 +656,9 @@ class TimestepEmbedder(nn.Module):
             out_size = hidden_size
 
         self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size, bias=True, **factory_kwargs),
+            nn.Linear(
+                frequency_embedding_size, hidden_size, bias=True, **factory_kwargs
+            ),
             act_layer(),
             nn.Linear(hidden_size, out_size, bias=True, **factory_kwargs),
         )
@@ -629,7 +666,9 @@ class TimestepEmbedder(nn.Module):
         nn.init.normal_(self.mlp[2].weight, std=0.02)
 
     def forward(self, t):
-        t_freq = timestep_embedding(t, self.frequency_embedding_size, self.max_period).type(self.mlp[0].weight.dtype)
+        t_freq = timestep_embedding(
+            t, self.frequency_embedding_size, self.max_period
+        ).type(self.mlp[0].weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
@@ -644,15 +683,19 @@ class Upsample(nn.Module):
                  upsampling occurs in the inner-two dimensions.
     """
 
-    def __init__(self, channels, use_conv, dims=2, out_channels=None, device=None, dtype=None):
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self, channels, use_conv, dims=2, out_channels=None, device=None, dtype=None
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         self.dims = dims
         if use_conv:
-            self.conv = conv_nd(dims, self.channels, self.out_channels, 3, padding=1, **factory_kwargs)
+            self.conv = conv_nd(
+                dims, self.channels, self.out_channels, 3, padding=1, **factory_kwargs
+            )
 
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -677,8 +720,10 @@ class Downsample(nn.Module):
                  downsampling occurs in the inner-two dimensions.
     """
 
-    def __init__(self, channels, use_conv, dims=2, out_channels=None, device=None, dtype=None):
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self, channels, use_conv, dims=2, out_channels=None, device=None, dtype=None
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -687,7 +732,13 @@ class Downsample(nn.Module):
         stride = 2 if dims != 3 else (1, 2, 2)
         if use_conv:
             self.op = conv_nd(
-                dims, self.channels, self.out_channels, 3, stride=stride, padding=1, **factory_kwargs
+                dims,
+                self.channels,
+                self.out_channels,
+                3,
+                stride=stride,
+                padding=1,
+                **factory_kwargs,
             )
         else:
             assert self.channels == self.out_channels
@@ -727,7 +778,7 @@ class ResBlock(nn.Module):
         device=None,
         dtype=None,
     ):
-        factory_kwargs = {'dtype': dtype, 'device': device}
+        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
         self.in_channels = in_channels
         self.dropout = dropout
@@ -737,7 +788,14 @@ class ResBlock(nn.Module):
         self.in_layers = nn.Sequential(
             normalization(self.in_channels, **factory_kwargs),
             nn.SiLU(),
-            conv_nd(dims, self.in_channels, self.out_channels, 3, padding=1, **factory_kwargs),
+            conv_nd(
+                dims,
+                self.in_channels,
+                self.out_channels,
+                3,
+                padding=1,
+                **factory_kwargs,
+            ),
         )
 
         self.updown = up or down
@@ -752,8 +810,7 @@ class ResBlock(nn.Module):
             self.h_upd = self.x_upd = nn.Identity()
 
         self.emb_layers = nn.Sequential(
-            nn.SiLU(),
-            linear(emb_channels, 2 * self.out_channels, **factory_kwargs)
+            nn.SiLU(), linear(emb_channels, 2 * self.out_channels, **factory_kwargs)
         )
 
         self.out_layers = nn.Sequential(
@@ -761,7 +818,14 @@ class ResBlock(nn.Module):
             nn.SiLU(),
             nn.Dropout(p=dropout),
             zero_module(
-                conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1, **factory_kwargs)
+                conv_nd(
+                    dims,
+                    self.out_channels,
+                    self.out_channels,
+                    3,
+                    padding=1,
+                    **factory_kwargs,
+                )
             ),
         )
 
@@ -769,10 +833,17 @@ class ResBlock(nn.Module):
             self.skip_connection = nn.Identity()
         elif use_conv:
             self.skip_connection = conv_nd(
-                dims, self.in_channels, self.out_channels, 3, padding=1, **factory_kwargs
+                dims,
+                self.in_channels,
+                self.out_channels,
+                3,
+                padding=1,
+                **factory_kwargs,
             )
         else:
-            self.skip_connection = conv_nd(dims, self.in_channels, self.out_channels, 1, **factory_kwargs)
+            self.skip_connection = conv_nd(
+                dims, self.in_channels, self.out_channels, 1, **factory_kwargs
+            )
 
     def forward(self, x, emb):
         if self.updown:
@@ -791,7 +862,7 @@ class ResBlock(nn.Module):
         # Adaptive Group Normalization
         out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
         scale, shift = torch.chunk(emb_out, 2, dim=1)
-        h = out_norm(h) * (1. + scale) + shift
+        h = out_norm(h) * (1.0 + scale) + shift
         h = out_rest(h)
 
         return self.skip_connection(x) + h
@@ -804,43 +875,63 @@ class UNetDown(nn.Module):
     hidden_channels: hidden dim for reducing parameters
     out_channels: transformer model dim
     """
-    def __init__(self, patch_size, in_channels, emb_channels, hidden_channels, out_channels,
-                 dropout=0.0, device=None, dtype=None):
-        factory_kwargs = {'dtype': dtype, 'device': device}
+
+    def __init__(
+        self,
+        patch_size,
+        in_channels,
+        emb_channels,
+        hidden_channels,
+        out_channels,
+        dropout=0.0,
+        device=None,
+        dtype=None,
+    ):
+        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
 
         self.patch_size = patch_size
         assert self.patch_size in [1, 2, 4, 8]
 
         self.model = nn.ModuleList(
-            [conv_nd(
-                2,
-                in_channels=in_channels,
-                out_channels=hidden_channels,
-                kernel_size=3,
-                padding=1,
-                **factory_kwargs
-            )]
+            [
+                conv_nd(
+                    2,
+                    in_channels=in_channels,
+                    out_channels=hidden_channels,
+                    kernel_size=3,
+                    padding=1,
+                    **factory_kwargs,
+                )
+            ]
         )
 
         if self.patch_size == 1:
-            self.model.append(ResBlock(
-                in_channels=hidden_channels,
-                emb_channels=emb_channels,
-                out_channels=out_channels,
-                dropout=dropout,
-                **factory_kwargs
-            ))
-        else:
-            for i in range(self.patch_size // 2):
-                self.model.append(ResBlock(
+            self.model.append(
+                ResBlock(
                     in_channels=hidden_channels,
                     emb_channels=emb_channels,
-                    out_channels=hidden_channels if (i + 1) * 2 != self.patch_size else out_channels,
+                    out_channels=out_channels,
                     dropout=dropout,
-                    down=True,
-                    **factory_kwargs
-                ))
+                    **factory_kwargs,
+                )
+            )
+        else:
+            for i in range(self.patch_size // 2):
+                self.model.append(
+                    ResBlock(
+                        in_channels=hidden_channels,
+                        emb_channels=emb_channels,
+                        out_channels=(
+                            hidden_channels
+                            if (i + 1) * 2 != self.patch_size
+                            else out_channels
+                        ),
+                        dropout=dropout,
+                        down=True,
+                        **factory_kwargs,
+                    )
+                )
 
     def forward(self, x, t):
         assert x.shape[2] % self.patch_size == 0 and x.shape[3] % self.patch_size == 0
@@ -850,7 +941,7 @@ class UNetDown(nn.Module):
             else:
                 x = module(x)
         _, _, token_h, token_w = x.shape
-        x = rearrange(x, 'b c h w -> b (h w) c')
+        x = rearrange(x, "b c h w -> b (h w) c")
         return x, token_h, token_w
 
 
@@ -861,9 +952,20 @@ class UNetUp(nn.Module):
     hidden_channels: hidden dim for reducing parameters
     out_channels: vae latent dim
     """
-    def __init__(self, patch_size, in_channels, emb_channels, hidden_channels, out_channels,
-                 dropout=0.0, device=None, dtype=None, out_norm=False):
-        factory_kwargs = {'dtype': dtype, 'device': device}
+
+    def __init__(
+        self,
+        patch_size,
+        in_channels,
+        emb_channels,
+        hidden_channels,
+        out_channels,
+        dropout=0.0,
+        device=None,
+        dtype=None,
+        out_norm=False,
+    ):
+        factory_kwargs = {"dtype": dtype, "device": device}
         super().__init__()
 
         self.patch_size = patch_size
@@ -872,50 +974,58 @@ class UNetUp(nn.Module):
         self.model = nn.ModuleList()
 
         if self.patch_size == 1:
-            self.model.append(ResBlock(
-                in_channels=in_channels,
-                emb_channels=emb_channels,
-                out_channels=hidden_channels,
-                dropout=dropout,
-                **factory_kwargs
-            ))
-        else:
-            for i in range(self.patch_size // 2):
-                self.model.append(ResBlock(
-                    in_channels=in_channels if i == 0 else hidden_channels,
+            self.model.append(
+                ResBlock(
+                    in_channels=in_channels,
                     emb_channels=emb_channels,
                     out_channels=hidden_channels,
                     dropout=dropout,
-                    up=True,
-                    **factory_kwargs
-                ))
+                    **factory_kwargs,
+                )
+            )
+        else:
+            for i in range(self.patch_size // 2):
+                self.model.append(
+                    ResBlock(
+                        in_channels=in_channels if i == 0 else hidden_channels,
+                        emb_channels=emb_channels,
+                        out_channels=hidden_channels,
+                        dropout=dropout,
+                        up=True,
+                        **factory_kwargs,
+                    )
+                )
 
         if out_norm:
-            self.model.append(nn.Sequential(
-                normalization(hidden_channels, **factory_kwargs),
-                nn.SiLU(),
+            self.model.append(
+                nn.Sequential(
+                    normalization(hidden_channels, **factory_kwargs),
+                    nn.SiLU(),
+                    conv_nd(
+                        2,
+                        in_channels=hidden_channels,
+                        out_channels=out_channels,
+                        kernel_size=3,
+                        padding=1,
+                        **factory_kwargs,
+                    ),
+                )
+            )
+        else:
+            self.model.append(
                 conv_nd(
                     2,
                     in_channels=hidden_channels,
                     out_channels=out_channels,
                     kernel_size=3,
                     padding=1,
-                    **factory_kwargs
-                ),
-            ))
-        else:
-            self.model.append(conv_nd(
-                2,
-                in_channels=hidden_channels,
-                out_channels=out_channels,
-                kernel_size=3,
-                padding=1,
-                **factory_kwargs
-            ))
+                    **factory_kwargs,
+                )
+            )
 
     # batch_size, seq_len, model_dim
     def forward(self, x, t, token_h, token_w):
-        x = rearrange(x, 'b (h w) c -> b c h w', h=token_h, w=token_w)
+        x = rearrange(x, "b (h w) c -> b c h w", h=token_h, w=token_w)
         for module in self.model:
             if isinstance(module, ResBlock):
                 x = module(x, t)
@@ -927,6 +1037,7 @@ class UNetUp(nn.Module):
 # =======================================================
 #     Modules for Transformer Backbone
 # =======================================================
+
 
 @dataclass
 class CausalMMOutputWithPast(CausalLMOutputWithPast):
@@ -940,6 +1051,7 @@ class HunyuanStaticCache(StaticCache):
 
     This cache supports batch cache_position updates.
     """
+
     def __init__(self, *args, **kwargs):
         self.dynamic = kwargs.pop("dynamic", False)
         super().__init__(*args, **kwargs)
@@ -972,8 +1084,12 @@ class HunyuanStaticCache(StaticCache):
         cache_position = cache_kwargs.get("cache_position")
         if hasattr(self, "key_cache") and hasattr(self, "value_cache"):
             if self.key_cache[layer_idx].device != key_states.device:
-                self.key_cache[layer_idx] = self.key_cache[layer_idx].to(key_states.device)
-                self.value_cache[layer_idx] = self.value_cache[layer_idx].to(value_states.device)
+                self.key_cache[layer_idx] = self.key_cache[layer_idx].to(
+                    key_states.device
+                )
+                self.value_cache[layer_idx] = self.value_cache[layer_idx].to(
+                    value_states.device
+                )
             k_out = self.key_cache[layer_idx]
             v_out = self.value_cache[layer_idx]
             key_states = key_states.to(k_out.dtype)
@@ -1000,7 +1116,9 @@ class HunyuanStaticCache(StaticCache):
                     k_out = k_out[:, :, :end]
                     v_out = v_out[:, :, :end]
             else:
-                assert cache_position.dim() == 2, f"multiple batch dims not yet {cache_position.shape=}"
+                assert (
+                    cache_position.dim() == 2
+                ), f"multiple batch dims not yet {cache_position.shape=}"
                 batch_size, idx_size = cache_position.shape
                 assert batch_size == k_out.size(0)
                 assert batch_size == v_out.size(0)
@@ -1008,8 +1126,12 @@ class HunyuanStaticCache(StaticCache):
                 assert batch_size == value_states.size(0)
                 for i in range(batch_size):
                     unbatched_dim = 1
-                    k_out[i].index_copy_(unbatched_dim, cache_position[i], key_states[i])
-                    v_out[i].index_copy_(unbatched_dim, cache_position[i], value_states[i])
+                    k_out[i].index_copy_(
+                        unbatched_dim, cache_position[i], key_states[i]
+                    )
+                    v_out[i].index_copy_(
+                        unbatched_dim, cache_position[i], value_states[i]
+                    )
 
                 if self.dynamic:
                     assert len(cache_position) == 1
@@ -1038,7 +1160,13 @@ class HunyuanRMSNorm(nn.Module):
 
 
 class HunyuanMLP(nn.Module):
-    def __init__(self, config: HunyuanImage3Config, layer_idx=None, is_shared_mlp=False, is_moe=False):
+    def __init__(
+        self,
+        config: HunyuanImage3Config,
+        layer_idx=None,
+        is_shared_mlp=False,
+        is_moe=False,
+    ):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -1049,22 +1177,36 @@ class HunyuanMLP(nn.Module):
         if is_shared_mlp or is_moe:
             # 如果是 moe 的话，优先用 moe_intermediate_size
             if config.moe_intermediate_size is not None:
-                self.intermediate_size = config.moe_intermediate_size \
-                    if isinstance(config.moe_intermediate_size, int) else config.moe_intermediate_size[layer_idx]
+                self.intermediate_size = (
+                    config.moe_intermediate_size
+                    if isinstance(config.moe_intermediate_size, int)
+                    else config.moe_intermediate_size[layer_idx]
+                )
 
             if is_shared_mlp:
-                num_shared_expert = config.num_shared_expert \
-                    if isinstance(config.num_shared_expert, int) else config.num_shared_expert[layer_idx]
+                num_shared_expert = (
+                    config.num_shared_expert
+                    if isinstance(config.num_shared_expert, int)
+                    else config.num_shared_expert[layer_idx]
+                )
                 self.intermediate_size *= num_shared_expert
 
         self.act_fn = ACT2FN[config.hidden_act]
         if self.hidden_act == "silu":
             self.intermediate_size *= 2  # SwiGLU
-            self.gate_and_up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-            self.down_proj = nn.Linear(self.intermediate_size // 2, self.hidden_size, bias=config.mlp_bias)
+            self.gate_and_up_proj = nn.Linear(
+                self.hidden_size, self.intermediate_size, bias=config.mlp_bias
+            )
+            self.down_proj = nn.Linear(
+                self.intermediate_size // 2, self.hidden_size, bias=config.mlp_bias
+            )
         elif self.hidden_act == "gelu":
-            self.gate_and_up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-            self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
+            self.gate_and_up_proj = nn.Linear(
+                self.hidden_size, self.intermediate_size, bias=config.mlp_bias
+            )
+            self.down_proj = nn.Linear(
+                self.intermediate_size, self.hidden_size, bias=config.mlp_bias
+            )
         else:
             assert False, "other hidden_act are not supported"
 
@@ -1088,12 +1230,22 @@ class HunyuanTopKGate(nn.Module):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
-        self.moe_topk = config.moe_topk if isinstance(config.moe_topk, int) else config.moe_topk[layer_idx]
+        self.moe_topk = (
+            config.moe_topk
+            if isinstance(config.moe_topk, int)
+            else config.moe_topk[layer_idx]
+        )
         self.drop_tokens = config.moe_drop_tokens
         self.min_capacity = 8
         self.random_routing_dropped_token = config.moe_random_routing_dropped_token
-        num_experts = config.num_experts if isinstance(config.num_experts, int) else config.num_experts[layer_idx]
-        self.wg = nn.Linear(config.hidden_size, num_experts, bias=False, dtype=torch.float32)
+        num_experts = (
+            config.num_experts
+            if isinstance(config.num_experts, int)
+            else config.num_experts[layer_idx]
+        )
+        self.wg = nn.Linear(
+            config.hidden_size, num_experts, bias=False, dtype=torch.float32
+        )
 
         # DeepSeek gating args
         self.routed_scaling_factor = config.routed_scaling_factor
@@ -1102,20 +1254,25 @@ class HunyuanTopKGate(nn.Module):
         self.norm_topk_prob = config.norm_topk_prob
         self.group_limited_greedy = config.group_limited_greedy
 
-    def forward(self, hidden_states, topk_impl='default'):
+    def forward(self, hidden_states, topk_impl="default"):
         bsz, seq_len, hidden_size = hidden_states.shape
         hidden_states = hidden_states.reshape(-1, hidden_size)
         if self.wg.weight.dtype == torch.float32:
             hidden_states = hidden_states.float()
         logits = self.wg(hidden_states)
-        if topk_impl == 'default':
-            gate_output = topkgating(logits, self.moe_topk, group_limited_greedy=self.group_limited_greedy,
-                                     n_group=self.n_group, topk_group=self.topk_group,
-                                     norm_topk_prob=self.norm_topk_prob,
-                                     routed_scaling_factor=self.routed_scaling_factor,
-                                     capacity_factor=self.config.capacity_factor,
-                                     drop_tokens=self.drop_tokens)
-        elif topk_impl == 'easy':
+        if topk_impl == "default":
+            gate_output = topkgating(
+                logits,
+                self.moe_topk,
+                group_limited_greedy=self.group_limited_greedy,
+                n_group=self.n_group,
+                topk_group=self.topk_group,
+                norm_topk_prob=self.norm_topk_prob,
+                routed_scaling_factor=self.routed_scaling_factor,
+                capacity_factor=self.config.capacity_factor,
+                drop_tokens=self.drop_tokens,
+            )
+        elif topk_impl == "easy":
             gate_output = self.easy_topk(logits, self.moe_topk)
         else:
             raise ValueError(f"Unsupported topk_impl: {topk_impl}")
@@ -1139,12 +1296,23 @@ class HunyuanMoE(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         self.moe_topk = config.moe_topk
-        self.num_experts = config.num_experts if isinstance(config.num_experts, int) else config.num_experts[layer_idx]
+        self.num_experts = (
+            config.num_experts
+            if isinstance(config.num_experts, int)
+            else config.num_experts[layer_idx]
+        )
         if config.use_mixed_mlp_moe:
-            self.shared_mlp = HunyuanMLP(config, layer_idx=layer_idx, is_shared_mlp=True)
+            self.shared_mlp = HunyuanMLP(
+                config, layer_idx=layer_idx, is_shared_mlp=True
+            )
         self.gate = HunyuanTopKGate(config, layer_idx=layer_idx)
         self.experts = nn.ModuleList(
-            [HunyuanMLP(config, layer_idx=layer_idx, is_shared_mlp=False, is_moe=True) for _ in range(self.num_experts)]
+            [
+                HunyuanMLP(
+                    config, layer_idx=layer_idx, is_shared_mlp=False, is_moe=True
+                )
+                for _ in range(self.num_experts)
+            ]
         )
 
         self._moe_impl = config.moe_impl
@@ -1161,7 +1329,9 @@ class HunyuanMoE(nn.Module):
     def moe_impl(self, value):
         self._moe_impl = value
         if self._moe_impl == "flashinfer":
-            assert flashinfer is not None, "When using fused_moe, flashinfer must be installed."
+            assert (
+                flashinfer is not None
+            ), "When using fused_moe, flashinfer must be installed."
 
     def forward(self, hidden_states):
         torch.cuda.set_device(hidden_states.device.index)
@@ -1170,17 +1340,19 @@ class HunyuanMoE(nn.Module):
         if self.config.use_mixed_mlp_moe:
             hidden_states_mlp = self.shared_mlp(hidden_states)
 
-        reshaped_input = hidden_states.reshape(-1, hidden_size) # [bsz*seq_len, hidden_size]
+        reshaped_input = hidden_states.reshape(
+            -1, hidden_size
+        )  # [bsz*seq_len, hidden_size]
 
         with nvtx.range("MoE"):
             if self._moe_impl == "flashinfer":
                 # Get expert weights
                 if not self._weights_initialized:
                     self._initialize_weights_on_device(hidden_states.device)
-                topk_weight, topk_index = self.gate(hidden_states, topk_impl='easy')
+                topk_weight, topk_index = self.gate(hidden_states, topk_impl="easy")
 
                 combined_output = torch.zeros_like(reshaped_input)
-                _ = flashinfer.fused_moe.cutlass_fused_moe(     # noqa
+                _ = flashinfer.fused_moe.cutlass_fused_moe(  # noqa
                     reshaped_input.contiguous(),
                     topk_index.to(torch.int).contiguous(),
                     topk_weight.to(torch.float).contiguous(),
@@ -1192,7 +1364,9 @@ class HunyuanMoE(nn.Module):
                 )
             else:
                 # Original implementation - fallback for compatibility
-                l_moe, routing_state, exp_counts = self.gate(hidden_states, topk_impl='default')
+                l_moe, routing_state, exp_counts = self.gate(
+                    hidden_states, topk_impl="default"
+                )
                 dispatched_input = routing_state.dispatch(reshaped_input)
                 chunks = dispatched_input.chunk(self.num_experts, dim=0)
                 expert_outputs = []
@@ -1205,7 +1379,7 @@ class HunyuanMoE(nn.Module):
         combined_output = combined_output.reshape(bsz, seq_len, hidden_size)
 
         if self.config.use_mixed_mlp_moe:
-            output = hidden_states_mlp + combined_output    # noqa
+            output = hidden_states_mlp + combined_output  # noqa
         else:
             output = combined_output
 
@@ -1241,14 +1415,16 @@ class HunyuanImage3SDPAAttention(nn.Module):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
-        self.attention_type = 'self'
+        self.attention_type = "self"
 
         self.attention_dropout = config.attention_dropout
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         # self.head_dim = self.hidden_size // self.num_heads
         self.head_dim = config.attention_head_dim
-        self.num_key_value_heads = config.num_key_value_heads if config.num_key_value_heads else self.num_heads
+        self.num_key_value_heads = (
+            config.num_key_value_heads if config.num_key_value_heads else self.num_heads
+        )
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
@@ -1262,12 +1438,16 @@ class HunyuanImage3SDPAAttention(nn.Module):
         self.qkv_proj = nn.Linear(
             self.hidden_size,
             self.hidden_size_q + 2 * self.hidden_size_kv,
-            bias=config.attention_bias
+            bias=config.attention_bias,
         )
-        self.o_proj = nn.Linear(self.hidden_size_q, self.hidden_size, bias=config.attention_bias)
+        self.o_proj = nn.Linear(
+            self.hidden_size_q, self.hidden_size, bias=config.attention_bias
+        )
 
         if self.use_qk_norm:
-            self.query_layernorm = HunyuanRMSNorm(self.head_dim, eps=config.rms_norm_eps)
+            self.query_layernorm = HunyuanRMSNorm(
+                self.head_dim, eps=config.rms_norm_eps
+            )
             self.key_layernorm = HunyuanRMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
         if self.use_rotary_pos_emb:
@@ -1282,40 +1462,58 @@ class HunyuanImage3SDPAAttention(nn.Module):
             raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
-        return tensor.reshape(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        return (
+            tensor.reshape(bsz, seq_len, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+            .contiguous()
+        )
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_value: Optional[Cache] = None,
-            output_attentions: bool = False,
-            use_cache: Optional[bool] = False,
-            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
-            **kwargs,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: Optional[bool] = False,
+        custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Cache]]:
         if output_attentions:
             raise NotImplementedError(
-                'HunyuanImage3Model is using HunyuanImage3SDPAAttention,'
-                'but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`.'
+                "HunyuanImage3Model is using HunyuanImage3SDPAAttention,"
+                "but `torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`."
             )
 
         bsz, q_len, _ = hidden_states.size()
-       
 
         qkv_states = self.qkv_proj(hidden_states)
-        qkv_states = qkv_states.reshape(bsz, q_len, self.num_key_value_heads, self.num_key_value_groups + 2,
-                                        self.head_dim)
-        query_states, key_states, value_states = torch.split(qkv_states, [self.num_key_value_groups, 1, 1], dim=3)
+        qkv_states = qkv_states.reshape(
+            bsz,
+            q_len,
+            self.num_key_value_heads,
+            self.num_key_value_groups + 2,
+            self.head_dim,
+        )
+        query_states, key_states, value_states = torch.split(
+            qkv_states, [self.num_key_value_groups, 1, 1], dim=3
+        )
 
-        query_states = query_states.reshape(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.reshape(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.reshape(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.reshape(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
         if self.use_rotary_pos_emb:
             cos, sin = custom_pos_emb
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+            query_states, key_states = apply_rotary_pos_emb(
+                query_states, key_states, cos, sin
+            )
 
         if self.use_qk_norm:
             query_states = self.query_layernorm(query_states)
@@ -1326,7 +1524,9 @@ class HunyuanImage3SDPAAttention(nn.Module):
 
         if past_key_value is not None:
             cache_kwargs = {"cache_position": position_ids}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
             query_states = query_states.to(key_states.dtype)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -1341,7 +1541,11 @@ class HunyuanImage3SDPAAttention(nn.Module):
             value_states = value_states.contiguous()
 
         attn_output = attention_register.call(
-            query_states, key_states, value_states, attn_mask=attention_mask, dropout_p=0.0
+            query_states,
+            key_states,
+            value_states,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
         )
         attn_output = attn_output.transpose(1, 2).contiguous()
 
@@ -1352,19 +1556,18 @@ class HunyuanImage3SDPAAttention(nn.Module):
         return attn_output, None, past_key_value
 
 
-
 class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_value: Optional[Cache] = None,
-            output_attentions: bool = False,
-            use_cache: Optional[bool] = False,
-            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
-            **kwargs,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: Optional[bool] = False,
+        custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Cache]]:
         if output_attentions:
             return super().forward(
@@ -1378,17 +1581,32 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
         bsz, q_len, _ = hidden_states.size()
 
         qkv_states = self.qkv_proj(hidden_states)
-        qkv_states = qkv_states.reshape(bsz, q_len, self.num_key_value_heads, self.num_key_value_groups + 2,
-                                        self.head_dim)
-        query_states, key_states, value_states = torch.split(qkv_states, [self.num_key_value_groups, 1, 1], dim=3)
+        qkv_states = qkv_states.reshape(
+            bsz,
+            q_len,
+            self.num_key_value_heads,
+            self.num_key_value_groups + 2,
+            self.head_dim,
+        )
+        query_states, key_states, value_states = torch.split(
+            qkv_states, [self.num_key_value_groups, 1, 1], dim=3
+        )
 
-        query_states = query_states.reshape(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.reshape(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.reshape(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.reshape(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.reshape(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
         if self.use_rotary_pos_emb:
             cos, sin = custom_pos_emb
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+            query_states, key_states = apply_rotary_pos_emb(
+                query_states, key_states, cos, sin
+            )
 
         if self.use_qk_norm:
             query_states = self.query_layernorm(query_states)
@@ -1399,7 +1617,9 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
 
         if past_key_value is not None:
             cache_kwargs = {"cache_position": position_ids}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -1412,7 +1632,11 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
             key_states = key_states.contiguous()
             value_states = value_states.contiguous()
 
-        target_dtype = key_states.dtype if key_states.dtype in [torch.bfloat16, torch.float16] else torch.bfloat16
+        target_dtype = (
+            key_states.dtype
+            if key_states.dtype in [torch.bfloat16, torch.float16]
+            else torch.bfloat16
+        )
 
         q_fa = query_states.to(target_dtype).transpose(1, 2).contiguous()
         k_fa = key_states.to(target_dtype).transpose(1, 2).contiguous()
@@ -1423,13 +1647,20 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
         with nvtx.range("attention"):
             if mode == "gen_text":
                 if attention_mask is None:
-                    attn_output = flash_attn_func(q_fa, k_fa, v_fa, causal=False)   # decode attention
+                    attn_output = flash_attn_func(
+                        q_fa, k_fa, v_fa, causal=False
+                    )  # decode attention
                 else:
-                    attn_output = flash_attn_func(q_fa, k_fa, v_fa, causal=True)    # prefill attention
+                    attn_output = flash_attn_func(
+                        q_fa, k_fa, v_fa, causal=True
+                    )  # prefill attention
             else:  # image attention
-                gen_timestep_scatter_index: Optional[torch.Tensor] = kwargs.get("gen_timestep_scatter_index", None)
-                assert gen_timestep_scatter_index is not None, \
-                    "When gen_image, `gen_timestep_scatter_index` must be provided."
+                gen_timestep_scatter_index: Optional[torch.Tensor] = kwargs.get(
+                    "gen_timestep_scatter_index", None
+                )
+                assert (
+                    gen_timestep_scatter_index is not None
+                ), "When gen_image, `gen_timestep_scatter_index` must be provided."
                 # TODO: batchify
                 timestep_index = gen_timestep_scatter_index[0, 0].item()
                 # When image generation, different attention implementations for the first step and the following steps
@@ -1443,26 +1674,43 @@ class HunyuanImage3FlashAttention2(HunyuanImage3SDPAAttention):
                     text_key_states = k_fa[:, :casual_len, :, :]
                     text_value_states = v_fa[:, :casual_len, :, :]
                     text_attn_output = flash_attn_func(
-                        text_query_states, text_key_states, text_value_states, causal=True)
+                        text_query_states,
+                        text_key_states,
+                        text_value_states,
+                        causal=True,
+                    )
                     image_query_states = q_fa[:, casual_len:, :, :]
-                    image_attn_output = flash_attn_func(image_query_states, k_fa, v_fa, causal=False)
-                    attn_output = torch.cat((text_attn_output, image_attn_output), dim=1)
+                    image_attn_output = flash_attn_func(
+                        image_query_states, k_fa, v_fa, causal=False
+                    )
+                    attn_output = torch.cat(
+                        (text_attn_output, image_attn_output), dim=1
+                    )
                 else:
                     casual_len = timestep_index + 1
                     timestep_query_states = q_fa[:, 0:1, :, :]
                     timestep_key_states = k_fa[:, :casual_len, :, :]
                     timestep_value_states = v_fa[:, :casual_len, :, :]
                     timestep_attn_output = flash_attn_func(
-                        timestep_query_states, timestep_key_states, timestep_value_states, causal=True)
+                        timestep_query_states,
+                        timestep_key_states,
+                        timestep_value_states,
+                        causal=True,
+                    )
                     image_query_states = q_fa[:, 1:, :, :]
-                    image_attn_output = flash_attn_func(image_query_states, k_fa, v_fa, causal=False)
-                    attn_output = torch.cat((timestep_attn_output, image_attn_output), dim=1)
+                    image_attn_output = flash_attn_func(
+                        image_query_states, k_fa, v_fa, causal=False
+                    )
+                    attn_output = torch.cat(
+                        (timestep_attn_output, image_attn_output), dim=1
+                    )
 
         attn_output = attn_output.reshape(bsz, q_len, -1)
 
         attn_output = self.o_proj(attn_output)
 
         return attn_output, None, past_key_value
+
 
 Hunyuan_ATTENTION_CLASSES = {
     "eager": HunyuanImage3SDPAAttention,
@@ -1477,9 +1725,9 @@ class HunyuanImage3DecoderLayer(nn.Module):
         self.hidden_size = config.hidden_size
         self.layer_idx = layer_idx
 
-        attn_impl = config._attn_implementation     # noqa
+        attn_impl = config._attn_implementation  # noqa
         default = attention_register._default
-        if default is None: 
+        if default is None:
             if attn_impl == "flash_attention_2":
                 attention_register.set_default("flash")
             elif attn_impl == "sdpa":
@@ -1487,44 +1735,58 @@ class HunyuanImage3DecoderLayer(nn.Module):
             elif attn_impl == "eager":
                 attention_register.set_default("sdpa")
         else:
-            assert default in ['flash', 'sdpa'], f"Unsupported attention implementation: {default}"
-            if default == 'flash':
+            assert default in [
+                "flash",
+                "sdpa",
+            ], f"Unsupported attention implementation: {default}"
+            if default == "flash":
                 attn_impl = "flash_attention_2"
             else:
                 attn_impl = "sdpa"
 
         if attn_impl in Hunyuan_ATTENTION_CLASSES:
-            self.self_attn = Hunyuan_ATTENTION_CLASSES[attn_impl](config=config, layer_idx=layer_idx)
+            self.self_attn = Hunyuan_ATTENTION_CLASSES[attn_impl](
+                config=config, layer_idx=layer_idx
+            )
         else:
             raise ValueError(f"Unsupported attention implementation: {attn_impl}")
 
-        if ((isinstance(config.num_experts, int) and config.num_experts > 1) or (
-                isinstance(config.num_experts, list) and max(
-                config.num_experts) > 1)) and layer_idx >= config.moe_layer_num_skipped:
+        if (
+            (isinstance(config.num_experts, int) and config.num_experts > 1)
+            or (isinstance(config.num_experts, list) and max(config.num_experts) > 1)
+        ) and layer_idx >= config.moe_layer_num_skipped:
             self.mlp = HunyuanMoE(config, layer_idx=layer_idx)
         else:
-            self.mlp = HunyuanMLP(config, layer_idx=layer_idx, is_shared_mlp=False, is_moe=False)
-        if config.norm_type == 'hf_rms' or config.norm_type == 'rms':
-            self.input_layernorm = HunyuanRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.post_attention_layernorm = HunyuanRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        elif config.norm_type == 'fused' or config.norm_type == 'torch_nn':
-            self.input_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
-            self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, eps=config.rms_norm_eps)
+            self.mlp = HunyuanMLP(
+                config, layer_idx=layer_idx, is_shared_mlp=False, is_moe=False
+            )
+        if config.norm_type == "hf_rms" or config.norm_type == "rms":
+            self.input_layernorm = HunyuanRMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
+            self.post_attention_layernorm = HunyuanRMSNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
+        elif config.norm_type == "fused" or config.norm_type == "torch_nn":
+            self.input_layernorm = nn.LayerNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
+            self.post_attention_layernorm = nn.LayerNorm(
+                config.hidden_size, eps=config.rms_norm_eps
+            )
         else:
             assert False, "other norm_type are not supported"
-            
-            
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_value: Optional[Tuple[torch.Tensor]] = None,
-            output_attentions: Optional[bool] = False,
-            use_cache: Optional[bool] = False,
-            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
-            **kwargs,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: Optional[bool] = False,
+        use_cache: Optional[bool] = False,
+        custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+        **kwargs,
     ) -> Tuple[torch.FloatTensor | Any]:
         """
         Args:
@@ -1679,6 +1941,7 @@ Hunyuan_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
+
 @add_start_docstrings(
     "The bare Hunyuan Model outputting raw hidden-states without any specific head on top.",
     Hunyuan_START_DOCSTRING,
@@ -1691,20 +1954,22 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
         self.add_classification_head = config.add_classification_head
         self.wte = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
-            [HunyuanImage3DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [
+                HunyuanImage3DecoderLayer(config, layer_idx)
+                for layer_idx in range(config.num_hidden_layers)
+            ]
         )
         # Initialize weights and apply final processing
         self.post_init()
 
         self.shared_tensor = None
-        
-    
+
     def instantiate_vae_image_tokens(
-            self,
-            x: torch.Tensor,
-            images: BatchRaggedImages,
-            ts: BatchRaggedTensor,
-            image_mask: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        images: BatchRaggedImages,
+        ts: BatchRaggedTensor,
+        image_mask: torch.Tensor,
     ):
         """
         Instantiate the VAE image embeddings into the input embedding sequence.
@@ -1720,7 +1985,11 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
         batch_size, seq_len, n_embd = x.shape
 
         if isinstance(images, list):
-            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            index = (
+                torch.arange(seq_len, device=x.device)
+                .unsqueeze(0)
+                .repeat(batch_size, 1)
+            )
             t_emb = []
             for i, (image_i, t_i) in enumerate(zip(images, ts)):
                 if isinstance(image_i, torch.Tensor):
@@ -1729,12 +1998,18 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
                     # n_{i} x one_image_seq_len x n_embd
                     image_i_seq, _, _ = self.patch_embed(image_i, t_i_emb)
                     # 1 x (n_{i} * one_image_seq_len)
-                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
-                    x[i:i + 1].scatter_(
+                    image_i_scatter_index = (
+                        index[i : i + 1]
+                        .masked_select(image_mask[i : i + 1].bool())
+                        .reshape(1, -1)
+                    )
+                    x[i : i + 1].scatter_(
                         dim=1,
                         index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
                         # 1 x (n_{i} * one_image_seq_len) x n_embd
-                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x (n_{i} * one_image_seq_len) x n_embd
+                        src=image_i_seq.reshape(
+                            1, -1, n_embd
+                        ),  # 1 x (n_{i} * one_image_seq_len) x n_embd
                     )
                     t_emb.append(t_i_emb)
                 elif isinstance(image_i, list):
@@ -1744,35 +2019,55 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
                     for j in range(len(image_i)):
                         image_ij = image_i[j]
                         if image_ij.dim() == 4:
-                            assert image_i[j].shape[0] == 1, "image_i[j] should have a batch dimension of 1"
+                            assert (
+                                image_i[j].shape[0] == 1
+                            ), "image_i[j] should have a batch dimension of 1"
                         elif image_ij.dim() == 3:
                             image_ij = image_ij.unsqueeze(0)
                         else:
-                            raise ValueError(f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}")
+                            raise ValueError(
+                                f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}"
+                            )
                         # 1 x one_image_seq_len_{j} x n_embd
-                        image_i_seq_j, _, _ = self.patch_embed(image_ij, t_i_emb[j:j + 1])
+                        image_i_seq_j, _, _ = self.patch_embed(
+                            image_ij, t_i_emb[j : j + 1]
+                        )
                         image_i_seq_list.append(image_i_seq_j)
                     # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
                     image_i_seq = torch.cat(image_i_seq_list, dim=1)
                     # 1 x sum_{j}(one_image_seq_len_{j})
-                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
-                    x[i:i + 1].scatter_(
+                    image_i_scatter_index = (
+                        index[i : i + 1]
+                        .masked_select(image_mask[i : i + 1].bool())
+                        .reshape(1, -1)
+                    )
+                    x[i : i + 1].scatter_(
                         dim=1,
                         index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
                         # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
-                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                        src=image_i_seq.reshape(
+                            1, -1, n_embd
+                        ),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
                     )
                     t_emb.append(t_i_emb)
                 else:
-                    raise TypeError(f"image_i should be a torch.Tensor or a list, got {type(image_i)}")
+                    raise TypeError(
+                        f"image_i should be a torch.Tensor or a list, got {type(image_i)}"
+                    )
             token_h, token_w = None, None
         else:
             # images is a 4-D tensor
             batch_size, seq_len, n_embd = x.shape
-            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            index = (
+                torch.arange(seq_len, device=x.device)
+                .unsqueeze(0)
+                .repeat(batch_size, 1)
+            )
             t_emb = self.time_embed(ts)
             image_seq, token_h, token_w = self.patch_embed(images, t_emb)
-            image_scatter_index = index.masked_select(image_mask.bool()).reshape(batch_size, -1)
+            image_scatter_index = index.masked_select(image_mask.bool()).reshape(
+                batch_size, -1
+            )
             x.scatter_(
                 dim=1,
                 index=image_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
@@ -1782,14 +2077,16 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
         return x, token_h, token_w
 
     def instantiate_timestep_tokens(
-            self,
-            x: torch.Tensor,
-            t: BatchRaggedTensor,
-            timestep_scatter_index: BatchRaggedTensor,
+        self,
+        x: torch.Tensor,
+        t: BatchRaggedTensor,
+        timestep_scatter_index: BatchRaggedTensor,
     ):
         batch_size, seq_len, n_embd = x.shape
         # batch_size x n x n_embd
-        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(batch_size, -1, n_embd)
+        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(
+            batch_size, -1, n_embd
+        )
         x.scatter_(
             dim=1,
             index=timestep_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
@@ -1800,30 +2097,38 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
 
     @add_start_docstrings_to_model_forward(Hunyuan_INPUTS_DOCSTRING)
     def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
-            mode: str = "gen_image",
-            first_step: Optional[bool] = None,
-            gen_timestep_scatter_index: Optional[torch.Tensor] = None,
-            **kwargs,
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+        mode: str = "gen_image",
+        first_step: Optional[bool] = None,
+        gen_timestep_scatter_index: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if inputs_embeds is None:
             inputs_embeds = self.wte(input_ids)
@@ -1869,7 +2174,11 @@ class HunyuanImage3Model(HunyuanImage3PreTrainedModel):
         if use_cache:
             next_cache = next_decoder_cache
         if not return_dict:
-            return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [hidden_states, next_cache, all_hidden_states, all_self_attns]
+                if v is not None
+            )
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
@@ -1882,9 +2191,9 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
     def __init__(self, config: HunyuanImage3Config, **kwargs):
         super().__init__(config)
         self.config = config
-        
+
         self.model = HunyuanImage3Model(config)
-        
+
         self.timestep_emb = TimestepEmbedder(hidden_size=config.hidden_size)
         if config.img_proj_type == "unet":
             self.patch_embed = UNetDown(
@@ -1913,13 +2222,13 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
 
         self.pad_id = config.pad_id
         self.vocab_size = config.vocab_size
-        
+
     def instantiate_vae_image_tokens(
-            self,
-            x: torch.Tensor,
-            images: BatchRaggedImages,
-            ts: BatchRaggedTensor,
-            image_mask: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        images: BatchRaggedImages,
+        ts: BatchRaggedTensor,
+        image_mask: torch.Tensor,
     ):
         """
         Instantiate the VAE image embeddings into the input embedding sequence.
@@ -1935,7 +2244,11 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
         batch_size, seq_len, n_embd = x.shape
 
         if isinstance(images, list):
-            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            index = (
+                torch.arange(seq_len, device=x.device)
+                .unsqueeze(0)
+                .repeat(batch_size, 1)
+            )
             t_emb = []
             for i, (image_i, t_i) in enumerate(zip(images, ts)):
                 if isinstance(image_i, torch.Tensor):
@@ -1944,12 +2257,18 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
                     # n_{i} x one_image_seq_len x n_embd
                     image_i_seq, _, _ = self.patch_embed(image_i, t_i_emb)
                     # 1 x (n_{i} * one_image_seq_len)
-                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
-                    x[i:i + 1].scatter_(
+                    image_i_scatter_index = (
+                        index[i : i + 1]
+                        .masked_select(image_mask[i : i + 1].bool())
+                        .reshape(1, -1)
+                    )
+                    x[i : i + 1].scatter_(
                         dim=1,
                         index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
                         # 1 x (n_{i} * one_image_seq_len) x n_embd
-                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x (n_{i} * one_image_seq_len) x n_embd
+                        src=image_i_seq.reshape(
+                            1, -1, n_embd
+                        ),  # 1 x (n_{i} * one_image_seq_len) x n_embd
                     )
                     t_emb.append(t_i_emb)
                 elif isinstance(image_i, list):
@@ -1959,35 +2278,55 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
                     for j in range(len(image_i)):
                         image_ij = image_i[j]
                         if image_ij.dim() == 4:
-                            assert image_i[j].shape[0] == 1, "image_i[j] should have a batch dimension of 1"
+                            assert (
+                                image_i[j].shape[0] == 1
+                            ), "image_i[j] should have a batch dimension of 1"
                         elif image_ij.dim() == 3:
                             image_ij = image_ij.unsqueeze(0)
                         else:
-                            raise ValueError(f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}")
+                            raise ValueError(
+                                f"image_i[j] should have 3 or 4 dimensions, got {image_ij.dim()}"
+                            )
                         # 1 x one_image_seq_len_{j} x n_embd
-                        image_i_seq_j, _, _ = self.patch_embed(image_ij, t_i_emb[j:j + 1])
+                        image_i_seq_j, _, _ = self.patch_embed(
+                            image_ij, t_i_emb[j : j + 1]
+                        )
                         image_i_seq_list.append(image_i_seq_j)
                     # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
                     image_i_seq = torch.cat(image_i_seq_list, dim=1)
                     # 1 x sum_{j}(one_image_seq_len_{j})
-                    image_i_scatter_index = index[i:i + 1].masked_select(image_mask[i:i + 1].bool()).reshape(1, -1)
-                    x[i:i + 1].scatter_(
+                    image_i_scatter_index = (
+                        index[i : i + 1]
+                        .masked_select(image_mask[i : i + 1].bool())
+                        .reshape(1, -1)
+                    )
+                    x[i : i + 1].scatter_(
                         dim=1,
                         index=image_i_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
                         # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
-                        src=image_i_seq.reshape(1, -1, n_embd),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
+                        src=image_i_seq.reshape(
+                            1, -1, n_embd
+                        ),  # 1 x sum_{j}(one_image_seq_len_{j}) x n_embd
                     )
                     t_emb.append(t_i_emb)
                 else:
-                    raise TypeError(f"image_i should be a torch.Tensor or a list, got {type(image_i)}")
+                    raise TypeError(
+                        f"image_i should be a torch.Tensor or a list, got {type(image_i)}"
+                    )
             token_h, token_w = None, None
         else:
             # images is a 4-D tensor
             batch_size, seq_len, n_embd = x.shape
-            index = torch.arange(seq_len, device=x.device).unsqueeze(0).repeat(batch_size, 1)
+            index = (
+                torch.arange(seq_len, device=x.device)
+                .unsqueeze(0)
+                .repeat(batch_size, 1)
+            )
             t_emb = self.time_embed(ts)
             image_seq, token_h, token_w = self.patch_embed(images, t_emb)
-            image_scatter_index = index.masked_select(image_mask.bool()).reshape(batch_size, -1)
+            image_scatter_index = index.masked_select(image_mask.bool()).reshape(
+                batch_size, -1
+            )
             x.scatter_(
                 dim=1,
                 index=image_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
@@ -1997,14 +2336,16 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
         return x, token_h, token_w
 
     def instantiate_timestep_tokens(
-            self,
-            x: torch.Tensor,
-            t: BatchRaggedTensor,
-            timestep_scatter_index: BatchRaggedTensor,
+        self,
+        x: torch.Tensor,
+        t: BatchRaggedTensor,
+        timestep_scatter_index: BatchRaggedTensor,
     ):
         batch_size, seq_len, n_embd = x.shape
         # batch_size x n x n_embd
-        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(batch_size, -1, n_embd)
+        timestep_scatter_src = self.timestep_emb(t.reshape(-1)).reshape(
+            batch_size, -1, n_embd
+        )
         x.scatter_(
             dim=1,
             index=timestep_scatter_index.unsqueeze(-1).repeat(1, 1, n_embd),
@@ -2012,65 +2353,71 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
         )
 
         return x
-    
+
     def ragged_final_layer(self, x, image_mask, timestep, token_h, token_w, first_step):
         bsz, seq_len, n_embd = x.shape
         if first_step:
-            image_output = x.masked_select(image_mask.unsqueeze(-1).bool()).reshape(bsz, -1, n_embd)
+            image_output = x.masked_select(image_mask.unsqueeze(-1).bool()).reshape(
+                bsz, -1, n_embd
+            )
         else:
             image_output = x[:, 1:, :]
         timestep_emb = self.time_embed_2(timestep)
         pred = self.final_layer(image_output, timestep_emb, token_h, token_w)
         return pred
-    
+
     @staticmethod
     def get_pos_emb(custom_pos_emb, position_ids):
         cos, sin = custom_pos_emb
         cos = real_batched_index_select(cos, dim=1, idx=position_ids)
         sin = real_batched_index_select(sin, dim=1, idx=position_ids)
         return cos, sin
-    
+
     @add_start_docstrings_to_model_forward(Hunyuan_INPUTS_DOCSTRING)
     def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            use_cache: Optional[bool] = True,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
-            mode: str = "gen_text",
-            first_step: Optional[bool] = None,
-            # for gen image
-            images: Optional[BatchRaggedImages] = None,
-            image_mask: Optional[torch.Tensor] = None,
-            timestep: Optional[BatchRaggedTensor] = None,
-            gen_timestep_scatter_index: Optional[torch.Tensor] = None,
-            # for cond image
-            cond_vae_images: Optional[BatchRaggedImages] = None,
-            cond_timestep: Optional[BatchRaggedTensor] = None,
-            cond_vae_image_mask: Optional[torch.Tensor] = None,
-            cond_vit_images: Optional[BatchRaggedImages] = None,
-            cond_vit_image_mask: Optional[torch.Tensor] = None,
-            vit_kwargs: Optional[Dict[str, Any]] = None,
-            cond_timestep_scatter_index: Optional[torch.Tensor] = None,
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        use_cache: Optional[bool] = True,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        custom_pos_emb: Optional[Tuple[torch.FloatTensor]] = None,
+        mode: str = "gen_text",
+        first_step: Optional[bool] = None,
+        # for gen image
+        images: Optional[BatchRaggedImages] = None,
+        image_mask: Optional[torch.Tensor] = None,
+        timestep: Optional[BatchRaggedTensor] = None,
+        gen_timestep_scatter_index: Optional[torch.Tensor] = None,
+        # for cond image
+        cond_vae_images: Optional[BatchRaggedImages] = None,
+        cond_timestep: Optional[BatchRaggedTensor] = None,
+        cond_vae_image_mask: Optional[torch.Tensor] = None,
+        cond_vit_images: Optional[BatchRaggedImages] = None,
+        cond_vit_image_mask: Optional[torch.Tensor] = None,
+        vit_kwargs: Optional[Dict[str, Any]] = None,
+        cond_timestep_scatter_index: Optional[torch.Tensor] = None,
     ) -> Union[Tuple, CausalMMOutputWithPast]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
         custom_pos_emb = self.get_pos_emb(custom_pos_emb, position_ids)
         self.model.wte.to(input_ids.device)
         inputs_embeds = self.model.wte(input_ids)
         bsz, seq_len, n_embd = inputs_embeds.shape
 
         # Instantiate placeholder tokens: <timestep>, <img> for the gen image
-        
+
         if first_step:
             inputs_embeds, token_h, token_w = self.instantiate_vae_image_tokens(
-                inputs_embeds, images, timestep, image_mask)
+                inputs_embeds, images, timestep, image_mask
+            )
             inputs_embeds = self.instantiate_timestep_tokens(
-                inputs_embeds, timestep, gen_timestep_scatter_index)
+                inputs_embeds, timestep, gen_timestep_scatter_index
+            )
         else:
             t_emb = self.time_embed(timestep)
             image_emb, token_h, token_w = self.patch_embed(images, t_emb)
@@ -2081,9 +2428,11 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
         # Should only run once with kv-cache enabled.
         if cond_vae_images is not None:
             inputs_embeds, _, _ = self.instantiate_vae_image_tokens(
-                inputs_embeds, cond_vae_images, cond_timestep, cond_vae_image_mask)
+                inputs_embeds, cond_vae_images, cond_timestep, cond_vae_image_mask
+            )
             inputs_embeds = self.instantiate_timestep_tokens(
-                inputs_embeds, cond_timestep, cond_timestep_scatter_index)
+                inputs_embeds, cond_timestep, cond_timestep_scatter_index
+            )
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
@@ -2103,11 +2452,11 @@ class HunyuanImage3ForCausalMM(HunyuanImage3PreTrainedModel, GenerationMixin):
         )
         hidden_states = outputs[0]
 
-
         logits = None
         hidden_states = hidden_states.to(input_ids.device)
         diffusion_prediction = self.ragged_final_layer(
-                hidden_states, image_mask, timestep, token_h, token_w, first_step)
+            hidden_states, image_mask, timestep, token_h, token_w, first_step
+        )
 
         if not return_dict:
             output = (logits,) + outputs[1:] + (diffusion_prediction,)

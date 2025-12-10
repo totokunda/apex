@@ -12,21 +12,22 @@ def get_gpu_memory(device=None):
         return 0
     device = device if device is not None else torch.cuda.current_device()
     props = torch.cuda.get_device_properties(device)
-    if hasattr(torch.cuda, 'get_per_process_memory_fraction'):
+    if hasattr(torch.cuda, "get_per_process_memory_fraction"):
         memory_fraction = torch.cuda.get_per_process_memory_fraction()
     else:
         memory_fraction = 1.0
     return props.total_memory * memory_fraction
+
 
 class HunyuanVideo15Shared(BaseEngine):
     """HunyuanVideo15 Shared Engine Implementation"""
 
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-    
+
     @staticmethod
     def is_sparse_attn_supported():
-        return 'nvidia h' in torch.cuda.get_device_properties(0).name.lower()
+        return "nvidia h" in torch.cuda.get_device_properties(0).name.lower()
 
     def _rescale_noise_cfg(self, noise_cfg, noise_pred_text, guidance_rescale=0.0):
         """
@@ -44,15 +45,16 @@ class HunyuanVideo15Shared(BaseEngine):
             guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
         )
         return noise_cfg
-    
-    
+
     def _resize_and_center_crop(self, image, target_width, target_height):
         if target_height == image.shape[0] and target_width == image.shape[1]:
             return image
 
         pil_image = Image.fromarray(image)
         original_width, original_height = pil_image.size
-        scale_factor = max(target_width / original_width, target_height / original_height)
+        scale_factor = max(
+            target_width / original_width, target_height / original_height
+        )
         resized_width = int(round(original_width * scale_factor))
         resized_height = int(round(original_height * scale_factor))
         resized_image = pil_image.resize((resized_width, resized_height), Image.LANCZOS)
@@ -63,8 +65,9 @@ class HunyuanVideo15Shared(BaseEngine):
         cropped_image = resized_image.crop((left, top, right, bottom))
         return np.array(cropped_image)
 
-
-    def _get_closest_ratio(self, height: float, width: float, ratios: list, buckets: list):
+    def _get_closest_ratio(
+        self, height: float, width: float, ratios: list, buckets: list
+    ):
         """
         Get the closest ratio in the buckets.
 
@@ -86,7 +89,6 @@ class HunyuanVideo15Shared(BaseEngine):
 
         return closest_size, closest_ratio
 
-
     def _generate_crop_size_list(sef, base_size=256, patch_size=16, max_ratio=4.0):
         num_patches = round((base_size / patch_size) ** 2)
         assert max_ratio >= 1.0
@@ -100,7 +102,6 @@ class HunyuanVideo15Shared(BaseEngine):
             else:
                 wp -= 1
         return crop_size_list
-    
 
     def _merge_tensor_by_mask(self, tensor_1, tensor_2, mask, dim):
         assert tensor_1.shape == tensor_2.shape
@@ -114,8 +115,7 @@ class HunyuanVideo15Shared(BaseEngine):
         elif dim == 2:
             tmp[:, :, masked_indices] = tensor_2[:, :, masked_indices]
         return tmp
-    
-    
+
     def _add_special_token(
         self,
         text_encoder: TextEncoder,
@@ -137,33 +137,40 @@ class HunyuanVideo15Shared(BaseEngine):
             font_ann_path (str): Path to font annotation JSON.
             multilingual (bool): Whether to use multilingual font tokens.
         """
-        with open(font_ann_path, 'r') as f:
+        with open(font_ann_path, "r") as f:
             idx_font_dict = json.load(f)
-        with open(color_ann_path, 'r') as f:
+        with open(color_ann_path, "r") as f:
             idx_color_dict = json.load(f)
 
         if multilingual:
-            font_token = [f'<{font_code[:2]}-font-{idx_font_dict[font_code]}>' for font_code in idx_font_dict]
+            font_token = [
+                f"<{font_code[:2]}-font-{idx_font_dict[font_code]}>"
+                for font_code in idx_font_dict
+            ]
         else:
-            font_token = [f'<font-{i}>' for i in range(len(idx_font_dict))]
-        color_token = [f'<color-{i}>' for i in range(len(idx_color_dict))]
+            font_token = [f"<font-{i}>" for i in range(len(idx_font_dict))]
+        color_token = [f"<color-{i}>" for i in range(len(idx_color_dict))]
         additional_special_tokens = []
         if add_color:
             additional_special_tokens += color_token
         if add_font:
             additional_special_tokens += font_token
-            
+
         tokenizer = text_encoder.tokenizer
 
         tokenizer.add_tokens(additional_special_tokens, special_tokens=True)
         if not text_encoder.model_loaded:
             text_encoder.model = text_encoder.load_model()
-        # Set mean_resizing=False to avoid PyTorch LAPACK dependency    
+        # Set mean_resizing=False to avoid PyTorch LAPACK dependency
 
         if hasattr(text_encoder.model, "resize_token_embeddings"):
-            text_encoder.model.resize_token_embeddings(len(tokenizer), mean_resizing=False)
+            text_encoder.model.resize_token_embeddings(
+                len(tokenizer), mean_resizing=False
+            )
         else:
-            logger.warning("Text encoder model does not support resizing token embeddings.")
+            logger.warning(
+                "Text encoder model does not support resizing token embeddings."
+            )
 
     @staticmethod
     def get_vae_inference_config(memory_limitation=None):
@@ -178,4 +185,8 @@ class HunyuanVideo15Shared(BaseEngine):
             sample_size = 256
             tile_overlap_factor = 0.25
             dtype = torch.float32
-        return {'sample_size': sample_size, 'tile_overlap_factor': tile_overlap_factor, 'dtype': dtype}
+        return {
+            "sample_size": sample_size,
+            "tile_overlap_factor": tile_overlap_factor,
+            "dtype": dtype,
+        }

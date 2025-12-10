@@ -67,12 +67,18 @@ class Kandinsky5Shared(BaseEngine):
     def _refresh_vae_factors(self) -> None:
         vae = getattr(self, "vae", None)
         self.vae_scale_factor_temporal = (
-            getattr(vae.config, "temporal_compression_ratio", 4) if vae is not None else 4
+            getattr(vae.config, "temporal_compression_ratio", 4)
+            if vae is not None
+            else 4
         )
         self.vae_scale_factor_spatial = (
-            getattr(vae.config, "spatial_compression_ratio", 8) if vae is not None else 8
+            getattr(vae.config, "spatial_compression_ratio", 8)
+            if vae is not None
+            else 8
         )
-        self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor_spatial)
+        self.video_processor = VideoProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial
+        )
 
     def _refresh_transformer_meta(self) -> None:
         transformer = getattr(self, "transformer", None)
@@ -92,7 +98,9 @@ class Kandinsky5Shared(BaseEngine):
             except Exception:
                 pass
         if getattr(self, "text_encoder_2", None) is None:
-            raise ValueError("`text_encoder_2` is required for Kandinsky5 text encoding but was not loaded.")
+            raise ValueError(
+                "`text_encoder_2` is required for Kandinsky5 text encoding but was not loaded."
+            )
         self.to_device(self.text_encoder_2)
 
         if getattr(self, "transformer", None) is None:
@@ -127,20 +135,41 @@ class Kandinsky5Shared(BaseEngine):
 
     @staticmethod
     def fast_sta_nabla(
-        T: int, H: int, W: int, wT: int = 3, wH: int = 3, wW: int = 3, device: Union[str, torch.device] = "cuda"
+        T: int,
+        H: int,
+        W: int,
+        wT: int = 3,
+        wH: int = 3,
+        wW: int = 3,
+        device: Union[str, torch.device] = "cuda",
     ) -> torch.Tensor:
         l = torch.Tensor([T, H, W]).amax()
         r = torch.arange(0, l, 1, dtype=torch.int16, device=device)
         mat = (r.unsqueeze(1) - r.unsqueeze(0)).abs()
-        sta_t, sta_h, sta_w = mat[:T, :T].flatten(), mat[:H, :H].flatten(), mat[:W, :W].flatten()
+        sta_t, sta_h, sta_w = (
+            mat[:T, :T].flatten(),
+            mat[:H, :H].flatten(),
+            mat[:W, :W].flatten(),
+        )
         sta_t = sta_t <= wT // 2
         sta_h = sta_h <= wH // 2
         sta_w = sta_w <= wW // 2
-        sta_hw = (sta_h.unsqueeze(1) * sta_w.unsqueeze(0)).reshape(H, H, W, W).transpose(1, 2).flatten()
-        sta = (sta_t.unsqueeze(1) * sta_hw.unsqueeze(0)).reshape(T, T, H * W, H * W).transpose(1, 2)
+        sta_hw = (
+            (sta_h.unsqueeze(1) * sta_w.unsqueeze(0))
+            .reshape(H, H, W, W)
+            .transpose(1, 2)
+            .flatten()
+        )
+        sta = (
+            (sta_t.unsqueeze(1) * sta_hw.unsqueeze(0))
+            .reshape(T, T, H * W, H * W)
+            .transpose(1, 2)
+        )
         return sta.reshape(T * H * W, T * H * W)
 
-    def get_sparse_params(self, sample: torch.Tensor, device: torch.device) -> Optional[Dict[str, Any]]:
+    def get_sparse_params(
+        self, sample: torch.Tensor, device: torch.device
+    ) -> Optional[Dict[str, Any]]:
         assert self.transformer.config.patch_size[0] == 1
         _, T, H, W, _ = sample.shape
         T, H, W = (
@@ -186,7 +215,7 @@ class Kandinsky5Shared(BaseEngine):
         dtype = dtype or getattr(self.text_encoder, "dtype", None) or torch.float32
 
         full_texts = [self.prompt_template.format(p) for p in prompt]
-        
+
         inputs = self.text_encoder.tokenizer(
             text=full_texts,
             images=None,
@@ -196,32 +225,41 @@ class Kandinsky5Shared(BaseEngine):
             return_tensors="pt",
             padding=True,
         ).to(device)
-        
+
         # cache the inputs
         if self.text_encoder.enable_cache:
-            hash = self.text_encoder.hash({"input_ids": inputs["input_ids"], "attention_mask": inputs["attention_mask"], "max_length": max_sequence_length + self.prompt_template_encode_start_idx})
+            hash = self.text_encoder.hash(
+                {
+                    "input_ids": inputs["input_ids"],
+                    "attention_mask": inputs["attention_mask"],
+                    "max_length": max_sequence_length
+                    + self.prompt_template_encode_start_idx,
+                }
+            )
             cached = self.text_encoder.load_cached(hash)
             if cached is not None:
                 return cached[0].to(dtype).to(device), cached[1].to(device)
-        
+
         # encode the prompt
         if not self.text_encoder.model_loaded:
             self.text_encoder.model = self.text_encoder.load_model()
-            
+
         embeds = self.text_encoder.model(
             input_ids=inputs["input_ids"],
             return_dict=True,
             output_hidden_states=True,
         )["hidden_states"][-1][:, self.prompt_template_encode_start_idx :]
-        
-        attention_mask = inputs["attention_mask"][:, self.prompt_template_encode_start_idx :]
+
+        attention_mask = inputs["attention_mask"][
+            :, self.prompt_template_encode_start_idx :
+        ]
         cu_seqlens = torch.cumsum(attention_mask.sum(1), dim=0)
         cu_seqlens = F.pad(cu_seqlens, (1, 0), value=0).to(dtype=torch.int32)
-        
+
         # cache the embeds and cu_seqlens
         if self.text_encoder.enable_cache:
             self.text_encoder.cache(hash, embeds, cu_seqlens)
-        
+
         return embeds.to(dtype), cu_seqlens
 
     def _encode_prompt_clip(
@@ -274,7 +312,10 @@ class Kandinsky5Shared(BaseEngine):
         )
 
         prompt_embeds_clip = self._encode_prompt_clip(
-            prompt=prompt, device=device, dtype=dtype, num_videos_per_prompt=num_videos_per_prompt
+            prompt=prompt,
+            device=device,
+            dtype=dtype,
+            num_videos_per_prompt=num_videos_per_prompt,
         )
 
         return prompt_embeds_qwen, prompt_embeds_clip, prompt_cu_seqlens

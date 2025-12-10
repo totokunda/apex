@@ -20,16 +20,35 @@ import torch
 import torch.nn as nn
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.loaders import FluxTransformer2DLoadersMixin, FromOriginalModelMixin, PeftAdapterMixin
-from diffusers.utils import USE_PEFT_BACKEND, deprecate, logging, scale_lora_layers, unscale_lora_layers
+from diffusers.loaders import (
+    FluxTransformer2DLoadersMixin,
+    FromOriginalModelMixin,
+    PeftAdapterMixin,
+)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    deprecate,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
 from diffusers.utils.import_utils import is_torch_npu_available
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import AttentionMixin, FeedForward
 from diffusers.models.cache_utils import CacheMixin
-from diffusers.models.embeddings import FluxPosEmbed, PixArtAlphaTextProjection, Timesteps, get_timestep_embedding
+from diffusers.models.embeddings import (
+    FluxPosEmbed,
+    PixArtAlphaTextProjection,
+    Timesteps,
+    get_timestep_embedding,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import CombinedTimestepLabelEmbeddings, FP32LayerNorm, RMSNorm
+from diffusers.models.normalization import (
+    CombinedTimestepLabelEmbeddings,
+    FP32LayerNorm,
+    RMSNorm,
+)
 from src.transformer.flux.base.attention import FluxAttnProcessor
 from src.transformer.flux.base.model import FluxAttention
 from src.transformer.base import TRANSFORMERS_REGISTRY
@@ -46,7 +65,13 @@ class ChromaAdaLayerNormZeroPruned(nn.Module):
         num_embeddings (`int`): The size of the embeddings dictionary.
     """
 
-    def __init__(self, embedding_dim: int, num_embeddings: Optional[int] = None, norm_type="layer_norm", bias=True):
+    def __init__(
+        self,
+        embedding_dim: int,
+        num_embeddings: Optional[int] = None,
+        norm_type="layer_norm",
+        bias=True,
+    ):
         super().__init__()
         if num_embeddings is not None:
             self.emb = CombinedTimestepLabelEmbeddings(num_embeddings, embedding_dim)
@@ -56,7 +81,9 @@ class ChromaAdaLayerNormZeroPruned(nn.Module):
         if norm_type == "layer_norm":
             self.norm = nn.LayerNorm(embedding_dim, elementwise_affine=False, eps=1e-6)
         elif norm_type == "fp32_layer_norm":
-            self.norm = FP32LayerNorm(embedding_dim, elementwise_affine=False, bias=False)
+            self.norm = FP32LayerNorm(
+                embedding_dim, elementwise_affine=False, bias=False
+            )
         else:
             raise ValueError(
                 f"Unsupported `norm_type` ({norm_type}) provided. Supported ones are: 'layer_norm', 'fp32_layer_norm'."
@@ -72,7 +99,9 @@ class ChromaAdaLayerNormZeroPruned(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if self.emb is not None:
             emb = self.emb(timestep, class_labels, hidden_dtype=hidden_dtype)
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.flatten(1, 2).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = emb.flatten(
+            1, 2
+        ).chunk(6, dim=1)
         x = self.norm(x) * (1 + scale_msa[:, None]) + shift_msa[:, None]
         return x, gate_msa, shift_mlp, scale_mlp, gate_mlp
 
@@ -154,13 +183,20 @@ class ChromaCombinedTimestepTextProjEmbeddings(nn.Module):
     def __init__(self, num_channels: int, out_dim: int):
         super().__init__()
 
-        self.time_proj = Timesteps(num_channels=num_channels, flip_sin_to_cos=True, downscale_freq_shift=0)
-        self.guidance_proj = Timesteps(num_channels=num_channels, flip_sin_to_cos=True, downscale_freq_shift=0)
+        self.time_proj = Timesteps(
+            num_channels=num_channels, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
+        self.guidance_proj = Timesteps(
+            num_channels=num_channels, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
 
         self.register_buffer(
             "mod_proj",
             get_timestep_embedding(
-                torch.arange(out_dim) * 1000, 2 * num_channels, flip_sin_to_cos=True, downscale_freq_shift=0
+                torch.arange(out_dim) * 1000,
+                2 * num_channels,
+                flip_sin_to_cos=True,
+                downscale_freq_shift=0,
             ),
             persistent=False,
         )
@@ -174,9 +210,13 @@ class ChromaCombinedTimestepTextProjEmbeddings(nn.Module):
             dtype=timestep.dtype, device=timestep.device
         )
 
-        mod_proj = self.mod_proj.to(dtype=timesteps_proj.dtype, device=timesteps_proj.device).repeat(batch_size, 1, 1)
+        mod_proj = self.mod_proj.to(
+            dtype=timesteps_proj.dtype, device=timesteps_proj.device
+        ).repeat(batch_size, 1, 1)
         timestep_guidance = (
-            torch.cat([timesteps_proj, guidance_proj], dim=1).unsqueeze(1).repeat(1, mod_index_length, 1)
+            torch.cat([timesteps_proj, guidance_proj], dim=1)
+            .unsqueeze(1)
+            .repeat(1, mod_index_length, 1)
         )
         input_vec = torch.cat([timestep_guidance, mod_proj], dim=-1)
         return input_vec.to(timestep.dtype)
@@ -187,7 +227,10 @@ class ChromaApproximator(nn.Module):
         super().__init__()
         self.in_proj = nn.Linear(in_dim, hidden_dim, bias=True)
         self.layers = nn.ModuleList(
-            [PixArtAlphaTextProjection(hidden_dim, hidden_dim, act_fn="silu") for _ in range(n_layers)]
+            [
+                PixArtAlphaTextProjection(hidden_dim, hidden_dim, act_fn="silu")
+                for _ in range(n_layers)
+            ]
         )
         self.norms = nn.ModuleList([nn.RMSNorm(hidden_dim) for _ in range(n_layers)])
         self.out_proj = nn.Linear(hidden_dim, out_dim)
@@ -254,7 +297,9 @@ class ChromaSingleTransformerBlock(nn.Module):
         joint_attention_kwargs = joint_attention_kwargs or {}
 
         if attention_mask is not None:
-            attention_mask = attention_mask[:, None, None, :] * attention_mask[:, None, :, None]
+            attention_mask = (
+                attention_mask[:, None, None, :] * attention_mask[:, None, :, None]
+            )
 
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
@@ -303,7 +348,9 @@ class ChromaTransformerBlock(nn.Module):
         self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
 
         self.norm2_context = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff_context = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
+        self.ff_context = FeedForward(
+            dim=dim, dim_out=dim, activation_fn="gelu-approximate"
+        )
 
     def forward(
         self,
@@ -315,14 +362,18 @@ class ChromaTransformerBlock(nn.Module):
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         temb_img, temb_txt = temb[:, :6], temb[:, 6:]
-        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb_img)
+        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(
+            hidden_states, emb=temb_img
+        )
 
-        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
-            encoder_hidden_states, emb=temb_txt
+        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
+            self.norm1_context(encoder_hidden_states, emb=temb_txt)
         )
         joint_attention_kwargs = joint_attention_kwargs or {}
         if attention_mask is not None:
-            attention_mask = attention_mask[:, None, None, :] * attention_mask[:, None, :, None]
+            attention_mask = (
+                attention_mask[:, None, None, :] * attention_mask[:, None, :, None]
+            )
 
         # Attention.
         attention_outputs = self.attn(
@@ -343,7 +394,9 @@ class ChromaTransformerBlock(nn.Module):
         hidden_states = hidden_states + attn_output
 
         norm_hidden_states = self.norm2(hidden_states)
-        norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        norm_hidden_states = (
+            norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        )
 
         ff_output = self.ff(norm_hidden_states)
         ff_output = gate_mlp.unsqueeze(1) * ff_output
@@ -358,10 +411,15 @@ class ChromaTransformerBlock(nn.Module):
         encoder_hidden_states = encoder_hidden_states + context_attn_output
 
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
-        norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
+        norm_encoder_hidden_states = (
+            norm_encoder_hidden_states * (1 + c_scale_mlp[:, None])
+            + c_shift_mlp[:, None]
+        )
 
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
-        encoder_hidden_states = encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        encoder_hidden_states = (
+            encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        )
         if encoder_hidden_states.dtype == torch.float16:
             encoder_hidden_states = encoder_hidden_states.clip(-65504, 65504)
 
@@ -436,7 +494,7 @@ class ChromaTransformer2DModel(
             num_channels=approximator_num_channels // 4,
             out_dim=3 * num_single_layers + 2 * 6 * num_layers + 2,
         )
-        
+
         self.distilled_guidance_layer = ChromaApproximator(
             in_dim=approximator_num_channels,
             out_dim=self.inner_dim,
@@ -472,7 +530,9 @@ class ChromaTransformer2DModel(
         self.norm_out = ChromaAdaLayerNormContinuousPruned(
             self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6
         )
-        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
+        self.proj_out = nn.Linear(
+            self.inner_dim, patch_size * patch_size * self.out_channels, bias=True
+        )
 
         self.gradient_checkpointing = False
 
@@ -524,7 +584,10 @@ class ChromaTransformer2DModel(
             # weight the lora layers by setting `lora_scale` for each PEFT layer
             scale_lora_layers(self, lora_scale)
         else:
-            if joint_attention_kwargs is not None and joint_attention_kwargs.get("scale", None) is not None:
+            if (
+                joint_attention_kwargs is not None
+                and joint_attention_kwargs.get("scale", None) is not None
+            ):
                 logger.warning(
                     "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
                 )
@@ -554,8 +617,13 @@ class ChromaTransformer2DModel(
         ids = torch.cat((txt_ids, img_ids), dim=0)
         image_rotary_emb = self.pos_embed(ids)
 
-        if joint_attention_kwargs is not None and "ip_adapter_image_embeds" in joint_attention_kwargs:
-            ip_adapter_image_embeds = joint_attention_kwargs.pop("ip_adapter_image_embeds")
+        if (
+            joint_attention_kwargs is not None
+            and "ip_adapter_image_embeds" in joint_attention_kwargs
+        ):
+            ip_adapter_image_embeds = joint_attention_kwargs.pop(
+                "ip_adapter_image_embeds"
+            )
             ip_hidden_states = self.encoder_hid_proj(ip_adapter_image_embeds)
             joint_attention_kwargs.update({"ip_hidden_states": ip_hidden_states})
 
@@ -572,8 +640,15 @@ class ChromaTransformer2DModel(
                 dim=1,
             )
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                encoder_hidden_states, hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, encoder_hidden_states, temb, image_rotary_emb, attention_mask
+                encoder_hidden_states, hidden_states = (
+                    self._gradient_checkpointing_func(
+                        block,
+                        hidden_states,
+                        encoder_hidden_states,
+                        temb,
+                        image_rotary_emb,
+                        attention_mask,
+                    )
                 )
 
             else:
@@ -588,15 +663,23 @@ class ChromaTransformer2DModel(
 
             # controlnet residual
             if controlnet_block_samples is not None:
-                interval_control = len(self.transformer_blocks) / len(controlnet_block_samples)
+                interval_control = len(self.transformer_blocks) / len(
+                    controlnet_block_samples
+                )
                 interval_control = int(np.ceil(interval_control))
                 # For Xlabs ControlNet.
                 if controlnet_blocks_repeat:
                     hidden_states = (
-                        hidden_states + controlnet_block_samples[index_block % len(controlnet_block_samples)]
+                        hidden_states
+                        + controlnet_block_samples[
+                            index_block % len(controlnet_block_samples)
+                        ]
                     )
                 else:
-                    hidden_states = hidden_states + controlnet_block_samples[index_block // interval_control]
+                    hidden_states = (
+                        hidden_states
+                        + controlnet_block_samples[index_block // interval_control]
+                    )
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
 
         for index_block, block in enumerate(self.single_transformer_blocks):
@@ -621,7 +704,9 @@ class ChromaTransformer2DModel(
 
             # controlnet residual
             if controlnet_single_block_samples is not None:
-                interval_control = len(self.single_transformer_blocks) / len(controlnet_single_block_samples)
+                interval_control = len(self.single_transformer_blocks) / len(
+                    controlnet_single_block_samples
+                )
                 interval_control = int(np.ceil(interval_control))
                 hidden_states[:, encoder_hidden_states.shape[1] :, ...] = (
                     hidden_states[:, encoder_hidden_states.shape[1] :, ...]

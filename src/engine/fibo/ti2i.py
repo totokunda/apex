@@ -13,15 +13,17 @@ import json
 import textwrap
 from src.types import InputImage
 
+
 class FiboTI2IEngine(BaseEngine):
 
     def __init__(self, *args, **kwargs):
         super(FiboTI2IEngine, self).__init__(*args, **kwargs)
         self.vae_scale_factor = 16
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
+        self.image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
         self.default_sample_size = 64
-        
-    
+
     @staticmethod
     # Based on diffusers.pipelines.flux.pipeline_flux.FluxPipeline._unpack_latents
     def _unpack_latents(latents, height, width, vae_scale_factor):
@@ -40,10 +42,16 @@ class FiboTI2IEngine(BaseEngine):
     # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline._prepare_latent_image_ids
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
         latent_image_ids = torch.zeros(height, width, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None]
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        latent_image_ids[..., 1] = (
+            latent_image_ids[..., 1] + torch.arange(height)[:, None]
+        )
+        latent_image_ids[..., 2] = (
+            latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        )
 
-        latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
+        latent_image_id_height, latent_image_id_width, latent_image_id_channels = (
+            latent_image_ids.shape
+        )
 
         latent_image_ids = latent_image_ids.reshape(
             latent_image_id_height * latent_image_id_width, latent_image_id_channels
@@ -64,19 +72,25 @@ class FiboTI2IEngine(BaseEngine):
         return latents
 
     @staticmethod
-    def _pack_latents_no_patch(latents, batch_size, num_channels_latents, height, width):
+    def _pack_latents_no_patch(
+        latents, batch_size, num_channels_latents, height, width
+    ):
         latents = latents.permute(0, 2, 3, 1)
         latents = latents.reshape(batch_size, height * width, num_channels_latents)
         return latents
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
-        latents = latents.view(batch_size, num_channels_latents, height // 2, 2, width // 2, 2)
+        latents = latents.view(
+            batch_size, num_channels_latents, height // 2, 2, width // 2, 2
+        )
         latents = latents.permute(0, 2, 4, 1, 3, 5)
-        latents = latents.reshape(batch_size, (height // 2) * (width // 2), num_channels_latents * 4)
+        latents = latents.reshape(
+            batch_size, (height // 2) * (width // 2), num_channels_latents * 4
+        )
 
         return latents
-    
+
     def get_prompt_embeds(
         self,
         prompt: Union[str, List[str]],
@@ -96,19 +110,28 @@ class FiboTI2IEngine(BaseEngine):
         bot_token_id = 128000
 
         text_encoder_device = device if device is not None else torch.device("cpu")
-        
+
         def process_inputs_func(text_inputs):
             if all(p == "" for p in prompt):
-                text_inputs.input_ids = torch.full((batch_size, 1), bot_token_id, dtype=torch.long, device=text_encoder_device)
+                text_inputs.input_ids = torch.full(
+                    (batch_size, 1),
+                    bot_token_id,
+                    dtype=torch.long,
+                    device=text_encoder_device,
+                )
                 text_inputs.attention_mask = torch.ones_like(text_inputs.input_ids)
                 return text_inputs
             if any(p == "" for p in prompt):
-                empty_rows = torch.tensor([p == "" for p in prompt], dtype=torch.bool, device=text_encoder_device)
+                empty_rows = torch.tensor(
+                    [p == "" for p in prompt],
+                    dtype=torch.bool,
+                    device=text_encoder_device,
+                )
                 text_inputs.input_ids[empty_rows] = bot_token_id
                 text_inputs.attention_mask[empty_rows] = 1
-            
+
             return text_inputs
-        
+
         outputs, attention_mask = self.text_encoder.encode(
             text=prompt,
             max_sequence_length=max_sequence_length,
@@ -120,47 +143,61 @@ class FiboTI2IEngine(BaseEngine):
             output_type="raw",
             return_attention_mask=True,
         )
-        
+
         hidden_states = outputs.hidden_states
         prompt_embeds = torch.cat([hidden_states[-1], hidden_states[-2]], dim=-1)
         prompt_embeds = prompt_embeds.to(device=device, dtype=dtype)
 
         prompt_embeds = prompt_embeds.repeat_interleave(num_images_per_prompt, dim=0)
         hidden_states = tuple(
-            layer.repeat_interleave(num_images_per_prompt, dim=0).to(device=device) for layer in hidden_states
+            layer.repeat_interleave(num_images_per_prompt, dim=0).to(device=device)
+            for layer in hidden_states
         )
-        
-        attention_mask = attention_mask.repeat_interleave(num_images_per_prompt, dim=0).to(device=device)
+
+        attention_mask = attention_mask.repeat_interleave(
+            num_images_per_prompt, dim=0
+        ).to(device=device)
 
         return prompt_embeds, hidden_states, attention_mask
-    
+
     @staticmethod
     def pad_embedding(prompt_embeds, max_tokens, attention_mask=None):
         # Pad embeddings to `max_tokens` while preserving the mask of real tokens.
         batch_size, seq_len, dim = prompt_embeds.shape
 
         if attention_mask is None:
-            attention_mask = torch.ones((batch_size, seq_len), dtype=prompt_embeds.dtype, device=prompt_embeds.device)
+            attention_mask = torch.ones(
+                (batch_size, seq_len),
+                dtype=prompt_embeds.dtype,
+                device=prompt_embeds.device,
+            )
         else:
-            attention_mask = attention_mask.to(device=prompt_embeds.device, dtype=prompt_embeds.dtype)
+            attention_mask = attention_mask.to(
+                device=prompt_embeds.device, dtype=prompt_embeds.dtype
+            )
 
         if max_tokens < seq_len:
-            raise ValueError("`max_tokens` must be greater or equal to the current sequence length.")
+            raise ValueError(
+                "`max_tokens` must be greater or equal to the current sequence length."
+            )
 
         if max_tokens > seq_len:
             pad_length = max_tokens - seq_len
             padding = torch.zeros(
-                (batch_size, pad_length, dim), dtype=prompt_embeds.dtype, device=prompt_embeds.device
+                (batch_size, pad_length, dim),
+                dtype=prompt_embeds.dtype,
+                device=prompt_embeds.device,
             )
             prompt_embeds = torch.cat([prompt_embeds, padding], dim=1)
 
             mask_padding = torch.zeros(
-                (batch_size, pad_length), dtype=prompt_embeds.dtype, device=prompt_embeds.device
+                (batch_size, pad_length),
+                dtype=prompt_embeds.dtype,
+                device=prompt_embeds.device,
             )
             attention_mask = torch.cat([attention_mask, mask_padding], dim=1)
 
         return prompt_embeds, attention_mask
-    
 
     @staticmethod
     def _prepare_attention_mask(attention_mask):
@@ -171,7 +208,7 @@ class FiboTI2IEngine(BaseEngine):
             attention_matrix == 1, 0.0, -torch.inf
         )  # Apply -inf to ignored tokens for nulling softmax score
         return attention_matrix
-    
+
     def encode_prompt(
         self,
         prompt: Union[str, List[str]],
@@ -210,7 +247,7 @@ class FiboTI2IEngine(BaseEngine):
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
         self.to_device(self.text_encoder)
-        
+
         transformer_dtype = self.component_dtypes["transformer"]
 
         # set lora scale so that monkey patched LoRA
@@ -231,20 +268,28 @@ class FiboTI2IEngine(BaseEngine):
         prompt_attention_mask = None
         negative_prompt_attention_mask = None
         if prompt_embeds is None:
-            prompt_embeds, prompt_layers, prompt_attention_mask = self.get_prompt_embeds(
-                prompt=prompt,
-                num_images_per_prompt=num_images_per_prompt,
-                max_sequence_length=max_sequence_length,
-                device=device,
+            prompt_embeds, prompt_layers, prompt_attention_mask = (
+                self.get_prompt_embeds(
+                    prompt=prompt,
+                    num_images_per_prompt=num_images_per_prompt,
+                    max_sequence_length=max_sequence_length,
+                    device=device,
+                )
             )
             prompt_embeds = prompt_embeds.to(dtype=transformer_dtype)
-            prompt_layers = [tensor.to(dtype=transformer_dtype) for tensor in prompt_layers]
+            prompt_layers = [
+                tensor.to(dtype=transformer_dtype) for tensor in prompt_layers
+            ]
 
         if guidance_scale > 1:
             if isinstance(negative_prompt, list) and negative_prompt[0] is None:
                 negative_prompt = ""
             negative_prompt = negative_prompt or ""
-            negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+            negative_prompt = (
+                batch_size * [negative_prompt]
+                if isinstance(negative_prompt, str)
+                else negative_prompt
+            )
             if prompt is not None and type(prompt) is not type(negative_prompt):
                 raise TypeError(
                     f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
@@ -257,15 +302,21 @@ class FiboTI2IEngine(BaseEngine):
                     " the batch size of `prompt`."
                 )
 
-            negative_prompt_embeds, negative_prompt_layers, negative_prompt_attention_mask = self.get_prompt_embeds(
+            (
+                negative_prompt_embeds,
+                negative_prompt_layers,
+                negative_prompt_attention_mask,
+            ) = self.get_prompt_embeds(
                 prompt=negative_prompt,
                 num_images_per_prompt=num_images_per_prompt,
                 max_sequence_length=max_sequence_length,
                 device=device,
             )
-            
+
             negative_prompt_embeds = negative_prompt_embeds.to(dtype=transformer_dtype)
-            negative_prompt_layers = [tensor.to(dtype=transformer_dtype) for tensor in negative_prompt_layers]
+            negative_prompt_layers = [
+                tensor.to(dtype=transformer_dtype) for tensor in negative_prompt_layers
+            ]
 
         if self.text_encoder is not None:
             if isinstance(self, FluxLoraLoaderMixin) and USE_PEFT_BACKEND:
@@ -274,24 +325,34 @@ class FiboTI2IEngine(BaseEngine):
 
         # Pad to longest
         if prompt_attention_mask is not None:
-            prompt_attention_mask = prompt_attention_mask.to(device=prompt_embeds.device, dtype=prompt_embeds.dtype)
+            prompt_attention_mask = prompt_attention_mask.to(
+                device=prompt_embeds.device, dtype=prompt_embeds.dtype
+            )
 
         if negative_prompt_embeds is not None:
             if negative_prompt_attention_mask is not None:
                 negative_prompt_attention_mask = negative_prompt_attention_mask.to(
-                    device=negative_prompt_embeds.device, dtype=negative_prompt_embeds.dtype
+                    device=negative_prompt_embeds.device,
+                    dtype=negative_prompt_embeds.dtype,
                 )
             max_tokens = max(negative_prompt_embeds.shape[1], prompt_embeds.shape[1])
 
             prompt_embeds, prompt_attention_mask = self.pad_embedding(
                 prompt_embeds, max_tokens, attention_mask=prompt_attention_mask
             )
-            prompt_layers = [self.pad_embedding(layer, max_tokens)[0] for layer in prompt_layers]
+            prompt_layers = [
+                self.pad_embedding(layer, max_tokens)[0] for layer in prompt_layers
+            ]
 
             negative_prompt_embeds, negative_prompt_attention_mask = self.pad_embedding(
-                negative_prompt_embeds, max_tokens, attention_mask=negative_prompt_attention_mask
+                negative_prompt_embeds,
+                max_tokens,
+                attention_mask=negative_prompt_attention_mask,
             )
-            negative_prompt_layers = [self.pad_embedding(layer, max_tokens)[0] for layer in negative_prompt_layers]
+            negative_prompt_layers = [
+                self.pad_embedding(layer, max_tokens)[0]
+                for layer in negative_prompt_layers
+            ]
         else:
             max_tokens = prompt_embeds.shape[1]
             prompt_embeds, prompt_attention_mask = self.pad_embedding(
@@ -300,7 +361,9 @@ class FiboTI2IEngine(BaseEngine):
             negative_prompt_layers = None
 
         dtype = self.text_encoder.dtype
-        text_ids = torch.zeros(prompt_embeds.shape[0], max_tokens, 3).to(device=device, dtype=dtype)
+        text_ids = torch.zeros(prompt_embeds.shape[0], max_tokens, 3).to(
+            device=device, dtype=dtype
+        )
 
         return (
             prompt_embeds,
@@ -311,8 +374,7 @@ class FiboTI2IEngine(BaseEngine):
             prompt_layers,
             negative_prompt_layers,
         )
-        
-    
+
     def _get_latents(
         self,
         batch_size,
@@ -331,7 +393,9 @@ class FiboTI2IEngine(BaseEngine):
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is not None:
-            latent_image_ids = self._prepare_latent_image_ids(batch_size, height, width, device, dtype)
+            latent_image_ids = self._prepare_latent_image_ids(
+                batch_size, height, width, device, dtype
+            )
             return latents.to(device=device, dtype=dtype), latent_image_ids
 
         if isinstance(generator, list) and len(generator) != batch_size:
@@ -342,22 +406,31 @@ class FiboTI2IEngine(BaseEngine):
 
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         if do_patching:
-            latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
-            latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+            latents = self._pack_latents(
+                latents, batch_size, num_channels_latents, height, width
+            )
+            latent_image_ids = self._prepare_latent_image_ids(
+                batch_size, height // 2, width // 2, device, dtype
+            )
         else:
-            latents = self._pack_latents_no_patch(latents, batch_size, num_channels_latents, height, width)
-            latent_image_ids = self._prepare_latent_image_ids(batch_size, height, width, device, dtype)
+            latents = self._pack_latents_no_patch(
+                latents, batch_size, num_channels_latents, height, width
+            )
+            latent_image_ids = self._prepare_latent_image_ids(
+                batch_size, height, width, device, dtype
+            )
 
         return latents, latent_image_ids
-    
+
     def get_default_negative_prompt(self, existing_json: dict) -> str:
         negative_prompt = ""
         style_medium = existing_json.get("style_medium", "").lower()
         if style_medium in ["photograph", "photography", "photo"]:
             negative_prompt = """{'style_medium':'digital illustration','artistic_style':'non-realistic'}"""
         return negative_prompt
-    
-    def run(self, 
+
+    def run(
+        self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
@@ -384,7 +457,7 @@ class FiboTI2IEngine(BaseEngine):
         render_on_step: bool = False,
         return_latents: bool = False,
         **kwargs,
-        ):
+    ):
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
 
         # Reserve progress ranges:
@@ -393,19 +466,25 @@ class FiboTI2IEngine(BaseEngine):
         prompt_progress_callback = make_mapped_progress(progress_callback, 0.05, 0.40)
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(prompt_progress_callback, 0.0, "Preparing prompt")
-        
+
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
-        
+
         lora_scale = (
-            attention_kwargs.get("scale", None) if attention_kwargs is not None else None
+            attention_kwargs.get("scale", None)
+            if attention_kwargs is not None
+            else None
         )
-      
+
         try:
             json.loads(prompt)
-            safe_emit_progress(prompt_progress_callback, 1.0, "Using provided structured JSON prompt")
+            safe_emit_progress(
+                prompt_progress_callback, 1.0, "Using provided structured JSON prompt"
+            )
         except Exception:
-            safe_emit_progress(prompt_progress_callback, 0.2, "Generating structured JSON prompt")
+            safe_emit_progress(
+                prompt_progress_callback, 0.2, "Generating structured JSON prompt"
+            )
             prompt = self._generate_json_prompt(
                 prompt,
                 structured_prompt,
@@ -414,8 +493,10 @@ class FiboTI2IEngine(BaseEngine):
                 progress_callback=prompt_progress_callback,
                 **generate_prompt_kwargs,
             )
-            safe_emit_progress(prompt_progress_callback, 1.0, "Generated structured JSON prompt")
-        
+            safe_emit_progress(
+                prompt_progress_callback, 1.0, "Generated structured JSON prompt"
+            )
+
         safe_emit_progress(progress_callback, 0.42, "Structured prompt ready")
 
         if not negative_prompt:
@@ -442,33 +523,37 @@ class FiboTI2IEngine(BaseEngine):
         )
         prompt_batch_size = prompt_embeds.shape[0]
         safe_emit_progress(progress_callback, 0.48, "Encoded prompt")
-        
+
         if offload:
             self._offload(self.text_encoder)
-        
-        
-        
 
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-        
+
         if guidance_scale > 1:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             prompt_layers = [
-                torch.cat([negative_prompt_layers[i], prompt_layers[i]], dim=0) for i in range(len(prompt_layers))
+                torch.cat([negative_prompt_layers[i], prompt_layers[i]], dim=0)
+                for i in range(len(prompt_layers))
             ]
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask], dim=0)
+            prompt_attention_mask = torch.cat(
+                [negative_prompt_attention_mask, prompt_attention_mask], dim=0
+            )
 
         total_num_layers_transformer = len(self.transformer.transformer_blocks) + len(
             self.transformer.single_transformer_blocks
         )
         if len(prompt_layers) >= total_num_layers_transformer:
             # remove first layers
-            prompt_layers = prompt_layers[len(prompt_layers) - total_num_layers_transformer :]
+            prompt_layers = prompt_layers[
+                len(prompt_layers) - total_num_layers_transformer :
+            ]
         else:
             # duplicate last layer
-            prompt_layers = prompt_layers + [prompt_layers[-1]] * (total_num_layers_transformer - len(prompt_layers))
+            prompt_layers = prompt_layers + [prompt_layers[-1]] * (
+                total_num_layers_transformer - len(prompt_layers)
+            )
 
         # 5. Prepare latent variables
         transformer_config = self.load_config_by_type("transformer")
@@ -476,10 +561,10 @@ class FiboTI2IEngine(BaseEngine):
         num_channels_latents = transformer_config.in_channels
         if do_patching:
             num_channels_latents = int(num_channels_latents / 4)
-            
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         latents, latent_image_ids = self._get_latents(
             prompt_batch_size,
             num_channels_latents,
@@ -490,17 +575,24 @@ class FiboTI2IEngine(BaseEngine):
             latents,
             do_patching,
         )
-        
-        
+
         latent_attention_mask = torch.ones(
-            [latents.shape[0], latents.shape[1]], dtype=latents.dtype, device=latents.device
+            [latents.shape[0], latents.shape[1]],
+            dtype=latents.dtype,
+            device=latents.device,
         )
         if guidance_scale > 1:
             latent_attention_mask = latent_attention_mask.repeat(2, 1)
 
-        attention_mask = torch.cat([prompt_attention_mask, latent_attention_mask], dim=1)
-        attention_mask = self._prepare_attention_mask(attention_mask)  # batch, seq => batch, seq, seq
-        attention_mask = attention_mask.unsqueeze(dim=1).to(dtype=self.transformer.dtype)  # for head broadcasting
+        attention_mask = torch.cat(
+            [prompt_attention_mask, latent_attention_mask], dim=1
+        )
+        attention_mask = self._prepare_attention_mask(
+            attention_mask
+        )  # batch, seq => batch, seq, seq
+        attention_mask = attention_mask.unsqueeze(dim=1).to(
+            dtype=self.transformer.dtype
+        )  # for head broadcasting
 
         if attention_kwargs is None:
             attention_kwargs = {}
@@ -509,11 +601,15 @@ class FiboTI2IEngine(BaseEngine):
         # Adapt scheduler to dynamic shifting (resolution dependent)
         if not self.scheduler:
             self.load_component_by_type("scheduler")
-        
+
         if do_patching:
-            seq_len = (height // (self.vae_scale_factor * 2)) * (width // (self.vae_scale_factor * 2))
+            seq_len = (height // (self.vae_scale_factor * 2)) * (
+                width // (self.vae_scale_factor * 2)
+            )
         else:
-            seq_len = (height // self.vae_scale_factor) * (width // self.vae_scale_factor)
+            seq_len = (height // self.vae_scale_factor) * (
+                width // self.vae_scale_factor
+            )
 
         sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
 
@@ -532,9 +628,13 @@ class FiboTI2IEngine(BaseEngine):
             mu=mu,
         )
 
-        num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        num_warmup_steps = max(
+            len(timesteps) - num_inference_steps * self.scheduler.order, 0
+        )
         self._num_timesteps = len(timesteps)
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         # Support old different diffusers versions
         if len(latent_image_ids.shape) == 3:
@@ -542,19 +642,19 @@ class FiboTI2IEngine(BaseEngine):
 
         if len(text_ids.shape) == 3:
             text_ids = text_ids[0]
-        
+
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
         self._do_patching = do_patching
-        
-
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
-                latent_model_input = torch.cat([latents] * 2) if guidance_scale > 1 else latents
+                latent_model_input = (
+                    torch.cat([latents] * 2) if guidance_scale > 1 else latents
+                )
 
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0]).to(
@@ -576,24 +676,35 @@ class FiboTI2IEngine(BaseEngine):
                 # perform guidance
                 if guidance_scale > 1:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     progress_bar.update()
-                
+
                 # Map denoising loop progress into [0.50, 0.90]
                 if denoise_progress_callback is not None and total_steps > 0:
                     step_progress = float(i + 1) / float(total_steps)
@@ -604,7 +715,7 @@ class FiboTI2IEngine(BaseEngine):
                     )
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
-        
+
         if offload:
             self._offload(self.transformer)
             safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
@@ -614,28 +725,43 @@ class FiboTI2IEngine(BaseEngine):
             return latents
         else:
             if do_patching:
-                latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+                latents = self._unpack_latents(
+                    latents, height, width, self.vae_scale_factor
+                )
             else:
-                latents = self._unpack_latents_no_patch(latents, height, width, self.vae_scale_factor)
-            
+                latents = self._unpack_latents_no_patch(
+                    latents, height, width, self.vae_scale_factor
+                )
+
             latents = latents.unsqueeze(dim=2)
             images = self.vae_decode(latents, offload=offload)
             images = images.squeeze(dim=2)
             images = self._tensor_to_frame(images)
-            safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
+            safe_emit_progress(
+                progress_callback, 1.0, "Completed text-to-image pipeline"
+            )
             return images
-        
+
     def _render_step(self, latents, render_on_step_callback):
         if self._do_patching:
-            latents = self._unpack_latents(latents, self._preview_height, self._preview_width, self.vae_scale_factor)
+            latents = self._unpack_latents(
+                latents,
+                self._preview_height,
+                self._preview_width,
+                self.vae_scale_factor,
+            )
         else:
-            latents = self._unpack_latents_no_patch(latents, self._preview_height, self._preview_width, self.vae_scale_factor)
+            latents = self._unpack_latents_no_patch(
+                latents,
+                self._preview_height,
+                self._preview_width,
+                self.vae_scale_factor,
+            )
         latents = latents.unsqueeze(dim=2)
         images = self.vae_decode(latents, offload=self._preview_offload)
         images = images.squeeze(dim=2)
         images = self._tensor_to_frame(images)
         render_on_step_callback(images[0])
-    
 
     def _build_messages(
         self,
@@ -681,29 +807,29 @@ class FiboTI2IEngine(BaseEngine):
         messages: List[Dict[str, Any]] = []
         messages.append({"role": "user", "content": user_content})
         return messages
-    
 
-    def _generate_json_prompt(self, prompt: Union[str, List[str], None] = None, 
-                              structured_prompt:str | None = None, 
-                              image: InputImage | None = None, 
-                              top_p: float = 0.9,
-                              temperature: float = 0.2,
-                              max_tokens: int = 4096,
-                              stop=["<|im_end|>", "<|end_of_text|>"],
-                              offload: bool = True,
-                              progress_callback: Optional[Callable] = None,
-                              **kwargs,
-                              ):
+    def _generate_json_prompt(
+        self,
+        prompt: Union[str, List[str], None] = None,
+        structured_prompt: str | None = None,
+        image: InputImage | None = None,
+        top_p: float = 0.9,
+        temperature: float = 0.2,
+        max_tokens: int = 4096,
+        stop=["<|im_end|>", "<|end_of_text|>"],
+        offload: bool = True,
+        progress_callback: Optional[Callable] = None,
+        **kwargs,
+    ):
         if isinstance(prompt, list):
             prompt = prompt[0]
-        
+
         self.logger.info(f"Loading image: {image} {prompt} {structured_prompt}")
-        
+
         if image is not None:
             image = self._load_image(image)
         llm = self.helpers["prompt_gen"]
         self.to_device(llm)
-        
 
         refine_image = None
         if not image and not structured_prompt:
@@ -746,4 +872,3 @@ class FiboTI2IEngine(BaseEngine):
         if offload:
             self._offload(llm)
         return json_str
-        

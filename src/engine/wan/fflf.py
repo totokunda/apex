@@ -47,7 +47,7 @@ class WanFFLFEngine(WanShared):
         First Frame Last Frame generation method.
         Generates video content conditioned on both first and last frames.
         """
-        
+
         use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         safe_emit_progress(progress_callback, 0.0, "Starting FFLF pipeline")
@@ -82,7 +82,11 @@ class WanFFLFEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -92,7 +96,6 @@ class WanFFLFEngine(WanShared):
 
         loaded_first_frame = self._load_image(first_frame)
         loaded_last_frame = self._load_image(last_frame)
-
 
         loaded_first_frame, height, width = self._aspect_ratio_resize(
             loaded_first_frame, max_area=height * width
@@ -137,7 +140,9 @@ class WanFFLFEngine(WanShared):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         scheduler = self.scheduler
         timesteps, num_inference_steps = self._get_timesteps(
@@ -146,7 +151,7 @@ class WanFFLFEngine(WanShared):
             timesteps_as_indices=timesteps_as_indices,
             num_inference_steps=num_inference_steps,
         )
-        
+
         num_frames = self._parse_num_frames(duration, fps)
 
         vae_config = self.load_config_by_type("vae")

@@ -2,6 +2,7 @@ import torch
 from typing import Dict, Any, Callable, List
 from .shared import WanShared
 
+
 class WanApexFramepackEngine(WanShared):
     """WAN Apex Framepack Engine Implementation"""
 

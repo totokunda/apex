@@ -104,14 +104,14 @@ You must strictly adhere to the following rules:
 t2i_system_prompts = {
     "en_vanilla": [t2i_system_prompt_en_vanilla],
     "en_recaption": [t2i_system_prompt_en_recaption],
-    "en_think_recaption": [t2i_system_prompt_en_think_recaption]
+    "en_think_recaption": [t2i_system_prompt_en_think_recaption],
 }
 
 
 def get_system_prompt(sys_type, bot_task, system_prompt=None):
-    if sys_type == 'None':
+    if sys_type == "None":
         return None
-    elif sys_type in ['en_vanilla', 'en_recaption', 'en_think_recaption']:
+    elif sys_type in ["en_vanilla", "en_recaption", "en_think_recaption"]:
         return t2i_system_prompts[sys_type][0]
     elif sys_type == "dynamic":
         if bot_task == "think":
@@ -122,7 +122,7 @@ def get_system_prompt(sys_type, bot_task, system_prompt=None):
             return t2i_system_prompts["en_vanilla"][0].strip("\n")
         else:
             return system_prompt
-    elif sys_type == 'custom':
+    elif sys_type == "custom":
         return system_prompt
     else:
         raise NotImplementedError(f"Unsupported system prompt type: {sys_type}")

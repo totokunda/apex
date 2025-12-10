@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 ## @package guided_filter.core.filters
 #
@@ -11,17 +10,20 @@
 import numpy as np
 import cv2
 
+
 ## Convert image into float32 type.
 def to32F(img):
     if img.dtype == np.float32:
         return img
     return (1.0 / 255.0) * np.float32(img)
 
+
 ## Convert image into uint8 type.
 def to8U(img):
     if img.dtype == np.uint8:
         return img
     return np.clip(np.uint8(255.0 * img), 0, 255)
+
 
 ## Return if the input image is gray or not.
 def _isGray(I):
@@ -37,7 +39,9 @@ def _downSample(I, scale=4, shape=None):
         return cv2.resize(I, (w, h), interpolation=cv2.INTER_NEAREST)
 
     h, w = I.shape[:2]
-    return cv2.resize(I, (int(w / scale), int(h / scale)), interpolation=cv2.INTER_NEAREST)
+    return cv2.resize(
+        I, (int(w / scale), int(h / scale)), interpolation=cv2.INTER_NEAREST
+    )
 
 
 ## Return up sampled image.
@@ -49,7 +53,10 @@ def _upSample(I, scale=2, shape=None):
         return cv2.resize(I, (w, h), interpolation=cv2.INTER_LINEAR)
 
     h, w = I.shape[:2]
-    return cv2.resize(I, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR)
+    return cv2.resize(
+        I, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_LINEAR
+    )
+
 
 ## Fast guide filter.
 class FastGuidedFilter:
@@ -166,8 +173,8 @@ class GuidedFilterGray:
         I = self._I
         r = self._radius
         self._I_mean = cv2.blur(I, (r, r))
-        I_mean_sq = cv2.blur(I ** 2, (r, r))
-        self._I_var = I_mean_sq - self._I_mean ** 2
+        I_mean_sq = cv2.blur(I**2, (r, r))
+        self._I_var = I_mean_sq - self._I_mean**2
 
     def _computeCoefficients(self, p):
         r = self._radius
@@ -187,7 +194,7 @@ class GuidedFilterGray:
 ## Guided filter for color guidance image.
 class GuidedFilterColor:
     #  @param I Input color guidance image.
-   #  @param radius Radius of Guided Filter.
+    #  @param radius Radius of Guided Filter.
     #  @param epsilon Regularization term of Guided Filter.
     def __init__(self, I, radius=5, epsilon=0.2):
         self._radius = 2 * radius + 1
@@ -212,7 +219,7 @@ class GuidedFilterColor:
         self._Ig_mean = cv2.blur(Ig, (r, r))
         self._Ib_mean = cv2.blur(Ib, (r, r))
 
-        Irr_var = cv2.blur(Ir ** 2, (r, r)) - self._Ir_mean ** 2 + eps
+        Irr_var = cv2.blur(Ir**2, (r, r)) - self._Ir_mean**2 + eps
         Irg_var = cv2.blur(Ir * Ig, (r, r)) - self._Ir_mean * self._Ig_mean
         Irb_var = cv2.blur(Ir * Ib, (r, r)) - self._Ir_mean * self._Ib_mean
         Igg_var = cv2.blur(Ig * Ig, (r, r)) - self._Ig_mean * self._Ig_mean + eps
@@ -273,9 +280,6 @@ class GuidedFilterColor:
 
         Ir, Ig, Ib = I[:, :, 0], I[:, :, 1], I[:, :, 2]
 
-        q = (ar_mean * Ir +
-             ag_mean * Ig +
-             ab_mean * Ib +
-             b_mean)
+        q = ar_mean * Ir + ag_mean * Ig + ab_mean * Ib + b_mean
 
         return q

@@ -5,6 +5,7 @@ import numpy as np
 from .shared import FluxShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class FluxKontextEngine(FluxShared):
     """Flux Kontext Engine Implementation"""
 
@@ -51,11 +52,18 @@ class FluxKontextEngine(FluxShared):
         safe_emit_progress(progress_callback, 0.0, "Starting Kontext pipeline")
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-            
+
         safe_emit_progress(progress_callback, 0.05, "Encoding prompts")
-        pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
+        (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             prompt_2,
@@ -66,23 +74,25 @@ class FluxKontextEngine(FluxShared):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        
+
         if offload:
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
-        
+
         safe_emit_progress(progress_callback, 0.10, "Loading and preprocessing image")
         image = self._load_image(image)
         if resize_to_preferred_resolution:
             image = self.resize_to_preferred_resolution(image)
             width, height = image.size
         else:
-            image, height, width = self._aspect_ratio_resize(image, mod_value=32, max_area=height*width)
-        
+            image, height, width = self._aspect_ratio_resize(
+                image, mod_value=32, max_area=height * width
+            )
+
         image = self.image_processor.preprocess(image)
         image = image.to(dtype=transformer_dtype)
-        
+
         batch_size = prompt_embeds.shape[0]
 
         safe_emit_progress(progress_callback, 0.15, "Preparing latents")
@@ -96,9 +106,11 @@ class FluxKontextEngine(FluxShared):
             device=self.device,
             generator=generator,
         )
-        
+
         if image_ids is not None:
-            latent_ids = torch.cat([latent_ids, image_ids], dim=0)  # dim 0 is sequence dimension
+            latent_ids = torch.cat(
+                [latent_ids, image_ids], dim=0
+            )  # dim 0 is sequence dimension
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -109,7 +121,7 @@ class FluxKontextEngine(FluxShared):
             if sigmas is None
             else sigmas
         )
-        
+
         image_seq_len = latents.shape[1]
         safe_emit_progress(progress_callback, 0.20, "Configuring scheduler")
         mu = self.calculate_shift(

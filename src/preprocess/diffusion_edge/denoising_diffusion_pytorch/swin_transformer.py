@@ -118,12 +118,23 @@ def shifted_window_attention(
 
     # partition windows
     num_windows = (pad_H // window_size[0]) * (pad_W // window_size[1])
-    x = x.view(B, pad_H // window_size[0], window_size[0], pad_W // window_size[1], window_size[1], C)
-    x = x.permute(0, 1, 3, 2, 4, 5).reshape(B * num_windows, window_size[0] * window_size[1], C)  # B*nW, Ws*Ws, C
+    x = x.view(
+        B,
+        pad_H // window_size[0],
+        window_size[0],
+        pad_W // window_size[1],
+        window_size[1],
+        C,
+    )
+    x = x.permute(0, 1, 3, 2, 4, 5).reshape(
+        B * num_windows, window_size[0] * window_size[1], C
+    )  # B*nW, Ws*Ws, C
 
     # multi-head attention
     qkv = F.linear(x, qkv_weight, qkv_bias)
-    qkv = qkv.reshape(x.size(0), x.size(1), 3, num_heads, C // num_heads).permute(2, 0, 3, 1, 4)
+    qkv = qkv.reshape(x.size(0), x.size(1), 3, num_heads, C // num_heads).permute(
+        2, 0, 3, 1, 4
+    )
     q, k, v = qkv[0], qkv[1], qkv[2]
     q = q * (C // num_heads) ** -0.5
     attn = q.matmul(k.transpose(-2, -1))
@@ -133,18 +144,37 @@ def shifted_window_attention(
     if sum(shift_size) > 0:
         # generate attention mask
         attn_mask = x.new_zeros((pad_H, pad_W))
-        h_slices = ((0, -window_size[0]), (-window_size[0], -shift_size[0]), (-shift_size[0], None))
-        w_slices = ((0, -window_size[1]), (-window_size[1], -shift_size[1]), (-shift_size[1], None))
+        h_slices = (
+            (0, -window_size[0]),
+            (-window_size[0], -shift_size[0]),
+            (-shift_size[0], None),
+        )
+        w_slices = (
+            (0, -window_size[1]),
+            (-window_size[1], -shift_size[1]),
+            (-shift_size[1], None),
+        )
         count = 0
         for h in h_slices:
             for w in w_slices:
                 attn_mask[h[0] : h[1], w[0] : w[1]] = count
                 count += 1
-        attn_mask = attn_mask.view(pad_H // window_size[0], window_size[0], pad_W // window_size[1], window_size[1])
-        attn_mask = attn_mask.permute(0, 2, 1, 3).reshape(num_windows, window_size[0] * window_size[1])
+        attn_mask = attn_mask.view(
+            pad_H // window_size[0],
+            window_size[0],
+            pad_W // window_size[1],
+            window_size[1],
+        )
+        attn_mask = attn_mask.permute(0, 2, 1, 3).reshape(
+            num_windows, window_size[0] * window_size[1]
+        )
         attn_mask = attn_mask.unsqueeze(1) - attn_mask.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
-        attn = attn.view(x.size(0) // num_windows, num_windows, num_heads, x.size(1), x.size(1))
+        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(
+            attn_mask == 0, float(0.0)
+        )
+        attn = attn.view(
+            x.size(0) // num_windows, num_windows, num_heads, x.size(1), x.size(1)
+        )
         attn = attn + attn_mask.unsqueeze(1).unsqueeze(0)
         attn = attn.view(-1, num_heads, x.size(1), x.size(1))
 
@@ -156,7 +186,14 @@ def shifted_window_attention(
     x = F.dropout(x, p=dropout)
 
     # reverse windows
-    x = x.view(B, pad_H // window_size[0], pad_W // window_size[1], window_size[0], window_size[1], C)
+    x = x.view(
+        B,
+        pad_H // window_size[0],
+        pad_W // window_size[1],
+        window_size[0],
+        window_size[1],
+        C,
+    )
     x = x.permute(0, 1, 3, 2, 4, 5).reshape(B, pad_H, pad_W, C)
 
     # reverse cyclic shift
@@ -210,8 +247,12 @@ class ShiftedWindowAttention(nn.Module):
         # coords = torch.stack(torch.meshgrid(coords_h, coords_w, indexing="ij"))  # 2, Wh, Ww
         coords = torch.stack(torch.meshgrid(coords_h, coords_w))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
-        relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
-        relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
+        relative_coords = (
+            coords_flatten[:, :, None] - coords_flatten[:, None, :]
+        )  # 2, Wh*Ww, Wh*Ww
+        relative_coords = relative_coords.permute(
+            1, 2, 0
+        ).contiguous()  # Wh*Ww, Wh*Ww, 2
         relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
         relative_coords[:, :, 1] += self.window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
@@ -231,7 +272,9 @@ class ShiftedWindowAttention(nn.Module):
         N = self.window_size[0] * self.window_size[1]
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index]  # type: ignore[index]
         relative_position_bias = relative_position_bias.view(N, N, -1)
-        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous().unsqueeze(0)
+        relative_position_bias = (
+            relative_position_bias.permute(2, 0, 1).contiguous().unsqueeze(0)
+        )
 
         return shifted_window_attention(
             x,
@@ -291,7 +334,13 @@ class SwinTransformerBlock(nn.Module):
         )
         self.stochastic_depth = StochasticDepth(stochastic_depth_prob, "row")
         self.norm2 = norm_layer(dim)
-        self.mlp = MLP(dim, [int(dim * mlp_ratio), dim], activation_layer=nn.GELU, inplace=None, dropout=dropout)
+        self.mlp = MLP(
+            dim,
+            [int(dim * mlp_ratio), dim],
+            activation_layer=nn.GELU,
+            inplace=None,
+            dropout=dropout,
+        )
 
         for m in self.mlp.modules():
             if isinstance(m, nn.Linear):
@@ -361,28 +410,37 @@ class SwinTransformer(nn.Module):
         #     )
         # )
         self.first_coonv = nn.Sequential(
-                nn.Conv2d(
-                    3, embed_dim, kernel_size=(patch_size[0], patch_size[1]), stride=(patch_size[0], patch_size[1])
-                ),
-                Permute([0, 2, 3, 1]),
-                norm_layer(embed_dim),
-            )
+            nn.Conv2d(
+                3,
+                embed_dim,
+                kernel_size=(patch_size[0], patch_size[1]),
+                stride=(patch_size[0], patch_size[1]),
+            ),
+            Permute([0, 2, 3, 1]),
+            norm_layer(embed_dim),
+        )
 
         total_stage_blocks = sum(depths)
         stage_block_id = 0
         # build SwinTransformer blocks
         for i_stage in range(len(depths)):
             stage: List[nn.Module] = []
-            dim = embed_dim * 2 ** i_stage
+            dim = embed_dim * 2**i_stage
             for i_layer in range(depths[i_stage]):
                 # adjust stochastic depth probability based on the depth of the stage block
-                sd_prob = stochastic_depth_prob * float(stage_block_id) / (total_stage_blocks - 1)
+                sd_prob = (
+                    stochastic_depth_prob
+                    * float(stage_block_id)
+                    / (total_stage_blocks - 1)
+                )
                 stage.append(
                     block(
                         dim,
                         num_heads[i_stage],
                         window_size=window_size,
-                        shift_size=[0 if i_layer % 2 == 0 else w // 2 for w in window_size],
+                        shift_size=[
+                            0 if i_layer % 2 == 0 else w // 2 for w in window_size
+                        ],
                         mlp_ratio=mlp_ratio,
                         dropout=dropout,
                         attention_dropout=attention_dropout,
@@ -456,7 +514,7 @@ def _swin_transformer(
         for i, k in enumerate(list(ckpt2.keys())):
             ckpt2[k] = ckpt1[kl1[i]]
         msg = model.load_state_dict(ckpt2, strict=False)
-        print(f'Load swin_transformer: {msg}')
+        print(f"Load swin_transformer: {msg}")
 
     return model
 
@@ -470,7 +528,10 @@ class Swin_T_Weights(WeightsEnum):
     IMAGENET1K_V1 = Weights(
         url="https://download.pytorch.org/models/swin_t-704ceda3.pth",
         transforms=partial(
-            ImageClassification, crop_size=224, resize_size=232, interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=224,
+            resize_size=232,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META,
@@ -493,7 +554,10 @@ class Swin_S_Weights(WeightsEnum):
     IMAGENET1K_V1 = Weights(
         url="https://download.pytorch.org/models/swin_s-5e29d889.pth",
         transforms=partial(
-            ImageClassification, crop_size=224, resize_size=246, interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=224,
+            resize_size=246,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META,
@@ -516,7 +580,10 @@ class Swin_B_Weights(WeightsEnum):
     IMAGENET1K_V1 = Weights(
         url="https://download.pytorch.org/models/swin_b-68c6b09e.pth",
         transforms=partial(
-            ImageClassification, crop_size=224, resize_size=238, interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=224,
+            resize_size=238,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META,
@@ -535,7 +602,9 @@ class Swin_B_Weights(WeightsEnum):
     DEFAULT = IMAGENET1K_V1
 
 
-def swin_t(*, weights: Optional[Swin_T_Weights] = None, progress: bool = True, **kwargs: Any) -> SwinTransformer:
+def swin_t(
+    *, weights: Optional[Swin_T_Weights] = None, progress: bool = True, **kwargs: Any
+) -> SwinTransformer:
     """
     Constructs a swin_tiny architecture from
     `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows <https://arxiv.org/pdf/2103.14030>`_.
@@ -571,7 +640,9 @@ def swin_t(*, weights: Optional[Swin_T_Weights] = None, progress: bool = True, *
     )
 
 
-def swin_s(*, weights: Optional[Swin_S_Weights] = None, progress: bool = True, **kwargs: Any) -> SwinTransformer:
+def swin_s(
+    *, weights: Optional[Swin_S_Weights] = None, progress: bool = True, **kwargs: Any
+) -> SwinTransformer:
     """
     Constructs a swin_small architecture from
     `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows <https://arxiv.org/pdf/2103.14030>`_.
@@ -608,8 +679,12 @@ def swin_s(*, weights: Optional[Swin_S_Weights] = None, progress: bool = True, *
 
 
 from torchvision.models._utils import handle_legacy_interface
+
+
 @handle_legacy_interface(weights=("pretrained", Swin_B_Weights.IMAGENET1K_V1))
-def swin_b(*, weights: Optional[Swin_B_Weights] = None, progress: bool = True, **kwargs: Any) -> SwinTransformer:
+def swin_b(
+    *, weights: Optional[Swin_B_Weights] = None, progress: bool = True, **kwargs: Any
+) -> SwinTransformer:
     """
     Constructs a swin_base architecture from
     `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows <https://arxiv.org/pdf/2103.14030>`_.
@@ -644,7 +719,8 @@ def swin_b(*, weights: Optional[Swin_B_Weights] = None, progress: bool = True, *
         **kwargs,
     )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     model = swin_b(weights=Swin_B_Weights)
     x = torch.rand(1, 3, 320, 320)
     y = model(x)

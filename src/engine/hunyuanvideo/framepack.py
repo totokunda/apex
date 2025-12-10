@@ -5,9 +5,10 @@ import numpy as np
 import math
 from .shared import HunyuanVideoShared
 
+
 class HunyuanFramepackEngine(HunyuanVideoShared):
     """Hunyuan Framepack Engine Implementation"""
-    
+
     def _soft_append(
         self, history: torch.Tensor, current: torch.Tensor, overlap: int = 0
     ):
@@ -109,7 +110,7 @@ class HunyuanFramepackEngine(HunyuanVideoShared):
             max_sequence_length=max_sequence_length,
             **text_encoder_kwargs,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None:

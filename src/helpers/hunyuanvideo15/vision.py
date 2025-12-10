@@ -16,9 +16,9 @@ import numpy as np
 
 
 PRECISION_TO_TYPE = {
-    'fp32': torch.float32,
-    'fp16': torch.float16,
-    'bf16': torch.bfloat16,
+    "fp32": torch.float32,
+    "fp16": torch.float16,
+    "bf16": torch.bfloat16,
 }
 VISION_ENCODER_PATH = {}
 
@@ -39,15 +39,16 @@ def load_vision_encoder(
 
     if vision_encoder_type == "siglip":
         vision_encoder = SiglipVisionModel.from_pretrained(
-            vision_encoder_path,
-            subfolder='image_encoder'
+            vision_encoder_path, subfolder="image_encoder"
         )
     else:
         raise ValueError(f"Unsupported vision encoder type: {vision_encoder_type}")
 
     # from_pretrained will ensure that the model is in eval mode.
     if vision_encoder_precision is not None:
-        vision_encoder = vision_encoder.to(dtype=PRECISION_TO_TYPE[vision_encoder_precision])
+        vision_encoder = vision_encoder.to(
+            dtype=PRECISION_TO_TYPE[vision_encoder_precision]
+        )
 
     vision_encoder.requires_grad_(False)
 
@@ -57,18 +58,13 @@ def load_vision_encoder(
     return vision_encoder, vision_encoder_path
 
 
-def load_image_processor(
-    processor_type, 
-    processor_path=None, 
-    logger=None
-):
+def load_image_processor(processor_type, processor_path=None, logger=None):
     if processor_path is None:
         processor_path = VISION_ENCODER_PATH[processor_type]
 
     if processor_type == "siglip":
         processor = SiglipImageProcessor.from_pretrained(
-            processor_path, 
-            subfolder='feature_extractor'
+            processor_path, subfolder="feature_extractor"
         )
     else:
         raise ValueError(f"Unsupported processor type: {processor_type}")
@@ -149,7 +145,7 @@ class VisionEncoder(nn.Module):
     def encode_latents_to_images(self, latents, vae, reorg_token=False):
         """
         Convert latents to images using VAE decoder.
-        
+
         Args:
             latents: Input latents tensor
             vae: VAE model for decoding
@@ -158,9 +154,13 @@ class VisionEncoder(nn.Module):
             images: Decoded images as numpy array
         """
         # Handle both 4D and 5D latents (for video, take first frame)
-        first_image_latents = latents[:, :, 0, ...] if len(latents.shape) == 5 else latents
+        first_image_latents = (
+            latents[:, :, 0, ...] if len(latents.shape) == 5 else latents
+        )
         first_image_latents = 1 / vae.config.scaling_factor * first_image_latents
-        first_image = vae.decode(first_image_latents.unsqueeze(2).to(vae.dtype), return_dict=False)[0].cpu()
+        first_image = vae.decode(
+            first_image_latents.unsqueeze(2).to(vae.dtype), return_dict=False
+        )[0].cpu()
         first_image = first_image[:, :, 0, :, :]
         first_image = (first_image / 2 + 0.5).clamp(0, 1)
         first_image = (first_image * 255.0).clamp(0, 255.0)
@@ -176,60 +176,65 @@ class VisionEncoder(nn.Module):
     def encode_images(self, images):
         """
         Encode images using the vision encoder.
-        
+
         Args:
             images: Input images (numpy array or preprocessed tensor)
-            
+
         Returns:
             VisionEncoderModelOutput with encoded features
         """
         if isinstance(images, np.ndarray):
             # Preprocess images if they're numpy arrays
-            preprocessed = self.processor.preprocess(images=images, return_tensors="pt").to(
-                device=self.model.device, dtype=self.model.dtype)
+            preprocessed = self.processor.preprocess(
+                images=images, return_tensors="pt"
+            ).to(device=self.model.device, dtype=self.model.dtype)
         else:
             # Assume already preprocessed
             preprocessed = images
 
         outputs = self.model(**preprocessed)
-        
+
         return VisionEncoderModelOutput(
             last_hidden_state=outputs.last_hidden_state,
-            pooler_output=outputs.pooler_output if hasattr(outputs, 'pooler_output') else None,
-            hidden_states=outputs.hidden_states if hasattr(outputs, 'hidden_states') else None
+            pooler_output=(
+                outputs.pooler_output if hasattr(outputs, "pooler_output") else None
+            ),
+            hidden_states=(
+                outputs.hidden_states if hasattr(outputs, "hidden_states") else None
+            ),
         )
 
     def encode_latents(self, latents, vae, reorg_token=False):
         """
         Encode latents by first converting to images, then encoding.
         This is the main function that replaces sigclip_vision_encode.
-        
+
         Args:
             latents: Input latent tensors
             vae: VAE model for decoding latents to images
-            
+
         Returns:
             Encoded image features
         """
         # Convert latents to images
         images = self.encode_latents_to_images(latents, vae, reorg_token)
-        
+
         # Encode images
         outputs = self.encode_images(images)
-        
+
         return outputs.last_hidden_state
 
     def forward(self, images):
         """
         Forward pass for direct image encoding.
-        
+
         Args:
             images: Input images
-            
+
         Returns:
             VisionEncoderModelOutput with encoded features
         """
-        return self.encode_images(images) 
+        return self.encode_images(images)
 
 
 class HunyuanVisionEncoder(BaseHelper):
@@ -262,8 +267,6 @@ class HunyuanVisionEncoder(BaseHelper):
             output_key=output_key,
             device=device,
         )
-
-
 
     def to(self, device: torch.device):
         self.encoder = self.encoder.to(device)

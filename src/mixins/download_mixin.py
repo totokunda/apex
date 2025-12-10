@@ -10,13 +10,14 @@ from typing import Dict, Any
 import tempfile
 import traceback
 
+
 class DownloadMixin:
     logger: Logger = logger
 
     @staticmethod
     def _stable_url_key(url: str) -> str:
         """Return a stable key for a URL that ignores volatile query/fragment signing parts.
-        
+
         Uses scheme://netloc/path when possible; falls back to the original string on parse errors.
         """
         try:
@@ -28,10 +29,14 @@ class DownloadMixin:
             return url
 
     @staticmethod
-    def _get_callback_tqdm(progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None):
+    def _get_callback_tqdm(
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
+    ):
         """Lazy create CallbackTqdm class when needed"""
         from tqdm import tqdm
-        
+
         class CallbackTqdm(tqdm):
             progress_callback = None
 
@@ -51,7 +56,7 @@ class DownloadMixin:
                     except Exception:
                         pass
                 return res
-        
+
         return CallbackTqdm
 
     def _is_url(self, url: str):
@@ -60,10 +65,10 @@ class DownloadMixin:
             return all([result.scheme, result.netloc])
         except ValueError:
             return False
-    
+
     def _requests_verify(self) -> bool:
         """Return whether HTTPS certificate verification should be enabled. Defaults to True.
-        
+
         Can be disabled by setting env var APEX_REQUESTS_VERIFY to 'false', '0', 'no', or 'off'.
         """
         try:
@@ -74,12 +79,10 @@ class DownloadMixin:
         except Exception:
             return True
 
-    
-
     def _save_config(self, config: Dict[str, Any], save_path: str):
         import json
         import yaml
-        
+
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         if save_path.endswith(".json"):
             with open(save_path, "w") as f:
@@ -107,6 +110,7 @@ class DownloadMixin:
         """
 
         try:
+
             def compute_hash(s: str) -> str:
                 try:
                     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -160,12 +164,39 @@ class DownloadMixin:
                     if any(lower_name.endswith(sfx) for sfx in multipart_suffixes):
                         return True
                     allowed_extensions = {
-                        "json","yaml","yml","toml","ini","cfg","conf",
-                        "bin","pt","pth","ckpt","safetensors","gguf","onnx","tflite","h5","hdf5","npz","pb","params","mar",
-                        "model","spm","vocab","merges",
-                        "zip","tgz","gz","bz2","xz",
+                        "json",
+                        "yaml",
+                        "yml",
+                        "toml",
+                        "ini",
+                        "cfg",
+                        "conf",
+                        "bin",
+                        "pt",
+                        "pth",
+                        "ckpt",
+                        "safetensors",
+                        "gguf",
+                        "onnx",
+                        "tflite",
+                        "h5",
+                        "hdf5",
+                        "npz",
+                        "pb",
+                        "params",
+                        "mar",
+                        "model",
+                        "spm",
+                        "vocab",
+                        "merges",
+                        "zip",
+                        "tgz",
+                        "gz",
+                        "bz2",
+                        "xz",
                         # Common text/docs
-                        "md","txt",
+                        "md",
+                        "txt",
                     }
                     ext = lower_name.rsplit(".", 1)[-1]
                     return ext in allowed_extensions
@@ -182,12 +213,16 @@ class DownloadMixin:
 
             # Google Drive: destination is not deterministic here
             if "drive.google.com" in model_path:
-                file_hashes = [hashlib.sha256(model_path.encode('utf-8')).hexdigest()]
+                file_hashes = [hashlib.sha256(model_path.encode("utf-8")).hexdigest()]
                 try:
                     q = parse_qs(urlparse(model_path).query)
                     file_id = (q.get("id") or [None])[0]
                     if file_id:
-                        file_hashes.append(hashlib.sha256(f"gdrive:{file_id}".encode("utf-8")).hexdigest())
+                        file_hashes.append(
+                            hashlib.sha256(
+                                f"gdrive:{file_id}".encode("utf-8")
+                            ).hexdigest()
+                        )
                 except Exception:
                     pass
                 try:
@@ -202,13 +237,25 @@ class DownloadMixin:
 
             # Google Cloud Storage
             if model_path.startswith("gs://"):
-                dest_dir = os.path.join(save_path, os.path.basename(model_path.rstrip("/")))
-                return dest_dir if os.path.isdir(dest_dir) and dir_is_complete(dest_dir) else None
+                dest_dir = os.path.join(
+                    save_path, os.path.basename(model_path.rstrip("/"))
+                )
+                return (
+                    dest_dir
+                    if os.path.isdir(dest_dir) and dir_is_complete(dest_dir)
+                    else None
+                )
 
             # AWS S3
             if model_path.startswith("s3://"):
-                dest_dir = os.path.join(save_path, os.path.basename(model_path.rstrip("/")))
-                return dest_dir if os.path.isdir(dest_dir) and dir_is_complete(dest_dir) else None
+                dest_dir = os.path.join(
+                    save_path, os.path.basename(model_path.rstrip("/"))
+                )
+                return (
+                    dest_dir
+                    if os.path.isdir(dest_dir) and dir_is_complete(dest_dir)
+                    else None
+                )
 
             # Azure Blob Storage
             if "blob.core.windows.net" in model_path:
@@ -216,12 +263,18 @@ class DownloadMixin:
                 if parsed.path:
                     try:
                         _, blob_prefix = parsed.path.strip("/").split("/", 1)
-                        dest_dir = os.path.join(save_path, os.path.basename(blob_prefix.rstrip("/")))
-                        return dest_dir if os.path.isdir(dest_dir) and dir_is_complete(dest_dir) else None
+                        dest_dir = os.path.join(
+                            save_path, os.path.basename(blob_prefix.rstrip("/"))
+                        )
+                        return (
+                            dest_dir
+                            if os.path.isdir(dest_dir) and dir_is_complete(dest_dir)
+                            else None
+                        )
                     except ValueError:
                         return None
                 return None
-            
+
             parsed_url = urlparse(model_path)
             if parsed_url.scheme and parsed_url.netloc:
                 relative_path_from_url = parsed_url.path.lstrip("/")
@@ -247,7 +300,7 @@ class DownloadMixin:
                 except Exception:
                     pass
                 return None
-                
+
             # Hugging Face Hub
             # Decide expected destination based on whether a specific file is referenced
             hf_has_file = has_file_ending(model_path)
@@ -255,19 +308,31 @@ class DownloadMixin:
             if hf_has_file:
                 file_name = os.path.basename(model_path)
                 file_path = os.path.join(
-                    save_path, f"{hashlib.sha256(model_path.encode()).hexdigest()}_{file_name}"
+                    save_path,
+                    f"{hashlib.sha256(model_path.encode()).hexdigest()}_{file_name}",
                 )
                 return file_path if is_complete_file(file_path) else None
 
             # If looks like an HF repo path (e.g., namespace/repo[/subfolder/...])
-            if len(split_path) >= 2 and "://" not in model_path and not model_path.startswith("/"):
+            if (
+                len(split_path) >= 2
+                and "://" not in model_path
+                and not model_path.startswith("/")
+            ):
                 base_repo = "/".join(split_path[:2])
                 base_dir = os.path.join(save_path, base_repo.replace("/", "_"))
                 if len(split_path) > 2:
                     sub_dir = os.path.join(base_dir, *split_path[2:])
-                    return sub_dir if os.path.isdir(sub_dir) and dir_is_complete(sub_dir) else None
-                return base_dir if os.path.isdir(base_dir) and dir_is_complete(base_dir) else None
-
+                    return (
+                        sub_dir
+                        if os.path.isdir(sub_dir) and dir_is_complete(sub_dir)
+                        else None
+                    )
+                return (
+                    base_dir
+                    if os.path.isdir(base_dir) and dir_is_complete(base_dir)
+                    else None
+                )
 
             return None
         except Exception:
@@ -281,10 +346,13 @@ class DownloadMixin:
     ):
         # check if model_path is a local path
         is_downloaded_path = self.is_downloaded(model_path, save_path)
+        print(model_path, save_path, is_downloaded_path)
         if is_downloaded_path:
             return is_downloaded_path
         elif "drive.google.com" in model_path:
-            return self._download_from_google_drive(model_path, save_path, progress_callback)
+            return self._download_from_google_drive(
+                model_path, save_path, progress_callback
+            )
         elif model_path.startswith("gs://"):
             return self._download_from_gcs(model_path, save_path, progress_callback)
         elif model_path.startswith("s3://"):
@@ -292,7 +360,9 @@ class DownloadMixin:
         elif "blob.core.windows.net" in model_path:
             return self._download_from_azure(model_path, save_path, progress_callback)
         elif self._is_huggingface_repo(model_path):
-            return self._download_from_huggingface(model_path, save_path, progress_callback)
+            return self._download_from_huggingface(
+                model_path, save_path, progress_callback
+            )
         elif self._is_url(model_path):
             return self._download_from_url(model_path, save_path, progress_callback)
         else:
@@ -305,6 +375,7 @@ class DownloadMixin:
         # if has subfolder in name remove it
         try:
             from huggingface_hub import repo_exists, get_token
+
             namespace, repo_name = model_path.split("/")[:2]
             token = get_token()
             return repo_exists(f"{namespace}/{repo_name}", token=token)
@@ -318,7 +389,9 @@ class DownloadMixin:
         self,
         gcs_path: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ):
         try:
             """Downloads files or directories from Google Cloud Storage."""
@@ -326,21 +399,27 @@ class DownloadMixin:
             from google.cloud.storage import Blob
             from tqdm import tqdm
             from datetime import timedelta
-            
+
             dest_dir = os.path.join(save_path, os.path.basename(gcs_path.rstrip("/")))
 
             self.logger.info(f"Downloading from GCS: {gcs_path} to {dest_dir}")
             # Allow specifying a credentials.json path via environment variable for restricted access
             # Prefer APEX_GCS_CREDENTIALS, fallback to GCS_CREDENTIALS_JSON; otherwise use default client behavior.
-            cred_path = os.environ.get("APEX_GCS_CREDENTIALS") or os.environ.get("GCS_CREDENTIALS_JSON")
+            cred_path = os.environ.get("APEX_GCS_CREDENTIALS") or os.environ.get(
+                "GCS_CREDENTIALS_JSON"
+            )
             if cred_path:
                 try:
                     if not os.path.isfile(cred_path):
-                        raise FileNotFoundError(f"GCS credentials file not found at {cred_path}")
+                        raise FileNotFoundError(
+                            f"GCS credentials file not found at {cred_path}"
+                        )
                     storage_client = storage.Client.from_service_account_json(cred_path)
                     self.logger.info("Using GCS credentials from environment variable")
                 except Exception as e:
-                    self.logger.warning(f"Failed to initialize GCS client with provided credentials file '{cred_path}': {e}. Falling back to default credentials.")
+                    self.logger.warning(
+                        f"Failed to initialize GCS client with provided credentials file '{cred_path}': {e}. Falling back to default credentials."
+                    )
                     storage_client = storage.Client()
             else:
                 # storage.Client() will pick up GOOGLE_APPLICATION_CREDENTIALS or default ADC if configured
@@ -373,7 +452,9 @@ class DownloadMixin:
                     relative_path = blob.name[len(prefix_norm) + 1 :]
                 else:
                     rp = os.path.relpath(blob.name, prefix_norm)
-                    relative_path = rp if rp not in (".", "") else os.path.basename(blob.name)
+                    relative_path = (
+                        rp if rp not in (".", "") else os.path.basename(blob.name)
+                    )
                 destination_file_path = os.path.join(dest_dir, relative_path)
 
                 file_label = os.path.basename(destination_file_path)
@@ -431,7 +512,9 @@ class DownloadMixin:
                     continue
 
                 # Use URL-based downloader for better progress reporting
-                def _per_file_cb(n: int, _total: Optional[int], _label: Optional[str] = None):
+                def _per_file_cb(
+                    n: int, _total: Optional[int], _label: Optional[str] = None
+                ):
                     if progress_callback:
                         # Pass through per-file bytes and per-file total
                         progress_callback(int(n), _total, _label or file_label)
@@ -479,13 +562,15 @@ class DownloadMixin:
         self,
         s3_path: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ):
         """Downloads files or directories from AWS S3."""
         try:
             import boto3
             from botocore.exceptions import NoCredentialsError
-            
+
             dest_dir = os.path.join(save_path, os.path.basename(s3_path.rstrip("/")))
             if os.path.isdir(dest_dir) and os.listdir(dest_dir):
                 self.logger.info(
@@ -522,10 +607,16 @@ class DownloadMixin:
                             self.logger.info(
                                 f"File {dest_path} already exists, skipping download."
                             )
-                            file_size = int(obj.get("Size", 0)) if obj.get("Size") is not None else None
+                            file_size = (
+                                int(obj.get("Size", 0))
+                                if obj.get("Size") is not None
+                                else None
+                            )
                             if progress_callback and file_size:
                                 # Report per-file completion
-                                progress_callback(file_size, file_size, os.path.basename(dest_path))
+                                progress_callback(
+                                    file_size, file_size, os.path.basename(dest_path)
+                                )
                             if file_size:
                                 bytes_downloaded += file_size
                             continue
@@ -534,12 +625,22 @@ class DownloadMixin:
                         if not key.endswith("/"):
                             # Use TransferConfig with callback for streaming progress
                             cb_accum = {"n": 0}
-                            file_total = int(obj.get("Size", 0)) if obj.get("Size") is not None else None
+                            file_total = (
+                                int(obj.get("Size", 0))
+                                if obj.get("Size") is not None
+                                else None
+                            )
+
                             def _cb(bytes_amount):
                                 cb_accum["n"] += int(bytes_amount)
                                 if progress_callback:
                                     # Report per-file progress with per-file total
-                                    progress_callback(cb_accum["n"], file_total, os.path.basename(dest_path))
+                                    progress_callback(
+                                        cb_accum["n"],
+                                        file_total,
+                                        os.path.basename(dest_path),
+                                    )
+
                             s3_client.download_file(
                                 bucket_name,
                                 key,
@@ -571,12 +672,14 @@ class DownloadMixin:
         self,
         azure_url: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ):
         """Downloads files or blobs from Azure Blob Storage."""
         try:
             from azure.storage.blob import BlobServiceClient
-            
+
             url_parts = urlparse(azure_url)
             if not url_parts.path:
                 self.logger.error(f"Invalid Azure URL: {azure_url}. Path is missing.")
@@ -594,7 +697,9 @@ class DownloadMixin:
             container_client = blob_service_client.get_container_client(container_name)
 
             blob_list = list(container_client.list_blobs(name_starts_with=blob_prefix))
-            total_bytes = sum(int(b.size or 0) for b in blob_list if not b.name.endswith("/"))
+            total_bytes = sum(
+                int(b.size or 0) for b in blob_list if not b.name.endswith("/")
+            )
             bytes_downloaded = 0
             downloaded = False
             sas_suffix = f"?{url_parts.query}" if url_parts.query else ""
@@ -612,24 +717,40 @@ class DownloadMixin:
                     per_file_size = int(blob.size or 0) if blob.size else None
                     if progress_callback and per_file_size:
                         # Report per-file completion
-                        progress_callback(per_file_size, per_file_size, os.path.basename(file_path))
+                        progress_callback(
+                            per_file_size, per_file_size, os.path.basename(file_path)
+                        )
                     if per_file_size:
                         bytes_downloaded += per_file_size
                     continue
 
                 # Build per-blob URL (append SAS from original URL if present) and delegate to URL downloader
-                blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob.name)
+                blob_client = blob_service_client.get_blob_client(
+                    container=container_name, blob=blob.name
+                )
                 blob_url = f"{blob_client.url}{sas_suffix}"
 
                 # Offset per-file progress into aggregate total
                 start_offset = bytes_downloaded
 
-                def _agg_progress(per_file_downloaded: int, _per_file_total: Optional[int], filename: Optional[str]):
+                def _agg_progress(
+                    per_file_downloaded: int,
+                    _per_file_total: Optional[int],
+                    filename: Optional[str],
+                ):
                     if progress_callback:
                         try:
                             # Report per-file progress and per-file total (prefer per-call total; fallback to blob.size)
-                            total_for_file = _per_file_total if _per_file_total is not None else (int(blob.size or 0) or None)
-                            progress_callback(int(per_file_downloaded or 0), total_for_file, filename or os.path.basename(file_path))
+                            total_for_file = (
+                                _per_file_total
+                                if _per_file_total is not None
+                                else (int(blob.size or 0) or None)
+                            )
+                            progress_callback(
+                                int(per_file_downloaded or 0),
+                                total_for_file,
+                                filename or os.path.basename(file_path),
+                            )
                         except Exception:
                             pass
 
@@ -643,7 +764,9 @@ class DownloadMixin:
                 )
                 # Update aggregate counter: prefer reported blob size, fallback to actual file size
                 try:
-                    bytes_downloaded = start_offset + (int(blob.size or 0) or os.path.getsize(file_path))
+                    bytes_downloaded = start_offset + (
+                        int(blob.size or 0) or os.path.getsize(file_path)
+                    )
                 except Exception:
                     try:
                         bytes_downloaded = start_offset + os.path.getsize(file_path)
@@ -746,7 +869,9 @@ class DownloadMixin:
         self,
         repo_id: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
     ):
         """Downloads a repository from the Hugging Face Hub."""
         try:
@@ -762,35 +887,48 @@ class DownloadMixin:
                 self.logger.info(f"Downloading from Hugging Face Hub: {repo_id}")
 
             split_path = repo_id.split("/")
-            
+
             looks_like_path_is_dir = False
             if self._has_file_ending(repo_id):
                 try:
                     # fetch the specific file via signed URL and download through URL downloader
-                    self.logger.info(f"Downloading specific file from Hugging Face Hub: {repo_id}")
+                    self.logger.info(
+                        f"Downloading specific file from Hugging Face Hub: {repo_id}"
+                    )
                     base_repo = "/".join(split_path[:2])
                     file_name = os.path.basename(repo_id)
-                    subfolder = f"{'/'.join(split_path[2:-1])}" if len(split_path) > 2 else None
+                    subfolder = (
+                        f"{'/'.join(split_path[2:-1])}" if len(split_path) > 2 else None
+                    )
                     # deterministic final path based on logical repo path (not signed URL)
                     deterministic_path = os.path.join(
                         save_path,
                         f"{hashlib.sha256(repo_id.encode()).hexdigest()}_{file_name}",
                     )
                     if os.path.exists(deterministic_path):
-                        self.logger.info(f"File {deterministic_path} already exists, skipping download.")
+                        self.logger.info(
+                            f"File {deterministic_path} already exists, skipping download."
+                        )
                         return deterministic_path
                     # Build resolve URL then follow redirects to signed URL
-                    resolve_url = hf_hub_url(repo_id=base_repo, filename=file_name, subfolder=subfolder)
+                    resolve_url = hf_hub_url(
+                        repo_id=base_repo, filename=file_name, subfolder=subfolder
+                    )
                     token = HfFolder.get_token()
                     headers = build_hf_headers(token=token)
                     with requests.Session() as sess:
                         sess.headers.update(headers)
-                        head = sess.head(resolve_url, allow_redirects=True, timeout=20, verify=self._requests_verify())
+                        head = sess.head(
+                            resolve_url,
+                            allow_redirects=True,
+                            timeout=20,
+                            verify=self._requests_verify(),
+                        )
                         head.raise_for_status()
                         signed_url = head.url
                         # Download directly to deterministic path with resume support
                         os.makedirs(os.path.dirname(deterministic_path), exist_ok=True)
-                        
+
                         # Retry loop for single file download with verification
                         max_retries = 3
                         for attempt in range(max_retries):
@@ -803,14 +941,18 @@ class DownloadMixin:
                                     filename=file_name,
                                     dest_path=deterministic_path,
                                 )
-                                
+
                                 # Verify file
                                 if not os.path.exists(deterministic_path):
-                                    raise ValueError(f"File {deterministic_path} not found after download")
-                                
+                                    raise ValueError(
+                                        f"File {deterministic_path} not found after download"
+                                    )
+
                                 actual_size = os.path.getsize(deterministic_path)
                                 if actual_size == 0:
-                                    raise ValueError(f"File {deterministic_path} is empty")
+                                    raise ValueError(
+                                        f"File {deterministic_path} is empty"
+                                    )
 
                                 # Verify content length if available
                                 content_length = head.headers.get("content-length")
@@ -818,13 +960,17 @@ class DownloadMixin:
                                     try:
                                         expected_size = int(content_length)
                                         if actual_size != expected_size:
-                                            raise ValueError(f"File {deterministic_path} size mismatch: expected {expected_size}, got {actual_size}")
+                                            raise ValueError(
+                                                f"File {deterministic_path} size mismatch: expected {expected_size}, got {actual_size}"
+                                            )
                                     except (ValueError, TypeError):
                                         pass
 
                                 break  # Success
                             except Exception as e:
-                                self.logger.warning(f"Download failed for {file_name} (attempt {attempt+1}/{max_retries}): {e}")
+                                self.logger.warning(
+                                    f"Download failed for {file_name} (attempt {attempt+1}/{max_retries}): {e}"
+                                )
                                 if os.path.exists(deterministic_path):
                                     try:
                                         os.remove(deterministic_path)
@@ -832,11 +978,15 @@ class DownloadMixin:
                                         pass
                                 if attempt == max_retries - 1:
                                     raise e
-                    self.logger.info(f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}")
+                    self.logger.info(
+                        f"Successfully downloaded specific file from Hugging Face Hub: {repo_id}"
+                    )
                     return deterministic_path
                 except Exception:
                     looks_like_path_is_dir = True
-                    self.logger.warning(f"Failed to download specific file from Hugging Face Hub: {repo_id}")
+                    self.logger.warning(
+                        f"Failed to download specific file from Hugging Face Hub: {repo_id}"
+                    )
 
             subfolder = (
                 [f"{'/'.join(split_path[2:])}/*"] if len(split_path) > 2 else None
@@ -847,13 +997,14 @@ class DownloadMixin:
                 dest_path = os.path.join(save_path, repo_id.replace("/", "_"))
             else:
                 dest_path = os.path.join(save_path)
-            
 
             # If destination already exists and is non-empty:
             # - When downloading the whole repo (no subfolder), skip re-download.
             # - When downloading a subfolder, we will merge the staged subfolder into dest at finalize.
             if os.path.exists(dest_path) and os.listdir(dest_path) and not subfolder:
-                self.logger.info(f"Directory {dest_path} already exists with content; skipping full repo re-download.")
+                self.logger.info(
+                    f"Directory {dest_path} already exists with content; skipping full repo re-download."
+                )
                 return dest_path
             # Snapshot-style: list files, resolve signed URLs for each, download in parallel, preserve structure
             api = HfApi()
@@ -887,9 +1038,16 @@ class DownloadMixin:
                 # Split into subdir and filename
                 filename = os.path.basename(rel_path)
                 rel_dir = os.path.dirname(rel_path)
-                resolve_url = hf_hub_url(repo_id=repo_id, filename=filename, subfolder=rel_dir or None)
+                resolve_url = hf_hub_url(
+                    repo_id=repo_id, filename=filename, subfolder=rel_dir or None
+                )
                 try:
-                    head = session.head(resolve_url, allow_redirects=True, timeout=20, verify=self._requests_verify())
+                    head = session.head(
+                        resolve_url,
+                        allow_redirects=True,
+                        timeout=20,
+                        verify=self._requests_verify(),
+                    )
                     head.raise_for_status()
                     signed_url = head.url
                     size = None
@@ -901,22 +1059,33 @@ class DownloadMixin:
                         total_size += size
                     file_entries.append((rel_path, filename, rel_dir, signed_url, size))
                 except Exception as e:
-                    self.logger.error(f"Failed to resolve signed URL for {rel_path} in {repo_id}: {e}")
+                    self.logger.error(
+                        f"Failed to resolve signed URL for {rel_path} in {repo_id}: {e}"
+                    )
             if not file_entries:
-                self.logger.warning(f"No downloadable files resolved in repository: {repo_id}")
+                self.logger.warning(
+                    f"No downloadable files resolved in repository: {repo_id}"
+                )
                 if subfolder:
                     return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
+
             # Progress aggregation across threads
             def make_cb(rel_path: str, size_hint: Optional[int]):
                 def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
                     if progress_callback:
                         try:
                             # Report per-file progress with per-file total
-                            progress_callback(int(n), _total if _total is not None else size_hint, _label or os.path.basename(rel_path))
+                            progress_callback(
+                                int(n),
+                                _total if _total is not None else size_hint,
+                                _label or os.path.basename(rel_path),
+                            )
                         except Exception:
                             pass
+
                 return _cb
+
             # Download in parallel to temp (staging dir), then move the entire directory into dest_path atomically
             with tempfile.TemporaryDirectory() as tmp_root:
                 stage_dir = os.path.join(tmp_root, os.path.basename(dest_path))
@@ -924,32 +1093,52 @@ class DownloadMixin:
                 futures = []
                 with ThreadPoolExecutor(max_workers=min(8, len(file_entries))) as ex:
                     for rel_path, filename, rel_dir, signed_url, _size in file_entries:
-                        final_dir = os.path.join(stage_dir, rel_dir) if rel_dir else stage_dir
+                        final_dir = (
+                            os.path.join(stage_dir, rel_dir) if rel_dir else stage_dir
+                        )
                         final_path = os.path.join(final_dir, filename)
                         # Skip if already present in staging (e.g., duplicate entries)
                         if os.path.exists(final_path):
                             if progress_callback:
                                 try:
-                                    size_inc = _size if _size is not None else os.path.getsize(final_path)
+                                    size_inc = (
+                                        _size
+                                        if _size is not None
+                                        else os.path.getsize(final_path)
+                                    )
                                     if size_inc:
                                         progress_callback(size_inc, size_inc, filename)
                                 except Exception:
                                     pass
                             continue
                         os.makedirs(final_dir, exist_ok=True)
+
                         # Each task downloads directly into staged final path with resume support
-                        def task(rel_path=rel_path, filename=filename, signed_url=signed_url, rel_dir=rel_dir, final_dir=final_dir, expected_size=_size):
-                            tmp_dir = os.path.join(tmp_root, "files_tmp", rel_dir) if rel_dir else os.path.join(tmp_root, "files_tmp")
+                        def task(
+                            rel_path=rel_path,
+                            filename=filename,
+                            signed_url=signed_url,
+                            rel_dir=rel_dir,
+                            final_dir=final_dir,
+                            expected_size=_size,
+                        ):
+                            tmp_dir = (
+                                os.path.join(tmp_root, "files_tmp", rel_dir)
+                                if rel_dir
+                                else os.path.join(tmp_root, "files_tmp")
+                            )
                             os.makedirs(tmp_dir, exist_ok=True)
                             dest_file = os.path.join(final_dir, filename)
-                            
+
                             max_retries = 3
                             for attempt in range(max_retries):
                                 try:
                                     self._download_from_url(
                                         url=signed_url,
                                         save_path=tmp_dir,
-                                        progress_callback=make_cb(rel_path, expected_size),
+                                        progress_callback=make_cb(
+                                            rel_path, expected_size
+                                        ),
                                         session=session,
                                         filename=filename,
                                         dest_path=dest_file,
@@ -957,30 +1146,40 @@ class DownloadMixin:
 
                                     # Verification
                                     if not os.path.exists(dest_file):
-                                        raise ValueError(f"File {dest_file} not found after download")
-                                    
+                                        raise ValueError(
+                                            f"File {dest_file} not found after download"
+                                        )
+
                                     actual_size = os.path.getsize(dest_file)
                                     if actual_size == 0:
                                         raise ValueError(f"File {dest_file} is empty")
-                                    
-                                    if expected_size is not None and actual_size != expected_size:
-                                        raise ValueError(f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}")
-                                        
+
+                                    if (
+                                        expected_size is not None
+                                        and actual_size != expected_size
+                                    ):
+                                        raise ValueError(
+                                            f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}"
+                                        )
+
                                     return dest_file
 
                                 except Exception as e:
                                     if attempt < max_retries - 1:
                                         if hasattr(self, "logger"):
-                                            self.logger.warning(f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}")
-                                    
+                                            self.logger.warning(
+                                                f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}"
+                                            )
+
                                     if os.path.exists(dest_file):
                                         try:
                                             os.remove(dest_file)
                                         except Exception:
                                             pass
-                                            
+
                                     if attempt == max_retries - 1:
                                         raise e
+
                         futures.append(ex.submit(task))
                     # ensure completion
                     for _ in as_completed(futures):
@@ -1025,17 +1224,29 @@ class DownloadMixin:
                                 os.rmdir(root)
                             except Exception:
                                 pass
-                        self.logger.info(f"Merged staged Hugging Face files into existing destination: {dest_path}")
+                        self.logger.info(
+                            f"Merged staged Hugging Face files into existing destination: {dest_path}"
+                        )
                     else:
                         try:
-                            os.replace(stage_dir, dest_path)  # atomic on same filesystem when dest does not exist
+                            os.replace(
+                                stage_dir, dest_path
+                            )  # atomic on same filesystem when dest does not exist
                         except Exception:
                             shutil.move(stage_dir, dest_path)
                 except Exception as e:
-                    self.logger.error(f"Failed to finalize Hugging Face download into {dest_path}: {e}")
+                    self.logger.error(
+                        f"Failed to finalize Hugging Face download into {dest_path}: {e}"
+                    )
             if hasattr(self, "logger"):
-                self.logger.info(f"Successfully downloaded from Hugging Face Hub: {repo_id}")
-            return dest_path if not subfolder else os.path.join(dest_path, *subfolder).rstrip("*")
+                self.logger.info(
+                    f"Successfully downloaded from Hugging Face Hub: {repo_id}"
+                )
+            return (
+                dest_path
+                if not subfolder
+                else os.path.join(dest_path, *subfolder).rstrip("*")
+            )
         except Exception as e:
             if hasattr(self, "logger"):
                 self.logger.error(
@@ -1049,7 +1260,9 @@ class DownloadMixin:
         self,
         url: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
         fuzzy: bool = False,
     ):
         try:
@@ -1069,7 +1282,6 @@ class DownloadMixin:
 
             url_origin = url
             gdrive_file_id, is_gdrive_download_link = parse_url(url, warning=False)
-            
 
             if fuzzy and gdrive_file_id:
                 # Overwrite the url with fuzzy match of a file id
@@ -1085,7 +1297,9 @@ class DownloadMixin:
 
                 if url == url_origin and res.status_code == 500:
                     # The file could be Google Docs or Spreadsheets.
-                    url = "https://drive.google.com/open?id={id}".format(id=gdrive_file_id)
+                    url = "https://drive.google.com/open?id={id}".format(
+                        id=gdrive_file_id
+                    )
                     continue
 
                 if res.headers.get("Content-Type", "").startswith("text/html"):
@@ -1130,7 +1344,9 @@ class DownloadMixin:
             # Determine filename from response headers if available
             def _filename_from_response(resp: requests.Response) -> Optional[str]:
                 try:
-                    cd = resp.headers.get("Content-Disposition") or resp.headers.get("content-disposition")
+                    cd = resp.headers.get("Content-Disposition") or resp.headers.get(
+                        "content-disposition"
+                    )
                     if not cd:
                         return None
                     # Basic parsing for filename="..."
@@ -1141,7 +1357,11 @@ class DownloadMixin:
                 except Exception:
                     return None
 
-            filename_hint = _filename_from_response(res) or os.path.basename(urlparse(url).path) or "download"
+            filename_hint = (
+                _filename_from_response(res)
+                or os.path.basename(urlparse(url).path)
+                or "download"
+            )
             # Use our URL downloader with the prepared session and filename hint
 
             return self._download_from_url(
@@ -1164,26 +1384,29 @@ class DownloadMixin:
         self,
         url: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
         session=None,
         filename: Optional[str] = None,
-        chunk_size: int = 1024 * 1024, # 1MB
+        chunk_size: int = 1024 * 1024,  # 1MB
         adaptive: bool = True,
         initial_chunk_size: int = 512 * 1024,  # 512KB starting point for probing
-        target_chunk_seconds: float = 0.25,    # aim ~250ms per read
-        min_chunk_size: int = 64 * 1024,       # 64KB
-        max_chunk_size: int = 16 * 1024 * 1024, # 16MB
+        target_chunk_seconds: float = 0.25,  # aim ~250ms per read
+        min_chunk_size: int = 64 * 1024,  # 64KB
+        max_chunk_size: int = 16 * 1024 * 1024,  # 16MB
         dest_path: Optional[str] = None,
         stable_id: Optional[str] = None,
     ):
         """Downloads a single file from a URL with resume support.
-        
+
         If adaptive is True, dynamically adjusts chunk size during download based on observed
         throughput to target read durations around target_chunk_seconds, clamped to
         [min_chunk_size, max_chunk_size]."""
         import requests
         from tqdm import tqdm
         import time
+
         parsed_url = urlparse(url)
         relative_path_from_url = parsed_url.path.lstrip("/")
         # Build base headers (may be extended for specific providers like CivitAI)
@@ -1195,9 +1418,13 @@ class DownloadMixin:
             base_name = os.path.basename(file_path)
         else:
             # Convert to hash of a stable key that ignores volatile query/fragment unless a stable_id is provided
-            stable_key = stable_id if stable_id is not None else self._stable_url_key(url)
-            file_name = hashlib.sha256(stable_key.encode('utf-8')).hexdigest()
-            base_name = filename or os.path.basename(relative_path_from_url) or "download"
+            stable_key = (
+                stable_id if stable_id is not None else self._stable_url_key(url)
+            )
+            file_name = hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
+            base_name = (
+                filename or os.path.basename(relative_path_from_url) or "download"
+            )
             file_path = os.path.join(save_path, f"{file_name}_{base_name}")
         part_path = f"{file_path}.part"
         # Name to use in logs/progress
@@ -1233,11 +1460,17 @@ class DownloadMixin:
                 )
                 if head_resp.ok:
                     try:
-                        remote_size = int(head_resp.headers.get("content-length", "0")) or None
+                        remote_size = (
+                            int(head_resp.headers.get("content-length", "0")) or None
+                        )
                     except Exception as e:
-                        self.logger.warning(f"Failed to get content length from {url}: {e}")
+                        self.logger.warning(
+                            f"Failed to get content length from {url}: {e}"
+                        )
                         remote_size = None
-                    accept_ranges = head_resp.headers.get("accept-ranges", "").lower() == "bytes"
+                    accept_ranges = (
+                        head_resp.headers.get("accept-ranges", "").lower() == "bytes"
+                    )
             except Exception as e:
                 self.logger.warning(f"Failed to get content length from {url}: {e}")
 
@@ -1245,9 +1478,13 @@ class DownloadMixin:
             if resume_size and remote_size and resume_size >= remote_size:
                 try:
                     os.replace(part_path, file_path)
-                    self.logger.info(f"Resumed and finalized existing partial file to {file_path}")
+                    self.logger.info(
+                        f"Resumed and finalized existing partial file to {file_path}"
+                    )
                     if progress_callback:
-                        progress_callback(remote_size, remote_size, os.path.basename(file_path))
+                        progress_callback(
+                            remote_size, remote_size, os.path.basename(file_path)
+                        )
                     return file_path
                 except Exception:
                     # If finalize fails, continue with resume flow
@@ -1264,22 +1501,39 @@ class DownloadMixin:
 
             get_requester = session if session is not None else requests
             with get_requester.get(
-                url, timeout=10, verify=self._requests_verify(), headers=headers, stream=True, allow_redirects=True
+                url,
+                timeout=10,
+                verify=self._requests_verify(),
+                headers=headers,
+                stream=True,
+                allow_redirects=True,
             ) as response:
                 # If we attempted to resume but server responded with 200, it ignored Range.
                 # If we know total size and resume already matches it, finalize; otherwise restart from scratch.
-                if resume_size > 0 and response.status_code == 200 and "Range" in headers:
+                if (
+                    resume_size > 0
+                    and response.status_code == 200
+                    and "Range" in headers
+                ):
                     if remote_size and resume_size >= remote_size:
                         try:
                             os.replace(part_path, file_path)
-                            self.logger.info(f"Resumed and finalized existing partial file to {file_path}")
+                            self.logger.info(
+                                f"Resumed and finalized existing partial file to {file_path}"
+                            )
                             if progress_callback:
-                                progress_callback(remote_size, remote_size, os.path.basename(file_path))
+                                progress_callback(
+                                    remote_size,
+                                    remote_size,
+                                    os.path.basename(file_path),
+                                )
                             return file_path
                         except Exception:
                             pass
                     # Server does not support resume; restart download from scratch
-                    self.logger.warning("Server did not honor Range header; restarting download from scratch.")
+                    self.logger.warning(
+                        "Server did not honor Range header; restarting download from scratch."
+                    )
                     try:
                         if os.path.exists(part_path):
                             os.remove(part_path)
@@ -1301,10 +1555,12 @@ class DownloadMixin:
                 if total_size is None:
                     try:
                         cl = int(response.headers.get("content-length", "0"))
-                        total_size = cl + resume_size if cl and resume_size else (cl or None)
+                        total_size = (
+                            cl + resume_size if cl and resume_size else (cl or None)
+                        )
                     except Exception:
                         total_size = None
-                
+
                 # Ensure raw reads decode if needed (so sizes match actual written bytes)
                 try:
                     response.raw.decode_content = True
@@ -1313,21 +1569,28 @@ class DownloadMixin:
 
                 mode = "ab" if resume_size > 0 else "wb"
                 downloaded_so_far = resume_size
-                with open(part_path, mode) as out, tqdm(
-                    desc=os.path.basename(file_path),
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    initial=resume_size,
-                ) as bar:
+                with (
+                    open(part_path, mode) as out,
+                    tqdm(
+                        desc=os.path.basename(file_path),
+                        total=total_size,
+                        unit="B",
+                        unit_scale=True,
+                        unit_divisor=1024,
+                        initial=resume_size,
+                    ) as bar,
+                ):
                     if progress_callback and resume_size:
                         try:
-                            progress_callback(downloaded_so_far, total_size or None, os.path.basename(file_path))
+                            progress_callback(
+                                downloaded_so_far,
+                                total_size or None,
+                                os.path.basename(file_path),
+                            )
                         except Exception:
                             traceback.print_exc()
                             pass
-                    
+
                     # Reading strategy: fixed-size via iter_content, or adaptive via response.raw.read
                     if not adaptive:
                         for chunk in response.iter_content(chunk_size=chunk_size):
@@ -1338,12 +1601,19 @@ class DownloadMixin:
                             bar.update(chunk_len)
                             downloaded_so_far += chunk_len
                             if progress_callback:
-                                progress_callback(downloaded_so_far, total_size or None, os.path.basename(file_path))
+                                progress_callback(
+                                    downloaded_so_far,
+                                    total_size or None,
+                                    os.path.basename(file_path),
+                                )
                     else:
                         # Adaptive: start small, adjust size towards a target per-read duration
                         def clamp(n: int, low: int, high: int) -> int:
                             return low if n < low else (high if n > high else n)
-                        current_chunk_size = clamp(int(initial_chunk_size), min_chunk_size, max_chunk_size)
+
+                        current_chunk_size = clamp(
+                            int(initial_chunk_size), min_chunk_size, max_chunk_size
+                        )
                         speed_bps: Optional[float] = None
                         # If resuming and total is known, send an initial callback already done above
                         while True:
@@ -1352,7 +1622,9 @@ class DownloadMixin:
                                 data = response.raw.read(current_chunk_size)
                             except Exception as _e:
                                 # Fallback to iter_content on any raw read error
-                                for chunk in response.iter_content(chunk_size=current_chunk_size):
+                                for chunk in response.iter_content(
+                                    chunk_size=current_chunk_size
+                                ):
                                     if not chunk:
                                         continue
                                     out.write(chunk)
@@ -1360,7 +1632,11 @@ class DownloadMixin:
                                     bar.update(chunk_len)
                                     downloaded_so_far += chunk_len
                                     if progress_callback:
-                                        progress_callback(downloaded_so_far, total_size or None, os.path.basename(file_path))
+                                        progress_callback(
+                                            downloaded_so_far,
+                                            total_size or None,
+                                            os.path.basename(file_path),
+                                        )
                                 break
                             if not data:
                                 break
@@ -1369,7 +1645,11 @@ class DownloadMixin:
                             bar.update(chunk_len)
                             downloaded_so_far += chunk_len
                             if progress_callback:
-                                progress_callback(downloaded_so_far, total_size or None, os.path.basename(file_path))
+                                progress_callback(
+                                    downloaded_so_far,
+                                    total_size or None,
+                                    os.path.basename(file_path),
+                                )
                             # Update speed estimate and adjust chunk size
                             dt = time.perf_counter() - t0
                             if dt > 0 and chunk_len > 0:
@@ -1380,8 +1660,12 @@ class DownloadMixin:
                                 else:
                                     speed_bps = 0.7 * speed_bps + 0.3 * inst_bps
                                 # Aim for reads around target_chunk_seconds
-                                desired = int(speed_bps * max(0.05, target_chunk_seconds))
-                                current_chunk_size = clamp(desired, min_chunk_size, max_chunk_size)
+                                desired = int(
+                                    speed_bps * max(0.05, target_chunk_seconds)
+                                )
+                                current_chunk_size = clamp(
+                                    desired, min_chunk_size, max_chunk_size
+                                )
 
             # Finalize the downloaded file
             os.replace(part_path, file_path)
@@ -1396,7 +1680,9 @@ class DownloadMixin:
         self,
         url: str,
         save_path: str,
-        progress_callback: Optional[Callable[[int, Optional[int], Optional[str]], None]] = None,
+        progress_callback: Optional[
+            Callable[[int, Optional[int], Optional[str]], None]
+        ] = None,
         session=None,
         filename: Optional[str] = None,
         chunk_size: int = 1024 * 1024,

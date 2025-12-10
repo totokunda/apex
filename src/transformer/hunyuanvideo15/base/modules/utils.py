@@ -1,8 +1,10 @@
 import collections
 from itertools import repeat
 
+
 def _ntuple(n):
     """Create a function that converts input to n-tuple."""
+
     def parse(x):
         if isinstance(x, collections.abc.Iterable) and not isinstance(x, str):
             x = tuple(x)
@@ -10,7 +12,9 @@ def _ntuple(n):
                 x = tuple(repeat(x[0], n))
             return x
         return tuple(repeat(x, n))
+
     return parse
+
 
 # Convenience functions for common tuple sizes
 to_1tuple = _ntuple(1)

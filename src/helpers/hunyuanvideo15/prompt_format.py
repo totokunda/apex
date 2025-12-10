@@ -18,6 +18,7 @@ import json
 from src.helpers.helpers import BaseHelper, helpers
 from src.utils.defaults import get_components_path
 
+
 def closest_color(requested_color):
     import webcolors
 
@@ -46,25 +47,25 @@ class MultilingualPromptFormat(BaseHelper):
 
     def __init__(
         self,
-        font_path: str = 'assets/glyph_sdxl_assets/multilingual_10-lang_idx.json',
-        color_path: str = 'assets/glyph_sdxl_assets/color_idx.json',
+        font_path: str = "assets/glyph_sdxl_assets/multilingual_10-lang_idx.json",
+        color_path: str = "assets/glyph_sdxl_assets/color_idx.json",
         **kwargs,
     ):
         super().__init__()
         font_path = self._download(font_path, get_components_path())
         color_path = self._download(color_path, get_components_path())
-        with open(font_path, 'r') as f:
+        with open(font_path, "r") as f:
             self.font_dict = json.load(f)
-        with open(color_path, 'r') as f:
+        with open(color_path, "r") as f:
             self.color_dict = json.load(f)
-        
+
         self.color_path = color_path
         self.font_path = font_path
 
     def format_prompt(self, texts, styles):
-        '''
+        """
         Text "{text}" in {color}, {type}.
-        '''
+        """
 
         prompt = ""
         for text, style in zip(texts, styles):
@@ -83,7 +84,9 @@ class MultilingualPromptFormat(BaseHelper):
 
             # format font
             if style["font-family"] is not None:
-                attr_list.append(f"<{style['font-family'][:2]}-font-{self.font_dict[style['font-family']]}>")
+                attr_list.append(
+                    f"<{style['font-family'][:2]}-font-{self.font_dict[style['font-family']]}>"
+                )
                 attr_suffix = ", ".join(attr_list)
                 text_prompt += " in " + attr_suffix
                 text_prompt += ". "

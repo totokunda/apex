@@ -43,9 +43,7 @@ class WanI2VEngine(WanShared):
         **kwargs,
     ):
 
-        use_cfg_guidance = (
-            guidance_scale > 1.0 and negative_prompt is not None
-        )
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         safe_emit_progress(progress_callback, 0.0, "Starting image-to-video pipeline")
 
@@ -77,7 +75,15 @@ class WanI2VEngine(WanShared):
         else:
             negative_prompt_embeds = None
 
-        safe_emit_progress(progress_callback, 0.14, "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds")
+        safe_emit_progress(
+            progress_callback,
+            0.14,
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
+        )
 
         if offload:
             self._offload(self.text_encoder)
@@ -87,13 +93,21 @@ class WanI2VEngine(WanShared):
         loaded_image = self._load_image(image)
 
         # Prefer explicit height/width; otherwise derive from aspect_ratio/resolution; fallback to image area
-        if (height is None or width is None) and (aspect_ratio is not None or resolution is not None):
+        if (height is None or width is None) and (
+            aspect_ratio is not None or resolution is not None
+        ):
             if aspect_ratio is not None:
-                h, w = self._aspect_ratio_to_height_width(aspect_ratio, int(resolution or max(loaded_image.size)), mod_value=32 if expand_timesteps else 16)
+                h, w = self._aspect_ratio_to_height_width(
+                    aspect_ratio,
+                    int(resolution or max(loaded_image.size)),
+                    mod_value=32 if expand_timesteps else 16,
+                )
                 height = h
                 width = w
             elif resolution is not None:
-                h, w = self._resolution_to_height_width(int(resolution), mod_value=32 if expand_timesteps else 16)
+                h, w = self._resolution_to_height_width(
+                    int(resolution), mod_value=32 if expand_timesteps else 16
+                )
                 height = h
                 width = w
 
@@ -146,7 +160,9 @@ class WanI2VEngine(WanShared):
             num_inference_steps=num_inference_steps,
         )
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         num_frames = self._parse_num_frames(duration, fps)
 
@@ -298,5 +314,7 @@ class WanI2VEngine(WanShared):
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
-            safe_emit_progress(progress_callback, 1.0, "Completed image-to-video pipeline")
+            safe_emit_progress(
+                progress_callback, 1.0, "Completed image-to-video pipeline"
+            )
             return postprocessed_video

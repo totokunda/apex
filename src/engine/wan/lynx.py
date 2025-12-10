@@ -8,6 +8,7 @@ from src.helpers.wan.lynx import WanLynxHelper
 from src.types import InputImage
 from src.utils.progress import make_mapped_progress, safe_emit_progress
 
+
 class LynxEngine(WanShared):
     """Personalized Wan (Lynx) engine with IPA and Ref adapters."""
 
@@ -24,9 +25,18 @@ class LynxEngine(WanShared):
         if env_path:
             return env_path
         cfg = getattr(self, "config", {}) or {}
-        transformer_component = next((x for x in cfg.get("components", []) if x.get("type") == "transformer"), None)
+        transformer_component = next(
+            (x for x in cfg.get("components", []) if x.get("type") == "transformer"),
+            None,
+        )
         extra_model_path = transformer_component.get("extra_model_paths", [])[0]
-        return extra_model_path or cfg.get("adapter_path") or cfg.get("lynx_adapter_path") or cfg.get("adapter_dir") or override
+        return (
+            extra_model_path
+            or cfg.get("adapter_path")
+            or cfg.get("lynx_adapter_path")
+            or cfg.get("adapter_dir")
+            or override
+        )
 
     # ------------------------------- Main entry ------------------------------- #
     def run(
@@ -48,7 +58,6 @@ class LynxEngine(WanShared):
         adapter_path: str | None = None,
         face_embeds: Optional[np.ndarray | torch.Tensor] = None,
         landmarks: Optional[np.ndarray | torch.Tensor] = None,
-
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -65,7 +74,7 @@ class LynxEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting Lynx pipeline")
-        
+
         use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         helper = self._lynx_helper
@@ -80,7 +89,7 @@ class LynxEngine(WanShared):
             device=self.device or "cuda",
             load_image_fn=self._load_image,
         )
-        
+
         safe_emit_progress(progress_callback, 0.08, "Prepared face embeddings")
 
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
@@ -93,7 +102,7 @@ class LynxEngine(WanShared):
             text_encoder_kwargs=text_encoder_kwargs,
             offload=False,
         )
-        
+
         batch_size = prompt_embeds.shape[0]
 
         if offload:
@@ -108,7 +117,7 @@ class LynxEngine(WanShared):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
-        
+
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -147,8 +156,10 @@ class LynxEngine(WanShared):
         self.transformer = helper.load_adapters(
             self.transformer, adapter_root, device=self.device, dtype=transformer_dtype
         )
-        
-        lora_items, adapter_names = list(self.preloaded_loras.values()), list(self.preloaded_loras.keys())
+
+        lora_items, adapter_names = list(self.preloaded_loras.values()), list(
+            self.preloaded_loras.keys()
+        )
         if lora_items:
             self.apply_loras(lora_items, adapter_names=adapter_names)
 
@@ -252,9 +263,11 @@ class LynxEngine(WanShared):
                             attention_kwargs=merged_attention_kwargs,
                             return_dict=False,
                         )[0]
-                        noise_pred = noise_uncond + guidance_scale_i * (
-                            noise_i - noise_uncond
-                        ) + guidance_scale * (noise_pred - noise_i)
+                        noise_pred = (
+                            noise_uncond
+                            + guidance_scale_i * (noise_i - noise_uncond)
+                            + guidance_scale * (noise_pred - noise_i)
+                        )
                     else:
                         noise_pred = noise_uncond + guidance_scale * (
                             noise_pred - noise_uncond
@@ -276,7 +289,7 @@ class LynxEngine(WanShared):
                     f"Denoising step {i + 1}/{total_steps}",
                 )
                 pbar.update(1)
-        
+
         if offload:
             self._offload(self.transformer)
 

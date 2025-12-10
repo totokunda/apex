@@ -8,10 +8,12 @@ import io
 import ffmpeg
 from diffusers.video_processor import VideoProcessor
 from src.engine.base_engine import BaseEngine
-from .denoise import MagiDenoise 
+from .denoise import MagiDenoise
 
 SPECIAL_TOKEN_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))),
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    ),
     "assets",
     "magi",
     "special_tokens.npz",
@@ -58,7 +60,7 @@ class MagiShared(BaseEngine, MagiDenoise):
 
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        
+
         self.vae_scale_factor_temporal = (
             getattr(self.vae, "temporal_compression_ratio", None)
             or getattr(self.vae, "patch_length", None)
@@ -80,7 +82,6 @@ class MagiShared(BaseEngine, MagiDenoise):
         self.video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor_spatial
         )
-
 
     def pad_duration_token_keys(
         self, special_token_keys: List[str], pad_duration: bool = True

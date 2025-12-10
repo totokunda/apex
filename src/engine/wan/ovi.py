@@ -20,30 +20,36 @@ NAME_TO_MODEL_SPECS_MAP = {
         "video_latent_length": 31,
         "audio_latent_length": 157,
         "video_area": 720 * 720,
-        "formatter": lambda text: re.sub(r"Audio:\s*(.*)", r"<AUDCAP>\1<ENDAUDCAP>", text, flags=re.S)
+        "formatter": lambda text: re.sub(
+            r"Audio:\s*(.*)", r"<AUDCAP>\1<ENDAUDCAP>", text, flags=re.S
+        ),
     },
     "960x960_5s": {
         "path": "model_960x960.safetensors",
         "video_latent_length": 31,
         "audio_latent_length": 157,
         "video_area": 960 * 960,
-        "formatter": lambda text: re.sub(r"<AUDCAP>(.*?)<ENDAUDCAP>", r"Audio: \1", text, flags=re.S)
-    }, 
+        "formatter": lambda text: re.sub(
+            r"<AUDCAP>(.*?)<ENDAUDCAP>", r"Audio: \1", text, flags=re.S
+        ),
+    },
     "960x960_10s": {
         "path": "model_960x960_10s.safetensors",
         "video_latent_length": 61,
         "audio_latent_length": 314,
         "video_area": 960 * 960,
-        "formatter": lambda text: re.sub(r"<AUDCAP>(.*?)<ENDAUDCAP>", r"Audio: \1", text, flags=re.S)
-    }
+        "formatter": lambda text: re.sub(
+            r"<AUDCAP>(.*?)<ENDAUDCAP>", r"Audio: \1", text, flags=re.S
+        ),
+    },
 }
 
 
 class OviEngine(WanShared):
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
-        
-        self.transformer_name = None 
+
+        self.transformer_name = None
         for component in self.config.get("components", []):
             if component.get("type") == "transformer":
                 self.transformer_name = component.get("name")
@@ -51,9 +57,9 @@ class OviEngine(WanShared):
         if self.transformer_name is None:
             raise ValueError("Transformer component not found in config")
         logging.info(f"Using transformer: {self.transformer_name}")
-    
+
     @staticmethod
-    def snap_hw_to_multiple_of_32(h: int, w: int, area = 720 * 720) -> tuple[int, int]:
+    def snap_hw_to_multiple_of_32(h: int, w: int, area=720 * 720) -> tuple[int, int]:
         """
         Scale (h, w) to match a target area if provided, then snap both
         dimensions to the nearest multiple of 32 (min 32).
@@ -81,10 +87,17 @@ class OviEngine(WanShared):
             return max(32, int(round(x / 32)) * 32)
 
         return _n32(h), _n32(w)
-    
+
     @staticmethod
-    def preprocess_image_tensor(image_path, device, target_dtype, h_w_multiple_of=32, resize_total_area=720*720):
+    def preprocess_image_tensor(
+        image_path,
+        device,
+        target_dtype,
+        h_w_multiple_of=32,
+        resize_total_area=720 * 720,
+    ):
         """Preprocess video data into standardized tensor format and (optionally) resize area."""
+
         def _parse_area(val):
             if val is None:
                 return None
@@ -93,7 +106,9 @@ class OviEngine(WanShared):
             if isinstance(val, (tuple, list)) and len(val) == 2:
                 return int(val[0]) * int(val[1])
             if isinstance(val, str):
-                m = re.match(r"\s*(\d+)\s*[x\*\s]\s*(\d+)\s*$", val, flags=re.IGNORECASE)
+                m = re.match(
+                    r"\s*(\d+)\s*[x\*\s]\s*(\d+)\s*$", val, flags=re.IGNORECASE
+                )
                 if m:
                     return int(m.group(1)) * int(m.group(2))
                 if val.strip().isdigit():
@@ -118,10 +133,12 @@ class OviEngine(WanShared):
             H_sc = max(multiple, int(round(h * scale / multiple)) * multiple)
             W_sc = max(multiple, int(round(w * scale / multiple)) * multiple)
             candidates.append((H_sc, W_sc))
+
             def score(HW):
                 H, W = HW
                 area = H * W
                 return (abs(area - area_target), abs((W / max(H, 1e-8)) - ratio_wh))
+
             H_best, W_best = min(candidates, key=score)
             return H_best, W_best
 
@@ -137,8 +154,10 @@ class OviEngine(WanShared):
         image = image.transpose(2, 0, 1)
         image = image.astype(np.float32) / 255.0
 
-        image_tensor = torch.from_numpy(image).float().to(device, dtype=target_dtype).unsqueeze(0) ## b c h w
-        image_tensor = image_tensor * 2.0 - 1.0 ## -1 to 1
+        image_tensor = (
+            torch.from_numpy(image).float().to(device, dtype=target_dtype).unsqueeze(0)
+        )  ## b c h w
+        image_tensor = image_tensor * 2.0 - 1.0  ## -1 to 1
 
         _, c, h, w = image_tensor.shape
         area_target = _parse_area(resize_total_area)
@@ -155,23 +174,25 @@ class OviEngine(WanShared):
             image_tensor = torch.nn.functional.interpolate(
                 image_tensor,
                 size=(target_h, target_w),
-                mode='bicubic',
-                align_corners=False
+                mode="bicubic",
+                align_corners=False,
             )
 
         return image_tensor
-    
+
     def _get_model_specs(self, transformer_name: str | None = None) -> dict:
         if transformer_name is None:
             transformer_name = self.transformer_name
         if transformer_name not in NAME_TO_MODEL_SPECS_MAP:
-            logging.warning(f"Transformer name {transformer_name} not found in map. Defaulting to 960x960_10s")
+            logging.warning(
+                f"Transformer name {transformer_name} not found in map. Defaulting to 960x960_10s"
+            )
             transformer_name = "960x960_10s"
         return NAME_TO_MODEL_SPECS_MAP[transformer_name]
-    
+
     def _get_audio_video_length(self, duration: str | int) -> int:
         num_frames = self._parse_num_frames(duration, 24) - 1
-        video_latent_length = (num_frames // 4 ) + 1
+        video_latent_length = (num_frames // 4) + 1
         audio_latent_length = int((157 / 120) * num_frames)
         return video_latent_length, audio_latent_length
 
@@ -197,13 +218,17 @@ class OviEngine(WanShared):
         progress_callback: Optional[Callable] = None,
         **kwargs,
     ):
-        safe_emit_progress(progress_callback, 0.0, "Starting Ovi Video+Audio Generation Pipeline")
+        safe_emit_progress(
+            progress_callback, 0.0, "Starting Ovi Video+Audio Generation Pipeline"
+        )
 
-        specs = self._get_model_specs()   
+        specs = self._get_model_specs()
         if seed is None:
             seed = torch.randint(0, 1000000, (1,)).item()
         if duration is not None:
-            video_latent_length, audio_latent_length = self._get_audio_video_length(duration)
+            video_latent_length, audio_latent_length = self._get_audio_video_length(
+                duration
+            )
         else:
             video_latent_length = specs["video_latent_length"]
             audio_latent_length = specs["audio_latent_length"]
@@ -214,11 +239,11 @@ class OviEngine(WanShared):
         text_formatter = specs["formatter"]
         if image is not None:
             image = self._load_image(image)
-            
-        
-        logging.info(f"Video latent length: {video_latent_length}, Audio latent length: {audio_latent_length}")
-        logging.info(f"Target area: {target_area}")
 
+        logging.info(
+            f"Video latent length: {video_latent_length}, Audio latent length: {audio_latent_length}"
+        )
+        logging.info(f"Target area: {target_area}")
 
         safe_emit_progress(progress_callback, 0.02, "Loaded Ovi Model Specs")
 
@@ -226,26 +251,25 @@ class OviEngine(WanShared):
             image = self._load_image(image)
 
         device = self.device
-        target_dtype = torch.bfloat16 # Ovi uses bfloat16 by default
-        
+        target_dtype = torch.bfloat16  # Ovi uses bfloat16 by default
+
         if not self.vae:
             self.load_component_by_name("transformer_vae")
         self.to_device(self.transformer_vae)
 
         safe_emit_progress(progress_callback, 0.05, "VAE components ready")
-        
+
         # Audio VAE
         if not hasattr(self, "audio_vae") or self.audio_vae is None:
             self.load_component_by_name("audio_vae")
 
         safe_emit_progress(progress_callback, 0.08, "Audio VAE ready")
-    
+
         # Text formatting
         formatted_text_prompt = text_formatter(prompt)
         if formatted_text_prompt != prompt:
             logging.info(f"Formatted prompt: {formatted_text_prompt}")
             prompt = formatted_text_prompt
- 
 
         safe_emit_progress(progress_callback, 0.10, "Formatted Ovi prompt")
 
@@ -261,48 +285,47 @@ class OviEngine(WanShared):
             device=device,
             dtype=target_dtype,
             use_attention_mask=True,
-            max_sequence_length=self.text_encoder.config.get("max_sequence_length", 512),
+            max_sequence_length=self.text_encoder.config.get(
+                "max_sequence_length", 512
+            ),
             pad_with_zero=False,
             clean_text=False,
             output_type="raw",
-            return_attention_mask=True
+            return_attention_mask=True,
         )
         seq_lens = attention_mask.sum(dim=1).long()
 
         safe_emit_progress(progress_callback, 0.18, "Encoded prompts for Ovi")
-        
+
         if hasattr(raw_output, "last_hidden_state"):
             text_embeddings = torch.stack([u for u in raw_output.last_hidden_state])
         else:
             text_embeddings = raw_output
-        
+
         if self.text_encoder.enable_cache:
             prompt_hash = self.text_encoder.get_prompt_hash(
                 prompts,
                 device=device,
                 dtype=target_dtype,
                 use_attention_mask=True,
-                max_sequence_length=self.text_encoder.config.get("max_sequence_length", 512),
+                max_sequence_length=self.text_encoder.config.get(
+                    "max_sequence_length", 512
+                ),
                 pad_with_zero=False,
                 clean_text=False,
                 output_type="raw",
-                return_attention_mask=True
+                return_attention_mask=True,
             )
             self.text_encoder.cache(prompt_hash, text_embeddings, attention_mask)
             safe_emit_progress(progress_callback, 0.20, "Cached text embeddings")
-        
-        
+
         text_embeddings = [u[:v] for u, v in zip(text_embeddings, seq_lens)]
-        
-        
-        
+
         text_embeddings_audio_pos = text_embeddings[0]
         text_embeddings_video_pos = text_embeddings[0]
         text_embeddings_video_neg = text_embeddings[1]
         text_embeddings_audio_neg = text_embeddings[2]
 
-        
-        
         if offload:
             self._offload(self.text_encoder)
 
@@ -320,7 +343,9 @@ class OviEngine(WanShared):
                 self.load_component_by_type("vae")
             self.to_device(self.vae)
 
-            safe_emit_progress(progress_callback, 0.26, "VAE ready for image-to-video encoding")
+            safe_emit_progress(
+                progress_callback, 0.26, "VAE ready for image-to-video encoding"
+            )
 
             first_frame = self.preprocess_image_tensor(
                 image, device, target_dtype, resize_total_area=target_area
@@ -329,14 +354,19 @@ class OviEngine(WanShared):
             # Add temporal dim: (1, 3, 1, H, W)
             input_tensor = first_frame.unsqueeze(2)
             latents_images = self.vae_encode(input_tensor, dtype=target_dtype)
-            latents_images = latents_images.squeeze(0) # (C, T, H, W)
+            latents_images = latents_images.squeeze(0)  # (C, T, H, W)
             self.latents_images = latents_images
 
-            video_latent_h, video_latent_w = latents_images.shape[2], latents_images.shape[3]
+            video_latent_h, video_latent_w = (
+                latents_images.shape[2],
+                latents_images.shape[3],
+            )
 
             if offload:
                 self._offload(self.vae)
-            safe_emit_progress(progress_callback, 0.32, "Encoded first frame into video latents")
+            safe_emit_progress(
+                progress_callback, 0.32, "Encoded first frame into video latents"
+            )
         else:
             # T2V
             video_h, video_w = height, width
@@ -344,14 +374,19 @@ class OviEngine(WanShared):
                 video_h, video_w, area=target_area
             )
             video_latent_h, video_latent_w = video_h // 16, video_w // 16
-            safe_emit_progress(progress_callback, 0.28, "Prepared latent grid for text-to-video")
+            safe_emit_progress(
+                progress_callback, 0.28, "Prepared latent grid for text-to-video"
+            )
 
         # 3. Schedulers
-        if not hasattr(self, "transformer_scheduler") or self.transformer_scheduler is None:
+        if (
+            not hasattr(self, "transformer_scheduler")
+            or self.transformer_scheduler is None
+        ):
             self.load_component_by_name("transformer_scheduler")
 
         self.to_device(self.transformer_scheduler)
-        
+
         if not hasattr(self, "audio_scheduler") or self.audio_scheduler is None:
             self.load_component_by_name("audio_scheduler")
         self.to_device(self.audio_scheduler)
@@ -366,17 +401,23 @@ class OviEngine(WanShared):
         timesteps_audio, num_inference_steps_audio = self._get_timesteps(
             self.audio_scheduler, num_inference_steps, shift=shift
         )
-        
 
-        safe_emit_progress(progress_callback, 0.38, "Timesteps prepared for video and audio denoising")
+        safe_emit_progress(
+            progress_callback, 0.38, "Timesteps prepared for video and audio denoising"
+        )
 
         # 4. Latents Initialization
-        transformer_config = self.load_config_by_type("transformer") 
+        transformer_config = self.load_config_by_type("transformer")
         video_latent_channel = transformer_config.get("video", {}).get("in_dim", 48)
         audio_latent_channel = transformer_config.get("audio", {}).get("in_dim", 20)
 
         video_noise = randn_tensor(
-            shape=(video_latent_channel, video_latent_length, video_latent_h, video_latent_w),
+            shape=(
+                video_latent_channel,
+                video_latent_length,
+                video_latent_h,
+                video_latent_w,
+            ),
             device=device,
             dtype=target_dtype,
             generator=torch.Generator(device=self.device).manual_seed(seed),
@@ -390,24 +431,33 @@ class OviEngine(WanShared):
 
         max_seq_len_audio = audio_noise.shape[0]
 
-        safe_emit_progress(progress_callback, 0.42, "Initialized video and audio noise latents")
-        
+        safe_emit_progress(
+            progress_callback, 0.42, "Initialized video and audio noise latents"
+        )
+
         # 5. Transformer
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-        
+
         safe_emit_progress(progress_callback, 0.45, "Transformer ready")
-        
+
         _patch_size_h, _patch_size_w = (
             self.transformer.video_model.patch_size[1],
             self.transformer.video_model.patch_size[2],
         )
-        max_seq_len_video = video_noise.shape[1] * video_noise.shape[2] * video_noise.shape[3] // (_patch_size_h*_patch_size_w)
+        max_seq_len_video = (
+            video_noise.shape[1]
+            * video_noise.shape[2]
+            * video_noise.shape[3]
+            // (_patch_size_h * _patch_size_w)
+        )
         num_steps = len(timesteps_video)
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
-        safe_emit_progress(progress_callback, 0.50, "Starting joint video+audio denoising")
+        safe_emit_progress(
+            progress_callback, 0.50, "Starting joint video+audio denoising"
+        )
 
         with torch.amp.autocast(
             device.type, enabled=target_dtype != torch.float32, dtype=target_dtype
@@ -484,7 +534,9 @@ class OviEngine(WanShared):
                     and i != num_steps - 1
                 ):
                     try:
-                        self._render_step((video_noise, audio_noise), render_on_step_callback)
+                        self._render_step(
+                            (video_noise, audio_noise), render_on_step_callback
+                        )
                     except Exception as e:
                         logging.warning(f"Ovi per-step preview failed at step {i}: {e}")
 
@@ -498,7 +550,9 @@ class OviEngine(WanShared):
 
         if offload:
             self._offload(self.transformer)
-        safe_emit_progress(progress_callback, 0.92, "Transformer offloaded after denoising")
+        safe_emit_progress(
+            progress_callback, 0.92, "Transformer offloaded after denoising"
+        )
 
         if self._is_i2v:
             video_noise[:, :1] = latents_images
@@ -508,68 +562,74 @@ class OviEngine(WanShared):
         if not self.vae:
             self.load_component_by_name("transformer_vae")
         self.to_device(self.transformer_vae)
-        
+
         # Audio VAE
         if not hasattr(self, "audio_vae") or self.audio_vae is None:
             self.load_component_by_name("audio_vae")
-            
+
         self.audio_vae.tod.remove_weight_norm()
         self.to_device(self.audio_vae)
 
         safe_emit_progress(progress_callback, 0.94, "Decoding audio and video")
 
         # Decode Audio
-        audio_latents_for_vae = audio_noise.unsqueeze(0).transpose(1, 2) # 1, c, l
-        generated_audio = self.vae_decode(audio_latents_for_vae, component_name="audio_vae")
+        audio_latents_for_vae = audio_noise.unsqueeze(0).transpose(1, 2)  # 1, c, l
+        generated_audio = self.vae_decode(
+            audio_latents_for_vae, component_name="audio_vae"
+        )
         generated_audio = generated_audio.squeeze().cpu().float().numpy()
 
         # Decode Video
-        video_latents_for_vae = video_noise.unsqueeze(0) # 1, c, f, h, w
+        video_latents_for_vae = video_noise.unsqueeze(0)  # 1, c, f, h, w
         generated_video_tensor = self.vae_decode(
             video_latents_for_vae, component_name="transformer_vae"
         )
-        
+
         generated_video = generated_video_tensor.squeeze(0).cpu().float().numpy()
-        
+
         if offload:
             self._offload(self.vae)
             self._offload(self.audio_vae)
 
-        safe_emit_progress(progress_callback, 1.0, "Completed Ovi video+audio generation")
-        
+        safe_emit_progress(
+            progress_callback, 1.0, "Completed Ovi video+audio generation"
+        )
 
         return generated_video, generated_audio
-    
-    
-    def _render_step(self, output_obj:Tuple[torch.Tensor, torch.Tensor], render_on_step_callback):
-        
+
+    def _render_step(
+        self, output_obj: Tuple[torch.Tensor, torch.Tensor], render_on_step_callback
+    ):
+
         if not self.vae:
             self.load_component_by_name("transformer_vae")
         self.to_device(self.transformer_vae)
-        
+
         # Audio VAE
         if not hasattr(self, "audio_vae") or self.audio_vae is None:
             self.load_component_by_name("audio_vae")
-            
+
         self.audio_vae.tod.remove_weight_norm()
         self.to_device(self.audio_vae)
         video_noise, audio_noise = output_obj
-        
+
         if self._is_i2v:
             video_noise[:, :1] = self.latents_images
-        
-        audio_latents_for_vae = audio_noise.unsqueeze(0).transpose(1, 2) # 1, c, l
-        generated_audio = self.vae_decode(audio_latents_for_vae, component_name="audio_vae")
+
+        audio_latents_for_vae = audio_noise.unsqueeze(0).transpose(1, 2)  # 1, c, l
+        generated_audio = self.vae_decode(
+            audio_latents_for_vae, component_name="audio_vae"
+        )
         generated_audio = generated_audio.detach().squeeze().cpu().float().numpy()
 
         # Decode Video
-        video_latents_for_vae = video_noise.unsqueeze(0) # 1, c, f, h, w
+        video_latents_for_vae = video_noise.unsqueeze(0)  # 1, c, f, h, w
         generated_video_tensor = self.vae_decode(
             video_latents_for_vae, component_name="transformer_vae"
         )
         generated_video = generated_video_tensor.squeeze(0).cpu().float().numpy()
 
         render_on_step_callback((generated_video, generated_audio))
-        
+
         self._offload(self.transformer_vae, delete_from_cpu=False)
         self._offload(self.audio_vae, delete_from_cpu=False)

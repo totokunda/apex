@@ -23,7 +23,12 @@ from diffusers.loaders import FromOriginalModelMixin
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import PeftAdapterMixin
-from diffusers.utils import USE_PEFT_BACKEND, logging, scale_lora_layers, unscale_lora_layers
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_dispatch import dispatch_attention_fn
@@ -37,7 +42,11 @@ from diffusers.models.embeddings import (
 )
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.normalization import AdaLayerNormContinuous, AdaLayerNormZero, AdaLayerNormZeroSingle
+from diffusers.models.normalization import (
+    AdaLayerNormContinuous,
+    AdaLayerNormZero,
+    AdaLayerNormZeroSingle,
+)
 from src.transformer.base import TRANSFORMERS_REGISTRY
 from .attention import HunyuanImageAttnProcessor
 
@@ -56,11 +65,17 @@ class HunyuanImagePatchEmbed(nn.Module):
         self.patch_size = patch_size
 
         if len(patch_size) == 2:
-            self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+            self.proj = nn.Conv2d(
+                in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+            )
         elif len(patch_size) == 3:
-            self.proj = nn.Conv3d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+            self.proj = nn.Conv3d(
+                in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+            )
         else:
-            raise ValueError(f"patch_size must be a tuple of length 2 or 3, got {len(patch_size)}")
+            raise ValueError(
+                f"patch_size must be a tuple of length 2 or 3, got {len(patch_size)}"
+            )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.proj(hidden_states)
@@ -113,20 +128,30 @@ class HunyuanImageCombinedTimeGuidanceEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.time_proj = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-        self.timestep_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+        self.time_proj = Timesteps(
+            num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0
+        )
+        self.timestep_embedder = TimestepEmbedding(
+            in_channels=256, time_embed_dim=embedding_dim
+        )
 
         self.use_meanflow = use_meanflow
 
         self.time_proj_r = None
         self.timestep_embedder_r = None
         if use_meanflow:
-            self.time_proj_r = Timesteps(num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0)
-            self.timestep_embedder_r = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+            self.time_proj_r = Timesteps(
+                num_channels=256, flip_sin_to_cos=True, downscale_freq_shift=0
+            )
+            self.timestep_embedder_r = TimestepEmbedding(
+                in_channels=256, time_embed_dim=embedding_dim
+            )
 
         self.guidance_embedder = None
         if guidance_embeds:
-            self.guidance_embedder = TimestepEmbedding(in_channels=256, time_embed_dim=embedding_dim)
+            self.guidance_embedder = TimestepEmbedding(
+                in_channels=256, time_embed_dim=embedding_dim
+            )
 
     def forward(
         self,
@@ -139,12 +164,16 @@ class HunyuanImageCombinedTimeGuidanceEmbedding(nn.Module):
 
         if timestep_r is not None:
             timesteps_proj_r = self.time_proj_r(timestep_r)
-            timesteps_emb_r = self.timestep_embedder_r(timesteps_proj_r.to(dtype=timestep.dtype))
+            timesteps_emb_r = self.timestep_embedder_r(
+                timesteps_proj_r.to(dtype=timestep.dtype)
+            )
             timesteps_emb = (timesteps_emb + timesteps_emb_r) / 2
 
         if self.guidance_embedder is not None:
             guidance_proj = self.time_proj(guidance)
-            guidance_emb = self.guidance_embedder(guidance_proj.to(dtype=timestep.dtype))
+            guidance_emb = self.guidance_embedder(
+                guidance_proj.to(dtype=timestep.dtype)
+            )
             conditioning = timesteps_emb + guidance_emb
         else:
             conditioning = timesteps_emb
@@ -177,7 +206,12 @@ class HunyuanImageIndividualTokenRefinerBlock(nn.Module):
         )
 
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
-        self.ff = FeedForward(hidden_size, mult=mlp_width_ratio, activation_fn="linear-silu", dropout=mlp_drop_rate)
+        self.ff = FeedForward(
+            hidden_size,
+            mult=mlp_width_ratio,
+            activation_fn="linear-silu",
+            dropout=mlp_drop_rate,
+        )
 
         self.norm_out = HunyuanImageAdaNorm(hidden_size, 2 * hidden_size)
 
@@ -240,7 +274,9 @@ class HunyuanImageIndividualTokenRefiner(nn.Module):
             batch_size = attention_mask.shape[0]
             seq_len = attention_mask.shape[1]
             attention_mask = attention_mask.to(hidden_states.device)
-            self_attn_mask_1 = attention_mask.view(batch_size, 1, 1, seq_len).repeat(1, 1, seq_len, 1)
+            self_attn_mask_1 = attention_mask.view(batch_size, 1, 1, seq_len).repeat(
+                1, 1, seq_len, 1
+            )
             self_attn_mask_2 = self_attn_mask_1.transpose(2, 3)
             self_attn_mask = (self_attn_mask_1 & self_attn_mask_2).bool()
             self_attn_mask[:, :, :, 0] = True
@@ -291,7 +327,9 @@ class HunyuanImageTokenRefiner(nn.Module):
         else:
             original_dtype = hidden_states.dtype
             mask_float = attention_mask.float().unsqueeze(-1)
-            pooled_hidden_states = (hidden_states * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+            pooled_hidden_states = (hidden_states * mask_float).sum(
+                dim=1
+            ) / mask_float.sum(dim=1)
             pooled_hidden_states = pooled_hidden_states.to(original_dtype)
 
         temb = self.time_text_embed(timestep, pooled_hidden_states)
@@ -303,18 +341,27 @@ class HunyuanImageTokenRefiner(nn.Module):
 
 class HunyuanImageRotaryPosEmbed(nn.Module):
     def __init__(
-        self, patch_size: Union[Tuple, List[int]], rope_dim: Union[Tuple, List[int]], theta: float = 256.0
+        self,
+        patch_size: Union[Tuple, List[int]],
+        rope_dim: Union[Tuple, List[int]],
+        theta: float = 256.0,
     ) -> None:
         super().__init__()
 
         if not isinstance(patch_size, (tuple, list)) or len(patch_size) not in [2, 3]:
-            raise ValueError(f"patch_size must be a tuple or list of length 2 or 3, got {patch_size}")
+            raise ValueError(
+                f"patch_size must be a tuple or list of length 2 or 3, got {patch_size}"
+            )
 
         if not isinstance(rope_dim, (tuple, list)) or len(rope_dim) not in [2, 3]:
-            raise ValueError(f"rope_dim must be a tuple or list of length 2 or 3, got {rope_dim}")
+            raise ValueError(
+                f"rope_dim must be a tuple or list of length 2 or 3, got {rope_dim}"
+            )
 
         if not len(patch_size) == len(rope_dim):
-            raise ValueError(f"patch_size and rope_dim must have the same length, got {patch_size} and {rope_dim}")
+            raise ValueError(
+                f"patch_size and rope_dim must have the same length, got {patch_size} and {rope_dim}"
+            )
 
         self.patch_size = patch_size
         self.rope_dim = rope_dim
@@ -324,24 +371,34 @@ class HunyuanImageRotaryPosEmbed(nn.Module):
         if hidden_states.ndim == 5:
             _, _, frame, height, width = hidden_states.shape
             patch_size_frame, patch_size_height, patch_size_width = self.patch_size
-            rope_sizes = [frame // patch_size_frame, height // patch_size_height, width // patch_size_width]
+            rope_sizes = [
+                frame // patch_size_frame,
+                height // patch_size_height,
+                width // patch_size_width,
+            ]
         elif hidden_states.ndim == 4:
             _, _, height, width = hidden_states.shape
             patch_size_height, patch_size_width = self.patch_size
             rope_sizes = [height // patch_size_height, width // patch_size_width]
         else:
-            raise ValueError(f"hidden_states must be a 4D or 5D tensor, got {hidden_states.shape}")
+            raise ValueError(
+                f"hidden_states must be a 4D or 5D tensor, got {hidden_states.shape}"
+            )
 
         axes_grids = []
         for i in range(len(rope_sizes)):
-            grid = torch.arange(0, rope_sizes[i], device=hidden_states.device, dtype=torch.float32)
+            grid = torch.arange(
+                0, rope_sizes[i], device=hidden_states.device, dtype=torch.float32
+            )
             axes_grids.append(grid)
         grid = torch.meshgrid(*axes_grids, indexing="ij")  # dim x [H, W]
         grid = torch.stack(grid, dim=0)  # [2, H, W]
 
         freqs = []
         for i in range(len(rope_sizes)):
-            freq = get_1d_rotary_pos_embed(self.rope_dim[i], grid[i].reshape(-1), self.theta, use_real=True)
+            freq = get_1d_rotary_pos_embed(
+                self.rope_dim[i], grid[i].reshape(-1), self.theta, use_real=True
+            )
             freqs.append(freq)
 
         freqs_cos = torch.cat([f[0] for f in freqs], dim=1)  # (W * H * T, D / 2)
@@ -457,10 +514,16 @@ class HunyuanImageTransformerBlock(nn.Module):
         )
 
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff = FeedForward(hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate")
+        self.ff = FeedForward(
+            hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate"
+        )
 
-        self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.ff_context = FeedForward(hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate")
+        self.norm2_context = nn.LayerNorm(
+            hidden_size, elementwise_affine=False, eps=1e-6
+        )
+        self.ff_context = FeedForward(
+            hidden_size, mult=mlp_ratio, activation_fn="gelu-approximate"
+        )
 
     def forward(
         self,
@@ -473,9 +536,11 @@ class HunyuanImageTransformerBlock(nn.Module):
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # 1. Input normalization
-        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
-        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
-            encoder_hidden_states, emb=temb
+        norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(
+            hidden_states, emb=temb
+        )
+        norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = (
+            self.norm1_context(encoder_hidden_states, emb=temb)
         )
 
         # 2. Joint attention
@@ -488,26 +553,37 @@ class HunyuanImageTransformerBlock(nn.Module):
 
         # 3. Modulation and residual connection
         hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
-        encoder_hidden_states = encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
+        encoder_hidden_states = (
+            encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
+        )
 
         norm_hidden_states = self.norm2(hidden_states)
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
 
-        norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
-        norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
+        norm_hidden_states = (
+            norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+        )
+        norm_encoder_hidden_states = (
+            norm_encoder_hidden_states * (1 + c_scale_mlp[:, None])
+            + c_shift_mlp[:, None]
+        )
 
         # 4. Feed-forward
         ff_output = self.ff(norm_hidden_states)
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
 
         hidden_states = hidden_states + gate_mlp.unsqueeze(1) * ff_output
-        encoder_hidden_states = encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        encoder_hidden_states = (
+            encoder_hidden_states + c_gate_mlp.unsqueeze(1) * context_ff_output
+        )
 
         return hidden_states, encoder_hidden_states
 
 
 @TRANSFORMERS_REGISTRY("hunyuanimage.base")
-class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin):
+class HunyuanImageTransformer2DModel(
+    ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin, CacheMixin
+):
     r"""
     The Transformer model used in [HunyuanImage-2.1](https://github.com/Tencent-Hunyuan/HunyuanImage-2.1).
 
@@ -586,7 +662,9 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         super().__init__()
 
         if not (isinstance(patch_size, (tuple, list)) and len(patch_size) in [2, 3]):
-            raise ValueError(f"patch_size must be a tuple of length 2 or 3, got {patch_size}")
+            raise ValueError(
+                f"patch_size must be a tuple of length 2 or 3, got {patch_size}"
+            )
 
         inner_dim = num_attention_heads * attention_head_dim
         out_channels = out_channels or in_channels
@@ -594,15 +672,22 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         # 1. Latent and condition embedders
         self.x_embedder = HunyuanImagePatchEmbed(patch_size, in_channels, inner_dim)
         self.context_embedder = HunyuanImageTokenRefiner(
-            text_embed_dim, num_attention_heads, attention_head_dim, num_layers=num_refiner_layers
+            text_embed_dim,
+            num_attention_heads,
+            attention_head_dim,
+            num_layers=num_refiner_layers,
         )
 
         if text_embed_2_dim is not None:
-            self.context_embedder_2 = HunyuanImageByT5TextProjection(text_embed_2_dim, 2048, inner_dim)
+            self.context_embedder_2 = HunyuanImageByT5TextProjection(
+                text_embed_2_dim, 2048, inner_dim
+            )
         else:
             self.context_embedder_2 = None
 
-        self.time_guidance_embed = HunyuanImageCombinedTimeGuidanceEmbedding(inner_dim, guidance_embeds, use_meanflow)
+        self.time_guidance_embed = HunyuanImageCombinedTimeGuidanceEmbedding(
+            inner_dim, guidance_embeds, use_meanflow
+        )
 
         # 2. RoPE
         self.rope = HunyuanImageRotaryPosEmbed(patch_size, rope_axes_dim, rope_theta)
@@ -612,7 +697,10 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         self.transformer_blocks = nn.ModuleList(
             [
                 HunyuanImageTransformerBlock(
-                    num_attention_heads, attention_head_dim, mlp_ratio=mlp_ratio, qk_norm=qk_norm
+                    num_attention_heads,
+                    attention_head_dim,
+                    mlp_ratio=mlp_ratio,
+                    qk_norm=qk_norm,
                 )
                 for _ in range(num_layers)
             ]
@@ -622,14 +710,19 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         self.single_transformer_blocks = nn.ModuleList(
             [
                 HunyuanImageSingleTransformerBlock(
-                    num_attention_heads, attention_head_dim, mlp_ratio=mlp_ratio, qk_norm=qk_norm
+                    num_attention_heads,
+                    attention_head_dim,
+                    mlp_ratio=mlp_ratio,
+                    qk_norm=qk_norm,
                 )
                 for _ in range(num_single_layers)
             ]
         )
 
         # 5. Output projection
-        self.norm_out = AdaLayerNormContinuous(inner_dim, inner_dim, elementwise_affine=False, eps=1e-6)
+        self.norm_out = AdaLayerNormContinuous(
+            inner_dim, inner_dim, elementwise_affine=False, eps=1e-6
+        )
         self.proj_out = nn.Linear(inner_dim, math.prod(patch_size) * out_channels)
 
         self.gradient_checkpointing = False
@@ -645,7 +738,11 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(
+            name: str,
+            module: torch.nn.Module,
+            processors: Dict[str, AttentionProcessor],
+        ):
             if hasattr(module, "get_processor"):
                 processors[f"{name}.processor"] = module.get_processor()
 
@@ -660,7 +757,9 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(
+        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
+    ):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -717,7 +816,10 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
             # weight the lora layers by setting `lora_scale` for each PEFT layer
             scale_lora_layers(self, lora_scale)
         else:
-            if attention_kwargs is not None and attention_kwargs.get("scale", None) is not None:
+            if (
+                attention_kwargs is not None
+                and attention_kwargs.get("scale", None) is not None
+            ):
                 logger.warning(
                     "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
                 )
@@ -729,7 +831,9 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
             batch_size, channels, frame, height, width = hidden_states.shape
             sizes = (frame, height, width)
         else:
-            raise ValueError(f"hidden_states must be a 4D or 5D tensor, got {hidden_states.shape}")
+            raise ValueError(
+                f"hidden_states must be a 4D or 5D tensor, got {hidden_states.shape}"
+            )
 
         post_patch_sizes = tuple(d // p for d, p in zip(sizes, self.config.patch_size))
 
@@ -738,9 +842,13 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
 
         # 2. Conditional embeddings
         encoder_attention_mask = encoder_attention_mask.bool()
-        temb = self.time_guidance_embed(timestep, guidance=guidance, timestep_r=timestep_r)
+        temb = self.time_guidance_embed(
+            timestep, guidance=guidance, timestep_r=timestep_r
+        )
         hidden_states = self.x_embedder(hidden_states)
-        encoder_hidden_states = self.context_embedder(encoder_hidden_states, timestep, encoder_attention_mask)
+        encoder_hidden_states = self.context_embedder(
+            encoder_hidden_states, timestep, encoder_attention_mask
+        )
 
         if self.context_embedder_2 is not None and encoder_hidden_states_2 is not None:
             encoder_hidden_states_2 = self.context_embedder_2(encoder_hidden_states_2)
@@ -752,7 +860,10 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
             new_encoder_attention_mask = []
 
             for text, text_mask, text_2, text_mask_2 in zip(
-                encoder_hidden_states, encoder_attention_mask, encoder_hidden_states_2, encoder_attention_mask_2
+                encoder_hidden_states,
+                encoder_attention_mask,
+                encoder_hidden_states_2,
+                encoder_attention_mask_2,
             ):
                 # Concatenate: [valid_mllm, valid_byt5, invalid_mllm, invalid_byt5]
                 new_encoder_hidden_states.append(
@@ -783,28 +894,34 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
             encoder_hidden_states = torch.stack(new_encoder_hidden_states)
             encoder_attention_mask = torch.stack(new_encoder_attention_mask)
 
-        attention_mask = torch.nn.functional.pad(encoder_attention_mask, (hidden_states.shape[1], 0), value=True)
+        attention_mask = torch.nn.functional.pad(
+            encoder_attention_mask, (hidden_states.shape[1], 0), value=True
+        )
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
         # 3. Transformer blocks
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for block in self.transformer_blocks:
-                hidden_states, encoder_hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    encoder_hidden_states,
-                    temb,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
+                hidden_states, encoder_hidden_states = (
+                    self._gradient_checkpointing_func(
+                        block,
+                        hidden_states,
+                        encoder_hidden_states,
+                        temb,
+                        attention_mask=attention_mask,
+                        image_rotary_emb=image_rotary_emb,
+                    )
                 )
 
             for block in self.single_transformer_blocks:
-                hidden_states, encoder_hidden_states = self._gradient_checkpointing_func(
-                    block,
-                    hidden_states,
-                    encoder_hidden_states,
-                    temb,
-                    attention_mask=attention_mask,
-                    image_rotary_emb=image_rotary_emb,
+                hidden_states, encoder_hidden_states = (
+                    self._gradient_checkpointing_func(
+                        block,
+                        hidden_states,
+                        encoder_hidden_states,
+                        temb,
+                        attention_mask=attention_mask,
+                        image_rotary_emb=image_rotary_emb,
+                    )
                 )
 
         else:
@@ -833,7 +950,12 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         # 5. unpatchify
         # reshape: [batch_size, *post_patch_dims, channels, *patch_size]
         out_channels = self.config.out_channels
-        reshape_dims = [batch_size] + list(post_patch_sizes) + [out_channels] + list(self.config.patch_size)
+        reshape_dims = (
+            [batch_size]
+            + list(post_patch_sizes)
+            + [out_channels]
+            + list(self.config.patch_size)
+        )
         hidden_states = hidden_states.reshape(*reshape_dims)
 
         # create permutation pattern: batch, channels, then interleave post_patch and patch dims
@@ -842,13 +964,16 @@ class HunyuanImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, 
         ndim = len(post_patch_sizes)
         permute_pattern = [0, ndim + 1]  # batch, channels
         for i in range(ndim):
-            permute_pattern.extend([i + 1, ndim + 2 + i])  # post_patch_sizes[i], patch_sizes[i]
+            permute_pattern.extend(
+                [i + 1, ndim + 2 + i]
+            )  # post_patch_sizes[i], patch_sizes[i]
         hidden_states = hidden_states.permute(*permute_pattern)
 
         # flatten patch dimensions: flatten each (post_patch_size, patch_size) pair
         # batch_size, channels, post_patch_sizes[0] * patch_sizes[0], post_patch_sizes[1] * patch_sizes[1], ...
         final_dims = [batch_size, out_channels] + [
-            post_patch * patch for post_patch, patch in zip(post_patch_sizes, self.config.patch_size)
+            post_patch * patch
+            for post_patch, patch in zip(post_patch_sizes, self.config.patch_size)
         ]
         hidden_states = hidden_states.reshape(*final_dims)
 

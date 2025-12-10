@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from .utils import to_2tuple
 
+
 class PatchEmbed(nn.Module):
     """2D Image to Patch Embedding
 
@@ -57,7 +58,7 @@ class PatchEmbed(nn.Module):
         orig_in_chans = in_chans
         if concat_condition:
             if is_reshape_temporal_channels:
-                in_chans = in_chans + in_chans//2 + 1
+                in_chans = in_chans + in_chans // 2 + 1
             else:
                 in_chans = in_chans * 2 + 1
 
@@ -70,9 +71,17 @@ class PatchEmbed(nn.Module):
             **factory_kwargs,
         )
 
-        nn.init.xavier_uniform_(self.proj.weight[:, :orig_in_chans].view(self.proj.weight[:, :orig_in_chans].size(0), -1))
+        nn.init.xavier_uniform_(
+            self.proj.weight[:, :orig_in_chans].view(
+                self.proj.weight[:, :orig_in_chans].size(0), -1
+            )
+        )
         # Special initialization for concat mode
-        nn.init.zeros_(self.proj.weight[:, orig_in_chans:].view(self.proj.weight[:, orig_in_chans:].size(0), -1))
+        nn.init.zeros_(
+            self.proj.weight[:, orig_in_chans:].view(
+                self.proj.weight[:, orig_in_chans:].size(0), -1
+            )
+        )
 
         if bias:
             nn.init.zeros_(self.proj.bias)
@@ -101,14 +110,14 @@ class TextProjection(nn.Module):
             in_features=in_channels,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
+            **factory_kwargs,
         )
         self.act_1 = act_layer()
         self.linear_2 = nn.Linear(
             in_features=hidden_size,
             out_features=hidden_size,
             bias=True,
-            **factory_kwargs
+            **factory_kwargs,
         )
 
     def forward(self, caption):
@@ -118,23 +127,22 @@ class TextProjection(nn.Module):
         return hidden_states
 
 
-
 class VisionProjection(torch.nn.Module):
 
     def __init__(self, input_dim, output_dim):
         super().__init__()
 
         self.proj = torch.nn.Sequential(
-            torch.nn.LayerNorm(input_dim), 
+            torch.nn.LayerNorm(input_dim),
             torch.nn.Linear(input_dim, input_dim),
-            torch.nn.GELU(), 
+            torch.nn.GELU(),
             torch.nn.Linear(input_dim, output_dim),
-            torch.nn.LayerNorm(output_dim)
+            torch.nn.LayerNorm(output_dim),
         )
-        
 
     def forward(self, vision_embeds):
         return self.proj(vision_embeds)
+
 
 class ClipVisionProjection(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -147,7 +155,8 @@ class ClipVisionProjection(nn.Module):
     def forward(self, x):
         projected_x = self.down(nn.functional.silu(self.up(x)))
         return projected_x
-    
+
+
 def timestep_embedding(t, dim, max_period=10000):
     """
     Create sinusoidal timestep embeddings.
@@ -198,7 +207,9 @@ class TimestepEmbedder(nn.Module):
             out_size = hidden_size
 
         self.mlp = nn.Sequential(
-            nn.Linear(frequency_embedding_size, hidden_size, bias=True, **factory_kwargs),
+            nn.Linear(
+                frequency_embedding_size, hidden_size, bias=True, **factory_kwargs
+            ),
             act_layer(),
             nn.Linear(hidden_size, out_size, bias=True, **factory_kwargs),
         )
