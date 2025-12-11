@@ -23,6 +23,12 @@ spec:
   denoise_type: moe
   attention_types:
   - sdpa
+  loras:
+  - source: QingyanBai/Ditto_models/models/ditto_global.safetensors
+    scale: 1.0
+    name: ditto_global
+    label: Ditto Global 
+    verified: true
   components:
   - type: scheduler
     label: Scheduler

@@ -5,6 +5,11 @@ import torch
 from typing import Optional
 from warnings import warn
 
+from src.transformer import TRANSFORMERS_REGISTRY
+
+
+
+@TRANSFORMERS_REGISTRY("qwenimage.nunchaku")
 class QwenImageTransformer2DModel(NunchakuQwenImageTransformer2DModel):
     """
     Apex wrapper around Nunchaku's quantized QwenImage transformer.

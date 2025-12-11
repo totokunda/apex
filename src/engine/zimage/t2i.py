@@ -2,6 +2,7 @@ from typing import Union, List, Optional, Callable, Dict, Any, Tuple
 import torch
 import numpy as np
 from PIL import Image
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 from .shared import ZImageShared
 class ZImageT2IEngine(ZImageShared):
@@ -53,9 +54,11 @@ class ZImageT2IEngine(ZImageShared):
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
         max_sequence_length: int = 512,
         render_on_step_interval: int = 3,
+        progress_callback: Callable = None,
         **kwargs,
     ):
     
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -109,14 +112,18 @@ class ZImageT2IEngine(ZImageShared):
                 device=device,
                 max_sequence_length=max_sequence_length,
             )
+            safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
             
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
+            safe_emit_progress(progress_callback, 0.20, "Text encoder offloaded")
             
         
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+        
+        safe_emit_progress(progress_callback, 0.25, "Transformer ready")
 
         # 4. Prepare latent variables
         num_channels_latents = self.transformer.in_channels
@@ -131,6 +138,7 @@ class ZImageT2IEngine(ZImageShared):
             generator,
             latents,
         )
+        safe_emit_progress(progress_callback, 0.32, "Initialized latent noise")
 
         # Repeat prompt_embeds for num_images_per_prompt
         if num_images_per_prompt > 1:
@@ -144,6 +152,8 @@ class ZImageT2IEngine(ZImageShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
+        
+        safe_emit_progress(progress_callback, 0.36, "Scheduler ready")
 
         # 5. Prepare timesteps
         mu = self.calculate_shift(
@@ -162,9 +172,12 @@ class ZImageT2IEngine(ZImageShared):
             timesteps=timesteps,
             mu=mu
         )
+        safe_emit_progress(progress_callback, 0.40, "Timesteps computed; starting denoise")
         
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
+        
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.40, 0.92)
         
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -246,13 +259,24 @@ class ZImageT2IEngine(ZImageShared):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                
+                if denoise_progress_callback is not None and len(timesteps) > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / len(timesteps), 1.0), f"Denoising step {i + 1}/{len(timesteps)}")
+                    except Exception:
+                        pass
+        
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
         if offload:
             self._offload(self.transformer)
-            
+            safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
+
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             image = self.vae_decode(latents, offload=offload)
             image = self._tensor_to_frame(image)
+            safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
             return image

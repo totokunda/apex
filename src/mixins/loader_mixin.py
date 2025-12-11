@@ -73,6 +73,8 @@ class LoaderMixin(DownloadMixin):
         extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
 
+
+
         if extra_kwargs is None:
             extra_kwargs = {}
 
@@ -95,6 +97,7 @@ class LoaderMixin(DownloadMixin):
         model_base = component.get("base")
         model_path = component.get("model_path")
 
+
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -103,14 +106,16 @@ class LoaderMixin(DownloadMixin):
             )
         if model_class is None:
             raise ValueError(f"Model class for base '{model_base}' not found")
-
         config_path = component.get("config_path")
         config = {}
+
+
+
         if config_path:
             config.update(self.fetch_config(config_path))
+
         if component.get("config"):
             config.update(component.get("config"))
-        
         if (
             not config
             or (
@@ -120,6 +125,7 @@ class LoaderMixin(DownloadMixin):
         ) and (
             not component.get("extra_model_paths")
         ) and not extra_kwargs.get("load_from_config"):
+
             if (
                 hasattr(self, "engine_type")
                 and self.engine_type == "mlx"
@@ -128,9 +134,10 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["dtype"] = load_dtype
             elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
                 extra_kwargs["torch_dtype"] = load_dtype
-                
+
             self.logger.info(f"Loading {model_class} from {model_path}")
             context = init_empty_weights() if no_weights else nullcontext()
+
             with context:
                 # remove all kwargs that are null 
                 extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
@@ -162,7 +169,9 @@ class LoaderMixin(DownloadMixin):
                     pass
 
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
-            
+
+
+
             if mm_config is not None and not no_weights:
                 apply_group_offloading = getattr(self, "_apply_group_offloading", None)
                 if callable(apply_group_offloading):
@@ -174,13 +183,14 @@ class LoaderMixin(DownloadMixin):
                         model_to_offload = model
                     try:
                         apply_group_offloading(model_to_offload, mm_config, module_label=label)
+
                     except Exception as e:
                         if hasattr(self, "logger"):
                             self.logger.warning(
                                 f"Failed to enable group offloading for '{label}': {e}"
                             )
             return model
-    
+
         self.logger.info(f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}")
 
         with init_empty_weights():
@@ -241,6 +251,7 @@ class LoaderMixin(DownloadMixin):
         ):
             logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
+
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
@@ -248,13 +259,13 @@ class LoaderMixin(DownloadMixin):
             if component.get("type") == "transformer":
                 # Lazy import to avoid circular dependency at module import time.
                 from src.converters.convert import get_transformer_converter
-
                 converter = get_transformer_converter(model_base)
                 converter.convert(state_dict)
 
             # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model(model)
             model.load_state_dict(state_dict, assign=True, strict=False)
+
         else:
             if os.path.isdir(model_path):
                 extensions = component.get(

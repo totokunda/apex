@@ -68,7 +68,7 @@ class FluxKontextEngine(FluxShared):
         )
         
         if offload:
-            self._offload(self.text_encoder_2)
+            del self.text_encoder_2
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
         

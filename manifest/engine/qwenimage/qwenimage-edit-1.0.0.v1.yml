@@ -224,7 +224,7 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 1024
       options:
       - name: HD
         value: 720

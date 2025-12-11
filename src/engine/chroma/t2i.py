@@ -241,7 +241,7 @@ class ChromaT2IEngine(BaseEngine):
             negative_text_ids = None
             
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
             
         return prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids
     

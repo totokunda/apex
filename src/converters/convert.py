@@ -63,7 +63,7 @@ def get_transformer_converter(model_base: str):
         return SkyReelsTransformerConverter()
     elif model_base == "magi.base":
         return MagiTransformerConverter()
-    elif model_base == "flux.base":
+    elif model_base == "flux.base" or model_base == "flux.nunchaku":
         return FluxTransformerConverter()
     else:
         return NoOpTransformerConverter()
@@ -130,6 +130,7 @@ def load_pt(dir: pathlib.Path):
     """Load a sharded pt file."""
     pt_extensions = tuple(["pt", "bin", "pth"])
     if dir.is_file() and dir.suffix.endswith(pt_extensions):
+
         return torch.load(dir, weights_only=True, map_location="cpu", mmap=True)
 
     shards = list(dir.glob(f"*{pt_extensions}"))
@@ -259,26 +260,37 @@ def convert_transformer(
     else:
         using_mlx = False
         model_type = "transformer"
+    
+
 
     model_class = get_model_class(model_base, config, model_type=model_type)
 
+
+
     converter = get_transformer_converter(model_base)
+
 
     model = get_empty_model(model_class, config)
 
+
     original_state_dict = model.state_dict()
 
+
     keys_to_ignore = getattr(model, "_keys_to_ignore_on_load_unexpected", [])
+
 
     if isinstance(ckpt_path, list):
         state_dict = {}
         for i, ckpt in enumerate(ckpt_path):
             ct_state_dict = load_state_dict(ckpt, model_key, pattern)
+
             if needs_conversion(original_state_dict, ct_state_dict, keys_to_ignore):
                 converter.convert(ct_state_dict)
             state_dict.update(ct_state_dict)
+
     else:
         state_dict = load_state_dict(ckpt_path, model_key, pattern)
+
         if needs_conversion(original_state_dict, state_dict, keys_to_ignore):
             converter.convert(state_dict)
 
@@ -286,7 +298,9 @@ def convert_transformer(
 
     if not using_mlx:
         state_dict = strip_common_prefix(state_dict, model.state_dict())
+
         model.load_state_dict(state_dict, strict=True, assign=True)
+
     else:
         model_state_dict = tree_flatten(model.parameters(), destination={})
         state_dict = strip_common_prefix(state_dict, model_state_dict)

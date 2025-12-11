@@ -1,5 +1,6 @@
 from typing import Union, List, Optional, Callable, Dict, Any, Tuple
 import torch
+from src.utils.progress import safe_emit_progress
 from .shared import ZImageShared
 from PIL import Image
 import numpy as np
@@ -93,8 +94,10 @@ class ZImageControlEngine(ZImageShared):
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
         max_sequence_length: int = 512,
         render_on_step_interval: int = 3,
+        progress_callback: Callable = None,
         **kwargs,
     ):
+        safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
         height = height or 1024
         width = width or 1024
         
@@ -135,6 +138,7 @@ class ZImageControlEngine(ZImageShared):
             control_image = self.image_processor.preprocess(control_image, height=height, width=width) 
             control_image = control_image.to(dtype=weight_dtype, device=device)
             control_latents = self.vae_encode(control_image, offload=offload)
+            safe_emit_progress(progress_callback, 0.10, "Control image encoded")
 
         control_context = control_latents.unsqueeze(2)
 
@@ -158,15 +162,17 @@ class ZImageControlEngine(ZImageShared):
                 device=device,
                 max_sequence_length=max_sequence_length,
             )
+            safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
             
         if offload:
             self._offload(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.20, "Text encoder offloaded")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
-            
         
+        safe_emit_progress(progress_callback, 0.25, "Transformer ready")        
         num_channels_latents = self.transformer.in_channels
 
         # 4. Prepare latent variables
@@ -180,6 +186,7 @@ class ZImageControlEngine(ZImageShared):
             generator,
             latents,
         )
+        safe_emit_progress(progress_callback, 0.32, "Initialized latent noise")
 
         # Repeat prompt_embeds for num_images_per_prompt
         if num_images_per_prompt > 1:
@@ -193,6 +200,8 @@ class ZImageControlEngine(ZImageShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
+        
+        safe_emit_progress(progress_callback, 0.36, "Scheduler ready")
 
         # 5. Prepare timesteps
         mu = self.calculate_shift(
@@ -211,10 +220,10 @@ class ZImageControlEngine(ZImageShared):
             timesteps=timesteps,
             mu=mu
         )
+        safe_emit_progress(progress_callback, 0.40, "Timesteps computed; starting denoise")
         
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
-        
         
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -295,18 +304,23 @@ class ZImageControlEngine(ZImageShared):
                 assert latents.dtype == torch.float32
 
                 if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback)
+                    self._render_step(latents, render_on_step_callback, image=True)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
         
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
+        
         if offload:
             self._offload(self.transformer)
+            safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
         
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             image = self.vae_decode(latents, offload=offload)
             image = self._tensor_to_frame(image)
+            safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
             return image

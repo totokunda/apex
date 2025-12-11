@@ -131,6 +131,7 @@ class EngineRegistry:
         """
 
         resolved = resolve_manifest_reference(yaml_path) or yaml_path
+        engine_kwargs = {}
         
         if engine_type is None or model_type is None:
             # read from yaml_path
@@ -138,16 +139,15 @@ class EngineRegistry:
             spec = data.get("spec", {})
             engine_type = spec.get("engine")
             model_type = spec.get("model_type")
+            engine_kwargs = spec.get("engine_kwargs", {})
             if engine_type is None or model_type is None:
                 raise ValueError(f"Engine type and model type must be provided in the yaml file: {resolved}")
 
         # Prefer auto‑discovered concrete engines when model_type is given.
         impl_class = self.get_engine_class(engine_type, model_type) if model_type else None
-
-
         
         if impl_class is not None and impl_class is not BaseEngine:
-            return impl_class(yaml_path=resolved, model_type=model_type, **kwargs)
+            return impl_class(yaml_path=resolved, model_type=model_type, **{**engine_kwargs, **kwargs})
 
         # No autodiscovered implementation found
         raise ValueError(

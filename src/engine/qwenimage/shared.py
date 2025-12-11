@@ -3,6 +3,7 @@ from diffusers.utils.torch_utils import randn_tensor
 from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
+from loguru import logger
 
 class QwenImageShared(BaseEngine):
     """Base class for QwenImage engine implementations containing common functionality"""
@@ -147,6 +148,7 @@ class QwenImageShared(BaseEngine):
                 **text_encoder_kwargs,
             }
         else:
+
             processor = self.helpers["image.processor"]
             model_inputs = processor(
                 text=txt,
@@ -178,7 +180,8 @@ class QwenImageShared(BaseEngine):
             )
             else: 
                 if not self.text_encoder.model_loaded:
-                    self.text_encoder.model = self.text_encoder.load_model(override_kwargs={"load_dtype": None})
+                    # self.text_encoder.model = self.text_encoder.load_model(override_kwargs={"load_dtype": None})
+                    self.text_encoder.model = self.text_encoder.load_model(no_weights=False)
                     self.text_encoder.model = self.text_encoder.model.to(dtype)
                     self.text_encoder.model_loaded = True
                 

@@ -6,6 +6,7 @@ from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
 from src.engine.base_engine import BaseEngine 
 from src.utils.progress import safe_emit_progress
+from loguru import logger
 
 class FluxShared(TextualInversionLoaderMixin, BaseEngine):
     """Shared functionality for Flux engine implementations"""
@@ -245,9 +246,10 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             )
         else:
             negative_pooled_prompt_embeds = None
-
+        
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
+
 
         if not hasattr(self, "text_encoder_2") or not self.text_encoder_2:
             self.load_component_by_name("text_encoder_2")
@@ -276,7 +278,6 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             output_type="hidden_states",
             **text_encoder_2_kwargs,
         )
-        
 
         text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(
             device=self.device, dtype=prompt_embeds.dtype
@@ -296,7 +297,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         else:
             negative_prompt_embeds = None
             negative_text_ids = None
-            
+        
         return pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids
     
     

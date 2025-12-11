@@ -21,6 +21,8 @@ metadata:
   categories:
   - text-to-image
 spec:
+  engine_kwargs:
+    check_weights: false
   engine: flux
   model_type: t2i
   engine_type: torch
@@ -83,11 +85,14 @@ spec:
       variant: int4_r32
       precision: int4
       type: safetensors
+      file_size: 6760960000
     # NF4 (FP4 SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-krea-dev
     - path: nunchaku-tech/nunchaku-flux.1-krea-dev/svdq-fp4_r32-flux.1-krea-dev.safetensors
       variant: nf4_r32
       precision: nf4
       type: safetensors
+      file_size: 7048192000
+
   defaults:
     run:
       num_inference_steps: 40

@@ -15,7 +15,7 @@ metadata:
   license: Apache-2.0
   demo_path: https://i.ytimg.com/vi/dNeA5mJ36hA/maxresdefault.jpg
   categories:
-  - text-to-image
+  - control
 spec:
   engine: zimage
   model_type: control
@@ -97,7 +97,7 @@ spec:
     - name: control
       label: Control
       collapsible: true
-      default_open: false
+      default_open: true
       layout:
         flow: column
         rows:
@@ -145,6 +145,8 @@ spec:
       type: image
       panel: control
       required: true
+      map_h: height
+      map_w: width
     - id: control_context_scale
       label: Control Context Scale
       description: The scale of the control context.

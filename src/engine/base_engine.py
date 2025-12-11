@@ -893,6 +893,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             component.pop("extra_model_paths", None)
 
         if self.check_weights and not self._check_weights(component):
+
             self.logger.info("Found old model weights, converting to diffusers format")
             transformer = self.convert_transformer_weights(component)
 
@@ -941,6 +942,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 self.logger.info("Converted transformer weights to diffusers format")
                 empty_cache()
         else:
+
+
             base = component.get("base")
             if base.startswith("mlx."):
                 registry = TRANSFORMERS_REGISTRY_MLX
@@ -1467,6 +1470,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             config = self.fetch_config(config_path)
         if component.get("config", None):
             config.update(component.get("config", {}))
+        
+
 
         return convert_transformer(
             config,
@@ -1730,6 +1735,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         else None
                     ),
                 )
+
                 setattr(self, component.get("type"), component_module)
                 break
 
@@ -1919,7 +1925,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                                 component['extra_kwargs'] = model_path_item.get('extra_kwargs')
                     
                     path = self.is_downloaded(component['model_path'], components_path)
-                    print(path, component['model_path'])
+
                     if path is None:
                         component['model_path'] = self._download(component['model_path'], components_path)
                     else:

@@ -48,7 +48,7 @@ spec:
     model_path:
     - path: black-forest-labs/FLUX.2-dev/text_encoder
       variant: default
-      file_size: 48029309520
+      file_size: 48329309520
     tokenizer_class: PixtralProcessor
     tokenizer_name: black-forest-labs/FLUX.2-dev
     tokenizer_kwargs:

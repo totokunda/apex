@@ -135,7 +135,7 @@ class HidreamShared(BaseEngine):
             negative_pooled_prompt_embeds_1 = None
 
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
 
         if not hasattr(self, "text_encoder_2") or not self.text_encoder_2:
             self.load_component_by_name("text_encoder_2")
@@ -168,7 +168,7 @@ class HidreamShared(BaseEngine):
             negative_pooled_prompt_embeds_2 = None
 
         if offload:
-            self._offload(self.text_encoder_2)
+            del self.text_encoder_2
 
         if not hasattr(self, "text_encoder_3") or not self.text_encoder_3:
             self.load_component_by_name("text_encoder_3")
@@ -199,7 +199,7 @@ class HidreamShared(BaseEngine):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder_3)
+            del self.text_encoder_3
             
         pooled_prompt_embeds = torch.cat(
             [pooled_prompt_embeds_1, pooled_prompt_embeds_2], dim=-1
@@ -229,7 +229,7 @@ class HidreamShared(BaseEngine):
             llama_negative_prompt_embeds = None
             
         if offload:
-            self._offload(llama_encoder)
+            del llama_encoder
 
 
 

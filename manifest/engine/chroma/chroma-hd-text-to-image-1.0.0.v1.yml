@@ -63,6 +63,22 @@ spec:
     - path: lodestones/Chroma1-HD/transformer
       variant: default
       file_size: 17800194937
+    - path: https://huggingface.co/silveroxides/Chroma-GGUF/resolve/main/Chroma1-HD/Chroma1-HD-Q4_0.gguf
+      variant: GGUF_Q4_0
+      precision: q4_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 5430008832
+    - path: https://huggingface.co/silveroxides/Chroma-GGUF/resolve/main/Chroma1-HD/Chroma1-HD-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 16
+      file_size: 9746891392
   defaults:
     run:
       num_inference_steps: 50
