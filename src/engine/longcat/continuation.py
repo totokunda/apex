@@ -6,6 +6,7 @@ from .vc import LongCatVCEngine
 from .refine import LongCatRefineEngine
 from src.types import InputVideo
 
+
 class LongCatContinuationEngine(LongCatShared):
     """
     LongCat video‑continuation engine.
@@ -23,7 +24,7 @@ class LongCatContinuationEngine(LongCatShared):
 
         self._vc_engine: Optional[LongCatVCEngine] = None
         self._refine_engine: Optional[LongCatRefineEngine] = None
-        
+
     def _get_vc_engine(self) -> LongCatVCEngine:
         if self._vc_engine is None:
             self._vc_engine = self.sub_engines["vc"]
@@ -39,7 +40,7 @@ class LongCatContinuationEngine(LongCatShared):
         video: InputVideo,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        duration: str  | int = 93,
+        duration: str | int = 93,
         fps: int = 15,
         num_cond_frames: int = 13,
         num_inference_steps: int = 50,
@@ -162,7 +163,6 @@ class LongCatContinuationEngine(LongCatShared):
                 }
             return [final_video]
 
-
         # Use a reasonable target fps for conditioning video as in the demo:
         # 15 fps when only spatial refinement, 30 fps when also temporal.
         target_fps = 15 if spatial_refine_only else 30
@@ -198,5 +198,3 @@ class LongCatContinuationEngine(LongCatShared):
             }
 
         return [final_video]
-
-

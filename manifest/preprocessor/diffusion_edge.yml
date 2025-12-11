@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: hr16/Diffusion-Edge/diffusion_edge_indoor.pt
   size_bytes: 1192128970

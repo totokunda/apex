@@ -34,8 +34,13 @@ from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import RMSNorm
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from diffusers.models.attention_processor import Attention, AttentionProcessor
-from diffusers.utils import (USE_PEFT_BACKEND, is_torch_version, logging,
-                             scale_lora_layers, unscale_lora_layers)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    is_torch_version,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
 from src.attention import attention_register
 
 
@@ -69,12 +74,16 @@ class TimestepEmbedder(nn.Module):
         with torch.amp.autocast("cuda", enabled=False):
             half = dim // 2
             freqs = torch.exp(
-                -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32, device=t.device) / half
+                -math.log(max_period)
+                * torch.arange(start=0, end=half, dtype=torch.float32, device=t.device)
+                / half
             )
             args = t[:, None].float() * freqs[None]
             embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
             if dim % 2:
-                embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+                embedding = torch.cat(
+                    [embedding, torch.zeros_like(embedding[:, :1])], dim=-1
+                )
             return embedding
 
     def forward(self, t):
@@ -124,7 +133,9 @@ class ZSingleStreamAttnProcessor:
             key = attn.norm_k(key)
 
         # Apply RoPE
-        def apply_rotary_emb(x_in: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
+        def apply_rotary_emb(
+            x_in: torch.Tensor, freqs_cis: torch.Tensor
+        ) -> torch.Tensor:
             with torch.amp.autocast("cuda", enabled=False):
                 x = torch.view_as_complex(x_in.float().reshape(*x_in.shape[:-1], -1, 2))
                 freqs_cis = freqs_cis.unsqueeze(2)
@@ -148,7 +159,7 @@ class ZSingleStreamAttnProcessor:
             query.transpose(1, 2),
             key.transpose(1, 2),
             value.transpose(1, 2),
-            attn_mask=attention_mask
+            attn_mask=attention_mask,
         )
         hidden_states = hidden_states.transpose(1, 2)
         # Reshape back
@@ -232,7 +243,11 @@ class ZImageTransformerBlock(nn.Module):
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(
+            name: str,
+            module: torch.nn.Module,
+            processors: Dict[str, AttentionProcessor],
+        ):
             if hasattr(module, "get_processor"):
                 processors[f"{name}.processor"] = module.get_processor()
 
@@ -247,7 +262,9 @@ class ZImageTransformerBlock(nn.Module):
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(
+        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
+    ):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -290,7 +307,9 @@ class ZImageTransformerBlock(nn.Module):
     ):
         if self.modulation:
             assert adaln_input is not None
-            scale_msa, gate_msa, scale_mlp, gate_mlp = self.adaLN_modulation(adaln_input).unsqueeze(1).chunk(4, dim=2)
+            scale_msa, gate_msa, scale_mlp, gate_mlp = (
+                self.adaLN_modulation(adaln_input).unsqueeze(1).chunk(4, dim=2)
+            )
             gate_msa, gate_mlp = gate_msa.tanh(), gate_mlp.tanh()
             scale_msa, scale_mlp = 1.0 + scale_msa, 1.0 + scale_mlp
 
@@ -355,7 +374,9 @@ class RopeEmbedder:
         self.theta = theta
         self.axes_dims = axes_dims
         self.axes_lens = axes_lens
-        assert len(axes_dims) == len(axes_lens), "axes_dims and axes_lens must have the same length"
+        assert len(axes_dims) == len(
+            axes_lens
+        ), "axes_dims and axes_lens must have the same length"
         self.freqs_cis = None
 
     @staticmethod
@@ -363,10 +384,15 @@ class RopeEmbedder:
         with torch.device("cpu"):
             freqs_cis = []
             for i, (d, e) in enumerate(zip(dim, end)):
-                freqs = 1.0 / (theta ** (torch.arange(0, d, 2, dtype=torch.float64, device="cpu") / d))
+                freqs = 1.0 / (
+                    theta
+                    ** (torch.arange(0, d, 2, dtype=torch.float64, device="cpu") / d)
+                )
                 timestep = torch.arange(e, device=freqs.device, dtype=torch.float64)
                 freqs = torch.outer(timestep, freqs).float()
-                freqs_cis_i = torch.polar(torch.ones_like(freqs), freqs).to(torch.complex64)  # complex64
+                freqs_cis_i = torch.polar(torch.ones_like(freqs), freqs).to(
+                    torch.complex64
+                )  # complex64
                 freqs_cis.append(freqs_cis_i)
 
             return freqs_cis
@@ -377,7 +403,9 @@ class RopeEmbedder:
         device = ids.device
 
         if self.freqs_cis is None:
-            self.freqs_cis = self.precompute_freqs_cis(self.axes_dims, self.axes_lens, theta=self.theta)
+            self.freqs_cis = self.precompute_freqs_cis(
+                self.axes_dims, self.axes_lens, theta=self.theta
+            )
             self.freqs_cis = [freqs_cis.to(device) for freqs_cis in self.freqs_cis]
         else:
             # Ensure freqs_cis are on the same device as ids
@@ -431,11 +459,17 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         all_x_embedder = {}
         all_final_layer = {}
-        for patch_idx, (patch_size, f_patch_size) in enumerate(zip(all_patch_size, all_f_patch_size)):
-            x_embedder = nn.Linear(f_patch_size * patch_size * patch_size * in_channels, dim, bias=True)
+        for patch_idx, (patch_size, f_patch_size) in enumerate(
+            zip(all_patch_size, all_f_patch_size)
+        ):
+            x_embedder = nn.Linear(
+                f_patch_size * patch_size * patch_size * in_channels, dim, bias=True
+            )
             all_x_embedder[f"{patch_size}-{f_patch_size}"] = x_embedder
 
-            final_layer = FinalLayer(dim, patch_size * patch_size * f_patch_size * self.out_channels)
+            final_layer = FinalLayer(
+                dim, patch_size * patch_size * f_patch_size * self.out_channels
+            )
             all_final_layer[f"{patch_size}-{f_patch_size}"] = final_layer
 
         self.all_x_embedder = nn.ModuleDict(all_x_embedder)
@@ -479,7 +513,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         self.layers = nn.ModuleList(
             [
-                ZImageTransformerBlock(layer_id, dim, n_heads, n_kv_heads, norm_eps, qk_norm)
+                ZImageTransformerBlock(
+                    layer_id, dim, n_heads, n_kv_heads, norm_eps, qk_norm
+                )
                 for layer_id in range(n_layers)
             ]
         )
@@ -488,8 +524,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         self.axes_dims = axes_dims
         self.axes_lens = axes_lens
 
-        self.rope_embedder = RopeEmbedder(theta=rope_theta, axes_dims=axes_dims, axes_lens=axes_lens)
-
+        self.rope_embedder = RopeEmbedder(
+            theta=rope_theta, axes_dims=axes_dims, axes_lens=axes_lens
+        )
 
     def _set_gradient_checkpointing(self, *args, **kwargs):
         if "value" in kwargs:
@@ -510,7 +547,11 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         # set recursively
         processors = {}
 
-        def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
+        def fn_recursive_add_processors(
+            name: str,
+            module: torch.nn.Module,
+            processors: Dict[str, AttentionProcessor],
+        ):
             if hasattr(module, "get_processor"):
                 processors[f"{name}.processor"] = module.get_processor()
 
@@ -525,7 +566,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         return processors
 
     # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    def set_attn_processor(
+        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]
+    ):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -559,7 +602,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         for name, module in self.named_children():
             fn_recursive_attn_processor(name, module, processor)
 
-    def unpatchify(self, x: List[torch.Tensor], size: List[Tuple], patch_size, f_patch_size) -> List[torch.Tensor]:
+    def unpatchify(
+        self, x: List[torch.Tensor], size: List[Tuple], patch_size, f_patch_size
+    ) -> List[torch.Tensor]:
         pH = pW = patch_size
         pF = f_patch_size
         bsz = len(x)
@@ -581,7 +626,10 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         if start is None:
             start = (0 for _ in size)
 
-        axes = [torch.arange(x0, x0 + span, dtype=torch.int32, device=device) for x0, span in zip(start, size)]
+        axes = [
+            torch.arange(x0, x0 + span, dtype=torch.int32, device=device)
+            for x0, span in zip(start, size)
+        ]
         grids = torch.meshgrid(axes, indexing="ij")
         return torch.stack(grids, dim=-1)
 
@@ -609,7 +657,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
             image = image.view(C, F_tokens, pF, H_tokens, pH, W_tokens, pW)
             # "c f pf h ph w pw -> (f h w) (pf ph pw c)"
-            image = image.permute(1, 3, 5, 2, 4, 6, 0).reshape(F_tokens * H_tokens * W_tokens, pF * pH * pW * C)
+            image = image.permute(1, 3, 5, 2, 4, 6, 0).reshape(
+                F_tokens * H_tokens * W_tokens, pF * pH * pW * C
+            )
 
             image_ori_len = len(image)
             image_padding_len = (-image_ori_len) % SEQ_MULTI_OF
@@ -628,20 +678,26 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 .flatten(0, 2)
                 .repeat(image_padding_len, 1)
             )
-            image_padded_pos_ids = torch.cat([image_ori_pos_ids, image_padding_pos_ids], dim=0)
+            image_padded_pos_ids = torch.cat(
+                [image_ori_pos_ids, image_padding_pos_ids], dim=0
+            )
             all_image_pos_ids.append(image_padded_pos_ids)
             # pad mask
             all_image_pad_mask.append(
                 torch.cat(
                     [
                         torch.zeros((image_ori_len,), dtype=torch.bool, device=device),
-                        torch.ones((image_padding_len,), dtype=torch.bool, device=device),
+                        torch.ones(
+                            (image_padding_len,), dtype=torch.bool, device=device
+                        ),
                     ],
                     dim=0,
                 )
             )
             # padded feature
-            image_padded_feat = torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
+            image_padded_feat = torch.cat(
+                [image, image[-1:].repeat(image_padding_len, 1)], dim=0
+            )
             all_image_out.append(image_padded_feat)
 
         return (
@@ -705,7 +761,9 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
             image = image.view(C, F_tokens, pF, H_tokens, pH, W_tokens, pW)
             # "c f pf h ph w pw -> (f h w) (pf ph pw c)"
-            image = image.permute(1, 3, 5, 2, 4, 6, 0).reshape(F_tokens * H_tokens * W_tokens, pF * pH * pW * C)
+            image = image.permute(1, 3, 5, 2, 4, 6, 0).reshape(
+                F_tokens * H_tokens * W_tokens, pF * pH * pW * C
+            )
 
             image_ori_len = len(image)
             image_padding_len = (-image_ori_len) % SEQ_MULTI_OF
@@ -724,20 +782,26 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 .flatten(0, 2)
                 .repeat(image_padding_len, 1)
             )
-            image_padded_pos_ids = torch.cat([image_ori_pos_ids, image_padding_pos_ids], dim=0)
+            image_padded_pos_ids = torch.cat(
+                [image_ori_pos_ids, image_padding_pos_ids], dim=0
+            )
             all_image_pos_ids.append(image_padded_pos_ids)
             # pad mask
             all_image_pad_mask.append(
                 torch.cat(
                     [
                         torch.zeros((image_ori_len,), dtype=torch.bool, device=device),
-                        torch.ones((image_padding_len,), dtype=torch.bool, device=device),
+                        torch.ones(
+                            (image_padding_len,), dtype=torch.bool, device=device
+                        ),
                     ],
                     dim=0,
                 )
             )
             # padded feature
-            image_padded_feat = torch.cat([image, image[-1:].repeat(image_padding_len, 1)], dim=0)
+            image_padded_feat = torch.cat(
+                [image, image[-1:].repeat(image_padding_len, 1)], dim=0
+            )
             all_image_out.append(image_padded_feat)
 
         return (
@@ -788,25 +852,36 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         adaln_input = t.type_as(x)
         x[torch.cat(x_inner_pad_mask)] = self.x_pad_token
         x = list(x.split(x_item_seqlens, dim=0))
-        x_freqs_cis = list(self.rope_embedder(torch.cat(x_pos_ids, dim=0)).split(x_item_seqlens, dim=0))
+        x_freqs_cis = list(
+            self.rope_embedder(torch.cat(x_pos_ids, dim=0)).split(x_item_seqlens, dim=0)
+        )
 
         x = pad_sequence(x, batch_first=True, padding_value=0.0)
         x_freqs_cis = pad_sequence(x_freqs_cis, batch_first=True, padding_value=0.0)
-        x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
+        x_attn_mask = torch.zeros(
+            (bsz, x_max_item_seqlen), dtype=torch.bool, device=device
+        )
         for i, seq_len in enumerate(x_item_seqlens):
             x_attn_mask[i, :seq_len] = 1
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for layer in self.noise_refiner:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
                 x = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer),
-                    x, x_attn_mask, x_freqs_cis, adaln_input,
+                    x,
+                    x_attn_mask,
+                    x_freqs_cis,
+                    adaln_input,
                     **ckpt_kwargs,
                 )
         else:
@@ -822,26 +897,36 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         cap_feats = self.cap_embedder(cap_feats)
         cap_feats[torch.cat(cap_inner_pad_mask)] = self.cap_pad_token
         cap_feats = list(cap_feats.split(cap_item_seqlens, dim=0))
-        cap_freqs_cis = list(self.rope_embedder(torch.cat(cap_pos_ids, dim=0)).split(cap_item_seqlens, dim=0))
+        cap_freqs_cis = list(
+            self.rope_embedder(torch.cat(cap_pos_ids, dim=0)).split(
+                cap_item_seqlens, dim=0
+            )
+        )
 
         cap_feats = pad_sequence(cap_feats, batch_first=True, padding_value=0.0)
         cap_freqs_cis = pad_sequence(cap_freqs_cis, batch_first=True, padding_value=0.0)
-        cap_attn_mask = torch.zeros((bsz, cap_max_item_seqlen), dtype=torch.bool, device=device)
+        cap_attn_mask = torch.zeros(
+            (bsz, cap_max_item_seqlen), dtype=torch.bool, device=device
+        )
         for i, seq_len in enumerate(cap_item_seqlens):
             cap_attn_mask[i, :seq_len] = 1
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for layer in self.context_refiner:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
                 cap_feats = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer),
-                    cap_feats, 
-                    cap_attn_mask, 
+                    cap_feats,
+                    cap_attn_mask,
                     cap_freqs_cis,
                     **ckpt_kwargs,
                 )
@@ -856,12 +941,16 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             x_item_seqlens = [len(_) for _ in x]
             assert all(_ % SEQ_MULTI_OF == 0 for _ in x_item_seqlens)
             x_max_item_seqlen = max(x_item_seqlens)
-            x_attn_mask = torch.zeros((bsz, x_max_item_seqlen), dtype=torch.bool, device=device)
+            x_attn_mask = torch.zeros(
+                (bsz, x_max_item_seqlen), dtype=torch.bool, device=device
+            )
             for i, seq_len in enumerate(x_item_seqlens):
                 x_attn_mask[i, :seq_len] = 1
 
             if x_freqs_cis is not None:
-                x_freqs_cis = torch.chunk(x_freqs_cis, self.sp_world_size, dim=1)[self.sp_world_rank]
+                x_freqs_cis = torch.chunk(x_freqs_cis, self.sp_world_size, dim=1)[
+                    self.sp_world_rank
+                ]
 
         # unified
         unified = []
@@ -870,35 +959,47 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             x_len = x_item_seqlens[i]
             cap_len = cap_item_seqlens[i]
             unified.append(torch.cat([x[i][:x_len], cap_feats[i][:cap_len]]))
-            unified_freqs_cis.append(torch.cat([x_freqs_cis[i][:x_len], cap_freqs_cis[i][:cap_len]]))
+            unified_freqs_cis.append(
+                torch.cat([x_freqs_cis[i][:x_len], cap_freqs_cis[i][:cap_len]])
+            )
         unified_item_seqlens = [a + b for a, b in zip(cap_item_seqlens, x_item_seqlens)]
         assert unified_item_seqlens == [len(_) for _ in unified]
         unified_max_item_seqlen = max(unified_item_seqlens)
         unified = pad_sequence(unified, batch_first=True, padding_value=0.0)
-        unified_freqs_cis = pad_sequence(unified_freqs_cis, batch_first=True, padding_value=0.0)
-        unified_attn_mask = torch.zeros((bsz, unified_max_item_seqlen), dtype=torch.bool, device=device)
+        unified_freqs_cis = pad_sequence(
+            unified_freqs_cis, batch_first=True, padding_value=0.0
+        )
+        unified_attn_mask = torch.zeros(
+            (bsz, unified_max_item_seqlen), dtype=torch.bool, device=device
+        )
         for i, seq_len in enumerate(unified_item_seqlens):
             unified_attn_mask[i, :seq_len] = 1
 
         if torch.is_grad_enabled() and self.gradient_checkpointing:
             for layer in self.layers:
+
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         return module(*inputs)
 
                     return custom_forward
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+
+                ckpt_kwargs: Dict[str, Any] = (
+                    {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                )
                 unified = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(layer),
-                    unified, 
-                    unified_attn_mask, 
-                    unified_freqs_cis, 
+                    unified,
+                    unified_attn_mask,
+                    unified_freqs_cis,
                     adaln_input,
                     **ckpt_kwargs,
                 )
         else:
             for layer in self.layers:
-                unified = layer(unified, unified_attn_mask, unified_freqs_cis, adaln_input)
+                unified = layer(
+                    unified, unified_attn_mask, unified_freqs_cis, adaln_input
+                )
 
         if self.sp_world_size > 1:
             unified_out = []
@@ -907,53 +1008,67 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                 unified_out.append(unified[i, :x_len])
             unified = torch.stack(unified_out)
             unified = self.all_gather(unified, dim=1)
-            
-        unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](unified, adaln_input)
+
+        unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](
+            unified, adaln_input
+        )
         unified = list(unified.unbind(dim=0))
         x = self.unpatchify(unified, x_size, patch_size, f_patch_size)
 
         x = torch.stack(x)
         return x, {}
-    
 
     @classmethod
     def from_pretrained(
-        cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={},
-        low_cpu_mem_usage=False, torch_dtype=torch.bfloat16
+        cls,
+        pretrained_model_path,
+        subfolder=None,
+        transformer_additional_kwargs={},
+        low_cpu_mem_usage=False,
+        torch_dtype=torch.bfloat16,
     ):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
-        print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
+        print(
+            f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ..."
+        )
 
-        config_file = os.path.join(pretrained_model_path, 'config.json')
+        config_file = os.path.join(pretrained_model_path, "config.json")
         if not os.path.isfile(config_file):
             raise RuntimeError(f"{config_file} does not exist")
         with open(config_file, "r") as f:
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
 
         if "dict_mapping" in transformer_additional_kwargs.keys():
             for key in transformer_additional_kwargs["dict_mapping"]:
-                transformer_additional_kwargs[transformer_additional_kwargs["dict_mapping"][key]] = config[key]
+                transformer_additional_kwargs[
+                    transformer_additional_kwargs["dict_mapping"][key]
+                ] = config[key]
 
         if low_cpu_mem_usage:
             try:
                 import re
 
                 from diffusers import __version__ as diffusers_version
+
                 if diffusers_version >= "0.33.0":
-                    from diffusers.models.model_loading_utils import \
-                        load_model_dict_into_meta
+                    from diffusers.models.model_loading_utils import (
+                        load_model_dict_into_meta,
+                    )
                 else:
-                    from diffusers.models.modeling_utils import \
-                        load_model_dict_into_meta
+                    from diffusers.models.modeling_utils import (
+                        load_model_dict_into_meta,
+                    )
                 from diffusers.utils import is_accelerate_available
+
                 if is_accelerate_available():
                     import accelerate
-                
+
                 # Instantiate model with empty weights
                 with accelerate.init_empty_weights():
                     model = cls.from_config(config, **transformer_additional_kwargs)
@@ -963,10 +1078,14 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                     state_dict = torch.load(model_file, map_location="cpu")
                 elif os.path.exists(model_file_safetensors):
                     from safetensors.torch import load_file, safe_open
+
                     state_dict = load_file(model_file_safetensors)
                 else:
                     from safetensors.torch import load_file, safe_open
-                    model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+                    model_files_safetensors = glob.glob(
+                        os.path.join(pretrained_model_path, "*.safetensors")
+                    )
                     state_dict = {}
                     print(model_files_safetensors)
                     for _model_file_safetensors in model_files_safetensors:
@@ -976,59 +1095,115 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
                 filtered_state_dict = {}
                 for key in state_dict:
-                    if key in model.state_dict() and model.state_dict()[key].size() == state_dict[key].size():
+                    if (
+                        key in model.state_dict()
+                        and model.state_dict()[key].size() == state_dict[key].size()
+                    ):
                         filtered_state_dict[key] = state_dict[key]
                     else:
-                        print(f"Skipping key '{key}' due to size mismatch or absence in model.")
-                        
+                        print(
+                            f"Skipping key '{key}' due to size mismatch or absence in model."
+                        )
+
                 model_keys = set(model.state_dict().keys())
                 loaded_keys = set(filtered_state_dict.keys())
                 missing_keys = model_keys - loaded_keys
 
-                def initialize_missing_parameters(missing_keys, model_state_dict, torch_dtype=None):
+                def initialize_missing_parameters(
+                    missing_keys, model_state_dict, torch_dtype=None
+                ):
                     initialized_dict = {}
-                    
+
                     with torch.no_grad():
                         for key in missing_keys:
                             param_shape = model_state_dict[key].shape
-                            param_dtype = torch_dtype if torch_dtype is not None else model_state_dict[key].dtype
-                            if "control" in key and key.replace("control_", "") in filtered_state_dict.keys():
-                                initialized_dict[key] = filtered_state_dict[key.replace("control_", "")].clone()
-                                print(f"Initializing missing parameter '{key}' with model.state_dict().")
+                            param_dtype = (
+                                torch_dtype
+                                if torch_dtype is not None
+                                else model_state_dict[key].dtype
+                            )
+                            if (
+                                "control" in key
+                                and key.replace("control_", "")
+                                in filtered_state_dict.keys()
+                            ):
+                                initialized_dict[key] = filtered_state_dict[
+                                    key.replace("control_", "")
+                                ].clone()
+                                print(
+                                    f"Initializing missing parameter '{key}' with model.state_dict()."
+                                )
                             elif "after_proj" in key or "before_proj" in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                                print(f"Initializing missing parameter '{key}' with zero.")
-                            elif 'weight' in key:
-                                if any(norm_type in key for norm_type in ['norm', 'ln_', 'layer_norm', 'group_norm', 'batch_norm']):
-                                    initialized_dict[key] = torch.ones(param_shape, dtype=param_dtype)
-                                elif 'embedding' in key or 'embed' in key:
-                                    initialized_dict[key] = torch.randn(param_shape, dtype=param_dtype) * 0.02
-                                elif 'head' in key or 'output' in key or 'proj_out' in key:
-                                    initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                                print(
+                                    f"Initializing missing parameter '{key}' with zero."
+                                )
+                            elif "weight" in key:
+                                if any(
+                                    norm_type in key
+                                    for norm_type in [
+                                        "norm",
+                                        "ln_",
+                                        "layer_norm",
+                                        "group_norm",
+                                        "batch_norm",
+                                    ]
+                                ):
+                                    initialized_dict[key] = torch.ones(
+                                        param_shape, dtype=param_dtype
+                                    )
+                                elif "embedding" in key or "embed" in key:
+                                    initialized_dict[key] = (
+                                        torch.randn(param_shape, dtype=param_dtype)
+                                        * 0.02
+                                    )
+                                elif (
+                                    "head" in key
+                                    or "output" in key
+                                    or "proj_out" in key
+                                ):
+                                    initialized_dict[key] = torch.zeros(
+                                        param_shape, dtype=param_dtype
+                                    )
                                 elif len(param_shape) >= 2:
-                                    initialized_dict[key] = torch.empty(param_shape, dtype=param_dtype)
+                                    initialized_dict[key] = torch.empty(
+                                        param_shape, dtype=param_dtype
+                                    )
                                     nn.init.xavier_uniform_(initialized_dict[key])
                                 else:
-                                    initialized_dict[key] = torch.randn(param_shape, dtype=param_dtype) * 0.02
-                            elif 'bias' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            elif 'running_mean' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            elif 'running_var' in key:
-                                initialized_dict[key] = torch.ones(param_shape, dtype=param_dtype)
-                            elif 'num_batches_tracked' in key:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=torch.long)
+                                    initialized_dict[key] = (
+                                        torch.randn(param_shape, dtype=param_dtype)
+                                        * 0.02
+                                    )
+                            elif "bias" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "running_mean" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "running_var" in key:
+                                initialized_dict[key] = torch.ones(
+                                    param_shape, dtype=param_dtype
+                                )
+                            elif "num_batches_tracked" in key:
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=torch.long
+                                )
                             else:
-                                initialized_dict[key] = torch.zeros(param_shape, dtype=param_dtype)
-                            
+                                initialized_dict[key] = torch.zeros(
+                                    param_shape, dtype=param_dtype
+                                )
+
                     return initialized_dict
 
                 if missing_keys:
                     print(f"Missing keys will be initialized: {sorted(missing_keys)}")
                     initialized_params = initialize_missing_parameters(
-                        missing_keys, 
-                        model.state_dict(), 
-                        torch_dtype
+                        missing_keys, model.state_dict(), torch_dtype
                     )
                     filtered_state_dict.update(initialized_params)
 
@@ -1053,62 +1228,85 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
                     if cls._keys_to_ignore_on_load_unexpected is not None:
                         for pat in cls._keys_to_ignore_on_load_unexpected:
-                            unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+                            unexpected_keys = [
+                                k for k in unexpected_keys if re.search(pat, k) is None
+                            ]
 
                     if len(unexpected_keys) > 0:
                         print(
                             f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}"
                         )
-                
-                params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
+
+                params = [
+                    p.numel() if "." in n else 0 for n, p in model.named_parameters()
+                ]
                 print(f"### All Parameters: {sum(params) / 1e6} M")
 
-                params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+                params = [
+                    p.numel() if "attn1." in n else 0
+                    for n, p in model.named_parameters()
+                ]
                 print(f"### attn1 Parameters: {sum(params) / 1e6} M")
                 return model
             except Exception as e:
                 print(
                     f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead."
                 )
-        
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         if os.path.exists(model_file):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             from safetensors.torch import load_file, safe_open
-            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+
+            model_files_safetensors = glob.glob(
+                os.path.join(pretrained_model_path, "*.safetensors")
+            )
             state_dict = {}
             for _model_file_safetensors in model_files_safetensors:
                 _state_dict = load_file(_model_file_safetensors)
                 for key in _state_dict:
                     state_dict[key] = _state_dict[key]
-        
-        tmp_state_dict = {} 
+
+        tmp_state_dict = {}
         for key in state_dict:
-            if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
+            if (
+                key in model.state_dict().keys()
+                and model.state_dict()[key].size() == state_dict[key].size()
+            ):
                 tmp_state_dict[key] = state_dict[key]
             else:
                 print(key, "Size don't match, skip")
-        
+
         for key in model.state_dict():
-            if "control" in key and key.replace("control_", "") in state_dict.keys() and model.state_dict()[key].size() == state_dict[key.replace("control_", "")].size():
+            if (
+                "control" in key
+                and key.replace("control_", "") in state_dict.keys()
+                and model.state_dict()[key].size()
+                == state_dict[key.replace("control_", "")].size()
+            ):
                 tmp_state_dict[key] = state_dict[key.replace("control_", "")].clone()
-                print(f"Initializing missing parameter '{key}' with model.state_dict().")
-                
+                print(
+                    f"Initializing missing parameter '{key}' with model.state_dict()."
+                )
+
         state_dict = tmp_state_dict
 
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
-        
+
         params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
         print(f"### All Parameters: {sum(params) / 1e6} M")
 
-        params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+        params = [
+            p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()
+        ]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
-        
+
         model = model.to(torch_dtype)
         return model

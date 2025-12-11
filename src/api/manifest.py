@@ -1,5 +1,6 @@
 import os
 from functools import lru_cache
+from loguru import logger
 import yaml
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -7,9 +8,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_config_path, get_lora_path
-from src.utils.compute import get_compute_capability, validate_compute_requirements, ComputeCapability
+from src.utils.compute import (
+    get_compute_capability,
+    validate_compute_requirements,
+    ComputeCapability,
+)
 from src.engine import UniversalEngine
 import traceback
+
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
 # Base path to manifest directory
@@ -17,6 +23,7 @@ MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "engine"
 
 # Cache the system's compute capability (it doesn't change during runtime)
 _SYSTEM_COMPUTE_CAPABILITY: Optional[ComputeCapability] = None
+
 
 def _get_system_compute_capability() -> ComputeCapability:
     """Get the system's compute capability (cached)."""
@@ -30,11 +37,10 @@ class ModelTypeInfo(BaseModel):
     key: str
     label: str
     description: str
-    
+
 
 class ModelCategoryInfo(ModelTypeInfo):
     pass
-
 
 
 def _normalize_subengine_relative_path(yaml_path: str) -> Optional[str]:
@@ -58,6 +64,7 @@ def _normalize_subengine_relative_path(yaml_path: str) -> Optional[str]:
 
     # If it already looks like a path relative to manifest/engine, just return it
     return yaml_path
+
 
 def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     """Load a manifest by relative path and enrich it with runtime info."""
@@ -105,18 +112,18 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
                     continue
                 seen_keys.add(key)
                 merged_components.append(comp)
-                
+
         def _lora_key(lora: Dict[str, Any]) -> tuple:
             return (
                 lora.get("source"),
                 lora.get("name"),
                 lora.get("label"),
             )
-                
+
         def _add_loras(loras: Any) -> None:
             if not isinstance(loras, list):
                 return
-            
+
             for lora in loras:
                 if not isinstance(lora, dict):
                     continue
@@ -163,7 +170,9 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     if configured_attention is None:
         configured_attention = spec.get("attention_types")
     if isinstance(configured_attention, list):
-        attention_allowed: Optional[List[str]] = [x for x in configured_attention if isinstance(x, str)]
+        attention_allowed: Optional[List[str]] = [
+            x for x in configured_attention if isinstance(x, str)
+        ]
     else:
         attention_allowed = None  # fall back to all available backends
 
@@ -173,6 +182,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     content["spec"]["attention_types_detail"] = attention_options
 
     # Enrich LoRA entries
+    all_loras_downloaded = True
     for lora_index, lora in enumerate(content.get("spec", {}).get("loras", [])):
         if isinstance(lora, str):
             is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
@@ -189,22 +199,30 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             else:
                 out_lora["is_downloaded"] = False
                 out_lora["source"] = lora
+                all_loras_downloaded = False
             content["spec"]["loras"][lora_index] = out_lora
         elif isinstance(lora, dict):
-            is_downloaded = DownloadMixin.is_downloaded(lora.get("source"), get_lora_path())
+            is_downloaded = DownloadMixin.is_downloaded(
+                lora.get("source"), get_lora_path()
+            )
             if is_downloaded is not None:
                 lora["is_downloaded"] = True
                 lora["source"] = is_downloaded
             else:
                 lora["is_downloaded"] = False
                 lora["source"] = lora.get("source")
+                all_loras_downloaded = False
             content["spec"]["loras"][lora_index] = lora
 
     # Enrich components entries
-    for component_index, component in enumerate(content.get("spec", {}).get("components", [])):
+    for component_index, component in enumerate(
+        content.get("spec", {}).get("components", [])
+    ):
         is_component_downloaded = True
         if config_path := component.get("config_path"):
-            is_downloaded = DownloadMixin.is_downloaded(config_path, get_components_path())
+            is_downloaded = DownloadMixin.is_downloaded(
+                config_path, get_components_path()
+            )
             if is_downloaded is None:
                 is_component_downloaded = False
             else:
@@ -217,36 +235,43 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             for idx, option in enumerate(options):
                 if option.get("config_path"):
                     has_downloadable_config = True
-                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_config_path())
+                    is_downloaded = DownloadMixin.is_downloaded(
+                        option.get("config_path"), get_config_path()
+                    )
                     if is_downloaded is not None:
                         is_scheduler_downloaded = True
-                        options[idx]['config_path'] = is_downloaded                   
-                    is_downloaded = DownloadMixin.is_downloaded(option.get("config_path"), get_components_path())
+                        options[idx]["config_path"] = is_downloaded
+                    is_downloaded = DownloadMixin.is_downloaded(
+                        option.get("config_path"), get_components_path()
+                    )
                     if is_downloaded is not None:
                         is_scheduler_downloaded = True
-                        options[idx]['config_path'] = is_downloaded
+                        options[idx]["config_path"] = is_downloaded
 
             if not is_scheduler_downloaded and has_downloadable_config:
                 is_component_downloaded = False
-            
-        
-            component['scheduler_options'] = options
+
+            component["scheduler_options"] = options
 
         any_path_downloaded = False
         for index, model_path in enumerate(component.get("model_path", [])):
-            is_downloaded = DownloadMixin.is_downloaded(model_path.get("path"), get_components_path())
+            is_downloaded = DownloadMixin.is_downloaded(
+                model_path.get("path"), get_components_path()
+            )
             if is_downloaded is not None:
                 model_path["is_downloaded"] = True
                 model_path["path"] = is_downloaded
                 any_path_downloaded = True
             else:
                 model_path["is_downloaded"] = False
-            
+
             component["model_path"][index] = model_path
-            
+
         any_extra_path_downloaded = False
         for index, model_path in enumerate(component.get("extra_model_paths", [])):
-            path = model_path.get("path") if isinstance(model_path, dict) else model_path
+            path = (
+                model_path.get("path") if isinstance(model_path, dict) else model_path
+            )
             out_model_path = {}
             is_downloaded = DownloadMixin.is_downloaded(path, get_components_path())
             if is_downloaded is not None:
@@ -256,24 +281,17 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             else:
                 out_model_path["is_downloaded"] = False
                 out_model_path["path"] = path
-            
+
             component["extra_model_paths"][index] = out_model_path
 
-        if (not any_path_downloaded and len(component.get("model_path", [])) > 0) or (not any_extra_path_downloaded and len(component.get("extra_model_paths", [])) > 0):
+        if (not any_path_downloaded and len(component.get("model_path", [])) > 0) or (
+            not any_extra_path_downloaded
+            and len(component.get("extra_model_paths", [])) > 0
+        ):
             is_component_downloaded = False
 
-        component['is_downloaded'] = is_component_downloaded
+        component["is_downloaded"] = is_component_downloaded
         content["spec"]["components"][component_index] = component
-        
-    loras = content.get("spec", {}).get("loras", [])
-    all_loras_downloaded = True
-    for lora_index, lora in enumerate(loras):
-        if isinstance(lora, dict) and lora.get("required", False):
-            is_downloaded = DownloadMixin.is_downloaded(lora, get_lora_path())
-            if is_downloaded is None:
-                all_loras_downloaded = False
-                break
-            
 
     # Convenience fields for filtering and compatibility with previous ManifestInfo
     # Normalize and expose common metadata at the top level
@@ -294,17 +312,21 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
     content["full_path"] = relative_path
     # Manifest-level downloaded flag: true if there are components and all are downloaded
     components_list = content.get("spec", {}).get("components", []) or []
-    content["downloaded"] = bool(components_list) and all(
-        isinstance(c, dict) and c.get("is_downloaded", False) for c in components_list
-    ) and all_loras_downloaded
-    
+    content["downloaded"] = (
+        bool(components_list)
+        and all(
+            isinstance(c, dict) and c.get("is_downloaded", False)
+            for c in components_list
+        )
+        and all_loras_downloaded
+    )
+
     # Compute compatibility check
     compute_requirements = spec.get("compute_requirements")
     if compute_requirements:
         system_capability = _get_system_compute_capability()
         is_compatible, compatibility_error = validate_compute_requirements(
-            compute_requirements, 
-            system_capability
+            compute_requirements, system_capability
         )
         content["compute_compatible"] = is_compatible
         content["compute_compatibility_error"] = compatibility_error
@@ -317,38 +339,43 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
 
     return content
 
+
 def get_manifest(manifest_id: str):
     """Get the actual YAML content of a specific manifest by name."""
     # Resolve manifest path via cached id->path index to avoid full list load
     id_index = _get_manifest_id_index()
     relative_path = id_index.get(manifest_id)
     if not relative_path:
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {manifest_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {manifest_id}"
+        )
     # Load and enrich only the requested manifest
     return _load_and_enrich_manifest(relative_path)
 
 
-
 def _get_all_manifest_files_uncached() -> List[Dict[str, Any]]:
     """Scan manifest directory and return all enriched manifest contents (no cache).
-    
+
     Filters out manifests that are not compatible with the current system's compute capabilities.
     """
     manifests: List[Dict[str, Any]] = []
-    
+
     for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
         for file in files:
-            if file.endswith('.yml') and not file.startswith('shared'):
+            if file.endswith(".yml") and not file.startswith("shared"):
                 file_path = Path(root) / file
                 relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
 
                 # Load and enrich each manifest directly
                 enriched = _load_and_enrich_manifest(str(relative_path))
-                
+
                 # Only include manifests that are compatible with the current system
-                if enriched.get("compute_compatible", True) and enriched.get("spec", {}).get("ui", None) is not None:
+                if (
+                    enriched.get("compute_compatible", True)
+                    and enriched.get("spec", {}).get("ui", None) is not None
+                ):
                     manifests.append(enriched)
-                
+
     return manifests
 
 
@@ -366,17 +393,20 @@ def _get_all_manifest_files_cached(cache_key: str) -> List[Dict[str, Any]]:
 
 def get_all_manifest_files() -> List[Dict[str, Any]]:
     """Return all enriched manifests, optionally cached based on environment variables.
-    
+
     Controls:
     - APEX_MANIFEST_CACHE or APEX_MANIFEST_CACHE_ENABLED: enable caching when truthy (default disabled)
     - APEX_MANIFEST_CACHE_BUSTER: changing this string invalidates the cache (e.g., set to a timestamp)
     """
-    enabled = _env_truthy(os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0")))
+    enabled = _env_truthy(
+        os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0"))
+    )
     if not enabled:
         return _get_all_manifest_files_uncached()
     buster = os.getenv("APEX_MANIFEST_CACHE_BUSTER", "")
     cache_key = f"v1:{buster}"
     return _get_all_manifest_files_cached(cache_key)
+
 
 def _build_manifest_id_index_uncached() -> Dict[str, str]:
     """
@@ -402,31 +432,38 @@ def _build_manifest_id_index_uncached() -> Dict[str, str]:
                 continue
     return index
 
+
 @lru_cache(maxsize=1)
 def _get_manifest_id_index_cached(cache_key: str) -> Dict[str, str]:
     return _build_manifest_id_index_uncached()
+
 
 def _get_manifest_id_index() -> Dict[str, str]:
     """
     Get the manifest id index, optionally cached controlled by the same env flags
     used for manifest list caching.
     """
-    enabled = _env_truthy(os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0")))
+    enabled = _env_truthy(
+        os.getenv("APEX_MANIFEST_CACHE", os.getenv("APEX_MANIFEST_CACHE_ENABLED", "0"))
+    )
     if not enabled:
         return _build_manifest_id_index_uncached()
     buster = os.getenv("APEX_MANIFEST_CACHE_BUSTER", "")
     cache_key = f"v1:{buster}"
     return _get_manifest_id_index_cached(cache_key)
 
+
 def load_yaml_content(file_path: Path) -> Dict[Any, Any]:
     """Load and return YAML file content."""
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Manifest file not found")
     except yaml.YAMLError as e:
-        raise HTTPException(status_code=500, detail=f"Error parsing YAML file: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error parsing YAML file: {str(e)}"
+        )
 
 
 def _sizeof_local_path(path_str: str) -> int:
@@ -483,7 +520,9 @@ def _attention_label_description_maps() -> tuple[Dict[str, str], Dict[str, str]]
     return label_map, description_map
 
 
-def _build_attention_options(allowed: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def _build_attention_options(
+    allowed: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
     """
     Build a list of attention backend options from the attention registry, each
     containing name, label and description. If `allowed` is provided, the list is
@@ -511,15 +550,18 @@ def _build_attention_options(allowed: Optional[List[str]] = None) -> List[Dict[s
 
     results: List[Dict[str, str]] = []
     for key in final_keys:
-        label = label_map.get(key, key.replace('_', ' ').title())
+        label = label_map.get(key, key.replace("_", " ").title())
         desc = description_map.get(key, f"{key} attention backend.")
-        results.append({
-            "name": key,
-            "label": label,
-            "description": desc,
-        })
+        results.append(
+            {
+                "name": key,
+                "label": label,
+                "description": desc,
+            }
+        )
 
     return results
+
 
 @router.get("/types", response_model=List[ModelTypeInfo])
 def list_model_types() -> List[ModelTypeInfo]:
@@ -549,7 +591,7 @@ def list_model_types() -> List[ModelTypeInfo]:
         "control": "Control / Animation",
         "edit": "Edit",
     }
-    
+
     description_map = {
         "text-to-video": "Generate videos from text prompts.",
         "image-to-video": "Animate or transform images into videos.",
@@ -610,9 +652,9 @@ def list_model_types() -> List[ModelTypeInfo]:
 
 @router.get("/categories", response_model=List[ModelCategoryInfo])
 def list_model_categories() -> List[ModelCategoryInfo]:
-    """List distinct metadata.categories values across manifests with label and description.
-    """
+    """List distinct metadata.categories values across manifests with label and description."""
     return list_model_types()
+
 
 @router.get("/system/compute")
 def get_system_compute_info():
@@ -624,32 +666,37 @@ def get_system_compute_info():
 @router.get("/list")
 def list_all_manifests(include_incompatible: bool = False):
     """List all available manifests.
-    
+
     Args:
-        include_incompatible: If True, include manifests that are not compatible 
+        include_incompatible: If True, include manifests that are not compatible
                             with the current system's compute capabilities.
                             Default is False (only show compatible manifests).
     """
-    if include_incompatible:
-        # Load all manifests without filtering
-        manifests: List[Dict[str, Any]] = []
-        for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
-            for file in files:
-                if file.endswith('.yml') and not file.startswith('shared'):
-                    file_path = Path(root) / file
-                    relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
-                    enriched = _load_and_enrich_manifest(str(relative_path))
-                    manifests.append(enriched)
-        return manifests
-    else:
-        # Use the normal filtered list
-        manifests = get_all_manifest_files()
-        return manifests
+    try:
+        if include_incompatible:
+            # Load all manifests without filtering
+            manifests: List[Dict[str, Any]] = []
+            for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
+                for file in files:
+                    if file.endswith(".yml") and not file.startswith("shared"):
+                        file_path = Path(root) / file
+                        relative_path = file_path.relative_to(MANIFEST_BASE_PATH)
+                        enriched = _load_and_enrich_manifest(str(relative_path))
+                        manifests.append(enriched)
+            return manifests
+        else:
+            # Use the normal filtered list
+            manifests = get_all_manifest_files()
+            return manifests
+    except Exception as e:
+        logger.error(f"Error listing manifests: {e}")
+        raise HTTPException(status_code=500, detail=f"Error listing manifests: {e}")
+
 
 @router.get("/list/model/{model}")
 def list_manifests_by_model(model: str, include_incompatible: bool = False):
     """List all manifest names for a specific model.
-    
+
     Args:
         model: The model name to filter by
         include_incompatible: If True, include manifests not compatible with current system
@@ -660,13 +707,16 @@ def list_manifests_by_model(model: str, include_incompatible: bool = False):
         manifests = get_all_manifest_files()
     filtered = [m for m in manifests if m.get("model") == model]
     if not filtered:
-        raise HTTPException(status_code=404, detail=f"No manifests found for model: {model}")
+        raise HTTPException(
+            status_code=404, detail=f"No manifests found for model: {model}"
+        )
     return filtered
+
 
 @router.get("/list/type/{model_type}")
 def list_manifests_by_model_type(model_type: str, include_incompatible: bool = False):
     """List all manifest names for a specific model type.
-    
+
     Args:
         model_type: The model type to filter by
         include_incompatible: If True, include manifests not compatible with current system
@@ -685,13 +735,18 @@ def list_manifests_by_model_type(model_type: str, include_incompatible: bool = F
             if mt == model_type:
                 filtered.append(m)
     if not filtered:
-        raise HTTPException(status_code=404, detail=f"No manifests found for model_type: {model_type}")
+        raise HTTPException(
+            status_code=404, detail=f"No manifests found for model_type: {model_type}"
+        )
     return filtered
 
+
 @router.get("/list/model/{model}/model_type/{model_type}")
-def list_manifests_by_model_and_type(model: str, model_type: str, include_incompatible: bool = False):
+def list_manifests_by_model_and_type(
+    model: str, model_type: str, include_incompatible: bool = False
+):
     """List all manifest names for a specific model and model type combination.
-    
+
     Args:
         model: The model name to filter by
         model_type: The model type to filter by
@@ -703,22 +758,26 @@ def list_manifests_by_model_and_type(model: str, model_type: str, include_incomp
         manifests = get_all_manifest_files()
     filtered: List[Dict[str, Any]] = []
     for m in manifests:
-        model_match = (m.get("model") == model)
+        model_match = m.get("model") == model
         mt = m.get("model_type")
         if isinstance(mt, list):
-            type_match = (model_type in mt)
+            type_match = model_type in mt
         else:
-            type_match = (mt == model_type)
+            type_match = mt == model_type
         if model_match and type_match:
             filtered.append(m)
     if not filtered:
-        raise HTTPException(status_code=404, detail=f"No manifests found for model: {model} and model_type: {model_type}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No manifests found for model: {model} and model_type: {model_type}",
+        )
     return filtered
 
 
 @router.get("/{manifest_id}")
 def get_manifest_by_id(manifest_id: str) -> Dict[Any, Any]:
     return get_manifest(manifest_id)
+
 
 @router.get("/{manifest_id}/part")
 def get_manifest_part(manifest_id: str, path: Optional[str] = None):
@@ -739,17 +798,26 @@ def get_manifest_part(manifest_id: str, path: Optional[str] = None):
             if token in value:
                 value = value[token]
             else:
-                raise HTTPException(status_code=404, detail=f"Key not found at segment '{token}'")
+                raise HTTPException(
+                    status_code=404, detail=f"Key not found at segment '{token}'"
+                )
         elif isinstance(value, list):
             try:
                 idx = int(token)
             except ValueError:
-                raise HTTPException(status_code=400, detail=f"Expected list index at segment '{token}'")
+                raise HTTPException(
+                    status_code=400, detail=f"Expected list index at segment '{token}'"
+                )
             if idx < 0 or idx >= len(value):
-                raise HTTPException(status_code=404, detail=f"List index out of range at segment '{token}'")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"List index out of range at segment '{token}'",
+                )
             value = value[idx]
         else:
-            raise HTTPException(status_code=404, detail=f"Path not traversable at segment '{token}'")
+            raise HTTPException(
+                status_code=404, detail=f"Path not traversable at segment '{token}'"
+            )
 
     return value
 
@@ -774,6 +842,7 @@ class UpdateLoraScaleRequest(BaseModel):
     LoRAs are stored under spec.loras as either strings or mappings. This endpoint
     normalizes the targeted entry to a mapping (dict) and writes a `scale` field.
     """
+
     manifest_id: str
     lora_index: int
     scale: float
@@ -805,7 +874,9 @@ def update_lora_scale(req: UpdateLoraScaleRequest) -> Dict[str, Any]:
     # Load enriched manifest to locate backing YAML path
     manifest = get_manifest(req.manifest_id)
     if not manifest:
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {req.manifest_id}"
+        )
 
     relative_path = manifest.get("full_path")
     if not isinstance(relative_path, str) or not relative_path:
@@ -875,6 +946,7 @@ class UpdateLoraNameRequest(BaseModel):
 
     This normalizes the target entry to a mapping (dict) and writes both `name` and `label`.
     """
+
     manifest_id: str
     lora_index: int
     name: str
@@ -899,7 +971,9 @@ def update_lora_name(req: UpdateLoraNameRequest) -> Dict[str, Any]:
 
     manifest = get_manifest(req.manifest_id)
     if not manifest:
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {req.manifest_id}"
+        )
 
     relative_path = manifest.get("full_path")
     if not isinstance(relative_path, str) or not relative_path:
@@ -966,6 +1040,7 @@ class DeleteLoraRequest(BaseModel):
     `remote_source` value, the associated local path may also be removed depending on how
     it was resolved.
     """
+
     manifest_id: str
     lora_index: int
 
@@ -987,7 +1062,9 @@ def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
 
     manifest = get_manifest(req.manifest_id)
     if not manifest:
-        raise HTTPException(status_code=404, detail=f"Manifest not found: {req.manifest_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Manifest not found: {req.manifest_id}"
+        )
 
     relative_path = manifest.get("full_path")
     if not isinstance(relative_path, str) or not relative_path:
@@ -1063,6 +1140,7 @@ def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
                     removed_local = True
                 elif target.is_dir():
                     import shutil
+
                     shutil.rmtree(target, ignore_errors=True)
                     removed_local = True
         except Exception:
@@ -1078,7 +1156,9 @@ def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
 
 
 @router.post("/custom-model-path")
-def validate_and_register_custom_model_path(req: CustomModelPathRequest) -> Dict[str, Any]:
+def validate_and_register_custom_model_path(
+    req: CustomModelPathRequest,
+) -> Dict[str, Any]:
     """
     Validate a local model path and, if valid, register it in the manifest as a
     custom component model_path entry.
@@ -1090,7 +1170,7 @@ def validate_and_register_custom_model_path(req: CustomModelPathRequest) -> Dict
         list in the underlying YAML manifest, including a computed `file_size`
         and a `custom: true` flag.
     """
-   
+
     if not req.manifest_id:
         raise HTTPException(status_code=400, detail="manifest_id is required")
     if req.component_index < 0:
@@ -1211,7 +1291,7 @@ def validate_and_register_custom_model_path(req: CustomModelPathRequest) -> Dict
     try:
         engine.validate_model_path(component_for_validation)
     except Exception as e:
-        
+
         traceback.print_exc()
         raise HTTPException(
             status_code=400, detail=f"Failed to validate model path: {e}"

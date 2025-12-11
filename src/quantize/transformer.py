@@ -259,12 +259,11 @@ def check_key_in_preserve_weights_dtype(key: str, preserve_weights_dtype: list[s
     return False
 
 
-
 def _prepare_and_quantize_tensor(args):
     """Quantize a single tensor and return the result without writing to file.
     Args is a tuple of (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)"""
     key, data, preserve_weights_dtype, keys_to_exclude, qconfig = args
-    
+
     if keys_to_exclude:
         skip = False
         for exclude_key in keys_to_exclude:
@@ -273,7 +272,7 @@ def _prepare_and_quantize_tensor(args):
                 break
         if skip:
             return None
-    
+
     old_dtype = data.dtype
     if data.dtype == torch.bfloat16:
         data = data.to(torch.float32)
@@ -282,7 +281,7 @@ def _prepare_and_quantize_tensor(args):
         getattr(torch, "float8_e5m2", "_invalid"),
     ]:
         data = data.to(torch.float16)
-    
+
     data = data.numpy()
     n_dims = len(data.shape)
     if old_dtype == torch.bfloat16:
@@ -310,19 +309,28 @@ def _prepare_and_quantize_tensor(args):
         data_qtype = gguf.GGMLQuantizationType.F32
     else:
         data_qtype = qconfig.qtype
-    
+
     try:
         data = quantize(data, data_qtype)
     except (AttributeError, gguf.QuantError) as e:
         logger.warning(f"Falling back to F16: {e}")
         data_qtype = gguf.GGMLQuantizationType.F16
         data = quantize(data, data_qtype)
-    
+
     return (key, data, data_qtype)
 
 
-def _quantize_data(data: torch.Tensor, key: str, preserve_weights_dtype: list[str], keys_to_exclude: list[str], qconfig: QuantConfig, writer: gguf.GGUFWriter):
-    result = _prepare_and_quantize_tensor((key, data, preserve_weights_dtype, keys_to_exclude, qconfig))
+def _quantize_data(
+    data: torch.Tensor,
+    key: str,
+    preserve_weights_dtype: list[str],
+    keys_to_exclude: list[str],
+    qconfig: QuantConfig,
+    writer: gguf.GGUFWriter,
+):
+    result = _prepare_and_quantize_tensor(
+        (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)
+    )
     if result is not None:
         key, data, data_qtype = result
         writer.add_tensor(
@@ -330,6 +338,7 @@ def _quantize_data(data: torch.Tensor, key: str, preserve_weights_dtype: list[st
             tensor=data,
             raw_dtype=data_qtype,
         )
+
 
 def convert_model(
     model_path: str,
@@ -372,39 +381,54 @@ def convert_model(
     files_to_load += glob(os.path.join(model_path, pt_pattern), recursive=True)
 
     files_to_load += glob(os.path.join(model_path, pth_pattern), recursive=True)
-    
+
     # Parallel quantization with ProcessPoolExecutor for true parallel CPU processing
     if num_workers is None:
         num_workers = multiprocessing.cpu_count()
-    
+
     print(f"Quantizing with {num_workers} workers")
     if num_workers == 1:
-        for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
+        for idx, file_path in enumerate(
+            tqdm(files_to_load, desc="Loading model files")
+        ):
             state_dict = load_file(file_path)
-            for key, data in tqdm(state_dict.items(), desc=f"Quantizing file {idx + 1}/{len(files_to_load)}"):
-                _quantize_data(data, key, preserve_weights_dtype, keys_to_exclude, qconfig, writer)
+            for key, data in tqdm(
+                state_dict.items(),
+                desc=f"Quantizing file {idx + 1}/{len(files_to_load)}",
+            ):
+                _quantize_data(
+                    data, key, preserve_weights_dtype, keys_to_exclude, qconfig, writer
+                )
     else:
-        for idx, file_path in enumerate(tqdm(files_to_load, desc="Loading model files")):
+        for idx, file_path in enumerate(
+            tqdm(files_to_load, desc="Loading model files")
+        ):
             state_dict = load_file(file_path)
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 # Submit all tasks for tensors in this file
                 futures = {
-                    executor.submit(_prepare_and_quantize_tensor, (key, data, preserve_weights_dtype, keys_to_exclude, qconfig)): key
-                 for key, data in state_dict.items()
-            }
+                    executor.submit(
+                        _prepare_and_quantize_tensor,
+                        (key, data, preserve_weights_dtype, keys_to_exclude, qconfig),
+                    ): key
+                    for key, data in state_dict.items()
+                }
 
                 # Process results as they complete with live progress updates
-            with tqdm(total=len(futures), desc=f"Quantizing file {idx + 1}/{len(files_to_load)}") as pbar:
-                    for future in as_completed(futures):
-                        result = future.result()
-                        if result is not None:
-                            key, data, data_qtype = result
-                            writer.add_tensor(
-                                name=key,
-                                tensor=data,
-                                raw_dtype=data_qtype,
-                            )
-                        pbar.update(1)
+            with tqdm(
+                total=len(futures),
+                desc=f"Quantizing file {idx + 1}/{len(files_to_load)}",
+            ) as pbar:
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result is not None:
+                        key, data, data_qtype = result
+                        writer.add_tensor(
+                            name=key,
+                            tensor=data,
+                            raw_dtype=data_qtype,
+                        )
+                    pbar.update(1)
 
     writer.add_file_type(ftype=qconfig.ftype)
     writer.add_quantization_version(gguf.GGML_QUANT_VERSION)

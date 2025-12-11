@@ -7,12 +7,17 @@ from src.utils.progress import safe_emit_progress, make_mapped_progress
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.image_processor import VaeImageProcessor
 
+
 class ChromaT2IEngine(BaseEngine):
     """Chroma Text-to-Image Engine Implementation"""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1)
+            if getattr(self, "vae", None)
+            else 8
+        )
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor * 2
         )
@@ -26,9 +31,13 @@ class ChromaT2IEngine(BaseEngine):
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
-        latents = latents.view(batch_size, num_channels_latents, height // 2, 2, width // 2, 2)
+        latents = latents.view(
+            batch_size, num_channels_latents, height // 2, 2, width // 2, 2
+        )
         latents = latents.permute(0, 2, 4, 1, 3, 5)
-        latents = latents.reshape(batch_size, (height // 2) * (width // 2), num_channels_latents * 4)
+        latents = latents.reshape(
+            batch_size, (height // 2) * (width // 2), num_channels_latents * 4
+        )
 
         return latents
 
@@ -92,7 +101,7 @@ class ChromaT2IEngine(BaseEngine):
         )
 
         return latents, latent_image_ids
-    
+
     @staticmethod
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
         latent_image_ids = torch.zeros(height, width, 3)
@@ -138,13 +147,16 @@ class ChromaT2IEngine(BaseEngine):
 
         # Extend the prompt attention mask to account for image tokens in the final sequence
         attention_mask = torch.cat(
-            [attention_mask, torch.ones(batch_size, sequence_length, device=attention_mask.device)],
+            [
+                attention_mask,
+                torch.ones(batch_size, sequence_length, device=attention_mask.device),
+            ],
             dim=1,
         )
         attention_mask = attention_mask.to(dtype)
 
         return attention_mask
-    
+
     def encode_image(self, image):
         image_encoder = self.helpers["image_encoder"]
         return image_encoder(image)
@@ -194,7 +206,6 @@ class ChromaT2IEngine(BaseEngine):
 
         return ip_adapter_image_embeds
 
-    
     def encode_prompt(
         self,
         prompt: Union[str, List[str]] = None,
@@ -223,23 +234,25 @@ class ChromaT2IEngine(BaseEngine):
         )
 
         if negative_prompt is not None and use_cfg_guidance:
-            negative_prompt_embeds, negative_prompt_embeds_mask = self.text_encoder.encode(
-                negative_prompt,
-                device=self.device,
-                num_videos_per_prompt=num_images,
-                return_attention_mask=True,
-                output_type="hidden_states",
-                **text_encoder_kwargs,
+            negative_prompt_embeds, negative_prompt_embeds_mask = (
+                self.text_encoder.encode(
+                    negative_prompt,
+                    device=self.device,
+                    num_videos_per_prompt=num_images,
+                    return_attention_mask=True,
+                    output_type="hidden_states",
+                    **text_encoder_kwargs,
+                )
             )
-            
+
             negative_text_ids = torch.zeros(negative_prompt_embeds.shape[1], 3).to(
                 device=self.device, dtype=negative_prompt_embeds.dtype
             )
-            
+
         else:
             negative_prompt_embeds = None
             negative_text_ids = None
-            
+
         if offload:
             del self.text_encoder
             
@@ -250,7 +263,7 @@ class ChromaT2IEngine(BaseEngine):
         """Override: unpack latents for image decoding and render a preview frame.
 
         Falls back to base implementation if preview dimensions are unavailable.
-        
+
         """
         try:
             preview_height = getattr(self, "_preview_height", None)
@@ -303,24 +316,30 @@ class ChromaT2IEngine(BaseEngine):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-image pipeline")
-        
-        
+
         if isinstance(prompt, str):
             prompt = [prompt]
         if isinstance(negative_prompt, str):
             negative_prompt = [negative_prompt]
 
         safe_emit_progress(progress_callback, 0.05, "Encoding prompt")
-        prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids = self.encode_prompt(
+        (
+            prompt_embeds,
+            prompt_embeds_mask,
+            negative_prompt_embeds,
+            negative_prompt_embeds_mask,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             num_images=num_images,
             text_encoder_kwargs=text_encoder_kwargs,
             use_cfg_guidance=use_cfg_guidance,
-            offload=offload
+            offload=offload,
         )
         safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
-        
+
         batch_size = prompt_embeds.shape[0]
 
         transformer_dtype = self.component_dtypes["transformer"]
@@ -354,7 +373,7 @@ class ChromaT2IEngine(BaseEngine):
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
-            
+
         self.to_device(self.scheduler)
         safe_emit_progress(progress_callback, 0.35, "Scheduler ready")
 
@@ -365,7 +384,7 @@ class ChromaT2IEngine(BaseEngine):
         )
 
         image_seq_len = latents.shape[1]
-        
+
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -374,7 +393,7 @@ class ChromaT2IEngine(BaseEngine):
             self.scheduler.config.get("max_shift", 1.15),
         )
         safe_emit_progress(progress_callback, 0.40, "Computed scheduler shift")
-        
+
         attention_mask = self._prepare_attention_mask(
             batch_size=latents.shape[0],
             sequence_length=image_seq_len,
@@ -388,7 +407,7 @@ class ChromaT2IEngine(BaseEngine):
             attention_mask=negative_prompt_embeds_mask,
         )
         safe_emit_progress(progress_callback, 0.45, "Prepared attention masks")
-        
+
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -396,7 +415,9 @@ class ChromaT2IEngine(BaseEngine):
             timesteps=timesteps,
             mu=mu,
         )
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -406,25 +427,30 @@ class ChromaT2IEngine(BaseEngine):
             self.load_component_by_type("transformer")
 
         self.to_device(self.transformer)
-        
+
         # Set preview context for per-step rendering on the main engine
 
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
-        
-        
+
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
-            negative_ip_adapter_image is None and negative_ip_adapter_image_embeds is None
+            negative_ip_adapter_image is None
+            and negative_ip_adapter_image_embeds is None
         ):
             negative_ip_adapter_image = np.zeros((width, height, 3), dtype=np.uint8)
-            negative_ip_adapter_image = [negative_ip_adapter_image] * self.transformer.encoder_hid_proj.num_ip_adapters
+            negative_ip_adapter_image = [
+                negative_ip_adapter_image
+            ] * self.transformer.encoder_hid_proj.num_ip_adapters
 
         elif (ip_adapter_image is None and ip_adapter_image_embeds is None) and (
-            negative_ip_adapter_image is not None or negative_ip_adapter_image_embeds is not None
+            negative_ip_adapter_image is not None
+            or negative_ip_adapter_image_embeds is not None
         ):
             ip_adapter_image = np.zeros((width, height, 3), dtype=np.uint8)
-            ip_adapter_image = [ip_adapter_image] * self.transformer.encoder_hid_proj.num_ip_adapters
+            ip_adapter_image = [
+                ip_adapter_image
+            ] * self.transformer.encoder_hid_proj.num_ip_adapters
 
         image_embeds = None
         negative_image_embeds = None
@@ -435,15 +461,17 @@ class ChromaT2IEngine(BaseEngine):
                 self.device,
                 num_images,
             )
-        if negative_ip_adapter_image is not None or negative_ip_adapter_image_embeds is not None:
+        if (
+            negative_ip_adapter_image is not None
+            or negative_ip_adapter_image_embeds is not None
+        ):
             negative_image_embeds = self.prepare_ip_adapter_image_embeds(
                 negative_ip_adapter_image,
                 negative_ip_adapter_image_embeds,
                 self.device,
                 num_images,
             )
-            
-        
+
         # 6. Denoising loop
         # We set the index here to remove DtoH sync, helpful especially during compilation.
         # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
@@ -457,9 +485,7 @@ class ChromaT2IEngine(BaseEngine):
                 denoise_progress_callback(0.0, "Starting denoise")
             except Exception:
                 pass
-            
-        
-        
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if image_embeds is not None:
@@ -479,9 +505,11 @@ class ChromaT2IEngine(BaseEngine):
                     return_dict=False,
                 )[0]
 
-                if use_cfg_guidance:    
+                if use_cfg_guidance:
                     if negative_image_embeds is not None:
-                        joint_attention_kwargs["ip_adapter_image_embeds"] = negative_image_embeds
+                        joint_attention_kwargs["ip_adapter_image_embeds"] = (
+                            negative_image_embeds
+                        )
                     neg_noise_pred = self.transformer(
                         hidden_states=latents,
                         timestep=timestep / 1000,
@@ -492,18 +520,27 @@ class ChromaT2IEngine(BaseEngine):
                         joint_attention_kwargs=joint_attention_kwargs,
                         return_dict=False,
                     )[0]
-                    noise_pred = neg_noise_pred + guidance_scale * (noise_pred - neg_noise_pred)
+                    noise_pred = neg_noise_pred + guidance_scale * (
+                        noise_pred - neg_noise_pred
+                    )
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(
+                    noise_pred, t, latents, return_dict=False
+                )[0]
 
                 if latents.dtype != latents_dtype:
                     if torch.backends.mps.is_available():
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
@@ -514,18 +551,25 @@ class ChromaT2IEngine(BaseEngine):
 
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
-        
+
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
-        
+
         if offload:
             try:
                 self._offload(self.transformer)
             except Exception:
                 pass
-        safe_emit_progress(progress_callback, 0.94, "Transformer offloaded" if offload else "Preparing decode")
+        safe_emit_progress(
+            progress_callback,
+            0.94,
+            "Transformer offloaded" if offload else "Preparing decode",
+        )
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
@@ -536,5 +580,3 @@ class ChromaT2IEngine(BaseEngine):
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")
         return image
-    
-    

@@ -2,9 +2,14 @@ import torch
 import torch.nn.functional as F
 from typing import Optional, Tuple
 from src.attention import attention_register
-    
+
+
 # Copied from diffusers.models.transformers.transformer_wan._get_qkv_projections
-def _get_qkv_projections(attn: "WanAttention", hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor):
+def _get_qkv_projections(
+    attn: "WanAttention",
+    hidden_states: torch.Tensor,
+    encoder_hidden_states: torch.Tensor,
+):
     # encoder_hidden_states is only passed for cross-attention
     if encoder_hidden_states is None:
         encoder_hidden_states = hidden_states
@@ -25,14 +30,17 @@ def _get_qkv_projections(attn: "WanAttention", hidden_states: torch.Tensor, enco
 
 
 # Copied from diffusers.models.transformers.transformer_wan._get_added_kv_projections
-def _get_added_kv_projections(attn: "WanAttention", encoder_hidden_states_img: torch.Tensor):
+def _get_added_kv_projections(
+    attn: "WanAttention", encoder_hidden_states_img: torch.Tensor
+):
     if attn.fused_projections:
-        key_img, value_img = attn.to_added_kv(encoder_hidden_states_img).chunk(2, dim=-1)
+        key_img, value_img = attn.to_added_kv(encoder_hidden_states_img).chunk(
+            2, dim=-1
+        )
     else:
         key_img = attn.add_k_proj(encoder_hidden_states_img)
         value_img = attn.add_v_proj(encoder_hidden_states_img)
     return key_img, value_img
-
 
 
 class WanAttnProcessor:
@@ -60,7 +68,9 @@ class WanAttnProcessor:
             encoder_hidden_states_img = encoder_hidden_states[:, :image_context_length]
             encoder_hidden_states = encoder_hidden_states[:, image_context_length:]
 
-        query, key, value = _get_qkv_projections(attn, hidden_states, encoder_hidden_states)
+        query, key, value = _get_qkv_projections(
+            attn, hidden_states, encoder_hidden_states
+        )
 
         query = attn.norm_q(query)
         key = attn.norm_k(key)
@@ -90,7 +100,9 @@ class WanAttnProcessor:
         # I2V task
         hidden_states_img = None
         if encoder_hidden_states_img is not None:
-            key_img, value_img = _get_added_kv_projections(attn, encoder_hidden_states_img)
+            key_img, value_img = _get_added_kv_projections(
+                attn, encoder_hidden_states_img
+            )
             key_img = attn.norm_added_k(key_img)
 
             key_img = key_img.unflatten(2, (attn.heads, -1))
@@ -102,7 +114,7 @@ class WanAttnProcessor:
                 value_img.transpose(1, 2),
                 attn_mask=None,
                 dropout_p=0.0,
-                is_causal=False
+                is_causal=False,
             )
             hidden_states_img = hidden_states_img.transpose(1, 2).flatten(2, 3)
             hidden_states_img = hidden_states_img.type_as(query)
@@ -113,7 +125,7 @@ class WanAttnProcessor:
             value.transpose(1, 2),
             attn_mask=attention_mask,
             dropout_p=0.0,
-            is_causal=False
+            is_causal=False,
         )
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
@@ -124,9 +136,6 @@ class WanAttnProcessor:
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)
         return hidden_states
-    
-
-
 
 
 class WanAnimateFaceBlockAttnProcessor:
@@ -155,10 +164,14 @@ class WanAnimateFaceBlockAttnProcessor:
         # B --> batch_size, T --> reduced inference segment len, N --> face_encoder_num_heads + 1, C --> attn.dim
         B, T, N, C = encoder_hidden_states.shape
 
-        query, key, value = _get_qkv_projections(attn, hidden_states, encoder_hidden_states)
+        query, key, value = _get_qkv_projections(
+            attn, hidden_states, encoder_hidden_states
+        )
 
         query = query.unflatten(2, (attn.heads, -1))  # [B, S, H * D] --> [B, S, H, D]
-        key = key.view(B, T, N, attn.heads, -1)  # [B, T, N, H * D_kv] --> [B, T, N, H, D_kv]
+        key = key.view(
+            B, T, N, attn.heads, -1
+        )  # [B, T, N, H * D_kv] --> [B, T, N, H, D_kv]
         value = value.view(B, T, N, attn.heads, -1)
 
         query = attn.norm_q(query)
@@ -167,7 +180,9 @@ class WanAnimateFaceBlockAttnProcessor:
         # NOTE: the below line (which follows the official code) means that in practice, the number of frames T in
         # encoder_hidden_states (the motion vector after applying the face encoder) must evenly divide the
         # post-patchify sequence length S of the transformer hidden_states. Is it possible to remove this dependency?
-        query = query.unflatten(1, (T, -1)).flatten(0, 1)  # [B, S, H, D] --> [B * T, S / T, H, D]
+        query = query.unflatten(1, (T, -1)).flatten(
+            0, 1
+        )  # [B, S, H, D] --> [B * T, S / T, H, D]
         key = key.flatten(0, 1)  # [B, T, N, H, D_kv] --> [B * T, N, H, D_kv]
         value = value.flatten(0, 1)
 
@@ -177,7 +192,7 @@ class WanAnimateFaceBlockAttnProcessor:
             value.transpose(1, 2),
             attn_mask=None,
             dropout_p=0.0,
-            is_causal=False
+            is_causal=False,
         ).transpose(1, 2)
 
         hidden_states = hidden_states.flatten(2, 3)

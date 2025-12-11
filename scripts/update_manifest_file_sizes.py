@@ -16,11 +16,10 @@ except Exception:
     requests = None  # type: ignore
 
 try:
-    from huggingface_hub.hf_api import HfApi
+    from huggingface_hub import HfApi, hf_hub_url
 except Exception:
     HfApi = None  # type: ignore
-    RepoFile = None  # type: ignore
-    RepoFolder = None  # type: ignore
+    hf_hub_url = None  # type: ignore
 
 
 MANIFEST_ROOT = Path(__file__).resolve().parents[1] / "manifest/engine"
@@ -93,9 +92,21 @@ def sizeof_hf(path: str) -> int:
     try:
         owner, repo, subpath = parse_hf_path(path)
         repo_id = f"{owner}/{repo}"
+        # If subpath looks like a file path, try resolving the raw file URL and
+        # using standard HTTP size detection. This avoids issues with the tree
+        # API when pointing directly at a file.
+        if subpath and "." in os.path.basename(subpath):
+            if hf_hub_url is not None:
+                try:
+                    url = hf_hub_url(repo_id=repo_id, filename=subpath, revision="main")
+                    size = sizeof_url(url)
+                    if size:
+                        return int(size)
+                except Exception as e:
+                    print(f"Error computing size for {path} via hf_hub_url: {e}")
+
         api = HfApi()
-        # If subpath points to a file, list_repo_tree returns a single RepoFile; if
-        # it points to a directory or empty, use recursive to sum all files.
+        # Otherwise, treat it as a directory or repo root and sum all entries.
         recursive = True
         entries = api.list_repo_tree(
             repo_id=repo_id,
@@ -199,7 +210,8 @@ def update_manifest_file(path: Path) -> bool:
                 changed = True
             if not isinstance(item, dict):
                 continue
-            path_value = item.get("path")
+            # Prefer explicit "path", but also allow "url" for remote artefacts
+            path_value = item.get("path") or item.get("url")
             if not path_value or not isinstance(path_value, str):
                 continue
             size_bytes = compute_size_for_model_path(path_value, path.parent)
@@ -231,9 +243,13 @@ def main() -> int:
         return 2
 
     updated = 0
-    for yml in root.rglob("*.yml"):
-        if update_manifest_file(yml):
+    if root.is_file():
+        if root.suffix in {".yml", ".yaml"} and update_manifest_file(root):
             updated += 1
+    else:
+        for yml in root.rglob("*.yml"):
+            if update_manifest_file(yml):
+                updated += 1
 
     print(f"Done. Updated {updated} file(s).")
     return 0

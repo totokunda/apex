@@ -30,6 +30,7 @@ from src.quantize.ggml_layer import patch_model
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
+
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
@@ -41,15 +42,32 @@ import librosa
 
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 IMAGE_EXTS = [
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'ico', 'webp',
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "bmp",
+    "tiff",
+    "ico",
+    "webp",
 ]
 VIDEO_EXTS = [
-  'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'mpg', 'mpeg', 'm4v',
+    "mp4",
+    "mov",
+    "avi",
+    "mkv",
+    "webm",
+    "flv",
+    "wmv",
+    "mpg",
+    "mpeg",
+    "m4v",
 ]
+
 
 class LoaderMixin(DownloadMixin):
     logger: Logger = logger
-    
+
     def fetch_config(
         self,
         config_path: str,
@@ -91,8 +109,6 @@ class LoaderMixin(DownloadMixin):
                     mm_config = resolve_mm_cfg(component)
                 except Exception:
                     mm_config = None
-                if mm_config is not None:
-                    needs_memory_management = True
 
         model_base = component.get("base")
         model_path = component.get("model_path")
@@ -116,21 +132,51 @@ class LoaderMixin(DownloadMixin):
 
         if component.get("config"):
             config.update(component.get("config"))
+
+        # Lazy import here as well to avoid circular imports.
+        from src.converters.convert import (
+            get_transformer_converter,
+            get_vae_converter,
+            NoOpConverter,
+        )
+
+        # Decide which converter (if any) is needed for this component.
+        if component.get("type") == "vae":
+            converter = get_vae_converter(model_base)
+        elif component.get("type") == "transformer":
+            converter = get_transformer_converter(model_base)
+        else:
+            converter = NoOpConverter()
+
+        # Only take the diffusers `from_pretrained` fast-path when we *don't*
+        # need to run any custom conversion logic. If a converter is required,
+        # we fall through to the manual loading path below where we explicitly
+        # load checkpoints and call `converter.convert(state_dict)` before
+        # assigning weights.
+        requires_conversion = extra_kwargs.get("require_conversion", False)
+
         if (
-            not config
-            or (
-                os.path.isdir(model_path)
-                and os.path.exists(os.path.join(model_path, "config.json"))
+            not requires_conversion
+            and (
+                not config
+                or (
+                    os.path.isdir(model_path)
+                    and os.path.exists(os.path.join(model_path, "config.json"))
+                )
             )
         ) and (
             not component.get("extra_model_paths")
         ) and not extra_kwargs.get("load_from_config"):
 
             if (
-                hasattr(self, "engine_type")
-                and self.engine_type == "mlx"
-                and component.get("type") == "transformer"
-            ) and load_dtype is not None and "dtype" not in extra_kwargs:
+                (
+                    hasattr(self, "engine_type")
+                    and self.engine_type == "mlx"
+                    and component.get("type") == "transformer"
+                )
+                and load_dtype is not None
+                and "dtype" not in extra_kwargs
+            ):
                 extra_kwargs["dtype"] = load_dtype
             elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
                 extra_kwargs["torch_dtype"] = load_dtype
@@ -139,7 +185,7 @@ class LoaderMixin(DownloadMixin):
             context = init_empty_weights() if no_weights else nullcontext()
 
             with context:
-                # remove all kwargs that are null 
+                # remove all kwargs that are null
                 extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
 
                 # Filter out any kwargs that `from_pretrained` cannot accept.
@@ -148,8 +194,7 @@ class LoaderMixin(DownloadMixin):
                     sig = inspect.signature(model_class.from_pretrained)
                     params = sig.parameters
                     accepts_var_kw = any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD
-                        for p in params.values()
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
                     )
                     if not accepts_var_kw:
                         filtered_kwargs = {}
@@ -170,28 +215,34 @@ class LoaderMixin(DownloadMixin):
 
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
 
-
-
             if mm_config is not None and not no_weights:
                 apply_group_offloading = getattr(self, "_apply_group_offloading", None)
                 if callable(apply_group_offloading):
-                    label = component.get("name") or component.get("type") or type(model).__name__
+                    label = (
+                        component.get("name")
+                        or component.get("type")
+                        or type(model).__name__
+                    )
                     offloading_module = component.get("offloading_module", None)
                     if offloading_module:
                         model_to_offload = model.get_submodule(offloading_module)
                     else:
                         model_to_offload = model
                     try:
-                        apply_group_offloading(model_to_offload, mm_config, module_label=label)
-
+                        apply_group_offloading(
+                            model_to_offload, mm_config, module_label=label
+                        )
                     except Exception as e:
                         if hasattr(self, "logger"):
                             self.logger.warning(
                                 f"Failed to enable group offloading for '{label}': {e}"
                             )
+
             return model
 
-        self.logger.info(f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}")
+        self.logger.info(
+            f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}"
+        )
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects
@@ -229,12 +280,11 @@ class LoaderMixin(DownloadMixin):
                 if hasattr(model_class, "_from_config"):
                     model = model_class._from_config(config, **extra_kwargs)
                 else:
-
                     model = model_class.from_config(config, **extra_kwargs)
 
         if no_weights:
             return model
-        
+
         if (
             model_path.endswith(".gguf")
             and hasattr(self, "engine_type")
@@ -245,23 +295,15 @@ class LoaderMixin(DownloadMixin):
             gguf_weights = mx.load(model_path)
             check_mlx_convolutional_weights(gguf_weights, model)
             model.load_weights(gguf_weights)
-        
-        elif (
-            model_path.endswith(".gguf")
-        ):
+
+        elif model_path.endswith(".gguf"):
             logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
 
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), **gguf_kwargs
             )
-            # check if we need to convert the weights
-            if component.get("type") == "transformer":
-                # Lazy import to avoid circular dependency at module import time.
-                from src.converters.convert import get_transformer_converter
-                converter = get_transformer_converter(model_base)
-                converter.convert(state_dict)
-
+            converter.convert(state_dict)
             # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model(model)
             model.load_state_dict(state_dict, assign=True, strict=False)
@@ -285,11 +327,13 @@ class LoaderMixin(DownloadMixin):
             extra_model_paths = component.get("extra_model_paths", [])
             if isinstance(extra_model_paths, str):
                 extra_model_paths = [extra_model_paths]
-            
+
             if extra_kwargs.get("load_extra_model_paths", True):
                 files_to_load.extend(extra_model_paths)
 
- 
+            # Track whether we've already patched this model for FP8 scaled weights
+            patched_for_fp8_scaled = False
+
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")
                 is_safetensors = is_safetensors_file(file_path)
@@ -297,30 +341,18 @@ class LoaderMixin(DownloadMixin):
                     state_dict = load_safetensors(
                         file_path,
                         dtype=load_dtype,
-                        framework="np" if self.engine_type == "mlx" else "pt",
+                        framework=(
+                            "np"
+                            if hasattr(self, "engine_type")
+                            and self.engine_type == "mlx"
+                            else "pt"
+                        ),
                     )
                 else:
                     state_dict = torch.load(
                         file_path, map_location="cpu", weights_only=True, mmap=True
                     )
-                
-                if extra_kwargs.get("require_conversion", False):
-                    # Lazy import here as well to avoid circular imports.
-                    from src.converters.convert import (
-                        get_transformer_converter,
-                        get_vae_converter,
-                    )
 
-                    if component.get("type") == "vae":
-                        converter = get_vae_converter(model_base)
-                    elif component.get("type") == "transformer":
-                        converter = get_transformer_converter(model_base)
-                    else:
-                        raise ValueError(
-                            f"Unsupported component type: {component.get('type')}"
-                        )
-                    converter.convert(state_dict)
-                
                 if load_dtype and not is_safetensors:
                     for k, v in state_dict.items():
                         state_dict[k] = v.to(load_dtype)
@@ -335,6 +367,42 @@ class LoaderMixin(DownloadMixin):
                                 new_state_dict[k2] = v2
 
                     state_dict = new_state_dict
+
+                converter.convert(state_dict)
+
+                # Detect FP8 scaled checkpoints (e.g., Wan2.2 FP8 e4m3fn scaled)
+                # and patch the model with FP8Scaled* layers *before* loading
+                # the state dict. We only do this once per model.
+                if (
+                    not patched_for_fp8_scaled
+                    and hasattr(self, "engine_type")
+                    and self.engine_type == "torch"
+                    and isinstance(state_dict, dict)
+                    and any(k.endswith("scale_weight") for k in state_dict.keys())
+                ):
+                    from src.quantize import patch_fp8_scaled_model
+
+                    # Prefer the explicit load_dtype (if it's a torch dtype)
+                    # as the compute dtype for FP8 dequantization; otherwise
+                    # let the scaled layers infer it from their inputs.
+                    default_compute_dtype = (
+                        load_dtype if isinstance(load_dtype, torch.dtype) else None
+                    )
+
+                    self.logger.info(
+                        "Detected FP8 scaled checkpoint (found '*.scale_weight' "
+                        "keys). Patching model with FP8Scaled layers."
+                    )
+
+                    patch_fp8_scaled_model(
+                        model,
+                        default_compute_dtype=default_compute_dtype,
+                    )
+
+                    # Mark the model so we can treat leftover meta scale_weight
+                    # parameters more leniently in the post-load meta check.
+                    setattr(model, "_patched_for_fp8_scaled", True)
+                    patched_for_fp8_scaled = True
 
                 if hasattr(self, "engine_type") and self.engine_type == "mlx":
                     check_mlx_convolutional_weights(state_dict, model)
@@ -352,13 +420,30 @@ class LoaderMixin(DownloadMixin):
 
         if hasattr(self, "engine_type") and self.engine_type == "torch":
             has_meta_params = False
+            patched_for_fp8_scaled = getattr(model, "_patched_for_fp8_scaled", False)
             for name, param in model.named_parameters():
                 if param.device.type == "meta":
+                    # If this is an FP8-scaled model and the offending parameter
+                    # is a residual `scale_weight` that never got real weights
+                    # loaded, we can safely drop it instead of erroring out.
+                    if patched_for_fp8_scaled and name.endswith("scale_weight"):
+                        self.logger.warning(
+                            f"Dropping unused meta-device scale_weight parameter '{name}' "
+                            "on FP8-scaled model."
+                        )
+                        # Remove the parameter from the owning module so it no
+                        # longer appears as a meta device parameter.
+                        module_name, _, param_name = name.rpartition(".")
+                        owner = (
+                            model.get_submodule(module_name) if module_name else model
+                        )
+                        owner.register_parameter(param_name, None)
+                        continue
+
+                    # For all other parameters on meta, this is still an error.
                     self.logger.error(f"Parameter {name} is on meta device")
                     has_meta_params = True
 
-        
-            
             if has_meta_params:
                 raise ValueError(
                     "Model has parameters on meta device, this is not supported"
@@ -369,14 +454,20 @@ class LoaderMixin(DownloadMixin):
         if mm_config is not None and not no_weights:
             apply_group_offloading = getattr(self, "_apply_group_offloading", None)
             if callable(apply_group_offloading):
-                label = component.get("name") or component.get("type") or type(model).__name__
+                label = (
+                    component.get("name")
+                    or component.get("type")
+                    or type(model).__name__
+                )
                 offloading_module = component.get("offloading_module", None)
                 if offloading_module:
                     model_to_offload = model.get_submodule(offloading_module)
                 else:
                     model_to_offload = model
                 try:
-                    apply_group_offloading(model_to_offload, mm_config, module_label=label)
+                    apply_group_offloading(
+                        model_to_offload, mm_config, module_label=label
+                    )
                 except Exception as e:
                     if hasattr(self, "logger"):
                         self.logger.warning(
@@ -426,7 +517,6 @@ class LoaderMixin(DownloadMixin):
 
         # --- PASS 2: real load with !include expansion ---
         loaded = yaml.load(text, Loader=LoaderWithInclude)
-        
 
         # Validate and normalize if this is a v1 manifest
         try:
@@ -584,10 +674,27 @@ class LoaderMixin(DownloadMixin):
     ) -> List[Image.Image]:
 
         def _finalize_frames(frames, inferred_fps=None):
+            # Ensure we are always working with a concrete list
+            frames = list(frames)
+
+            # Apply temporal direction first so num_frames semantics are
+            # always with respect to the final playback order.
             if reverse:
                 frames = list(reversed(frames))
-            if num_frames is not None:
-                frames = frames[:num_frames]
+
+            if num_frames is not None and len(frames) > 0:
+                current_len = len(frames)
+
+                if num_frames < current_len:
+                    # If we need fewer frames than we have, simply truncate.
+                    frames = frames[:num_frames]
+                elif num_frames > current_len:
+                    # If we need more frames than we have, resample by
+                    # evenly duplicating frames across the sequence so
+                    # motion still appears smooth.
+                    indices = np.linspace(0, current_len - 1, num_frames)
+                    frames = [frames[int(round(idx))] for idx in indices]
+
             if return_fps:
                 return frames, inferred_fps
             return frames
@@ -626,10 +733,10 @@ class LoaderMixin(DownloadMixin):
                     raise IOError(f"Cannot open video file: {video_path}")
 
                 original_fps = cap.get(cv2.CAP_PROP_FPS)
-                
+
                 frames = []
                 frame_count = 0
-                
+
                 if fps is None:
                     # No fps specified, extract all frames
                     while True:
@@ -655,12 +762,12 @@ class LoaderMixin(DownloadMixin):
                     # Extract frames at specified fps using time-based sampling
                     frame_interval = original_fps / fps  # frames between each sample
                     next_frame_time = 0.0
-                    
+
                     while True:
                         ret, frame = cap.read()
                         if not ret:
                             break
-                        
+
                         # Check if current frame should be extracted based on timing
                         if frame_count >= next_frame_time:
                             # Check if frame is grayscale or color
@@ -678,7 +785,7 @@ class LoaderMixin(DownloadMixin):
                                 else Image.fromarray(frame_rgb)
                             )
                             next_frame_time += frame_interval
-                        
+
                         frame_count += 1
                 return _finalize_frames(frames, original_fps)
             finally:
@@ -759,7 +866,7 @@ class LoaderMixin(DownloadMixin):
             ]
             return _finalize_frames(frames, fps)
         raise ValueError(f"Invalid video type: {type(video_input)}")
-    
+
     def _load_audio(
         self,
         audio_input: "InputAudio",
@@ -822,7 +929,9 @@ class LoaderMixin(DownloadMixin):
                 response.raise_for_status()
                 contents = response.content
                 suffix = Path(urlparse(audio_input).path).suffix or ".wav"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=suffix
+                ) as tmp_file:
                     tmp_file.write(contents)
                     tmp_file_path = tmp_file.name
                 audio_path = tmp_file_path

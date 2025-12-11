@@ -13,7 +13,7 @@ def fetch_and_save_tokenizer_from_config(
     config: Dict[str, Any] | None = None,
     tokenizer_class: str | None = None,
     tokenizer_name: str | None = None,
-    **tokenizer_kwargs: Any
+    **tokenizer_kwargs: Any,
 ) -> AutoTokenizer:
     """
     1) Finds the HF repo whose config.json matches your local config file name.
@@ -36,7 +36,6 @@ def fetch_and_save_tokenizer_from_config(
         transformers.AutoTokenizer: the loaded tokenizer instance.
     """
 
-    
     if config_path:
         loaded_config = json.load(open(config_path, "r"))
     else:
@@ -47,14 +46,12 @@ def fetch_and_save_tokenizer_from_config(
 
     _name_or_path = tokenizer_name or loaded_config.get("_name_or_path", None)
 
-
     if _name_or_path is not None:
         tokenizer_kwargs["from_tiktoken"] = False
         if tokenizer_class is not None:
             tokenizer_class = find_class_recursive(transformers, tokenizer_class)
         else:
             tokenizer_class = AutoTokenizer
-
 
         tokenizer = tokenizer_class.from_pretrained(_name_or_path, **tokenizer_kwargs)
         save_dir = Path(model_path).parent

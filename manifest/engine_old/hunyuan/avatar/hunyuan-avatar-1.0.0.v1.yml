@@ -36,7 +36,6 @@ spec:
     base: hunyuanvideo.avatar
     model_path: https://huggingface.co/tencent/HunyuanVideo-Avatar/resolve/main/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt
     config_path: transformer_configs/hunyuan/hunyuan_avatar.json
-    
   - type: helper
     base: hunyuanvideo.llama
     base_model: LlavaForConditionalGeneration

@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: hr16/Diffusion-Edge/dsine.pt
   size_bytes: 291298581

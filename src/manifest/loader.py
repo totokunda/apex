@@ -127,14 +127,14 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
         normalized["denoise_type"] = spec["denoiseType"]
     if spec.get("engine_kwargs"):
         normalized["engine_kwargs"] = spec["engine_kwargs"]
-        
+
     if spec.get("sub_engines"):
         normalized["sub_engines"] = spec["sub_engines"]
     elif spec.get("subEngines"):
         normalized["sub_engines"] = spec["subEngines"]
     elif spec.get("subengines"):
         normalized["sub_engines"] = spec["subengines"]
-        
+
     # components and stages
     for key in (
         "components",
@@ -165,5 +165,51 @@ def validate_and_normalize(doc: Dict[str, Any]) -> Dict[str, Any]:
     # UI spec normalized under 'ui'
     if ui_spec is not None:
         normalized["ui"] = _normalize_ui(ui_spec)
+
+    # Pass through any remaining top-level keys (except nested blocks we already handled)
+    for top_key, top_val in doc.items():
+        if top_key in ("metadata", "spec", "ui", "UI"):
+            continue
+        if top_key not in normalized:
+            normalized[top_key] = top_val
+
+    # Pass through any remaining spec keys that were not explicitly normalized above.
+    # This keeps the legacy engine shape while still exposing the full v1 spec surface.
+    passthrough_exclude = {
+        # Core engine wiring already mapped
+        "engine",
+        "model_type",
+        "model_types",
+        "modelType",
+        "modelTypes",
+        "engine_type",
+        "engineType",
+        "denoise_type",
+        "denoiseType",
+        "engine_kwargs",
+        "sub_engines",
+        "subEngines",
+        "subengines",
+        # Stages/components we already copied verbatim
+        "components",
+        "preprocessors",
+        "postprocessors",
+        "shared",
+        "helpers",
+        "loras",
+        "attention_types",
+        "compute_requirements",
+        # Defaults/save handled explicitly
+        "defaults",
+        "save",
+        # UI handled via ui_spec above
+        "ui",
+        "UI",
+    }
+    for key, value in spec.items():
+        if key in passthrough_exclude:
+            continue
+        if key not in normalized:
+            normalized[key] = value
 
     return normalized

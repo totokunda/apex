@@ -24,7 +24,12 @@ spec:
   engine_type: torch
   max_duration_secs: 5.0
   min_duration_secs: 5.0
-  
+  fps: 24
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   - flash
@@ -39,7 +44,7 @@ spec:
       description: The UniPC Multistep Scheduler is used for Ovi 10B.
       base: src.scheduler.unipc.UniPCMultistepScheduler
       config:
-        shift: 5.0
+        shift: 1.0
         num_train_timesteps: 1000
   - type: scheduler
     name: audio_scheduler
@@ -51,7 +56,7 @@ spec:
       description: The UniPC Multistep Scheduler is used for Ovi 10B.
       base: src.scheduler.unipc.UniPCMultistepScheduler
       config:
-        shift: 5.0
+        shift: 1.0
         num_train_timesteps: 1000
   - type: vae
     name: transformer_vae
@@ -189,19 +194,17 @@ spec:
         - - video_guidance_scale
         - - audio_guidance_scale
         - - seed
+        - - shift
     inputs:
     - id: image
       label: Image
       description: The input image to generate a video from.
       type: image
       panel: image
-      required: true
-      map_h: height
-      map_w: width
-      scale_by: resolution
+      required: false
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate using the <S> and <E> tags for start and end of the text.
+      description: Describe the video you want to generate using the <S> and <E> tags for start and end of the text.
       placeholder: A man in the video grumbles angrily and says <S>I love open source. I can goon to whatever I want.<E> in a deep low voice.
       type: text
       panel: prompting
@@ -213,46 +216,18 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
-        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
-        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
-        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
-        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
-        legs, fused fingers, too many fingers, long neck, username, watermark, signature
+      default: jitter, bad hands, blur, distortion
     - id: audio_negative_prompt
       label: Audio Negative Prompt
       description: Describe what to avoid in the generation.
-      placeholder: blurry, low quality, distorted, artifacts
+      placeholder: robotic, muffled, echo, distorted
       type: text
       panel: advanced_prompting
       required: false
-      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
-        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
-        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
-        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
-        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
-        legs, fused fingers, too many fingers, long neck, username, watermark, signature
-    - id: resolution
-      label: Resolution
-      description: Select the resolution of the output image
-      panel: size
-      type: select
-      default: 1024
-      options:
-      - name: HD
-        value: 720
-        height: 720
-      - name: Full HD
-        value: 1024
-        height: 1024
-      - name: SD
-        value: 480
-        height: 480
-      - name: Custom
-        value: custom
+      default: robotic, muffled, echo, distorted
     - id: aspect_ratio
       label: Aspect Ratio
-      description: Select the aspect ratio of the output image
+      description: Select the aspect ratio of the output video
       panel: size
       type: select
       default: "1:1"
@@ -291,20 +266,20 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 960
       min: 256
       max: 8192
-      step: 64
+      step: 32
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 960
       min: 256
       max: 8192
-      step: 64
+      step: 32
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -332,6 +307,17 @@ spec:
       panel: sampling
       required: false
       default: 3.0
+      min: 1.0
+      max: 15.0
+      step: 0.5
+    - id: shift
+      label: Scheduler Shift
+      description: Shift for the scheduler
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 5.0
       min: 1.0
       max: 15.0
       step: 0.5

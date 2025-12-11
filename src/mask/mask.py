@@ -13,24 +13,28 @@ import traceback
 from datetime import datetime
 import gc
 import time
+
 # get the default device
 from src.utils.defaults import get_torch_device, DEFAULT_PREPROCESSOR_SAVE_PATH
 
-# create an enum for the model types 
+# create an enum for the model types
 from enum import Enum
+
 
 class ModelType(Enum):
     SAM2_TINY = "sam2_tiny"
     SAM2_SMALL = "sam2_small"
     SAM2_BASE_PLUS = "sam2_base_plus"
     SAM2_LARGE = "sam2_large"
-    
+    SAM3 = "sam3"
+
 
 MODEL_WEIGHTS = {
     ModelType.SAM2_TINY: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt",
-    ModelType.SAM2_SMALL: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt", 
+    ModelType.SAM2_SMALL: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt",
     ModelType.SAM2_BASE_PLUS: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_base_plus.pt",
     ModelType.SAM2_LARGE: "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt",
+    ModelType.SAM3: "https://huggingface.co/1038lab/sam3/resolve/main/sam3.pt",
 }
 
 MODEL_CONFIGS = {
@@ -44,51 +48,57 @@ MODEL_CONFIGS = {
 def extract_video_frame(video_path: str, frame_number: int) -> np.ndarray:
     """
     Extract a specific frame from a video file using decord.
-    
+
     Args:
         video_path: Path to the video file
         frame_number: Frame index to extract (0-based)
-        
+
     Returns:
         numpy array of shape (H, W, 3) in RGB format
     """
     try:
         from decord import VideoReader, cpu
-        
+
         # Use CPU context for frame extraction
         vr = VideoReader(video_path, ctx=cpu(0))
-        
+
         # Validate frame number
         total_frames = len(vr)
         if frame_number < 0 or frame_number >= total_frames:
-            raise ValueError(f"Frame number {frame_number} out of range [0, {total_frames-1}]")
-        
+            raise ValueError(
+                f"Frame number {frame_number} out of range [0, {total_frames-1}]"
+            )
+
         # Extract frame (decord returns RGB)
         frame = vr[frame_number].asnumpy()
-        
-        logger.info(f"Extracted frame {frame_number} from video: {video_path}, shape: {frame.shape}")
+
+        logger.info(
+            f"Extracted frame {frame_number} from video: {video_path}, shape: {frame.shape}"
+        )
         return frame
-        
+
     except ImportError:
-        raise ImportError("decord is required for video frame extraction. Install with: pip install decord")
+        raise ImportError(
+            "decord is required for video frame extraction. Install with: pip install decord"
+        )
     except Exception as e:
         logger.error(f"Failed to extract frame from video: {str(e)}")
         raise
 
 
 def mask_to_contours(
-    mask: np.ndarray, 
+    mask: np.ndarray,
     simplify_tolerance: float = 1.0,
-    min_area: int = 100  # Filter out tiny contours
+    min_area: int = 100,  # Filter out tiny contours
 ) -> List[List[float]]:
     """
     Convert a binary mask to contour polygon points (optimized for speed).
-    
+
     Args:
         mask: Binary mask array of shape (H, W) with values 0 or 1
         simplify_tolerance: Epsilon value for contour simplification (Douglas-Peucker)
         min_area: Minimum contour area to keep (filters noise)
-        
+
     Returns:
         List of contours, where each contour is a flat list [x1, y1, x2, y2, ...]
     """
@@ -97,34 +107,36 @@ def mask_to_contours(
         mask_uint8 = (mask * 255).astype(np.uint8)
     else:
         mask_uint8 = mask
-    
+
     # Find contours with optimized method
     contours, _ = cv2.findContours(
-        mask_uint8, 
+        mask_uint8,
         cv2.RETR_EXTERNAL,  # Only external contours
-        cv2.CHAIN_APPROX_SIMPLE  # Compress segments
+        cv2.CHAIN_APPROX_SIMPLE,  # Compress segments
     )
-    
+
     result_contours = []
     for contour in contours:
         # Filter small contours early (noise reduction)
         area = cv2.contourArea(contour)
         if area < min_area:
             continue
-        
+
         # Simplify contour to reduce point count
         epsilon = simplify_tolerance
         approx = cv2.approxPolyDP(contour, epsilon, True)
-        
+
         # Flatten to [x1, y1, x2, y2, ...] format
         # Optimize: use reshape(-1) instead of reshape(-1, 2).flatten()
         points = approx.reshape(-1).astype(np.float32).tolist()
-        
+
         # Only include contours with at least 3 points (6 values)
         if len(points) >= 6:
             result_contours.append(points)
-    
-    logger.debug(f"Extracted {len(result_contours)} contours from mask (filtered {len(contours) - len(result_contours)} tiny contours)")
+
+    logger.debug(
+        f"Extracted {len(result_contours)} contours from mask (filtered {len(contours) - len(result_contours)} tiny contours)"
+    )
     return result_contours
 
 
@@ -147,10 +159,12 @@ def rect_from_contours(contours: List[List[float]]) -> Optional[dict]:
     """
     if not contours:
         return None
+
     # Choose largest by area
     def contour_area(flat: List[float]) -> float:
         pts = np.array(flat, dtype=np.float32).reshape(-1, 2)
         return cv2.contourArea(pts)
+
     largest = max(contours, key=contour_area)
     pts = np.array(largest, dtype=np.float32).reshape(-1, 2)
     rect = cv2.minAreaRect(pts)  # ((cx, cy), (w, h), angle)
@@ -169,20 +183,26 @@ def rect_from_contours(contours: List[List[float]]) -> Optional[dict]:
     }
 
 
-def _min_area_rect_from_contours(contours: List[List[float]]) -> Optional[Tuple[float, float, float, float, float]]:
+def _min_area_rect_from_contours(
+    contours: List[List[float]],
+) -> Optional[Tuple[float, float, float, float, float]]:
     """Return (cx, cy, w, h, angle_deg) for the largest contour's min-area rect."""
     if not contours:
         return None
+
     def contour_area(flat: List[float]) -> float:
         pts = np.array(flat, dtype=np.float32).reshape(-1, 2)
         return cv2.contourArea(pts)
+
     largest = max(contours, key=contour_area)
     pts = np.array(largest, dtype=np.float32).reshape(-1, 2)
     (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
     return float(cx), float(cy), float(w), float(h), float(angle)
 
 
-def shape_bounds_from_contours(contours: List[List[float]], shape_type: Optional[str]) -> Optional[dict]:
+def shape_bounds_from_contours(
+    contours: List[List[float]], shape_type: Optional[str]
+) -> Optional[dict]:
     """Compute shape-specific bounds from contours.
 
     - rectangle: top-left pivot bounds derived from min-area rect
@@ -266,7 +286,9 @@ def shape_bounds_from_contours(contours: List[List[float]], shape_type: Optional
     }
 
 
-def _rasterize_shape(bounds: dict, shape_type: str, height: int, width: int) -> np.ndarray:
+def _rasterize_shape(
+    bounds: dict, shape_type: str, height: int, width: int
+) -> np.ndarray:
     """Rasterize a shape into a binary mask (H, W) based on shape bounds semantics.
 
     - rectangle: top-left pivot, rotated rectangle
@@ -299,15 +321,18 @@ def _rasterize_shape(bounds: dict, shape_type: str, height: int, width: int) -> 
         theta = np.deg2rad(angle_deg)
         c, s = np.cos(theta), np.sin(theta)
         R = np.array([[c, -s], [s, c]], dtype=np.float32)
-        return (local_pts @ R.T)
+        return local_pts @ R.T
 
     if st in ("polygon", "triangle"):
         # Equilateral triangle within bounds; local coords centered at origin
-        local = np.array([
-            [0.0, -h / 2.0],
-            [-w / 2.0, h / 2.0],
-            [w / 2.0, h / 2.0],
-        ], dtype=np.float32)
+        local = np.array(
+            [
+                [0.0, -h / 2.0],
+                [-w / 2.0, h / 2.0],
+                [w / 2.0, h / 2.0],
+            ],
+            dtype=np.float32,
+        )
         rot = _rotate_points(local, angle)
         rot[:, 0] += cx
         rot[:, 1] += cy
@@ -337,7 +362,9 @@ def _rasterize_shape(bounds: dict, shape_type: str, height: int, width: int) -> 
     return mask
 
 
-def _sample_points_from_mask(mask: np.ndarray, max_points: int = 48, rng: Optional[np.random.Generator] = None) -> Optional[np.ndarray]:
+def _sample_points_from_mask(
+    mask: np.ndarray, max_points: int = 48, rng: Optional[np.random.Generator] = None
+) -> Optional[np.ndarray]:
     """Randomly sample up to max_points (x,y) coordinates from non-zero mask pixels."""
     ys, xs = np.nonzero(mask)
     total = xs.size
@@ -360,19 +387,55 @@ def _bounds_from_box_and_shape(box_xyxy: np.ndarray, shape_type: Optional[str]) 
     w = max(1.0, x2 - x1)
     h = max(1.0, y2 - y1)
     if st == "rectangle":
-        return {"x": x1, "y": y1, "width": w, "height": h, "rotation": 0.0, "shapeType": "rectangle", "scaleX": 1.0, "scaleY": 1.0}
+        return {
+            "x": x1,
+            "y": y1,
+            "width": w,
+            "height": h,
+            "rotation": 0.0,
+            "shapeType": "rectangle",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
     cx = x1 + w / 2.0
     cy = y1 + h / 2.0
     if st == "star":
         side = float(max(1.0, min(w, h)))
-        return {"x": cx, "y": cy, "width": side, "height": side, "rotation": 0.0, "shapeType": "star", "scaleX": 1.0, "scaleY": 1.0}
+        return {
+            "x": cx,
+            "y": cy,
+            "width": side,
+            "height": side,
+            "rotation": 0.0,
+            "shapeType": "star",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
     if st in ("polygon", "triangle"):
         ratio = 1.1543665517482078
         fit_h = float(max(1.0, min(h, w / ratio)))
         fit_w = float(max(1.0, ratio * fit_h))
-        return {"x": cx, "y": cy, "width": fit_w, "height": fit_h, "rotation": 0.0, "shapeType": "polygon", "scaleX": 1.0, "scaleY": 1.0}
+        return {
+            "x": cx,
+            "y": cy,
+            "width": fit_w,
+            "height": fit_h,
+            "rotation": 0.0,
+            "shapeType": "polygon",
+            "scaleX": 1.0,
+            "scaleY": 1.0,
+        }
     # ellipse or default center-based
-    return {"x": cx, "y": cy, "width": w, "height": h, "rotation": 0.0, "shapeType": "ellipse", "scaleX": 1.0, "scaleY": 1.0}
+    return {
+        "x": cx,
+        "y": cy,
+        "width": w,
+        "height": h,
+        "rotation": 0.0,
+        "shapeType": "ellipse",
+        "scaleX": 1.0,
+        "scaleY": 1.0,
+    }
 
 
 def _inject_focus_points_for_bounds(
@@ -388,7 +451,9 @@ def _inject_focus_points_for_bounds(
     try:
         H = int(inference_state.get("video_height"))
         W = int(inference_state.get("video_width"))
-        region_mask = _rasterize_shape(bounds, shape_type or "rectangle", height=H, width=W)
+        region_mask = _rasterize_shape(
+            bounds, shape_type or "rectangle", height=H, width=W
+        )
         pts = _sample_points_from_mask(region_mask, max_points=max_points)
         if pts is None or len(pts) == 0:
             return
@@ -407,10 +472,20 @@ def _inject_focus_points_for_bounds(
         # Debug: overlay on the source frame
         try:
             path = Path(input_path)
-            is_video = path.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+            is_video = path.suffix.lower() in {
+                ".mp4",
+                ".avi",
+                ".mov",
+                ".mkv",
+                ".webm",
+                ".flv",
+                ".wmv",
+                ".m4v",
+            }
             if is_video:
                 try:
                     from decord import VideoReader, cpu
+
                     vr = VideoReader(str(path), ctx=cpu(0))
                     frame_rgb = vr[frame_idx].asnumpy()
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
@@ -429,7 +504,8 @@ def _inject_focus_points_for_bounds(
             overlay = frame_bgr.copy()
             color = (0, 165, 255)
             overlay[region_mask.astype(bool)] = (
-                0.6 * overlay[region_mask.astype(bool)] + 0.4 * np.array(color, dtype=np.float32)
+                0.6 * overlay[region_mask.astype(bool)]
+                + 0.4 * np.array(color, dtype=np.float32)
             ).astype(np.uint8)
             vis = overlay
             for x, y in pts:
@@ -450,6 +526,7 @@ def _inject_focus_points_for_bounds(
             pass
     except Exception as e:
         logger.warning(f"Focus injection failed: {e}")
+
 
 def _ensure_focus_points_for_shape(
     predictor: "UnifiedSAM2VideoPredictor",
@@ -486,7 +563,14 @@ def _ensure_focus_points_for_shape(
                 mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
                 contours = mask_to_contours(mask.astype(np.uint8))
                 if contours:
-                    frame_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
+                    frame_contours.append(
+                        max(
+                            contours,
+                            key=lambda c: cv2.contourArea(
+                                np.array(c, dtype=np.float32).reshape(-1, 2)
+                            ),
+                        )
+                    )
             results.append(frame_contours)
             break
 
@@ -517,7 +601,9 @@ def _ensure_focus_points_for_shape(
                 normalize_coords=True,
             )
             constants["focus_points_added"] = True
-            logger.info(f"Added {len(points)} focus points for shape '{shape_type}' at anchor frame {loader.anchor_idx}")
+            logger.info(
+                f"Added {len(points)} focus points for shape '{shape_type}' at anchor frame {loader.anchor_idx}"
+            )
             # Debug visualization: overlay shape region and sampled points on anchor frame
             try:
                 # Resolve debug dir
@@ -541,7 +627,8 @@ def _ensure_focus_points_for_shape(
                 overlay = frame_bgr.copy()
                 color = (0, 165, 255)  # orange
                 overlay[region_mask.astype(bool)] = (
-                    0.6 * overlay[region_mask.astype(bool)] + 0.4 * np.array(color, dtype=np.float32)
+                    0.6 * overlay[region_mask.astype(bool)]
+                    + 0.4 * np.array(color, dtype=np.float32)
                 ).astype(np.uint8)
                 vis = overlay
 
@@ -553,7 +640,9 @@ def _ensure_focus_points_for_shape(
                 # Optionally outline the shape bounds for clarity
                 if shape_type and shape_type.lower() == "rectangle":
                     box_pts = _bounds_to_box_points(bounds)
-                    cv2.polylines(vis, [box_pts.astype(np.int32)], True, (0, 255, 255), 2)
+                    cv2.polylines(
+                        vis, [box_pts.astype(np.int32)], True, (0, 255, 255), 2
+                    )
 
                 out_file = out_dir / f"anchor_{abs_idx:06d}_focus.png"
                 cv2.imwrite(str(out_file), vis)
@@ -563,6 +652,7 @@ def _ensure_focus_points_for_shape(
             logger.warning(f"Failed to add focus points: {e}")
     except Exception as e:
         logger.warning(f"Focus points injection skipped due to error: {e}")
+
 
 def _bounds_to_box_points(bounds: dict) -> np.ndarray:
     """Return 4x2 int points for the oriented rectangle described by bounds."""
@@ -576,7 +666,12 @@ def _bounds_to_box_points(bounds: dict) -> np.ndarray:
     return np.int32(pts)
 
 
-def _draw_bounds(frame_bgr: np.ndarray, bounds: Optional[dict], color: Tuple[int, int, int] = (0, 255, 0), thickness: int = 2) -> np.ndarray:
+def _draw_bounds(
+    frame_bgr: np.ndarray,
+    bounds: Optional[dict],
+    color: Tuple[int, int, int] = (0, 255, 0),
+    thickness: int = 2,
+) -> np.ndarray:
     """Draw an oriented rectangle on BGR image inplace and return it."""
     if bounds is None:
         return frame_bgr
@@ -585,7 +680,9 @@ def _draw_bounds(frame_bgr: np.ndarray, bounds: Optional[dict], color: Tuple[int
     return frame_bgr
 
 
-def _overlay_mask(frame_bgr: np.ndarray, mask: np.ndarray, color: Tuple[int, int, int]) -> np.ndarray:
+def _overlay_mask(
+    frame_bgr: np.ndarray, mask: np.ndarray, color: Tuple[int, int, int]
+) -> np.ndarray:
     """Overlay a binary mask onto a BGR frame with semi-transparency."""
     overlay = frame_bgr.copy()
     bool_mask = mask.astype(bool)
@@ -608,7 +705,9 @@ def _draw_shape(frame_bgr: np.ndarray, bounds: dict) -> np.ndarray:
     vis = _overlay_mask(frame_bgr, mask, (0, 255, 255))
 
     # Draw an outline for clarity by extracting contours from the mask
-    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     if contours:
         cv2.polylines(vis, contours, isClosed=True, color=(0, 200, 200), thickness=2)
     return vis
@@ -633,7 +732,16 @@ def debug_save_rectangles(
         The filesystem path to the created debug directory (str)
     """
     path = Path(input_path)
-    is_video = path.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+    is_video = path.suffix.lower() in {
+        ".mp4",
+        ".avi",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".flv",
+        ".wmv",
+        ".m4v",
+    }
 
     # Resolve debug root under repo's apex-engine/debug by default
     if base_debug_dir is None:
@@ -652,6 +760,7 @@ def debug_save_rectangles(
         vr = None
         try:
             from decord import VideoReader, cpu
+
             vr = VideoReader(str(path), ctx=cpu(0))
             rgb_reader = True
         except Exception:
@@ -689,7 +798,10 @@ def debug_save_rectangles(
                     frame_bgr = bgr
 
                 # Render correct shape type if provided
-                if bounds and (bounds.get("shapeType") or "rectangle").lower() != "rectangle":
+                if (
+                    bounds
+                    and (bounds.get("shapeType") or "rectangle").lower() != "rectangle"
+                ):
                     frame_bgr = _draw_shape(frame_bgr, bounds)
                 else:
                     _draw_bounds(frame_bgr, bounds)
@@ -725,108 +837,121 @@ class LazyFrameLoader:
     Caches VideoReader for the same video file.
     Applies SAM2 normalization (ImageNet mean/std).
     """
-    
+
     # Class-level cache for VideoReader objects
     _video_reader_cache = {}
     _max_cached_readers = 2
-    
+
     # SAM2 normalization constants (ImageNet)
     IMG_MEAN = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32)[:, None, None]
     IMG_STD = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32)[:, None, None]
-    
-    def __init__(self, input_path: str, frame_number: Optional[int] = None, image_size: int = 512):
+
+    def __init__(
+        self, input_path: str, frame_number: Optional[int] = None, image_size: int = 512
+    ):
         self.input_path = input_path
         self.frame_number = frame_number
         self.image_size = image_size
-        
+
         path = Path(input_path)
-        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v'}
+        video_extensions = {
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".webm",
+            ".flv",
+            ".wmv",
+            ".m4v",
+        }
         self.is_video = path.suffix.lower() in video_extensions
-        
+
         if self.is_video:
             # For videos, use cached decord VideoReader
             if input_path not in self._video_reader_cache:
                 try:
                     from decord import VideoReader, cpu
-                    
+
                     # Clean up old cached readers if we exceed max
                     if len(self._video_reader_cache) >= self._max_cached_readers:
                         oldest_key = next(iter(self._video_reader_cache))
                         del self._video_reader_cache[oldest_key]
-                    
+
                     # Cache the VideoReader
                     vr = VideoReader(input_path, ctx=cpu(0))
                     self._video_reader_cache[input_path] = vr
                 except ImportError:
-                    raise ImportError("decord is required for video support. Install with: pip install decord")
-            
+                    raise ImportError(
+                        "decord is required for video support. Install with: pip install decord"
+                    )
+
             vr = self._video_reader_cache[input_path]
-            
+
             # Get video dimensions from the first frame
             first_frame = vr[0].asnumpy()
             self.video_height, self.video_width = first_frame.shape[:2]
-            
+
             # For now, we only support single frame
             self.num_frames = 1
             self.target_frame_idx = frame_number or 0
-            
+
             # Validate frame number
             total_frames = len(vr)
             if self.target_frame_idx < 0:
                 self.target_frame_idx = 0
             elif self.target_frame_idx >= total_frames:
                 self.target_frame_idx = total_frames - 1
-                
+
         else:
             # For images, treat as single frame
             self.num_frames = 1
             pil_image = Image.open(input_path)
             pil_image = ImageOps.exif_transpose(pil_image)
-            pil_image = pil_image.convert('RGB')
+            pil_image = pil_image.convert("RGB")
             self.video_width, self.video_height = pil_image.size
             logger.info(f"Image size: {self.video_width}x{self.video_height}")
             logger.info(f"Image path: {input_path}")
             self._cached_image = np.array(pil_image)
             logger.info(f"Cached image: {self._cached_image.shape}")
-    
+
     def __len__(self):
         return self.num_frames
-    
+
     def __getitem__(self, idx: int) -> torch.Tensor:
         """
         Get a frame as a torch tensor, resized and normalized.
-        
+
         Applies SAM2 normalization: (pixel/255.0 - mean) / std
-        
+
         Returns:
             Tensor of shape (3, image_size, image_size), normalized
         """
         if idx >= self.num_frames:
             raise IndexError(f"Frame index {idx} out of range [0, {self.num_frames})")
-        
+
         # Get the frame
         if self.is_video:
             vr = self._video_reader_cache[self.input_path]
             frame = vr[self.target_frame_idx].asnumpy()
         else:
             frame = self._cached_image
-        
+
         # Convert to torch tensor (H, W, 3) -> (3, H, W)
         img_tensor = torch.from_numpy(frame).permute(2, 0, 1).float()
-        
+
         # Resize to model's image_size
         img_resized = torch.nn.functional.interpolate(
             img_tensor.unsqueeze(0),
             size=(self.image_size, self.image_size),
-            mode='bilinear',
-            align_corners=False
+            mode="bilinear",
+            align_corners=False,
         ).squeeze(0)
-        
+
         # Normalize: (pixel/255.0 - mean) / std (SAM2 ImageNet normalization)
         img_normalized = (img_resized / 255.0 - self.IMG_MEAN) / self.IMG_STD
-        
+
         return img_normalized
-    
+
     @classmethod
     def clear_cache(cls):
         """Clear all cached VideoReaders."""
@@ -838,6 +963,7 @@ class MultiFrameLoader:
     Frame loader over a contiguous range of frames in a video.
     Provides normalized tensors compatible with SAM2 preprocessing.
     """
+
     _video_reader_cache = LazyFrameLoader._video_reader_cache  # share cache
     _max_cached_readers = LazyFrameLoader._max_cached_readers
 
@@ -861,13 +987,16 @@ class MultiFrameLoader:
         if input_path not in self._video_reader_cache:
             try:
                 from decord import VideoReader, cpu
+
                 if len(self._video_reader_cache) >= self._max_cached_readers:
                     oldest_key = next(iter(self._video_reader_cache))
                     del self._video_reader_cache[oldest_key]
                 vr = VideoReader(input_path, ctx=cpu(0))
                 self._video_reader_cache[input_path] = vr
             except ImportError:
-                raise ImportError("decord is required for video support. Install with: pip install decord")
+                raise ImportError(
+                    "decord is required for video support. Install with: pip install decord"
+                )
 
         self.vr = self._video_reader_cache[input_path]
 
@@ -895,13 +1024,15 @@ class MultiFrameLoader:
         # Resolve video dimensions from the first materialized frame
         first_frame = self.vr[self.anchor_frame].asnumpy()
         self.video_height, self.video_width = first_frame.shape[:2]
-        
+
     def __len__(self) -> int:
         return len(self.frame_indices)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
         if idx < 0 or idx >= len(self.frame_indices):
-            raise IndexError(f"Frame index {idx} out of range [0, {len(self.frame_indices)})")
+            raise IndexError(
+                f"Frame index {idx} out of range [0, {len(self.frame_indices)})"
+            )
         frame_idx = self.frame_indices[idx]
         frame = self.vr[frame_idx].asnumpy()
 
@@ -909,12 +1040,12 @@ class MultiFrameLoader:
         img_resized = torch.nn.functional.interpolate(
             img_tensor.unsqueeze(0),
             size=(self.image_size, self.image_size),
-            mode='bilinear',
-            align_corners=False
+            mode="bilinear",
+            align_corners=False,
         ).squeeze(0)
-        
+
         img_normalized = (img_resized / 255.0 - self.IMG_MEAN) / self.IMG_STD
-        
+
         return img_normalized
 
 
@@ -923,7 +1054,7 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
     Custom SAM2VideoPredictor that supports both images and videos with lazy loading.
     Overrides init_state to use LazyFrameLoader instead of loading all frames.
     """
-    
+
     @torch.inference_mode()
     def init_state(
         self,
@@ -935,7 +1066,7 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
         """
         Initialize an inference state with lazy frame loading.
         Supports both images and videos.
-        
+
         Args:
             input_path: Path to image or video file
             frame_number: For videos, which frame to load (None for images)
@@ -943,15 +1074,15 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
             offload_state_to_cpu: Whether to offload inference state to CPU
         """
         compute_device = self.device
-        
+
         # Create lazy frame loader
         images = LazyFrameLoader(input_path, frame_number, image_size=self.image_size)
         video_height = images.video_height
         video_width = images.video_width
-        
+
         if self.device.type == "mps":
             offload_video_to_cpu = True
-        
+
         # Initialize inference state (same structure as original)
         inference_state = {}
         inference_state["images"] = images
@@ -961,12 +1092,12 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
         inference_state["video_height"] = video_height
         inference_state["video_width"] = video_width
         inference_state["device"] = compute_device
-        
+
         if offload_state_to_cpu:
             inference_state["storage_device"] = torch.device("cpu")
         else:
             inference_state["storage_device"] = compute_device
-        
+
         # Initialize tracking structures
         inference_state["point_inputs_per_obj"] = {}
         inference_state["mask_inputs_per_obj"] = {}
@@ -978,10 +1109,10 @@ class UnifiedSAM2VideoPredictor(SAM2VideoPredictor):
         inference_state["output_dict_per_obj"] = {}
         inference_state["temp_output_dict_per_obj"] = {}
         inference_state["frames_tracked_per_obj"] = {}
-        
+
         # Warm up the visual backbone and cache the image feature on frame 0
         self._get_image_feature(inference_state, frame_idx=0, batch_size=1)
-        
+
         return inference_state
 
 
@@ -990,38 +1121,39 @@ class UnifiedSAM2Predictor:
     Unified predictor using custom UnifiedSAM2VideoPredictor for both images and videos.
     Images are treated as single-frame videos.
     Uses lazy frame loading to handle long videos efficiently without temp directories.
-    
+
     Performance optimizations:
     - Half precision (FP16/BF16) inference for 2x speedup
     - Torch compile for optimized execution
     - TF32 tensor cores on Ampere+ GPUs
     - Aggressive feature caching
     """
-    
+
     def __init__(
-        self, 
-        model_path: str, 
-        config_name: str, 
+        self,
+        model_path: str,
+        config_name: str,
         model_type: ModelType = ModelType.SAM2_BASE_PLUS,
         use_compile: bool = False,
         use_tf32: bool = True,
     ):
         # Create logger inside actor to avoid pickling issues
         from loguru import logger as actor_logger
+
         self.logger = actor_logger
-        
+
         self.model_type = model_type
         self.model_path = model_path
         self.config_name = config_name
         self.use_compile = use_compile
         self.use_tf32 = use_tf32
-        
+
         # Get device inside actor
         self.device = get_torch_device()
 
         # Single video predictor for everything
         self._predictor = None
-        
+
         # Cache inference states by input hash
         # Format: {(input_path, frame_number, id): inference_state}
         self._inference_states = {}
@@ -1030,10 +1162,12 @@ class UnifiedSAM2Predictor:
         self._state_last_used = {}
         # Time-to-live (seconds) for idle inference states
         self._state_ttl_seconds = 180.0
-        
-        self.logger.info(f"UnifiedSAM2Predictor initialized with config: {config_name}, "
-                   f"device: {self.device}, compile: {use_compile}")
-    
+
+        self.logger.info(
+            f"UnifiedSAM2Predictor initialized with config: {config_name}, "
+            f"device: {self.device}, compile: {use_compile}"
+        )
+
     def get_predictor(self) -> UnifiedSAM2VideoPredictor:
         """Get or create the custom video predictor with optimizations."""
         if self._predictor is None:
@@ -1042,45 +1176,53 @@ class UnifiedSAM2Predictor:
                 try:
                     import torch.backends.cuda
                     import torch.backends.cudnn
+
                     torch.backends.cuda.matmul.allow_tf32 = True
                     torch.backends.cudnn.allow_tf32 = True
                     self.logger.info("Enabled TF32 tensor cores for faster inference")
                 except:
                     pass  # Not on CUDA or TF32 not available
-            
-            self.logger.info(f"Loading unified SAM2 video predictor with config: {self.config_name}, checkpoint: {self.model_path}")
-            
-            # Build the predictor
-            predictor = build_sam2_video_predictor(
-                self.config_name, 
-                self.model_path, 
-                device=self.device
+
+            self.logger.info(
+                f"Loading unified SAM2 video predictor with config: {self.config_name}, checkpoint: {self.model_path}"
             )
-            
+
+            # Build the predictor
+
+            predictor = build_sam2_video_predictor(
+                self.config_name, self.model_path, device=self.device
+            )
+
             # Apply torch.compile if enabled (PyTorch 2.0+)
             if self.use_compile:
                 try:
-                    self.logger.info("Compiling model with torch.compile (first run will be slow)...")
+                    self.logger.info(
+                        "Compiling model with torch.compile (first run will be slow)..."
+                    )
                     # Compile the model forward pass
                     predictor.forward_image = torch.compile(
-                        predictor.forward_image, 
-                        mode="reduce-overhead"  # Best for repeated calls
+                        predictor.forward_image,
+                        mode="reduce-overhead",  # Best for repeated calls
                     )
                     self.logger.info("Model compiled successfully")
                 except Exception as e:
-                    self.logger.warning(f"Failed to compile model: {e}. Continuing without compilation.")
-            
+                    self.logger.warning(
+                        f"Failed to compile model: {e}. Continuing without compilation."
+                    )
+
             # Convert to our custom subclass by copying attributes
-            custom_predictor = UnifiedSAM2VideoPredictor.__new__(UnifiedSAM2VideoPredictor)
+            custom_predictor = UnifiedSAM2VideoPredictor.__new__(
+                UnifiedSAM2VideoPredictor
+            )
             custom_predictor.__dict__.update(predictor.__dict__)
             self._predictor = custom_predictor
-            
+
             # Pre-warm the model with a dummy forward pass
             self._warmup_model()
-            
+
             self.logger.info("Unified SAM2 video predictor loaded and optimized")
         return self._predictor
-    
+
     def _warmup_model(self):
         """Pre-warm the model to compile CUDA kernels."""
         try:
@@ -1090,12 +1232,16 @@ class UnifiedSAM2Predictor:
                 _ = self._predictor.forward_image(dummy_img)
             self.logger.info("Model warmup complete")
         except Exception as e:
-            self.logger.warning(f"Warmup failed: {e}. Model will warm up on first real inference.")
-    
-    def _get_cache_key(self, input_path: str, frame_number: Optional[int], id: Optional[str] = None) -> Tuple[str, Optional[int], Optional[str]]:
+            self.logger.warning(
+                f"Warmup failed: {e}. Model will warm up on first real inference."
+            )
+
+    def _get_cache_key(
+        self, input_path: str, frame_number: Optional[int], id: Optional[str] = None
+    ) -> Tuple[str, Optional[int], Optional[str]]:
         """Generate cache key for inference state."""
         return (input_path, frame_number, id)
-    
+
     def _cleanup_oldest_state(self):
         """Remove the oldest cached inference state to manage memory."""
         if len(self._inference_states) >= self._max_cached_states:
@@ -1116,7 +1262,8 @@ class UnifiedSAM2Predictor:
             now = time.monotonic()
             ttl = getattr(self, "_state_ttl_seconds", 180.0)
             stale_keys = [
-                key for key, last in list(self._state_last_used.items())
+                key
+                for key, last in list(self._state_last_used.items())
                 if now - last > ttl
             ]
             for key in stale_keys:
@@ -1136,36 +1283,41 @@ class UnifiedSAM2Predictor:
         except Exception:
             # Best-effort only; do not fail inference on bookkeeping issues
             pass
-    
-    def _get_or_create_inference_state(self, input_path: str, frame_number: Optional[int] = None, id: Optional[str] = None):
+
+    def _get_or_create_inference_state(
+        self,
+        input_path: str,
+        frame_number: Optional[int] = None,
+        id: Optional[str] = None,
+    ):
         """Get cached inference state or create new one."""
         cache_key = self._get_cache_key(input_path, frame_number, id)
-        
+
         if cache_key in self._inference_states:
             self.logger.debug(f"Using cached inference state for {cache_key}")
             self._touch_state(cache_key)
             return self._inference_states[cache_key]
-        
+
         # Cleanup old states if needed
         self._cleanup_stale_states()
         self._cleanup_oldest_state()
-        
+
         # Initialize inference state using our custom init_state (no temp dir needed!)
         predictor = self.get_predictor()
-        
+
         inference_state = predictor.init_state(
             input_path=input_path,
             frame_number=frame_number,
             offload_video_to_cpu=False,  # Keep in GPU for speed
-            offload_state_to_cpu=False    # Keep in GPU for speed
+            offload_state_to_cpu=False,  # Keep in GPU for speed
         )
-        
+
         # Cache it
         self._inference_states[cache_key] = inference_state
         self._touch_state(cache_key)
 
         return inference_state
-    
+
     def _cache_inference_state(
         self,
         inference_state: dict,
@@ -1180,7 +1332,6 @@ class UnifiedSAM2Predictor:
         if prompts:
             state_prompts = inference_state.setdefault("cached_prompts", {})
             state_prompts[id or "default"] = prompts
-            
 
         self._inference_states[cache_key] = inference_state
         self._touch_state(cache_key)
@@ -1203,7 +1354,9 @@ class UnifiedSAM2Predictor:
 
         return inference_state
 
-    def _remap_cached_frame_index(self, inference_state: dict, old_idx: int, new_idx: int) -> None:
+    def _remap_cached_frame_index(
+        self, inference_state: dict, old_idx: int, new_idx: int
+    ) -> None:
         """Remap all per-frame caches from old_idx to new_idx after replacing images loader.
 
         This aligns the conditioning frame (created at index 0 in single-frame mode)
@@ -1265,7 +1418,7 @@ class UnifiedSAM2Predictor:
     ) -> Tuple[List[List[float]], np.ndarray]:
         """
         Generate mask using video predictor (works for both images and videos).
-        
+
         Args:
             input_path: Path to image or video file
             frame_number: Frame index for videos (None for images)
@@ -1274,26 +1427,28 @@ class UnifiedSAM2Predictor:
             box: Array of shape (4,) with box coordinates [x1, y1, x2, y2]
             obj_id: Object ID for tracking (default 1)
             simplify_tolerance: Contour simplification tolerance
-            
+
         Returns:
             Tuple of (contours, mask) where contours is a list of polygon point lists
         """
         predictor = self.get_predictor()
-        
-        self.logger.info(f"Predicting mask for {input_path}, frame_number: {frame_number}, id: {id}")
-        
+
+        self.logger.info(
+            f"Predicting mask for {input_path}, frame_number: {frame_number}, id: {id}"
+        )
+
         # Get or create inference state
         inference_state = self._maybe_restore_state(
             input_path=input_path,
             frame_start=frame_number or 0,
             id=id,
         )
-        
+
         self.logger.info(f"Inference states: {len(inference_state['obj_idx_to_id'])}")
-        
+
         # We always use frame 0 since we load only the specific frame
         target_frame_idx = 0
-        
+
         # Build seed mask if provided directly or via lasso polygon
         seed_mask = None
         if init_mask is not None:
@@ -1316,15 +1471,15 @@ class UnifiedSAM2Predictor:
             points = point_coords.tolist() if point_coords is not None else None
             labels = point_labels.tolist() if point_labels is not None else None
             box_list = box.tolist() if box is not None else None
-            
+
             self.logger.info(f"points: {points}, labels: {labels}, box: {box_list}")
-            
+
             # Add prompts and get mask
-            self.logger.debug(f"Adding prompts: points={len(points) if points else 0}, "
-                        f"box={'yes' if box_list else 'no'}")
-            
-            
-            
+            self.logger.debug(
+                f"Adding prompts: points={len(points) if points else 0}, "
+                f"box={'yes' if box_list else 'no'}"
+            )
+
             _, obj_ids, video_res_masks = predictor.add_new_points_or_box(
                 inference_state=inference_state,
                 frame_idx=target_frame_idx,
@@ -1332,19 +1487,21 @@ class UnifiedSAM2Predictor:
                 points=points,
                 labels=labels,
                 box=box_list,
-                normalize_coords=True
+                normalize_coords=True,
             )
-        
+
         # Extract mask for our object (first object, first channel)
         mask = video_res_masks[0, 0].cpu().numpy()  # (H, W)
-        
+
         # Convert mask scores to binary
         mask_binary = (mask > 0.0).astype(np.uint8)
-        
+
         # Convert to contours
         contours = mask_to_contours(mask_binary, simplify_tolerance=simplify_tolerance)
-        
-        self.logger.info(f"Generated mask with {len(contours)} contours for object {obj_id}")
+
+        self.logger.info(
+            f"Generated mask with {len(contours)} contours for object {obj_id}"
+        )
 
         prompt_metadata = {"obj_id": obj_id}
         if seed_mask is not None:
@@ -1360,7 +1517,7 @@ class UnifiedSAM2Predictor:
             prompts=prompt_metadata,
         )
         return contours, mask_binary
-    
+
     @torch.inference_mode()
     def track_masks(
         self,
@@ -1384,7 +1541,7 @@ class UnifiedSAM2Predictor:
             frame_start=frame_start,
             id=id,
         )
-        
+
         # Swap in a multi-frame loader spanning the requested range
         loader = MultiFrameLoader(
             input_path=input_path,
@@ -1398,17 +1555,19 @@ class UnifiedSAM2Predictor:
         inference_state["video_height"] = loader.video_height
         inference_state["video_width"] = loader.video_width
         # Remap any cached frame index from previous single-frame session (0) to anchor idx
-        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        self._remap_cached_frame_index(
+            inference_state, old_idx=0, new_idx=loader.anchor_idx
+        )
         # Clear cached features as images changed, warm up on anchor frame
         inference_state["cached_features"] = {}
-        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+        predictor._get_image_feature(
+            inference_state, frame_idx=loader.anchor_idx, batch_size=1
+        )
 
         max_frames = len(loader)
         reverse = loader.reverse
         results: List[dict] = []
-        
-        
-        
+
         for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
             inference_state,
             start_frame_idx=loader.anchor_idx,
@@ -1420,14 +1579,18 @@ class UnifiedSAM2Predictor:
             frame_contours: List[List[float]] = []
             for i, _obj_id in enumerate(out_obj_ids):
                 mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
-                contours = mask_to_contours(mask.astype(np.uint8), simplify_tolerance=simplify_tolerance)
+                contours = mask_to_contours(
+                    mask.astype(np.uint8), simplify_tolerance=simplify_tolerance
+                )
                 if contours:
                     frame_contours.extend(contours)
 
-            results.append({
-                "frame_number": int(abs_frame),
-                "contours": frame_contours,
-            })
+            results.append(
+                {
+                    "frame_number": int(abs_frame),
+                    "contours": frame_contours,
+                }
+            )
 
         return results
 
@@ -1465,19 +1628,26 @@ class UnifiedSAM2Predictor:
         inference_state["video_height"] = loader.video_height
         inference_state["video_width"] = loader.video_width
         # Remap any cached frame index from previous single-frame session (0) to anchor idx
-        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        self._remap_cached_frame_index(
+            inference_state, old_idx=0, new_idx=loader.anchor_idx
+        )
         # Clear cached features as images changed, warm up on anchor frame
         inference_state["cached_features"] = {}
-        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+        predictor._get_image_feature(
+            inference_state, frame_idx=loader.anchor_idx, batch_size=1
+        )
 
         total = max(1, len(loader))
         reverse = loader.reverse
-        
+
         logger.info(f"{loader.anchor_idx} {loader.reverse} {max_frames}")
 
-
         try:
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            for (
+                out_frame_idx,
+                out_obj_ids,
+                out_mask_logits,
+            ) in predictor.propagate_in_video(
                 inference_state,
                 start_frame_idx=loader.anchor_idx,
                 max_frame_num_to_track=total,
@@ -1487,7 +1657,9 @@ class UnifiedSAM2Predictor:
                 frame_contours: List[List[float]] = []
                 for i, _obj_id in enumerate(out_obj_ids):
                     mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
-                    contours = mask_to_contours(mask.astype(np.uint8), simplify_tolerance=simplify_tolerance)
+                    contours = mask_to_contours(
+                        mask.astype(np.uint8), simplify_tolerance=simplify_tolerance
+                    )
                     if contours:
                         frame_contours.extend(contours)
 
@@ -1533,9 +1705,13 @@ class UnifiedSAM2Predictor:
         inference_state["num_frames"] = len(loader)
         inference_state["video_height"] = loader.video_height
         inference_state["video_width"] = loader.video_width
-        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        self._remap_cached_frame_index(
+            inference_state, old_idx=0, new_idx=loader.anchor_idx
+        )
         inference_state["cached_features"] = {}
-        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+        predictor._get_image_feature(
+            inference_state, frame_idx=loader.anchor_idx, batch_size=1
+        )
 
         max_frames = len(loader)
         reverse = loader.reverse
@@ -1555,13 +1731,26 @@ class UnifiedSAM2Predictor:
                 mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
                 contours = mask_to_contours(mask.astype(np.uint8))
                 if contours:
-                    largest_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
+                    largest_contours.append(
+                        max(
+                            contours,
+                            key=lambda c: cv2.contourArea(
+                                np.array(c, dtype=np.float32).reshape(-1, 2)
+                            ),
+                        )
+                    )
 
-            bounds = shape_bounds_from_contours(largest_contours, shape_type) if largest_contours else None
-            results.append({
-                "frame_number": int(abs_frame),
-                "shapeBounds": bounds,
-            })
+            bounds = (
+                shape_bounds_from_contours(largest_contours, shape_type)
+                if largest_contours
+                else None
+            )
+            results.append(
+                {
+                    "frame_number": int(abs_frame),
+                    "shapeBounds": bounds,
+                }
+            )
 
         return results
 
@@ -1599,15 +1788,23 @@ class UnifiedSAM2Predictor:
         inference_state["num_frames"] = len(loader)
         inference_state["video_height"] = loader.video_height
         inference_state["video_width"] = loader.video_width
-        self._remap_cached_frame_index(inference_state, old_idx=0, new_idx=loader.anchor_idx)
+        self._remap_cached_frame_index(
+            inference_state, old_idx=0, new_idx=loader.anchor_idx
+        )
         inference_state["cached_features"] = {}
-        predictor._get_image_feature(inference_state, frame_idx=loader.anchor_idx, batch_size=1)
+        predictor._get_image_feature(
+            inference_state, frame_idx=loader.anchor_idx, batch_size=1
+        )
 
         total = max(1, len(loader))
         reverse = loader.reverse
 
         try:
-            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            for (
+                out_frame_idx,
+                out_obj_ids,
+                out_mask_logits,
+            ) in predictor.propagate_in_video(
                 inference_state,
                 start_frame_idx=loader.anchor_idx,
                 max_frame_num_to_track=total,
@@ -1619,8 +1816,19 @@ class UnifiedSAM2Predictor:
                     mask = (out_mask_logits[i] > 0.0).detach().cpu().numpy().squeeze(0)
                     contours = mask_to_contours(mask.astype(np.uint8))
                     if contours:
-                        largest_contours.append(max(contours, key=lambda c: cv2.contourArea(np.array(c, dtype=np.float32).reshape(-1, 2))))
-                bounds = shape_bounds_from_contours(largest_contours, shape_type) if largest_contours else None
+                        largest_contours.append(
+                            max(
+                                contours,
+                                key=lambda c: cv2.contourArea(
+                                    np.array(c, dtype=np.float32).reshape(-1, 2)
+                                ),
+                            )
+                        )
+                bounds = (
+                    shape_bounds_from_contours(largest_contours, shape_type)
+                    if largest_contours
+                    else None
+                )
                 yield {
                     "frame_number": int(abs_frame),
                     "shapeBounds": bounds,
@@ -1646,7 +1854,9 @@ class UnifiedSAM2Predictor:
                 self._inference_states.pop(k, None)
                 self._state_last_used.pop(k, None)
             if dead_keys:
-                self.logger.info(f"Cleared {len(dead_keys)} SAM2 inference state(s) for id={id}")
+                self.logger.info(
+                    f"Cleared {len(dead_keys)} SAM2 inference state(s) for id={id}"
+                )
         except Exception as e:
             self.logger.warning(f"Failed to clear inference states for id={id}: {e}")
 
@@ -1727,9 +1937,10 @@ def get_sam2_predictor(
 
     logger.info("Creating new unified SAM2 predictor (in-process)")
     loader = LoaderMixin()
-    model_path = loader._download(MODEL_WEIGHTS[model_type], save_path=DEFAULT_PREPROCESSOR_SAVE_PATH)
+    model_path = loader._download(
+        MODEL_WEIGHTS[model_type], save_path=DEFAULT_PREPROCESSOR_SAVE_PATH
+    )
     config_name = MODEL_CONFIGS[model_type]
-
 
     predictor = UnifiedSAM2Predictor(
         model_path=model_path,
@@ -1741,6 +1952,3 @@ def get_sam2_predictor(
 
     _PREDICTOR_SINGLETONS[key] = predictor
     return predictor
-
-
-        

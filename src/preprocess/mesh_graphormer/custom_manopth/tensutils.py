@@ -14,7 +14,9 @@ def th_posemap_axisang(pose_vectors):
 
 def th_with_zeros(tensor):
     batch_size = tensor.shape[0]
-    padding = torch.tensor([0.0, 0.0, 0.0, 1.0], device = tensor.device, dtype = tensor.dtype)
+    padding = torch.tensor(
+        [0.0, 0.0, 0.0, 1.0], device=tensor.device, dtype=tensor.dtype
+    )
     padding.requires_grad = False
 
     concat_list = [tensor, padding.view(1, 1, 4).repeat(batch_size, 1, 1)]
@@ -34,9 +36,11 @@ def th_pack(tensor):
 def subtract_flat_id(rot_mats):
     # Subtracts identity as a flattened tensor
     rot_nb = int(rot_mats.shape[1] / 9)
-    id_flat = torch.eye(
-        3, dtype=rot_mats.dtype, device=rot_mats.device).view(1, 9).repeat(
-            rot_mats.shape[0], rot_nb)
+    id_flat = (
+        torch.eye(3, dtype=rot_mats.dtype, device=rot_mats.device)
+        .view(1, 9)
+        .repeat(rot_mats.shape[0], rot_nb)
+    )
     # id_flat.requires_grad = False
     results = rot_mats - id_flat
     return results

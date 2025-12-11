@@ -28,8 +28,6 @@ from .norm_layers import get_norm_layer
 from .attention import attention
 
 
-
-
 class IndividualTokenRefinerBlock(nn.Module):
     """
     A single block for token refinement with self-attention and MLP.
@@ -66,18 +64,30 @@ class IndividualTokenRefinerBlock(nn.Module):
         head_dim = hidden_size // heads_num
         mlp_hidden_dim = int(hidden_size * mlp_width_ratio)
 
-        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs)
-        self.self_attn_qkv = nn.Linear(hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs)
+        self.norm1 = nn.LayerNorm(
+            hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs
+        )
+        self.self_attn_qkv = nn.Linear(
+            hidden_size, hidden_size * 3, bias=qkv_bias, **factory_kwargs
+        )
         qk_norm_layer = get_norm_layer(qk_norm_type)
         self.self_attn_q_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
         self.self_attn_k_norm = (
-            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs) if qk_norm else nn.Identity()
+            qk_norm_layer(head_dim, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+            if qk_norm
+            else nn.Identity()
         )
-        self.self_attn_proj = nn.Linear(hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs)
+        self.self_attn_proj = nn.Linear(
+            hidden_size, hidden_size, bias=qkv_bias, **factory_kwargs
+        )
 
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs)
+        self.norm2 = nn.LayerNorm(
+            hidden_size, elementwise_affine=True, eps=1e-6, **factory_kwargs
+        )
         act_layer = get_activation_layer(act_type)
         self.mlp = MLP(
             in_channels=hidden_size,
@@ -236,10 +246,14 @@ class SingleTokenRefiner(nn.Module):
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.input_embedder = nn.Linear(in_channels, hidden_size, bias=True, **factory_kwargs)
+        self.input_embedder = nn.Linear(
+            in_channels, hidden_size, bias=True, **factory_kwargs
+        )
         act_layer = get_activation_layer(act_type)
         self.t_embedder = TimestepEmbedder(hidden_size, act_layer, **factory_kwargs)
-        self.c_embedder = TextProjection(in_channels, hidden_size, act_layer, **factory_kwargs)
+        self.c_embedder = TextProjection(
+            in_channels, hidden_size, act_layer, **factory_kwargs
+        )
         self.individual_token_refiner = IndividualTokenRefiner(
             hidden_size=hidden_size,
             heads_num=heads_num,
@@ -275,7 +289,9 @@ class SingleTokenRefiner(nn.Module):
             context_aware_representations = x.mean(dim=1)
         else:
             mask_float = mask.float().unsqueeze(-1)  # [B, L, 1]
-            context_aware_representations = (x * mask_float).sum(dim=1) / mask_float.sum(dim=1)
+            context_aware_representations = (x * mask_float).sum(
+                dim=1
+            ) / mask_float.sum(dim=1)
         context_aware_representations = self.c_embedder(context_aware_representations)
         c = timestep_aware_representations + context_aware_representations
         x = self.input_embedder(x)

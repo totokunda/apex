@@ -8,6 +8,7 @@ import torch
 @dataclasses.dataclass
 class MemoryConfig:
     """Configuration for memory management system."""
+
     # Group offloading behavior (diffusers-native offloading mechanism)
     group_offload_type: str = "leaf_level"
     group_offload_num_blocks_per_group: Optional[int] = None
@@ -17,7 +18,6 @@ class MemoryConfig:
     group_offload_low_cpu_mem_usage: bool = True
     group_offload_offload_device: Union[str, torch.device] = "cpu"
     group_offload_disk_path: Optional[str] = None
-
 
     def to_group_offload_kwargs(self, onload_device: torch.device) -> Dict[str, Any]:
         """
@@ -59,6 +59,5 @@ class MemoryConfig:
             group_offload_use_stream=True,
             group_offload_record_stream=True,
             group_offload_non_blocking=True,
-            group_offload_low_cpu_mem_usage=True
+            group_offload_low_cpu_mem_usage=True,
         )
-

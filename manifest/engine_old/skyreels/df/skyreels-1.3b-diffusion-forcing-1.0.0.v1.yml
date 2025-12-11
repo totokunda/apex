@@ -37,7 +37,6 @@ spec:
     model_path: Skywork/SkyReels-V2-DF-1.3B-540P
     file_pattern: '*.safetensors'
     config_path: transformer_configs/skyreels/skyreels_df_1.3b.json
-    
   defaults:
     run:
       num_inference_steps: 30

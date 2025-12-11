@@ -10,12 +10,13 @@ from safetensors.torch import save_file
 from src.utils.defaults import DEFAULT_CACHE_PATH
 import pickle
 
+
 class CacheMixin:
     enable_cache: bool = True
     cache_file: str | None = None
     max_cache_size: int | None = None
     model_path: str | None = None
-    
+
     def str_encode(self, item: Any) -> str:
         if isinstance(item, torch.Tensor):
             return item.cpu().numpy().tobytes().hex()
@@ -27,9 +28,9 @@ class CacheMixin:
             return item
         else:
             return str(item)
-        
+
     def hash_prompt(self, kwargs: Dict[str, Any]) -> str:
-        #Compatibility with old hash_prompt
+        # Compatibility with old hash_prompt
         return self.hash(kwargs)
 
     def hash(self, kwargs: Dict[str, Any]) -> str:
@@ -120,9 +121,7 @@ class CacheMixin:
         # Return keys ordered by their positional index
         return [latest_by_index[i][1] for i in sorted(latest_by_index.keys())]
 
-    def load_cached(
-        self, hash: str
-    ) -> Tuple[torch.Tensor, ...] | None:
+    def load_cached(self, hash: str) -> Tuple[torch.Tensor, ...] | None:
         """Load cached tensors for the given prompt hash if present.
 
         Returns a tuple of tensors in the same order they were cached,
@@ -255,11 +254,9 @@ class CacheMixin:
         except Exception:
             # As a fallback, avoid crashing the caller; drop caching if write fails
             pass
-        
+
     def load_cached_prompt(self, hash: str) -> Tuple[torch.Tensor, ...] | None:
         return self.load_cached(hash)
 
     def cache_prompt(self, hash: str, *tensors: torch.Tensor) -> None:
         return self.cache(hash, *tensors)
-    
-    

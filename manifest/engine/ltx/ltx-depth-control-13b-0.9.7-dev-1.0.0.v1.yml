@@ -70,7 +70,6 @@ spec:
   - type: helper
     base: ltx.patchifier
     patch_size: 1
-
   loras:
   - source: https://huggingface.co/Lightricks/LTX-Video-ICLoRA-depth-13b-0.9.7/resolve/main/ltxv-097-ic-lora-depth-control-comfyui.safetensors
     scale: 1.0
@@ -78,7 +77,6 @@ spec:
     name: ic_depth_lora
     label: ICLoRA depth
     required: true
-    
   defaults:
     run:
       num_inference_steps: 30
@@ -175,13 +173,10 @@ spec:
       options:
       - name: HD
         value: 720
-        height: 720
       - name: Full HD
         value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -269,10 +264,3 @@ spec:
       min: 0.1
       max: 15.0
       step: 0.5
-
-
-
-
-
-
-

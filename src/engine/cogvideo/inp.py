@@ -9,7 +9,7 @@ from einops import rearrange
 
 class CogVideoInpEngine(CogVideoShared):
     """CogVideo Fun Engine Implementation"""
-    
+
     def _prepare_mask_latents(
         self, masked_image, noise_aug_strength, transformer_config
     ):

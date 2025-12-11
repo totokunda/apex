@@ -320,7 +320,7 @@ class CausalConv(nn.Module):
             kernel_size,
             stride=self.stride,
             dilation=self.dilation,
-            **kwargs
+            **kwargs,
         )
         self.is_first_run = True
 
@@ -585,7 +585,7 @@ class CausalConvAfterNorm(CausalConv):
                 stride=self.stride,
                 dilation=self.dilation,
                 padding=(0, 1, 1),
-                **kwargs
+                **kwargs,
             )
         else:
             self.conv = nn.Conv3d(
@@ -594,7 +594,7 @@ class CausalConvAfterNorm(CausalConv):
                 kernel_size,
                 stride=self.stride,
                 dilation=self.dilation,
-                **kwargs
+                **kwargs,
             )
         self.is_first_run = True
 

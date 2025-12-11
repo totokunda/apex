@@ -3,17 +3,22 @@ import torch.nn.functional as F
 from diffusers.models.attention import Attention
 from typing import Optional, List
 from src.attention import attention_register
+
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
-# SPDX-License-Identifier: Apache-2.0 
+# SPDX-License-Identifier: Apache-2.0
 
 import torch
+
 try:
-    from flash_attn_interface import flash_attn_varlen_func # flash attn 3
+    from flash_attn_interface import flash_attn_varlen_func  # flash attn 3
 except:
     try:
-        from flash_attn.flash_attn_interface import flash_attn_varlen_func # flash attn 2
+        from flash_attn.flash_attn_interface import (
+            flash_attn_varlen_func,
+        )  # flash attn 2
     except Exception:
         flash_attn_varlen_func = None
+
 
 def flash_attention(query, key, value, q_lens, kv_lens, causal=False):
     """
@@ -40,7 +45,9 @@ def flash_attention(query, key, value, q_lens, kv_lens, causal=False):
     kv_lens_tensor = torch.tensor(kv_lens, device=device, dtype=torch.int32)
 
     cu_seqlens_q = torch.zeros(len(q_lens_tensor) + 1, device=device, dtype=torch.int32)
-    cu_seqlens_k = torch.zeros(len(kv_lens_tensor) + 1, device=device, dtype=torch.int32)
+    cu_seqlens_k = torch.zeros(
+        len(kv_lens_tensor) + 1, device=device, dtype=torch.int32
+    )
 
     cu_seqlens_q[1:] = torch.cumsum(q_lens_tensor, dim=0)
     cu_seqlens_k[1:] = torch.cumsum(kv_lens_tensor, dim=0)
@@ -50,16 +57,9 @@ def flash_attention(query, key, value, q_lens, kv_lens, causal=False):
 
     # Call FlashAttention varlen kernel
     out = flash_attn_varlen_func(
-        q,
-        k,
-        v,
-        cu_seqlens_q,
-        cu_seqlens_k,
-        max_seqlen_q,
-        max_seqlen_k,
-        causal=causal
+        q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, causal=causal
     )
-    if not torch.is_tensor(out): # flash attn 3
+    if not torch.is_tensor(out):  # flash attn 3
         out = out[0]
 
     # Restore shape: [total_q, H, D_h] -> [B, H, T_q, D_h]
@@ -67,10 +67,13 @@ def flash_attention(query, key, value, q_lens, kv_lens, causal=False):
 
     return out
 
+
 class WanAttnProcessor2_0:
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError("WanAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0.")
+            raise ImportError(
+                "WanAttnProcessor2_0 requires PyTorch 2.0. To use it, please upgrade PyTorch to 2.0."
+            )
 
     def __call__(
         self,
@@ -105,7 +108,9 @@ class WanAttnProcessor2_0:
         if rotary_emb is not None:
 
             def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+                x_rotated = torch.view_as_complex(
+                    hidden_states.to(torch.float64).unflatten(3, (-1, 2))
+                )
                 x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
                 return x_out.type_as(hidden_states)
 
@@ -123,17 +128,20 @@ class WanAttnProcessor2_0:
             value_img = value_img.unflatten(2, (attn.heads, -1)).transpose(1, 2)
 
             hidden_states_img = attention_register.call(
-                query, key_img, value_img, attn_mask=None, dropout_p=0.0, is_causal=False
+                query,
+                key_img,
+                value_img,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False,
             )
-            
+
             hidden_states_img = hidden_states_img.transpose(1, 2).flatten(2, 3)
             hidden_states_img = hidden_states_img.type_as(query)
-            
+
         if flash_attn_varlen_func is not None:
             hidden_states = flash_attention(
-                query, key, value,
-                q_lens=q_lens,
-                kv_lens=kv_lens
+                query, key, value, q_lens=q_lens, kv_lens=kv_lens
             )
         else:
             hidden_states = attention_register.call(

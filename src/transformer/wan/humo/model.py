@@ -13,6 +13,7 @@ from diffusers.configuration_utils import register_to_config
 from src.attention import attention_register
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 import warnings
+
 warnings.filterwarnings("ignore")
 
 
@@ -42,7 +43,7 @@ class DummyAdapterLayer(nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.layer(*args, **kwargs)
-    
+
 
 class AudioProjModel(nn.Module):
     def __init__(
@@ -59,15 +60,23 @@ class AudioProjModel(nn.Module):
         self.seq_len = seq_len
         self.blocks = blocks
         self.channels = channels
-        self.input_dim = seq_len * blocks * channels  # update input_dim to be the product of blocks and channels.
+        self.input_dim = (
+            seq_len * blocks * channels
+        )  # update input_dim to be the product of blocks and channels.
         self.intermediate_dim = intermediate_dim
         self.context_tokens = context_tokens
         self.output_dim = output_dim
 
         # define multiple linear layers
-        self.audio_proj_glob_1 = DummyAdapterLayer(nn.Linear(self.input_dim, intermediate_dim))
-        self.audio_proj_glob_2 = DummyAdapterLayer(nn.Linear(intermediate_dim, intermediate_dim))
-        self.audio_proj_glob_3 = DummyAdapterLayer(nn.Linear(intermediate_dim, context_tokens * output_dim))
+        self.audio_proj_glob_1 = DummyAdapterLayer(
+            nn.Linear(self.input_dim, intermediate_dim)
+        )
+        self.audio_proj_glob_2 = DummyAdapterLayer(
+            nn.Linear(intermediate_dim, intermediate_dim)
+        )
+        self.audio_proj_glob_3 = DummyAdapterLayer(
+            nn.Linear(intermediate_dim, context_tokens * output_dim)
+        )
 
         self.audio_proj_glob_norm = DummyAdapterLayer(nn.LayerNorm(output_dim))
 
@@ -92,14 +101,20 @@ class AudioProjModel(nn.Module):
         audio_embeds = torch.relu(self.audio_proj_glob_1(audio_embeds))
         audio_embeds = torch.relu(self.audio_proj_glob_2(audio_embeds))
 
-        context_tokens = self.audio_proj_glob_3(audio_embeds).reshape(batch_size, self.context_tokens, self.output_dim)
+        context_tokens = self.audio_proj_glob_3(audio_embeds).reshape(
+            batch_size, self.context_tokens, self.output_dim
+        )
 
         context_tokens = self.audio_proj_glob_norm(context_tokens)
-        context_tokens = rearrange(context_tokens, "(bz f) m c -> bz f m c", f=video_length)
+        context_tokens = rearrange(
+            context_tokens, "(bz f) m c -> bz f m c", f=video_length
+        )
 
         return context_tokens
 
+
 import types
+
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -109,7 +124,8 @@ def sinusoidal_embedding_1d(dim, position):
 
     # calculation
     sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
+        position, torch.pow(10000, -torch.arange(half).to(position).div(half))
+    )
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
 
@@ -119,8 +135,8 @@ def rope_params(max_seq_len, dim, theta=10000):
     assert dim % 2 == 0
     freqs = torch.outer(
         torch.arange(max_seq_len),
-        1.0 / torch.pow(theta,
-                        torch.arange(0, dim, 2).to(torch.float32).div(dim)))
+        1.0 / torch.pow(theta, torch.arange(0, dim, 2).to(torch.float32).div(dim)),
+    )
     freqs = torch.polar(torch.ones_like(freqs), freqs)
     return freqs
 
@@ -131,21 +147,24 @@ def rope_apply(x, grid_sizes, freqs):
 
     # split freqs
     freqs = freqs.split([c - 2 * (c // 3), c // 3, c // 3], dim=1)
-    
+
     # loop over samples
     output = []
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
 
         # precompute multipliers
-        x_i = torch.view_as_complex(x[i, :seq_len].to(torch.float32).reshape(
-            seq_len, n, -1, 2))
-        freqs_i = torch.cat([
-            freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
-            freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
-            freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1)
-        ],
-                            dim=-1).reshape(seq_len, 1, -1)
+        x_i = torch.view_as_complex(
+            x[i, :seq_len].to(torch.float32).reshape(seq_len, n, -1, 2)
+        )
+        freqs_i = torch.cat(
+            [
+                freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
+                freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+                freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
+            ],
+            dim=-1,
+        ).reshape(seq_len, 1, -1)
 
         # apply rotary embedding
         x_i = torch.view_as_real(x_i * freqs_i).flatten(2)
@@ -190,12 +209,7 @@ class WanLayerNorm(nn.LayerNorm):
 
 class WanSelfAttention(nn.Module):
 
-    def __init__(self,
-                 dim,
-                 num_heads,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 eps=1e-6):
+    def __init__(self, dim, num_heads, window_size=(-1, -1), qk_norm=True, eps=1e-6):
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -237,7 +251,7 @@ class WanSelfAttention(nn.Module):
             k=rope_apply(k, grid_sizes, freqs).transpose(1, 2),
             v=v.transpose(1, 2),
             k_lens=seq_lens,
-            window_size=self.window_size
+            window_size=self.window_size,
         ).transpose(1, 2)
         # output
         x = x.flatten(2)
@@ -247,13 +261,9 @@ class WanSelfAttention(nn.Module):
 
 class WanSelfAttentionSepKVDim(nn.Module):
 
-    def __init__(self,
-                 kv_dim,
-                 dim,
-                 num_heads,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 eps=1e-6):
+    def __init__(
+        self, kv_dim, dim, num_heads, window_size=(-1, -1), qk_norm=True, eps=1e-6
+    ):
         assert dim % num_heads == 0
         super().__init__()
         self.dim = dim
@@ -295,14 +305,13 @@ class WanSelfAttentionSepKVDim(nn.Module):
             k=rope_apply(k, grid_sizes, freqs).transpose(1, 2),
             v=v.transpose(1, 2),
             k_lens=seq_lens,
-            window_size=self.window_size
+            window_size=self.window_size,
         ).transpose(1, 2)
 
         # output
         x = x.flatten(2)
         x = self.o(x)
         return x
-
 
 
 class WanT2VCrossAttention(WanSelfAttention):
@@ -322,7 +331,9 @@ class WanT2VCrossAttention(WanSelfAttention):
         v = self.v(context).view(b, -1, n, d).transpose(1, 2)
 
         # compute attention
-        x = attention_register.call(q, k, v, k_lens=context_lens, window_size=self.window_size).transpose(1, 2)
+        x = attention_register.call(
+            q, k, v, k_lens=context_lens, window_size=self.window_size
+        ).transpose(1, 2)
 
         # output
         x = x.flatten(2)
@@ -370,8 +381,7 @@ class WanT2VCrossAttentionGather(WanSelfAttentionSepKVDim):
             v = v[:Bq]
         elif Bk < Bq:
             q = q[:Bk]
-            
-        
+
         x = attention_register.call(q, k, v, k_lens=None, window_size=self.window_size)
         x = x.transpose(1, 2).contiguous()  # [B * F_common, H * W, n, d]
         x = x.view(b, -1, n, d).flatten(2)
@@ -380,28 +390,31 @@ class WanT2VCrossAttentionGather(WanSelfAttentionSepKVDim):
 
 
 class AudioCrossAttentionWrapper(nn.Module):
-    def __init__(self, dim, kv_dim, num_heads, qk_norm=True, eps=1e-6,):
+    def __init__(
+        self,
+        dim,
+        kv_dim,
+        num_heads,
+        qk_norm=True,
+        eps=1e-6,
+    ):
         super().__init__()
 
         self.audio_cross_attn = WanT2VCrossAttentionGather(
-                kv_dim, dim, num_heads, (-1, -1), qk_norm, eps)
-        self.norm1_audio = WanLayerNorm(dim, eps,
-            elementwise_affine=True)
+            kv_dim, dim, num_heads, (-1, -1), qk_norm, eps
+        )
+        self.norm1_audio = WanLayerNorm(dim, eps, elementwise_affine=True)
 
     def forward(self, x, audio, seq_lens, grid_sizes, freqs, audio_seq_len):
         x = x + self.audio_cross_attn(
-            self.norm1_audio(x), audio, seq_lens, grid_sizes, freqs, audio_seq_len)
+            self.norm1_audio(x), audio, seq_lens, grid_sizes, freqs, audio_seq_len
+        )
         return x
-        
+
 
 class WanI2VCrossAttention(WanSelfAttention):
 
-    def __init__(self,
-                 dim,
-                 num_heads,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 eps=1e-6):
+    def __init__(self, dim, num_heads, window_size=(-1, -1), qk_norm=True, eps=1e-6):
         super().__init__(dim, num_heads, window_size, qk_norm, eps)
 
     def forward(self, x, context, context_lens):
@@ -422,10 +435,10 @@ class WanI2VCrossAttention(WanSelfAttention):
             k=k.transpose(1, 2),
             v=v.transpose(1, 2),
             k_lens=context_lens,
-            window_size=self.window_size
+            window_size=self.window_size,
         )
         x = x.transpose(1, 2)
-        
+
         # output
         x = x.flatten(2)
         x = self.o(x)
@@ -433,22 +446,25 @@ class WanI2VCrossAttention(WanSelfAttention):
 
 
 WAN_CROSSATTENTION_CLASSES = {
-    't2v_cross_attn': WanT2VCrossAttention,
-    'i2v_cross_attn': WanI2VCrossAttention,
+    "t2v_cross_attn": WanT2VCrossAttention,
+    "i2v_cross_attn": WanI2VCrossAttention,
 }
+
 
 class WanAttentionBlock(nn.Module):
 
-    def __init__(self,
-                 cross_attn_type,
-                 dim,
-                 ffn_dim,
-                 num_heads,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 cross_attn_norm=False,
-                 eps=1e-6,
-                 use_audio=True):
+    def __init__(
+        self,
+        cross_attn_type,
+        dim,
+        ffn_dim,
+        num_heads,
+        window_size=(-1, -1),
+        qk_norm=True,
+        cross_attn_norm=False,
+        eps=1e-6,
+        use_audio=True,
+    ):
         super().__init__()
         self.dim = dim
         self.ffn_dim = ffn_dim
@@ -460,38 +476,41 @@ class WanAttentionBlock(nn.Module):
 
         # layers
         self.norm1 = WanLayerNorm(dim, eps)
-        self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm,
-                                          eps)
-        self.norm3 = WanLayerNorm(
-            dim, eps,
-            elementwise_affine=True) if cross_attn_norm else nn.Identity()
-        self.cross_attn = WAN_CROSSATTENTION_CLASSES[cross_attn_type](dim,
-                                                                      num_heads,
-                                                                      (-1, -1),
-                                                                      qk_norm,
-                                                                      eps)
+        self.self_attn = WanSelfAttention(dim, num_heads, window_size, qk_norm, eps)
+        self.norm3 = (
+            WanLayerNorm(dim, eps, elementwise_affine=True)
+            if cross_attn_norm
+            else nn.Identity()
+        )
+        self.cross_attn = WAN_CROSSATTENTION_CLASSES[cross_attn_type](
+            dim, num_heads, (-1, -1), qk_norm, eps
+        )
         self.norm2 = WanLayerNorm(dim, eps)
         self.ffn = nn.Sequential(
-            nn.Linear(dim, ffn_dim), nn.GELU(approximate='tanh'),
-            nn.Linear(ffn_dim, dim))
+            nn.Linear(dim, ffn_dim),
+            nn.GELU(approximate="tanh"),
+            nn.Linear(ffn_dim, dim),
+        )
 
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
         self.use_audio = use_audio
         if use_audio:
-            self.audio_cross_attn_wrapper = AudioCrossAttentionWrapper(dim, 1536, num_heads, qk_norm, eps)
+            self.audio_cross_attn_wrapper = AudioCrossAttentionWrapper(
+                dim, 1536, num_heads, qk_norm, eps
+            )
 
     def forward(
         self,
-        x, # torch.Size([1, 9360, 5120])
-        e, # torch.Size([1, 6, 5120])
-        seq_lens, # tensor([9360])
-        grid_sizes, # tensor([[ 6, 30, 52]])
-        freqs, # torch.Size([1024, 64])
-        context, # torch.Size([1, 512, 5120])
-        context_lens, # None
-        audio=None, # None
+        x,  # torch.Size([1, 9360, 5120])
+        e,  # torch.Size([1, 6, 5120])
+        seq_lens,  # tensor([9360])
+        grid_sizes,  # tensor([[ 6, 30, 52]])
+        freqs,  # torch.Size([1024, 64])
+        context,  # torch.Size([1, 512, 5120])
+        context_lens,  # None
+        audio=None,  # None
         audio_seq_len=None,
         ref_num_list=None,
     ):
@@ -512,17 +531,19 @@ class WanAttentionBlock(nn.Module):
 
         # self-attention
         y = self.self_attn(
-            self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes,
-            freqs)
+            self.norm1(x).float() * (1 + e[1]) + e[0], seq_lens, grid_sizes, freqs
+        )
         with amp.autocast(dtype=torch.float32):
             x = x + y * e[2]
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
             x = x + self.cross_attn(self.norm3(x), context, context_lens)
-            
+
             if self.use_audio:
-                x = self.audio_cross_attn_wrapper(x, audio, seq_lens, grid_sizes, freqs, audio_seq_len)
+                x = self.audio_cross_attn_wrapper(
+                    x, audio, seq_lens, grid_sizes, freqs, audio_seq_len
+                )
 
             ffn_x = self.norm2(x).float() * (1 + e[4]) + e[3]
             y = self.ffn(ffn_x)
@@ -561,7 +582,7 @@ class Head(nn.Module):
         assert e.dtype == torch.float32
         with amp.autocast(dtype=torch.float32):
             e = (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
-            x = (self.head(self.norm(x) * (1 + e[1]) + e[0]))
+            x = self.head(self.norm(x) * (1 + e[1]) + e[0])
         return x
 
 
@@ -571,46 +592,57 @@ class MLPProj(torch.nn.Module):
         super().__init__()
 
         self.proj = torch.nn.Sequential(
-            torch.nn.LayerNorm(in_dim), torch.nn.Linear(in_dim, in_dim),
-            torch.nn.GELU(), torch.nn.Linear(in_dim, out_dim),
-            torch.nn.LayerNorm(out_dim))
+            torch.nn.LayerNorm(in_dim),
+            torch.nn.Linear(in_dim, in_dim),
+            torch.nn.GELU(),
+            torch.nn.Linear(in_dim, out_dim),
+            torch.nn.LayerNorm(out_dim),
+        )
 
     def forward(self, image_embeds):
         clip_extra_context_tokens = self.proj(image_embeds)
         return clip_extra_context_tokens
 
 
-class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
+class HumoWanTransformerModel(
+    ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin
+):
     r"""
     Wan diffusion backbone supporting both text-to-video and image-to-video.
     """
 
     ignore_for_config = [
-        'patch_size', 'cross_attn_norm', 'qk_norm', 'text_dim', 'window_size'
+        "patch_size",
+        "cross_attn_norm",
+        "qk_norm",
+        "text_dim",
+        "window_size",
     ]
-    _no_split_modules = ['WanAttentionBlock']
+    _no_split_modules = ["WanAttentionBlock"]
 
     gradient_checkpointing = False
 
     @register_to_config
-    def __init__(self,
-                 model_type='t2v',
-                 patch_size=(1, 2, 2),
-                 text_len=512,
-                 in_dim=16,
-                 dim=2048,
-                 ffn_dim=13824,
-                 freq_dim=256,
-                 text_dim=4096,
-                 out_dim=16,
-                 num_heads=40,
-                 num_layers=40,
-                 window_size=(-1, -1),
-                 qk_norm=True,
-                 cross_attn_norm=True,
-                 eps=1e-6,
-                 audio_token_num=16,
-                 insert_audio=True):
+    def __init__(
+        self,
+        model_type="t2v",
+        patch_size=(1, 2, 2),
+        text_len=512,
+        in_dim=16,
+        dim=2048,
+        ffn_dim=13824,
+        freq_dim=256,
+        text_dim=4096,
+        out_dim=16,
+        num_heads=40,
+        num_layers=40,
+        window_size=(-1, -1),
+        qk_norm=True,
+        cross_attn_norm=True,
+        eps=1e-6,
+        audio_token_num=16,
+        insert_audio=True,
+    ):
         r"""
         Initialize the diffusion model backbone.
 
@@ -649,7 +681,7 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
 
         super().__init__()
 
-        assert model_type in ['t2v', 'i2v']
+        assert model_type in ["t2v", "i2v"]
         self.model_type = model_type
 
         self.patch_size = patch_size
@@ -669,46 +701,65 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size)
+            in_dim, dim, kernel_size=patch_size, stride=patch_size
+        )
         self.text_embedding = nn.Sequential(
-            nn.Linear(text_dim, dim), nn.GELU(approximate='tanh'),
-            nn.Linear(dim, dim))
+            nn.Linear(text_dim, dim), nn.GELU(approximate="tanh"), nn.Linear(dim, dim)
+        )
 
         self.time_embedding = nn.Sequential(
-            nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim))
+            nn.Linear(freq_dim, dim), nn.SiLU(), nn.Linear(dim, dim)
+        )
         self.time_projection = nn.Sequential(nn.SiLU(), nn.Linear(dim, dim * 6))
 
         # blocks
-        cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
+        cross_attn_type = "t2v_cross_attn" if model_type == "t2v" else "i2v_cross_attn"
         self.insert_audio = insert_audio
-        self.blocks = nn.ModuleList([
-            WanAttentionBlock(cross_attn_type, dim, ffn_dim, num_heads,
-                        window_size, qk_norm, cross_attn_norm,
-                        eps, use_audio=self.insert_audio)
-            for _ in range(num_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                WanAttentionBlock(
+                    cross_attn_type,
+                    dim,
+                    ffn_dim,
+                    num_heads,
+                    window_size,
+                    qk_norm,
+                    cross_attn_norm,
+                    eps,
+                    use_audio=self.insert_audio,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
         # head
         self.head = Head(dim, out_dim, patch_size, eps)
 
         if self.insert_audio:
-            self.audio_proj = AudioProjModel(seq_len=8, blocks=5, channels=1280, 
-                intermediate_dim=512, output_dim=1536, context_tokens=audio_token_num)
+            self.audio_proj = AudioProjModel(
+                seq_len=8,
+                blocks=5,
+                channels=1280,
+                intermediate_dim=512,
+                output_dim=1536,
+                context_tokens=audio_token_num,
+            )
 
         # buffers (don't use register_buffer otherwise dtype will be changed in to())
         assert (dim % num_heads) == 0 and (dim // num_heads) % 2 == 0
         d = dim // num_heads
-        self.freqs = torch.cat([
-            rope_params(1024, d - 4 * (d // 6)),
-            rope_params(1024, 2 * (d // 6)),
-            rope_params(1024, 2 * (d // 6))
-        ],
-                               dim=1)
+        self.freqs = torch.cat(
+            [
+                rope_params(1024, d - 4 * (d // 6)),
+                rope_params(1024, 2 * (d // 6)),
+                rope_params(1024, 2 * (d // 6)),
+            ],
+            dim=1,
+        )
 
         # initialize weights
         self.init_weights()
 
-        
     def forward(
         self,
         x,
@@ -739,7 +790,7 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
-        if self.model_type == 'i2v':
+        if self.model_type == "i2v":
             # assert clip_fea is not None and y is not None
             assert y is not None
 
@@ -750,46 +801,61 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
 
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y)]
-        
+
         # embeddings
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
         grid_sizes = torch.stack(
-            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
-        
+            [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
+        )
+
         x = [u.flatten(2).transpose(1, 2) for u in x]
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long, device=device)
         assert seq_lens.max() <= seq_len
-        
-        x = torch.cat([
-            torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
-                      dim=1) for u in x
-        ])
+
+        x = torch.cat(
+            [
+                torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))], dim=1)
+                for u in x
+            ]
+        )
 
         # time embeddings
         with amp.autocast(dtype=torch.float32):
             e = self.time_embedding(
-                sinusoidal_embedding_1d(self.freq_dim, t).float()).float()
+                sinusoidal_embedding_1d(self.freq_dim, t).float()
+            ).float()
             e0 = self.time_projection(e).unflatten(1, (6, self.dim)).float()
             assert e.dtype == torch.float32 and e0.dtype == torch.float32
 
         # context
         context_lens = None
         context = self.text_embedding(
-            torch.stack([
-                torch.cat(
-                    [u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
-                for u in context
-            ]))
+            torch.stack(
+                [
+                    torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))])
+                    for u in context
+                ]
+            )
+        )
 
         if self.insert_audio:
-            audio = [self.audio_proj(au.unsqueeze(0)).permute(0, 3, 1, 2) for au in audio]
-            
-            audio_seq_len = torch.tensor(max([au.shape[2] for au in audio]) * audio[0].shape[3], device=t.device)
-            audio = [au.flatten(2).transpose(1, 2) for au in audio] # [1, t*32, 1536]
-            audio = torch.cat([
-                torch.cat([au, au.new_zeros(1, audio_seq_len - au.size(1), au.size(2))],
-                        dim=1) for au in audio
-            ])
+            audio = [
+                self.audio_proj(au.unsqueeze(0)).permute(0, 3, 1, 2) for au in audio
+            ]
+
+            audio_seq_len = torch.tensor(
+                max([au.shape[2] for au in audio]) * audio[0].shape[3], device=t.device
+            )
+            audio = [au.flatten(2).transpose(1, 2) for au in audio]  # [1, t*32, 1536]
+            audio = torch.cat(
+                [
+                    torch.cat(
+                        [au, au.new_zeros(1, audio_seq_len - au.size(1), au.size(2))],
+                        dim=1,
+                    )
+                    for au in audio
+                ]
+            )
         else:
             audio = None
             audio_seq_len = None
@@ -803,7 +869,8 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
             context=context,
             context_lens=context_lens,
             audio=audio,
-            audio_seq_len=audio_seq_len)
+            audio_seq_len=audio_seq_len,
+        )
 
         for block in self.blocks:
             x = block(x, **kwargs)
@@ -834,11 +901,11 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
         c = self.out_dim
         out = []
         for u, v in zip(x, grid_sizes.tolist()):
-            u = u[:math.prod(v)].view(*v, *self.patch_size, c)
-            u = torch.einsum('fhwpqrc->cfphqwr', u)
+            u = u[: math.prod(v)].view(*v, *self.patch_size, c)
+            u = torch.einsum("fhwpqrc->cfphqwr", u)
             u = u.reshape(c, *[i * j for i, j in zip(v, self.patch_size)])
             out.append(u)
-            
+
         return out
 
     def init_weights(self):
@@ -857,10 +924,10 @@ class HumoWanTransformerModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOri
         nn.init.xavier_uniform_(self.patch_embedding.weight.flatten(1))
         for m in self.text_embedding.modules():
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, std=.02)
+                nn.init.normal_(m.weight, std=0.02)
         for m in self.time_embedding.modules():
             if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, std=.02)
+                nn.init.normal_(m.weight, std=0.02)
 
         # init output layer
         nn.init.zeros_(self.head.head.weight)

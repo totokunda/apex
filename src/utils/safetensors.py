@@ -14,6 +14,9 @@ def is_safetensors_file(file_path: str, framework: str = "pt"):
         return False
 
 
+def is_floating_point_tensor(tensor: torch.Tensor) -> bool:
+    return tensor.dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16]
+
 def load_safetensors(
     filename: Union[str, os.PathLike],
     device: Union[str, int] = "cpu",
@@ -42,17 +45,42 @@ def load_safetensors(
     loaded = load_file(file_path)
     ```
     """
-    result = {}
+    result: Dict[str, torch.Tensor] = {}
+
+    # Cache local variables and flags outside the loop to minimize
+    # repeated attribute lookups and isinstance checks in the hot path.
+    framework_is_np = framework == "np"
+    has_dtype = dtype is not None
+    is_torch_dtype = isinstance(dtype, torch.dtype)
+    is_mx_dtype = isinstance(dtype, mx.Dtype)
+    to_mx_array = mx.array
+    is_fp = is_floating_point_tensor
+
     with safetensors.safe_open(filename, framework=framework, device=device) as f:
+        # Fast path: no framework conversion and no dtype casting.
+        if not framework_is_np and not has_dtype:
+            for k in f.keys():
+                result[k] = f.get_tensor(k)
+            return result
+
+        # General path with optional framework and/or dtype conversion.
         for k in f.keys():
-            result[k] = f.get_tensor(k)
-            if framework == "np":
-                result[k] = mx.array(result[k])
-            if dtype:
-                if isinstance(dtype, torch.dtype) and isinstance(
-                    result[k], torch.Tensor
+            tensor = f.get_tensor(k)
+
+            if framework_is_np:
+                tensor = to_mx_array(tensor)
+
+            if has_dtype:
+                if (
+                    is_torch_dtype
+                    and isinstance(tensor, torch.Tensor)
+                    and is_fp(tensor)
                 ):
-                    result[k] = result[k].to(dtype)
-                elif isinstance(dtype, mx.Dtype) and isinstance(result[k], mx.array):
-                    result[k] = result[k].astype(dtype)
+                    tensor = tensor.to(dtype)
+                elif is_mx_dtype and isinstance(tensor, mx.array):
+                    tensor = tensor.astype(dtype)
+
+            result[k] = tensor
+
     return result
+

@@ -15,14 +15,26 @@ class ContentShuffleDetector(BasePreprocessor):
     def from_pretrained(cls):
         """ContentShuffleDetector doesn't require pretrained models"""
         return cls()
-    
-    def process(self, input_image: InputImage, h=None, w=None, f=None, detect_resolution=512, upscale_method="INTER_CUBIC", seed=-1, **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        h=None,
+        w=None,
+        f=None,
+        detect_resolution=512,
+        upscale_method="INTER_CUBIC",
+        seed=-1,
+        **kwargs,
+    ) -> OutputImage:
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
-        input_image, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
+
+        input_image, remove_pad = resize_image_with_pad(
+            input_image, detect_resolution, upscale_method
+        )
 
         H, W, C = input_image.shape
         if h is None:
@@ -92,6 +104,6 @@ class Image2MaskShuffleDetector:
         self.H, self.W = resolution
 
     def __call__(self, img):
-        m = img2mask(img, self.H, self.W)  
+        m = img2mask(img, self.H, self.W)
         m *= 255.0
         return m.clip(0, 255).astype(np.uint8)

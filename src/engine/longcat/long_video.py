@@ -48,7 +48,7 @@ class LongCatLongVideoEngine(LongCatShared):
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
         num_segments: int = 11,
-        duration: str  | int = 93,
+        duration: str | int = 93,
         fps: int = 15,
         num_cond_frames: int = 13,
         num_inference_steps: int = 50,
@@ -215,5 +215,3 @@ class LongCatLongVideoEngine(LongCatShared):
             }
 
         return [final_video]
-
-

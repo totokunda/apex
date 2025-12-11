@@ -1,7 +1,8 @@
 """
 Ray tasks for preprocessor operations
 """
-from typing import Dict, Any, Optional, Callable, List
+
+from typing import Dict, Any, Optional, Callable, List, Tuple
 from pathlib import Path
 from urllib.parse import urlparse
 import ray
@@ -14,12 +15,11 @@ import shutil
 import torch
 import inspect
 import yaml
+import numpy as np
 import json
 from src.utils.cache import empty_cache
-from src.api.preprocessor_registry import (
-    get_preprocessor_info
-)
-from src.engine.registry import UniversalEngine 
+from src.api.preprocessor_registry import get_preprocessor_info
+from src.engine.registry import UniversalEngine
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import get_components_path, get_lora_path, get_preprocessor_path
 from diffusers.utils import export_to_video
@@ -47,7 +47,7 @@ def _persist_run_config(
       persisted JSON, without mutating the original `inputs` dict used by the engine.
     """
     try:
-        project_root = Path(__file__).parent.parent
+        project_root = Path(__file__).parent.parent.parent
         base_runs_dir = run_root or (project_root / "runs")
 
         manifest_stem = Path(manifest_path).stem
@@ -115,7 +115,9 @@ def _persist_run_config(
                         elif isinstance(value, str):
                             new_value = rel_path
                 except Exception as copy_err:
-                    logger.warning(f"Failed to copy media input '{media_path}' for key '{key}': {copy_err}")
+                    logger.warning(
+                        f"Failed to copy media input '{media_path}' for key '{key}': {copy_err}"
+                    )
 
             persisted_inputs[key] = new_value
 
@@ -162,7 +164,6 @@ def _derive_lora_name_from_source(source: str) -> str:
         return source
 
 
-
 def _load_manifest_yaml(yaml_path: Path) -> Optional[Dict[str, Any]]:
     """Best-effort YAML loader that never raises; logs and returns None on failure."""
     try:
@@ -190,7 +191,9 @@ def _save_manifest_yaml(yaml_path: Path, doc: Dict[str, Any]) -> None:
         logger.error(f"Failed to write updated manifest YAML {yaml_path}: {e}")
 
 
-def _remove_lora_from_manifest(lora_name: str, manifest_id: Optional[str] = None) -> bool:
+def _remove_lora_from_manifest(
+    lora_name: str, manifest_id: Optional[str] = None
+) -> bool:
     """
     Remove any LoRA entries whose source/remote_source (or raw string entry)
     matches `source` from the given manifest.
@@ -236,7 +239,6 @@ def _remove_lora_from_manifest(lora_name: str, manifest_id: Optional[str] = None
         traceback.print_exc()
         logger.warning(f"Failed to remove LoRA '{lora_name}' from manifest: {e}")
         return False
-
 
 
 def _cleanup_lora_artifacts_if_remote(lora_item: Any) -> None:
@@ -303,7 +305,9 @@ def _cleanup_lora_artifacts_if_remote(lora_item: Any) -> None:
         logger.warning(f"LoRA cleanup failed: {e}")
 
 
-def _ensure_lora_registered_in_manifests(source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _ensure_lora_registered_in_manifests(
+    source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Ensure that a LoRA entry for `source` exists in all engine manifests.
 
@@ -328,12 +332,16 @@ def _ensure_lora_registered_in_manifests(source: str, manifest_id: Optional[str]
         spec = doc.setdefault("spec", {})
         loras = spec.setdefault("loras", [])
         if not isinstance(loras, list):
-            logger.warning(f"spec.loras is not a list in manifest {manifest_id}; leaving unchanged")
+            logger.warning(
+                f"spec.loras is not a list in manifest {manifest_id}; leaving unchanged"
+            )
             return
         # Skip if already registered in this manifest
         already_present = False
         for entry in loras:
-            if isinstance(entry, dict) and (entry.get("source") == source or entry.get("remote_source") == source):
+            if isinstance(entry, dict) and (
+                entry.get("source") == source or entry.get("remote_source") == source
+            ):
                 already_present = True
                 break
             if isinstance(entry, str) and entry == source:
@@ -354,20 +362,24 @@ def _ensure_lora_registered_in_manifests(source: str, manifest_id: Optional[str]
             new_entry["source"] = is_downloaded
         else:
             new_entry["remote_source"] = source
-        
+
         loras.append(new_entry)
         spec["loras"] = loras
         doc["spec"] = spec
         _save_manifest_yaml(manifest_path, doc)
-        logger.info(f"Registered new LoRA '{source}' in manifest {doc.get('full_path')}")
+        logger.info(
+            f"Registered new LoRA '{source}' in manifest {doc.get('full_path')}"
+        )
         return new_entry
-    except Exception as e: 
+    except Exception as e:
         traceback.print_exc()
         logger.warning(f"Failed to register LoRA '{source}' in manifests: {e}")
         return None
 
 
-def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _is_transformer_downloaded_for_manifest(
+    doc: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     """
     Return the transformer component dict for this manifest with `model_path`
     set to a concrete local string path if any transformer weights are already
@@ -404,6 +416,8 @@ def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dic
                         if isinstance(path_val, str):
                             candidate_paths.append(path_val)
 
+            has_local_model_path = False
+
             base_dir = get_components_path()
             for p in candidate_paths:
                 local = DownloadMixin.is_downloaded(str(p), base_dir)
@@ -411,14 +425,39 @@ def _is_transformer_downloaded_for_manifest(doc: Dict[str, Any]) -> Optional[Dic
                     # Return a shallow copy so callers can safely mutate model_path
                     comp_copy: Dict[str, Any] = dict(component)
                     comp_copy["model_path"] = local
-                    return comp_copy
+                    has_local_model_path = True
+
+        extra_model_paths = component.get("extra_model_paths", [])
+        local_extra_model_paths: List[str] = []
+        if isinstance(extra_model_paths, list):
+            for extra_model_path in extra_model_paths:
+                local = DownloadMixin.is_downloaded(
+                    str(extra_model_path.get("path")), base_dir
+                )
+                if local:
+                    local_extra_model_paths.append(local)
+
+        if extra_model_paths:
+            comp_copy["extra_model_paths"] = local_extra_model_paths
+
+        if len(local_extra_model_paths) != len(extra_model_paths):
+            return None
+
+        if has_local_model_path:
+            return comp_copy
+
         return None
+
     except Exception as e:
-        logger.warning(f"Failed to determine transformer download status for manifest: {e}")
+        logger.warning(
+            f"Failed to determine transformer download status for manifest: {e}"
+        )
         return None
 
 
-def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = None) -> Optional[bool]:
+def _mark_lora_verified_in_manifests(
+    source: str, manifest_id: Optional[str] = None
+) -> Optional[bool]:
     """
     Update manifest entries for `source` with a `verified` flag.
 
@@ -442,14 +481,22 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
             return None
         # Only attempt verification if the manifest's transformer is present locally
         transformer_component = _is_transformer_downloaded_for_manifest(doc)
-        logger.info(f"Transformer component for validation before engine creation: {transformer_component}")
+        logger.info(
+            f"Transformer component for validation before engine creation: {transformer_component}"
+        )
         if not transformer_component:
             return None
         # Build engine once per manifest for validation
         try:
-            engine = UniversalEngine(yaml_path=str(manifest_path), should_download=False, auto_apply_loras=False).engine
+            engine = UniversalEngine(
+                yaml_path=str(manifest_path),
+                should_download=False,
+                auto_apply_loras=False,
+            ).engine
         except Exception as e:
-            logger.warning(f"Failed to create engine for manifest during LoRA validation: {e}")
+            logger.warning(
+                f"Failed to create engine for manifest during LoRA validation: {e}"
+            )
             return None
         updated = False
         any_verified = False
@@ -468,14 +515,23 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
             # Validate this LoRA against the transformer
             is_valid = False
             try:
-                is_valid = bool(engine.validate_lora_path(entry_source, transformer_component))
+                logger.info(
+                    f"Validating LoRA '{entry_source}' against transformer component: {transformer_component}"
+                )
+                is_valid = bool(
+                    engine.validate_lora_path(entry_source, transformer_component)
+                )
             except Exception as ve:
                 logger.error(traceback.format_exc())
-                logger.warning(f"LoRA validation failed for '{entry_source}' in manifest {manifest_path}: {ve}")
+                logger.warning(
+                    f"LoRA validation failed for '{entry_source}' in manifest {manifest_path}: {ve}"
+                )
                 is_valid = False
             if not is_valid:
                 # Drop invalid LoRAs from this manifest entirely
-                logger.warning(f"Removing invalid LoRA '{entry_source}' from manifest {manifest_path}")
+                logger.warning(
+                    f"Removing invalid LoRA '{entry_source}' from manifest {manifest_path}"
+                )
                 updated = True
                 any_removed = True
                 # Do not append this entry to new_loras -> effectively remove it
@@ -495,7 +551,9 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
                 entry.setdefault("name", name)
                 entry.setdefault("label", name)
                 entry["verified"] = True
-                entry["source"] = DownloadMixin.is_downloaded(entry_source, get_lora_path()) or entry.get("source")
+                entry["source"] = DownloadMixin.is_downloaded(
+                    entry_source, get_lora_path()
+                ) or entry.get("source")
             new_loras.append(entry)
             logger.info(f"New LoRA entry: {entry}")
             logger.info(f"New LoRA entries: {new_loras}")
@@ -506,16 +564,21 @@ def _mark_lora_verified_in_manifests(source: str, manifest_id: Optional[str] = N
         doc["spec"] = spec
         _save_manifest_yaml(manifest_path, doc)
         if any_verified:
-            logger.info(f"Updated LoRA '{source}' verification state in manifest {manifest_path.name}")
+            logger.info(
+                f"Updated LoRA '{source}' verification state in manifest {manifest_path.name}"
+            )
             return True
         if any_removed:
-            logger.info(f"Removed invalid LoRA '{source}' from manifest {manifest_path.name}")
+            logger.info(
+                f"Removed invalid LoRA '{source}' from manifest {manifest_path.name}"
+            )
             return False
         return None
     except Exception as e:
         traceback.print_exc()
         logger.warning(f"Failed to update LoRA verification state for '{source}': {e}")
         return None
+
 
 @ray.remote(num_cpus=0.1)
 def download_unified(
@@ -529,13 +592,13 @@ def download_unified(
 ) -> Dict[str, Any]:
     """
     Unified downloader for components, LoRAs, and preprocessors.
-    
+
     Behavior:
     - If item_type == "preprocessor" and source is a known preprocessor id, we initialize it via `.from_pretrained()`
       and mark it as downloaded, reporting progress over websocket.
     - Otherwise, we use DownloadMixin to download one or multiple paths directly into the appropriate default folder
       based on item_type (component, lora, preprocessor) or an explicit save_path override.
-    
+
     Args:
         item_type: One of {"component", "lora", "preprocessor"}.
         source: A preprocessor id (string) OR a path/url/hf-repo (string) OR a list of such strings.
@@ -546,8 +609,15 @@ def download_unified(
         lora_name: Optional name to use for the LoRA.
     """
     # Helper to send progress
-    logger.info(f"Downloading {item_type} {source} for job {job_id} with manifest {manifest_id} and lora name {lora_name}")
-    def send_progress(progress: Optional[float], message: str, metadata: Optional[Dict[str, Any]] = None):
+    logger.info(
+        f"Downloading {item_type} {source} for job {job_id} with manifest {manifest_id} and lora name {lora_name}"
+    )
+
+    def send_progress(
+        progress: Optional[float],
+        message: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
             if progress is not None:
@@ -556,12 +626,14 @@ def download_unified(
                 logger.info(f"[{job_id}] {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
-    
+
     try:
         norm_type = (item_type or "").strip().lower()
         if norm_type not in {"component", "lora", "preprocessor"}:
-            raise ValueError(f"Unknown item_type '{item_type}'. Expected one of: component, lora, preprocessor.")
-        
+            raise ValueError(
+                f"Unknown item_type '{item_type}'. Expected one of: component, lora, preprocessor."
+            )
+
         # Determine default directory if not explicitly provided
         base_save_dir = save_path
         if base_save_dir is None:
@@ -572,36 +644,40 @@ def download_unified(
             else:
                 base_save_dir = get_preprocessor_path()
         os.makedirs(base_save_dir, exist_ok=True)
-        
+
         # Case 1: Preprocessor-id based download and initialization
         if norm_type == "preprocessor" and isinstance(source, str):
             try:
                 preprocessor_info = get_preprocessor_info(source)
 
                 # Force CPU in worker to avoid MPS/CUDA fork issues
-                os.environ['CUDA_VISIBLE_DEVICES'] = ''
-                os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-                if hasattr(torch, 'set_default_device'):
-                    torch.set_default_device('cpu')
-                
+                os.environ["CUDA_VISIBLE_DEVICES"] = ""
+                os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+                if hasattr(torch, "set_default_device"):
+                    torch.set_default_device("cpu")
+
                 send_progress(0.0, f"Starting download of preprocessor '{source}'")
                 send_progress(0.1, "Loading preprocessor module")
-                
+
                 module = importlib.import_module(preprocessor_info["module"])
                 preprocessor_class = getattr(module, preprocessor_info["class"])
-                
+
                 # Wire download progress into util
                 from src.preprocess.download_tracker import DownloadProgressTracker
                 from src.preprocess import util as util_module
-                tracker = DownloadProgressTracker(job_id, lambda p, m, md=None: send_progress(p, m, md))
+
+                tracker = DownloadProgressTracker(
+                    job_id, lambda p, m, md=None: send_progress(p, m, md)
+                )
                 util_module.DOWNLOAD_PROGRESS_CALLBACK = tracker.update_progress
                 try:
                     preprocessor_class.from_pretrained()
                     from src.preprocess.base_preprocessor import BasePreprocessor
+
                     BasePreprocessor._mark_as_downloaded(source)
                 finally:
                     util_module.DOWNLOAD_PROGRESS_CALLBACK = None
-                
+
                 send_progress(1.0, "Download complete")
                 send_progress(1.0, "Complete", {"status": "complete"})
                 return {
@@ -613,12 +689,15 @@ def download_unified(
                 }
             except Exception as maybe_not_preproc:
                 # Not a registered preprocessor id; fall through to generic downloader
-                logger.info(f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}")
+                logger.info(
+                    f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}"
+                )
                 # continue to generic path-based downloading below
-        
+
         elif norm_type == "lora" and isinstance(source, str):
             try:
                 from src.preprocess.download_tracker import DownloadProgressTracker
+
                 lora_manager = LoraManager()
 
                 # 1) Start the actual download using the LoRA manager with progress tracking
@@ -650,9 +729,11 @@ def download_unified(
                                 or metadata.get("bytes_total")
                                 or metadata.get("total_bytes")
                             )
-                        if isinstance(downloaded, (int, float)) and isinstance(
-                            total, (int, float)
-                        ) and total > 0:
+                        if (
+                            isinstance(downloaded, (int, float))
+                            and isinstance(total, (int, float))
+                            and total > 0
+                        ):
                             frac = max(0.0, min(1.0, float(downloaded) / float(total)))
                         elif p is not None:
                             frac = max(0.0, min(1.0, float(p)))
@@ -669,13 +750,18 @@ def download_unified(
                     scaled = 0.75 * frac
                     send_progress(scaled, message, metadata)
 
-                tracker = DownloadProgressTracker(job_id, _lora_download_progress_adapter)
+                tracker = DownloadProgressTracker(
+                    job_id, _lora_download_progress_adapter
+                )
                 lora_item = lora_manager.resolve(
                     source,
                     prefer_name=lora_name,
                     progress_callback=tracker.update_progress,
                 )
-                if not getattr(lora_item, "local_paths", None) or len(lora_item.local_paths) == 0:
+                if (
+                    not getattr(lora_item, "local_paths", None)
+                    or len(lora_item.local_paths) == 0
+                ):
                     # Resolved but no actual files -> treat as failure and (best-effort) clean up any manifest traces
                     logger.error(
                         f"No LoRA files were found for source '{source}'. "
@@ -703,17 +789,27 @@ def download_unified(
                 # 2) Only after a successful download do we register/update the LoRA in the manifest.
                 source = lora_item.local_paths[0]
                 try:
-                    entry = _ensure_lora_registered_in_manifests(source, manifest_id, lora_name)
-                    logger.info(f"Registered LoRA '{source}' in manifests after download: {entry}")
+                    entry = _ensure_lora_registered_in_manifests(
+                        source, manifest_id, lora_name
+                    )
+                    logger.info(
+                        f"Registered LoRA '{source}' in manifests after download: {entry}"
+                    )
                 except Exception as register_err:
                     traceback.print_exc()
-                    logger.warning(f"Failed to register LoRA '{source}' in manifest after download: {register_err}")
+                    logger.warning(
+                        f"Failed to register LoRA '{source}' in manifest after download: {register_err}"
+                    )
                 # Explicitly mark the end of the download phase at 75%
                 try:
                     send_progress(
                         0.75,
                         "LoRA download complete",
-                        {"status": "processing", "bucket": norm_type, "stage": "lora_download"},
+                        {
+                            "status": "processing",
+                            "bucket": norm_type,
+                            "stage": "lora_download",
+                        },
                     )
                 except Exception:
                     pass
@@ -723,7 +819,11 @@ def download_unified(
                     send_progress(
                         0.80,
                         "Verifying LoRA",
-                        {"status": "processing", "bucket": norm_type, "stage": "lora_verification"},
+                        {
+                            "status": "processing",
+                            "bucket": norm_type,
+                            "stage": "lora_verification",
+                        },
                     )
                 except Exception:
                     pass
@@ -760,7 +860,9 @@ def download_unified(
                             "status": "complete",
                             "bucket": norm_type,
                             "stage": "lora_verification",
-                            "verified": bool(verified) if verified is not None else False,
+                            "verified": (
+                                bool(verified) if verified is not None else False
+                            ),
                         },
                     )
                 except Exception:
@@ -801,7 +903,7 @@ def download_unified(
                     "id": source,
                     "message": f"LoRA download failed; removed from manifest: {maybe_not_lora}",
                 }
-        
+
         # Case 2: Generic path/url/hf download(s) using DownloadMixin
         # Normalize sources to a list
         paths: List[str] = []
@@ -810,8 +912,10 @@ def download_unified(
         elif isinstance(source, str):
             paths = [source]
         else:
-            raise ValueError("source must be a string or list of strings representing paths/urls/hf repos.")
-        
+            raise ValueError(
+                "source must be a string or list of strings representing paths/urls/hf repos."
+            )
+
         @ray.remote
         class ProgressAggregator:
             def __init__(self, total_items: int):
@@ -822,7 +926,7 @@ def download_unified(
                 self.bytes_downloaded: Dict[int, int] = {}
                 self.bytes_total: Dict[int, int] = {}
                 self.last_overall: float = 0.0
-            
+
             def update(
                 self,
                 index: int,
@@ -863,12 +967,18 @@ def download_unified(
                             if d > t:
                                 d = t
                             done_bytes += d
-                        overall_progress = max(0.0, min(1.0, done_bytes / float(total_bytes)))
+                        overall_progress = max(
+                            0.0, min(1.0, done_bytes / float(total_bytes))
+                        )
                     else:
                         # Fallback: average of known item fractions
-                        overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+                        overall_progress = sum(
+                            self.per_index_progress.values()
+                        ) / float(self.total_items)
                 except Exception:
-                    overall_progress = sum(self.per_index_progress.values()) / float(self.total_items)
+                    overall_progress = sum(self.per_index_progress.values()) / float(
+                        self.total_items
+                    )
 
                 # Clamp to [0, 1]; allow progress to move down slightly when a new file
                 # in a multi-file/folder download starts (so we reflect aggregate progress
@@ -892,28 +1002,51 @@ def download_unified(
                 msg = message or f"Downloading {label}"
                 try:
                     # Report aggregated overall progress to the websocket, not per-file fraction
-                    return ray.get(ws_bridge.send_update.remote(job_id, overall_progress, msg, meta))
+                    return ray.get(
+                        ws_bridge.send_update.remote(
+                            job_id, overall_progress, msg, meta
+                        )
+                    )
                 except Exception:
                     return False
-            
+
             def complete(self, index: int, label: str):
                 return self.update(index, 1.0, label, message=f"Completed {label}")
-            
+
             def error(self, index: int, label: str, error_msg: str):
                 try:
-                    return ray.get(ws_bridge.send_update.remote(job_id, self.last_overall, error_msg, {"label": label, "status": "error", "bucket": norm_type}))
+                    return ray.get(
+                        ws_bridge.send_update.remote(
+                            job_id,
+                            self.last_overall,
+                            error_msg,
+                            {"label": label, "status": "error", "bucket": norm_type},
+                        )
+                    )
                 except Exception:
                     return False
-        
+
         @ray.remote
-        def download_single(path: str, dest_dir: str, index: int, aggregator) -> Dict[str, Any]:
+        def download_single(
+            path: str, dest_dir: str, index: int, aggregator
+        ) -> Dict[str, Any]:
             label = os.path.basename(path.rstrip("/")) or path
             try:
-                def _cb(downloaded: int, total: Optional[int], filename: Optional[str] = None):
+
+                def _cb(
+                    downloaded: int,
+                    total: Optional[int],
+                    filename: Optional[str] = None,
+                ):
                     frac = 0.0
                     if total and total > 0:
                         frac = max(0.0, min(1.0, downloaded / total))
-                    ray.get(aggregator.update.remote(index, frac, label, downloaded, total, filename))
+                    ray.get(
+                        aggregator.update.remote(
+                            index, frac, label, downloaded, total, filename
+                        )
+                    )
+
                 mixin = DownloadMixin()
                 os.makedirs(dest_dir, exist_ok=True)
                 mixin.logger.info(f"[{job_id}] Downloading {path} into {dest_dir}")
@@ -923,13 +1056,23 @@ def download_unified(
             except Exception as e:
                 ray.get(aggregator.error.remote(index, label, str(e)))
                 return {"path": path, "status": "error", "error": str(e)}
-        
+
         total = len(paths)
         aggregator = ProgressAggregator.remote(total)
-        refs = [download_single.remote(p, base_save_dir, i, aggregator) for i, p in enumerate(paths, start=1)]
+        refs = [
+            download_single.remote(p, base_save_dir, i, aggregator)
+            for i, p in enumerate(paths, start=1)
+        ]
         results = ray.get(refs)
         try:
-            ray.get(ws_bridge.send_update.remote(job_id, 1.0, "All downloads complete", {"status": "complete", "bucket": norm_type}))
+            ray.get(
+                ws_bridge.send_update.remote(
+                    job_id,
+                    1.0,
+                    "All downloads complete",
+                    {"status": "complete", "bucket": norm_type},
+                )
+            )
         except Exception:
             pass
         has_error = any(r.get("status") == "error" for r in results)
@@ -968,7 +1111,7 @@ def _execute_preprocessor(
         kwargs,
         supports_alpha_channel=preprocessor_info.get("supports_alpha_channel", False),
     )
-    
+
     media_type = cache.type
     send_progress(0.05, "Checking cache")
 
@@ -1067,7 +1210,7 @@ def run_preprocessor(
     ws_bridge,
     start_frame: Optional[int] = None,
     end_frame: Optional[int] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Run a preprocessor on input media
@@ -1101,7 +1244,10 @@ def run_engine_from_manifest(
     selected_components: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Execute a manifest YAML with provided inputs and persist result to disk."""
-    def send_progress(progress: float | None, message: str, metadata: Optional[Dict] = None):
+
+    def send_progress(
+        progress: float | None, message: str, metadata: Optional[Dict] = None
+    ):
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
             if progress is not None:
@@ -1125,7 +1271,7 @@ def run_engine_from_manifest(
         from src.utils.defaults import DEFAULT_CACHE_PATH
         import numpy as np
         from PIL import Image
-        
+
         logger.info(manifest_path, "manifest_path")
 
         # Normalize manifest (handles v1 -> engine shape)
@@ -1133,9 +1279,20 @@ def run_engine_from_manifest(
         config = validate_and_normalize(raw)
         inputs = inputs or {}
         selected_components = selected_components or {}
-        
+
+        # Extract any audio inputs that should be persisted alongside the final video
+        spec_block = (raw.get("spec") or {}) if isinstance(raw, dict) else {}
+        audio_inputs_to_save = spec_block.get("audio_inputs_to_save") or []
+        if not isinstance(audio_inputs_to_save, list):
+            audio_inputs_to_save = []
+        audio_inputs_to_save = [
+            str(x) for x in audio_inputs_to_save if isinstance(x, (str, int))
+        ]
+        # Resolved file system paths for those audio inputs (filled after preprocessing)
+        audio_input_paths: List[str] = []
+
         def _extract_ui_inputs() -> List[Dict[str, Any]]:
-            spec_ui = ((raw.get("spec") or {}).get("ui") or {})
+            spec_ui = (raw.get("spec") or {}).get("ui") or {}
             raw_inputs = spec_ui.get("inputs")
             if isinstance(raw_inputs, list):
                 return raw_inputs
@@ -1152,15 +1309,15 @@ def run_engine_from_manifest(
             preproc_ref = item.get("preprocessor_ref")
             if input_id and preproc_ref:
                 preprocessor_map[input_id] = preproc_ref
-        
+
         # Resolve engine settings
         engine_type = config.get("engine") or (config.get("spec") or {}).get("engine")
         model_type = config.get("type") or (config.get("spec") or {}).get("model_type")
         if isinstance(model_type, list):
             model_type = model_type[0] if model_type else None
-            
+
         attention_type = selected_components.pop("attention", {}).get("name", None)
-        
+
         input_kwargs = {
             "engine_type": engine_type,
             "yaml_path": manifest_path,
@@ -1169,20 +1326,15 @@ def run_engine_from_manifest(
             **(config.get("engine_kwargs", {}) or {}),
         }
 
-        
         if attention_type:
             input_kwargs["attention_type"] = attention_type
-            
-        
-        engine = UniversalEngine(**input_kwargs)
 
+        engine = UniversalEngine(**input_kwargs)
 
         def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:
             if isinstance(value, dict):
                 path_candidate = (
-                    value.get("input_path")
-                    or value.get("src")
-                    or value.get("path")
+                    value.get("input_path") or value.get("src") or value.get("path")
                 )
                 apply_flag = value.get("apply_preprocessor")
                 path_str = path_candidate if isinstance(path_candidate, str) else None
@@ -1195,7 +1347,7 @@ def run_engine_from_manifest(
         prepared_inputs: Dict[str, Any] = {}
         preprocessor_jobs: List[Dict[str, Any]] = []
         for input_key, raw_value in inputs.items():
-            if input_key in preprocessor_map: 
+            if input_key in preprocessor_map:
                 media_path, apply_flag = _coerce_media_input(raw_value)
                 if media_path:
                     prepared_inputs[input_key] = media_path
@@ -1220,7 +1372,98 @@ def run_engine_from_manifest(
         job_dir.mkdir(parents=True, exist_ok=True)
 
         # Unified saver usable for previews and final outputs
-        def save_output(output_obj, filename_prefix: str = "result", final: bool = False):
+        def _mux_audio_into_video(
+            video_path: str, audio_paths: List[str]
+        ) -> Optional[str]:
+            """
+            Best-effort helper to mux one or more audio files into a video using ffmpeg.
+            Returns the new video path on success, or None on failure.
+            """
+            import subprocess
+            import os
+
+            try:
+                valid_audio_paths = [
+                    p for p in audio_paths if isinstance(p, str) and os.path.isfile(p)
+                ]
+                if not valid_audio_paths:
+                    return None
+
+                base = Path(video_path)
+                # We first mux into a temporary file, then overwrite the original
+                # video so that the final saved filename remains unchanged.
+                temp_out_path = base.with_name(f"{base.stem}_with_audio{base.suffix}")
+
+                cmd: List[str] = ["ffmpeg", "-y", "-i", video_path]
+                for ap in valid_audio_paths:
+                    cmd.extend(["-i", ap])
+
+                if len(valid_audio_paths) == 1:
+                    # Single audio track: simple stream copy, similar to test_humo.py
+                    cmd.extend(
+                        [
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "1:a:0?",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-shortest",
+                            str(temp_out_path),
+                        ]
+                    )
+                else:
+                    # Multiple audio inputs: mix them down into a single track with amix.
+                    # Audio inputs start from index 1 (0 is the video).
+                    inputs_count = len(valid_audio_paths)
+                    filter_inputs = "".join(f"[{i+1}:a]" for i in range(inputs_count))
+                    filter_spec = f"{filter_inputs}amix=inputs={inputs_count}:dropout_transition=0[aout]"
+                    cmd.extend(
+                        [
+                            "-filter_complex",
+                            filter_spec,
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "[aout]",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-shortest",
+                            "-movflags",
+                            "+faststart",
+                            str(temp_out_path),
+                        ]
+                    )
+
+                proc = subprocess.run(cmd, capture_output=True)
+                if proc.returncode != 0 or not temp_out_path.is_file():
+                    logger.warning(
+                        f"ffmpeg audio mux failed with code {proc.returncode}"
+                    )
+                    return None
+                try:
+                    # Overwrite the original file so callers keep the same filename.
+                    temp_out_path.replace(base)
+                except Exception as move_err:
+                    logger.warning(
+                        f"ffmpeg audio mux succeeded but failed to move into place: {move_err}"
+                    )
+                    return None
+                return str(base)
+            except Exception as e:
+                logger.warning(f"Failed to mux audio into video: {e}")
+                return None
+
+        def save_output(
+            output_obj,
+            filename_prefix: str = "result",
+            final: bool = False,
+            audio_inputs: Optional[List[str]] = None,
+        ):
             result_path: Optional[str] = None
             media_type: Optional[str] = None
             try:
@@ -1236,25 +1479,43 @@ def run_engine_from_manifest(
                     media_type = "image"
                 # Sequence of frames
                 elif isinstance(output_obj, list) and len(output_obj) > 0:
-                    fps = (
-                        config.get("spec", {}).get("fps")
-                        or (config or {}).get("defaults", {}).get("run", {}).get("fps")
-                    )
+                    fps = config.get("fps", None)
                     if not fps:
                         try:
                             impl = getattr(engine.engine, "implementation_engine", None)
                             if impl is not None:
                                 sig = inspect.signature(impl.run)
                                 param = sig.parameters.get("fps")
-                                if param is not None and param.default is not inspect._empty:
+                                if (
+                                    param is not None
+                                    and param.default is not inspect._empty
+                                ):
                                     fps = param.default
                         except Exception:
                             pass
                     fps = fps or 16
+                    logger.info(f"Saving video to {result_path} with fps {fps}")
                     result_path = str(job_dir / f"{filename_prefix}.mp4")
-                    export_to_video(output_obj, result_path, fps=int(fps), quality=8.0 if final else 5.0)
+                    export_to_video(
+                        output_obj,
+                        result_path,
+                        fps=int(fps),
+                        quality=8.0 if final else 5.0,
+                    )
                     media_type = "video"
-                
+
+                    # If this is the final video and we have audio inputs to save, try to mux them in.
+                    if final and media_type == "video" and result_path and audio_inputs:
+                        try:
+                            muxed = _mux_audio_into_video(result_path, audio_inputs)
+                            if muxed:
+                                result_path = muxed
+                        except Exception as mux_err:
+                            logger.warning(
+                                "Audio muxing failed; returning video-only output. "
+                                f"Error: {mux_err}"
+                            )
+
                 else:
                     # Fallback best-effort serialization
                     try:
@@ -1274,8 +1535,96 @@ def run_engine_from_manifest(
                 raise
             return result_path, media_type
 
+        def save_ovi_output(
+            video_numpy: np.ndarray,
+            audio_numpy: Optional[np.ndarray] = None,
+            filename_prefix: str = "result",
+            sample_rate: int = 16000,
+            fps: int = 24,
+        ) -> Tuple[str, str]:
+            """
+            Combine a sequence of video frames with an optional audio track and save as an MP4.
+
+            Args:
+                output_path (str): Path to the output MP4 file.
+                video_numpy (np.ndarray): Numpy array of frames. Shape (C, F, H, W).
+                                          Values can be in range [-1, 1] or [0, 255].
+                audio_numpy (Optional[np.ndarray]): 1D or 2D numpy array of audio samples, range [-1, 1].
+                sample_rate (int): Sample rate of the audio in Hz. Defaults to 16000.
+                fps (int): Frames per second for the video. Defaults to 24.
+
+            Returns:
+                str: Path to the saved MP4 file.
+            """
+            from moviepy.editor import ImageSequenceClip, AudioFileClip
+            import soundfile as wavfile
+            import tempfile
+
+            # Validate inputs
+            assert isinstance(
+                video_numpy, np.ndarray
+            ), "video_numpy must be a numpy array"
+            assert video_numpy.ndim == 4, "video_numpy must have shape (C, F, H, W)"
+            assert video_numpy.shape[0] in {
+                1,
+                3,
+            }, "video_numpy must have 1 or 3 channels"
+
+            if audio_numpy is not None:
+                assert isinstance(
+                    audio_numpy, np.ndarray
+                ), "audio_numpy must be a numpy array"
+                assert (
+                    np.abs(audio_numpy).max() <= 1.0
+                ), "audio_numpy values must be in range [-1, 1]"
+
+            # Reorder dimensions: (C, F, H, W) → (F, H, W, C)
+            video_numpy = video_numpy.transpose(1, 2, 3, 0)
+
+            # Normalize frames if values are in [-1, 1]
+            if video_numpy.max() <= 1.0:
+                video_numpy = np.clip(video_numpy, -1, 1)
+                video_numpy = ((video_numpy + 1) / 2 * 255).astype(np.uint8)
+            else:
+                video_numpy = video_numpy.astype(np.uint8)
+
+            # Convert numpy array to a list of frames
+            frames = list(video_numpy)
+
+            # Create video clip
+            clip = ImageSequenceClip(frames, fps=fps)
+
+            # Add audio if provided
+            if audio_numpy is not None:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", mode="wb", delete=False
+                ) as temp_audio_file:
+                    wavfile.write(
+                        temp_audio_file.name,
+                        (audio_numpy * 32767).astype(np.int16),
+                        sample_rate,
+                    )
+                    audio_clip = AudioFileClip(temp_audio_file.name)
+                    final_clip = clip.set_audio(audio_clip)
+            else:
+                final_clip = clip
+
+            # Write final video to disk
+            output_path = str(job_dir / f"{filename_prefix}.mp4")
+            final_clip.write_videofile(
+                output_path,
+                codec="libx264",
+                audio_codec="aac",
+                fps=fps,
+                verbose=False,
+                logger=None,
+            )
+            final_clip.close()
+
+            return output_path, "video"
+
         total_steps = max(1, len(preprocessor_jobs) + 1)
-        
+
         logger.info(f"Total steps: {total_steps}")
         logger.info(f"Preprocessor jobs: {preprocessor_jobs}")
 
@@ -1283,7 +1632,11 @@ def run_engine_from_manifest(
             stage_start = idx / total_steps
             stage_span = 1.0 / total_steps
 
-            def stage_send_progress(local_progress: Optional[float], message: str, metadata: Optional[Dict] = None):
+            def stage_send_progress(
+                local_progress: Optional[float],
+                message: str,
+                metadata: Optional[Dict] = None,
+            ):
                 merged_meta = dict(metadata or {})
                 merged_meta.setdefault("stage", "preprocessor")
                 merged_meta.setdefault("input_id", job["input_id"])
@@ -1314,54 +1667,150 @@ def run_engine_from_manifest(
             print(f"\n\n\n {result} \n\n\n")
             prepared_inputs[job["input_id"]] = result.get("result_path")
 
+        # Resolve concrete file paths for any audio inputs that should be saved with the final video
+        if audio_inputs_to_save:
+            for audio_key in audio_inputs_to_save:
+                try:
+                    key_str = str(audio_key)
+                    val = prepared_inputs.get(key_str)
+                    media_path, _ = (
+                        _coerce_media_input(val)
+                        if isinstance(val, dict)
+                        else (val, None)
+                    )
+                    if (
+                        isinstance(media_path, str)
+                        and media_path not in audio_input_paths
+                    ):
+                        audio_input_paths.append(media_path)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to resolve audio input '{audio_key}' for saving: {e}"
+                    )
+
         engine_stage_start = len(preprocessor_jobs) / total_steps
         engine_stage_span = 1.0 / total_steps
 
         # Render-on-step callback that writes previews
         step_counter = {"i": 0}
-        def render_on_step_callback(frames):
+
+        def render_on_step_callback(
+            frames,
+            is_result: bool = False,
+            audio_inputs: Optional[List[str]] = None,
+        ):
             try:
                 idx = step_counter["i"]
                 step_counter["i"] = idx + 1
                 # Persist preview to cache and notify over websocket with metadata only
-                result_path, media_type = save_output(frames, filename_prefix=f"preview_{idx:04d}")
-                logger.info(f"Preview saved to {result_path} with media type {media_type}")
+                result_path, media_type = save_output(
+                    frames,
+                    filename_prefix=f"preview_{idx:04d}" if not is_result else "result",
+                    final=is_result,
+                    audio_inputs=audio_inputs if is_result else None,
+                )
+                logger.info(
+                    f"Preview saved to {result_path} with media type {media_type}"
+                )
                 try:
                     # Send an update that does not overwrite progress (progress=None)
-                    logger.info(f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}")
-                    send_progress(None, f"Preview frame {idx}", {
-                        "status": "preview",
-                        "preview_path": result_path,
-                        "type": media_type,
-                        "index": idx,
-                    })
+                    logger.info(
+                        f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}"
+                    )
+                    send_progress(
+                        1.0 if is_result else None,
+                        f"Preview frame {idx}",
+                        {
+                            "status": "complete" if is_result else "preview",
+                            "preview_path": result_path,
+                            "type": media_type,
+                            "index": idx,
+                        },
+                    )
                 except Exception as se:
-                    logger.warning(f"Failed sending preview websocket update at step {idx}: {se}")
+                    logger.warning(
+                        f"Failed sending preview websocket update at step {idx}: {se}"
+                    )
+                return result_path, media_type
             except Exception as e:
                 logger.warning(f"Preview save failed at step {step_counter['i']}: {e}")
 
+        def render_on_step_callback_ovi(
+            output_obj: Tuple[np.ndarray, np.ndarray],
+            is_result: bool = False,
+        ):
+            idx = step_counter["i"]
+            step_counter["i"] = idx + 1
+            logger.info(
+                f"Saving OVI output at step {idx} with output object {output_obj[0].shape} and {output_obj[1].shape}"
+            )
+            result_path, media_type = save_ovi_output(
+                output_obj[0],
+                output_obj[1],
+                filename_prefix=f"preview_{idx:04d}" if not is_result else "result",
+            )
+            logger.info(f"Preview saved to {result_path} with media type {media_type}")
+            try:
+                logger.info(
+                    f"Sending preview websocket update at step {idx} with result path {result_path} and media type {media_type}"
+                )
+                send_progress(
+                    1.0 if is_result else None,
+                    f"Preview frame {idx}",
+                    {
+                        "status": "complete" if is_result else "preview",
+                        "preview_path": result_path,
+                        "type": media_type,
+                        "index": idx,
+                    },
+                )
+            except Exception as se:
+                logger.warning(
+                    f"Failed sending preview websocket update at step {idx}: {se}"
+                )
+            return result_path, media_type
+
         # Progress callback forwarded into the engine
-        def progress_callback(progress: float, message: str, metadata: Optional[Dict] = None):
+        def progress_callback(
+            progress: float, message: str, metadata: Optional[Dict] = None
+        ):
             logger.info(f"Progress callback: {progress}, {message}, {metadata}")
             if progress is None:
                 send_progress(None, message, metadata)
                 return
             bounded = max(0.0, min(1.0, progress))
-            send_progress(engine_stage_start + bounded * engine_stage_span, message, metadata)
+            send_progress(
+                engine_stage_start + bounded * engine_stage_span, message, metadata
+            )
 
         # Persist a snapshot of the invocation into the structured `runs` directory
+        render_func = (
+            render_on_step_callback
+            if model_type.lower() != "ovi"
+            else render_on_step_callback_ovi
+        )
         _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),
             progress_callback=progress_callback,
             render_on_step=True,
-            render_on_step_callback=render_on_step_callback,
+            render_on_step_callback=render_func,
         )
-        
-        # Persist final result using the unified saver
-        result_path, media_type = save_output(output[0], filename_prefix="result", final=True)
 
+        # OVI models return a tuple of (video_tensor, audio_numpy). Use a dedicated
+        # saver so we correctly embed the generated audio into the MP4 output.
+        if isinstance(model_type, str) and model_type.lower() == "ovi":
+            result_path, media_type = render_func(
+                output,
+                is_result=True,
+            )
+        else:
+            result_path, media_type = render_func(
+                output[0],
+                is_result=True,
+                audio_inputs=audio_input_paths or None,
+            )
         send_progress(1.0, "Complete", {"status": "complete"})
         return {"status": "complete", "result_path": result_path, "type": media_type}
 
@@ -1408,7 +1857,10 @@ def run_frame_interpolation(
     Returns:
         Dict with status, result_path and type
     """
-    def send_update(progress: float | None, message: str, metadata: Optional[Dict[str, Any]] = None):
+
+    def send_update(
+        progress: float | None, message: str, metadata: Optional[Dict[str, Any]] = None
+    ):
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
         except Exception:
@@ -1416,8 +1868,10 @@ def run_frame_interpolation(
 
     from pathlib import Path
     from src.utils.defaults import DEFAULT_CACHE_PATH
+
     try:
         from src.postprocess.rife.rife import RifePostprocessor
+
         send_update(0.05, "Initializing RIFE")
         pp = RifePostprocessor(target_fps=target_fps, exp=exp, scale=scale)
 
@@ -1440,7 +1894,7 @@ def run_frame_interpolation(
             scale=scale,
             progress_callback=frame_progress,
         )
-        
+
         # Save output video (video-only first), then mux original audio if present
         import subprocess
         import shutil
@@ -1463,14 +1917,21 @@ def run_frame_interpolation(
             ffmpeg_cmd = [
                 "ffmpeg",
                 "-y",
-                "-i", video_only_path,
-                "-i", input_path,
-                "-map", "0:v:0",
-                "-map", "1:a:0?",
-                "-c:v", "copy",
-                "-c:a", "copy",
+                "-i",
+                video_only_path,
+                "-i",
+                input_path,
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0?",
+                "-c:v",
+                "copy",
+                "-c:a",
+                "copy",
                 "-shortest",
-                "-movflags", "+faststart",
+                "-movflags",
+                "+faststart",
                 final_out_path,
             ]
             proc = subprocess.run(ffmpeg_cmd, capture_output=True)
@@ -1486,7 +1947,11 @@ def run_frame_interpolation(
                 # If move also fails, keep path consistent
                 final_out_path = video_only_path
 
-        send_update(1.0, "Complete", {"status": "complete", "result_path": final_out_path, "type": "video"})
+        send_update(
+            1.0,
+            "Complete",
+            {"status": "complete", "result_path": final_out_path, "type": "video"},
+        )
         return {"status": "complete", "result_path": final_out_path, "type": "video"}
     except Exception as e:
         tb = traceback.format_exc()

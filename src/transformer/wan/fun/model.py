@@ -402,10 +402,10 @@ class WanFunTransformer3DModel(
         num_attention_heads: int = 40,
         attention_head_dim: int = 128,
         in_channels: int = 16,
-        in_dim:int=16,
-        out_dim:int=16,
-        dim:int=5120,
-        hidden_size:int=5120,
+        in_dim: int = 16,
+        out_dim: int = 16,
+        dim: int = 5120,
+        hidden_size: int = 5120,
         out_channels: int = 16,
         text_dim: int = 4096,
         freq_dim: int = 256,
@@ -515,8 +515,6 @@ class WanFunTransformer3DModel(
         enhance_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
 
-
-
         if enhance_kwargs is not None:
             enhance_weight = enhance_kwargs.get("enhance_weight", None)
             num_frames = enhance_kwargs.get("num_frames", None)
@@ -568,7 +566,7 @@ class WanFunTransformer3DModel(
             hidden_states = hidden_states + encoder_hidden_states_camera
 
         if encoder_hidden_states_full_ref is not None and hasattr(self, "ref_conv"):
-            
+
             encoder_hidden_states_full_ref = self.ref_conv(
                 encoder_hidden_states_full_ref
             )
@@ -576,14 +574,14 @@ class WanFunTransformer3DModel(
             encoder_hidden_states_full_ref = encoder_hidden_states_full_ref.flatten(
                 2
             ).transpose(1, 2)
-            
+
             seq_len += encoder_hidden_states_full_ref.shape[1]
-            
+
             # concat full ref features to hidden_states
             hidden_states = torch.cat(
                 [encoder_hidden_states_full_ref, hidden_states], dim=1
             )
-            
+
             if timestep.dim() != 1 and timestep.size(1) < seq_len:
                 pad_size = seq_len - timestep.size(1)
                 last_elements = timestep[:, -1].unsqueeze(1)
@@ -595,17 +593,17 @@ class WanFunTransformer3DModel(
             encoder_hidden_states_subject_ref = self.patch_embedding(
                 encoder_hidden_states_subject_ref
             )
-            
+
             encoder_hidden_states_subject_ref = (
                 encoder_hidden_states_subject_ref.flatten(2).transpose(1, 2)
             )
-            
+
             seq_len += encoder_hidden_states_subject_ref.shape[1]
             # concat subject ref features to hidden_states
             hidden_states = torch.cat(
                 [hidden_states, encoder_hidden_states_subject_ref], dim=1
             )
-            
+
             if timestep.dim() != 1 and timestep.size(1) < seq_len:
                 pad_size = seq_len - timestep.size(1)
                 last_elements = timestep[:, -1].unsqueeze(1)
@@ -617,7 +615,7 @@ class WanFunTransformer3DModel(
                 timestep, encoder_hidden_states, encoder_hidden_states_image
             )
         )
-        
+
         rotary_emb = self.rope(
             torch.zeros(
                 hidden_states_shape,
@@ -663,12 +661,14 @@ class WanFunTransformer3DModel(
             self.norm_out(hidden_states.float()) * (1 + scale) + shift
         ).type_as(hidden_states)
         hidden_states = self.proj_out(hidden_states)
-        
+
         if self.add_ref_conv and encoder_hidden_states_full_ref is not None:
-            hidden_states = hidden_states[:, encoder_hidden_states_full_ref.shape[1]:]
-            
+            hidden_states = hidden_states[:, encoder_hidden_states_full_ref.shape[1] :]
+
         if encoder_hidden_states_subject_ref is not None:
-            hidden_states = hidden_states[:, :-encoder_hidden_states_subject_ref[0].shape[1]]
+            hidden_states = hidden_states[
+                :, : -encoder_hidden_states_subject_ref[0].shape[1]
+            ]
 
         hidden_states = hidden_states.reshape(
             batch_size,
@@ -680,7 +680,7 @@ class WanFunTransformer3DModel(
             p_w,
             -1,
         )
-        
+
         hidden_states = hidden_states.permute(0, 7, 1, 4, 2, 5, 3, 6)
         output = hidden_states.flatten(6, 7).flatten(4, 5).flatten(2, 3)
 

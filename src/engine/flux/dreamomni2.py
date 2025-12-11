@@ -28,9 +28,10 @@ PREFERRED_KONTEXT_RESOLUTIONS = [
     (1568, 672),
 ]
 
+
 class DreamOmni2Engine(FluxShared):
     """DreamOmni engine implementation"""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_channels_latents = (
@@ -73,13 +74,13 @@ class DreamOmni2Engine(FluxShared):
         max_area: int = 1024**2,
         **kwargs,
     ):
-        
+
         safe_emit_progress(progress_callback, 0.0, "Starting DreamOmni2 pipeline")
         if task not in ["generation", "editing"]:
             raise ValueError(f"Invalid task: {task}")
-    
+
         images = image_list or None
-        
+
         height = height or self.default_sample_size * self.vae_scale_factor
         width = width or self.default_sample_size * self.vae_scale_factor
 
@@ -91,20 +92,25 @@ class DreamOmni2Engine(FluxShared):
         multiple_of = self.vae_scale_factor * 2
         width = width // multiple_of * multiple_of
         height = height // multiple_of * multiple_of
-        
-        safe_emit_progress(progress_callback, 0.05, "Preparing prompt")
-        
-        prompt = self._prepare_prompt(prompt, images, task, offload, progress_callback)
-        
 
-       
+        safe_emit_progress(progress_callback, 0.05, "Preparing prompt")
+
+        prompt = self._prepare_prompt(prompt, images, task, offload, progress_callback)
+
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-            
+
         safe_emit_progress(progress_callback, 0.10, "Encoding prompts")
-        pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
+        (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             prompt_2,
@@ -115,28 +121,35 @@ class DreamOmni2Engine(FluxShared):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        
+
         if offload:
             self._offload(self.text_encoder_2)
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
-        
+
         safe_emit_progress(progress_callback, 0.125, "Loading and preprocessing image")
         for idx, image in enumerate(images):
             images[idx] = self._load_image(image)
-            
-        if images is not None and not (isinstance(images[0], torch.Tensor) and images[0].size(1) == self.num_channels_latents):
-            tp_images=[]
+
+        if images is not None and not (
+            isinstance(images[0], torch.Tensor)
+            and images[0].size(1) == self.num_channels_latents
+        ):
+            tp_images = []
             for img in images:
                 image = img
-                image_height, image_width = self.image_processor.get_default_height_width(img)
+                image_height, image_width = (
+                    self.image_processor.get_default_height_width(img)
+                )
                 aspect_ratio = image_width / image_height
                 if _auto_resize:
                     image, image_width, image_height = self._resize_input(image)
-                image = self.image_processor.preprocess(image, image_height, image_width)
+                image = self.image_processor.preprocess(
+                    image, image_height, image_width
+                )
                 tp_images.append(image)
             images = tp_images
-        
+
         batch_size = prompt_embeds.shape[0]
 
         safe_emit_progress(progress_callback, 0.15, "Preparing latents")
@@ -150,9 +163,11 @@ class DreamOmni2Engine(FluxShared):
             device=self.device,
             generator=generator,
         )
-        
+
         if image_ids is not None:
-            latent_ids = torch.cat([latent_ids, image_ids], dim=0)  # dim 0 is sequence dimension
+            latent_ids = torch.cat(
+                [latent_ids, image_ids], dim=0
+            )  # dim 0 is sequence dimension
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -163,7 +178,7 @@ class DreamOmni2Engine(FluxShared):
             if sigmas is None
             else sigmas
         )
-        
+
         image_seq_len = latents.shape[1]
         safe_emit_progress(progress_callback, 0.20, "Configuring scheduler")
         mu = self.calculate_shift(
@@ -174,7 +189,6 @@ class DreamOmni2Engine(FluxShared):
             self.scheduler.config.get("max_shift", 1.15),
         )
 
-        
         safe_emit_progress(progress_callback, 0.25, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
@@ -190,21 +204,23 @@ class DreamOmni2Engine(FluxShared):
 
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
-            
-        
+
         lora_paths = self.config.get("loras", [])
         safe_emit_progress(progress_callback, 0.27, "Applying LoRAs")
         if task == "generation":
-            gen_lora_path = next((lora for lora in lora_paths if lora.get("name") == "gen"), None)
+            gen_lora_path = next(
+                (lora for lora in lora_paths if lora.get("name") == "gen"), None
+            )
             if gen_lora_path:
                 self.apply_lora(gen_lora_path.get("source"))
         elif task == "editing":
-            edit_lora_path = next((lora for lora in lora_paths if lora.get("name") == "edit"), None)
+            edit_lora_path = next(
+                (lora for lora in lora_paths if lora.get("name") == "edit"), None
+            )
             if edit_lora_path:
                 self.apply_lora(edit_lora_path.get("source"))
 
         self.to_device(self.transformer)
-        
 
         safe_emit_progress(progress_callback, 0.30, "Transformer ready")
 
@@ -216,12 +232,11 @@ class DreamOmni2Engine(FluxShared):
         else:
             guidance = None
 
-        
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
             negative_ip_adapter_image is None
             and negative_ip_adapter_image_embeds is None
         ):
-            
+
             negative_ip_adapter_image = np.zeros((width, height, 3), dtype=np.uint8)
             negative_ip_adapter_image = [
                 negative_ip_adapter_image
@@ -306,7 +321,6 @@ class DreamOmni2Engine(FluxShared):
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed DreamOmni2 pipeline")
         return image
-    
 
     def _get_latents(
         self,
@@ -341,14 +355,24 @@ class DreamOmni2Engine(FluxShared):
             for i, image in enumerate(images):
                 image = image.to(device=device, dtype=dtype)
                 if image.shape[1] != self.num_channels_latents:
-                    image_latents = self.vae_encode(image, sample_generator=generator, offload=offload)
+                    image_latents = self.vae_encode(
+                        image, sample_generator=generator, offload=offload
+                    )
                 else:
                     image_latents = image
-                if batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] == 0:
+                if (
+                    batch_size > image_latents.shape[0]
+                    and batch_size % image_latents.shape[0] == 0
+                ):
                     # expand init_latents for batch_size
                     additional_image_per_prompt = batch_size // image_latents.shape[0]
-                    image_latents = torch.cat([image_latents] * additional_image_per_prompt, dim=0)
-                elif batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] != 0:
+                    image_latents = torch.cat(
+                        [image_latents] * additional_image_per_prompt, dim=0
+                    )
+                elif (
+                    batch_size > image_latents.shape[0]
+                    and batch_size % image_latents.shape[0] != 0
+                ):
                     raise ValueError(
                         f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts."
                     )
@@ -357,41 +381,61 @@ class DreamOmni2Engine(FluxShared):
 
                 image_latent_height, image_latent_width = image_latents.shape[2:]
                 image_latents = self._pack_latents(
-                    image_latents, batch_size, num_channels_latents, image_latent_height, image_latent_width
+                    image_latents,
+                    batch_size,
+                    num_channels_latents,
+                    image_latent_height,
+                    image_latent_width,
                 )
                 image_ids = self._prepare_latent_image_ids(
-                    batch_size, image_latent_height // 2, image_latent_width // 2, device, dtype
+                    batch_size,
+                    image_latent_height // 2,
+                    image_latent_width // 2,
+                    device,
+                    dtype,
                 )
-                image_ids[..., 0] = i+1
+                image_ids[..., 0] = i + 1
                 image_ids[..., 2] += w_offset
                 tp_image_latents.append(image_latents)
                 tp_image_ids.append(image_ids)
-                h_offset += image_latent_height //2
-                w_offset += image_latent_width //2
+                h_offset += image_latent_height // 2
+                w_offset += image_latent_width // 2
             image_latents = torch.cat(tp_image_latents, dim=1)
             image_ids = torch.cat(tp_image_ids, dim=0)
 
-        latent_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+        latent_ids = self._prepare_latent_image_ids(
+            batch_size, height // 2, width // 2, device, dtype
+        )
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-            latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
+            latents = self._pack_latents(
+                latents, batch_size, num_channels_latents, height, width
+            )
         else:
             latents = latents.to(device=device, dtype=dtype)
 
         return latents, image_latents, latent_ids, image_ids
-    
 
-    def _prepare_prompt(self, prompt: List[str] | str, images: List[InputImage], task: str, offload: bool = True, progress_callback: Callable = None):
+    def _prepare_prompt(
+        self,
+        prompt: List[str] | str,
+        images: List[InputImage],
+        task: str,
+        offload: bool = True,
+        progress_callback: Callable = None,
+    ):
         safe_emit_progress(progress_callback, 0.06, "Loading LLM")
         llm: Qwen2_5_VLForConditionalGeneration | None = self.helpers.get("llm")
         processor: Qwen2_5_VLProcessor | None = self.helpers.get("llm_processor")
-        
+
         if not llm or not processor:
             return prompt
-        
+
         tp = []
-        prefix=" It is editing task." if task == "editing" else ""
+        prefix = " It is editing task." if task == "editing" else ""
         input_instruction = prompt + prefix
         for image in images:
             tp.append({"type": "image", "image": image})
@@ -399,8 +443,8 @@ class DreamOmni2Engine(FluxShared):
         messages = [{"role": "user", "content": tp}]
 
         text = processor.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
+            messages, tokenize=False, add_generation_prompt=True
+        )
         image_inputs = self._process_images(images)
         inputs = processor(
             text=[text],
@@ -414,27 +458,31 @@ class DreamOmni2Engine(FluxShared):
         safe_emit_progress(progress_callback, 0.07, "Generating prompt from LLM")
         generated_ids = llm.generate(**inputs, do_sample=False, max_new_tokens=4096)
         generated_ids_trimmed = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids) :]
+            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
         output_text = processor.batch_decode(
-            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
         )
-        
+
         if offload:
             safe_emit_progress(progress_callback, 0.08, "Offloading LLM")
             self._offload(llm)
 
         return output_text[0]
 
-    def _process_images(self, images: List[InputImage], patch_size: int = 14) -> List[Image.Image]:
+    def _process_images(
+        self, images: List[InputImage], patch_size: int = 14
+    ) -> List[Image.Image]:
         output_images = []
         for image in images:
             image = self._load_image(image)
             image, image_width, image_height = self._resize_input(image)
             output_images.append(image)
         return output_images
-    
-    
+
     def _resize_input(self, image: Image.Image, multiple_of: int = 16) -> Image.Image:
         image_height, image_width = image.height, image.width
         aspect_ratio = image_width / image_height

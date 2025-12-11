@@ -53,10 +53,17 @@ class FluxT2IEngine(FluxShared):
 
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
-            
+
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
-            
-        pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids = self.encode_prompt(
+
+        (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        ) = self.encode_prompt(
             prompt,
             negative_prompt,
             prompt_2,
@@ -119,7 +126,9 @@ class FluxT2IEngine(FluxShared):
             timesteps=timesteps,
             mu=mu,
         )
-        safe_emit_progress(progress_callback, 0.50, "Timesteps computed; starting denoise")
+        safe_emit_progress(
+            progress_callback, 0.50, "Timesteps computed; starting denoise"
+        )
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
@@ -139,7 +148,7 @@ class FluxT2IEngine(FluxShared):
             guidance = guidance.expand(latents.shape[0])
         else:
             guidance = None
-            
+
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
             negative_ip_adapter_image is None
             and negative_ip_adapter_image_embeds is None

@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: oneformer/models--shi-labs--oneformer_ade20k_swin_large/blobs/c0b2fe11dfecee6f2f1f315f466946e96f4e94813f3f6d660ff3747b83c28cc9
   name: pytorch_model.bin

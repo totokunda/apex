@@ -18,7 +18,9 @@ try:
     from flash_attn_interface import flash_attn_varlen_func  # flash attn 3
 except Exception:
     try:
-        from flash_attn.flash_attn_interface import flash_attn_varlen_func  # flash attn 2
+        from flash_attn.flash_attn_interface import (
+            flash_attn_varlen_func,
+        )  # flash attn 2
     except Exception:  # pragma: no cover
         flash_attn_varlen_func = None
 
@@ -30,6 +32,7 @@ try:
     from facexlib.recognition import init_recognition_model
 except Exception:  # pragma: no cover
     init_recognition_model = None
+
 
 # ------------------------------- Math helpers ------------------------------- #
 def masked_mean(x: torch.Tensor, dim: int, mask: torch.Tensor) -> torch.Tensor:
@@ -54,7 +57,9 @@ def flash_attention(query, key, value, q_lens, kv_lens, causal=False):
     kv_lens_tensor = torch.tensor(kv_lens, device=device, dtype=torch.int32)
 
     cu_seqlens_q = torch.zeros(len(q_lens_tensor) + 1, device=device, dtype=torch.int32)
-    cu_seqlens_k = torch.zeros(len(kv_lens_tensor) + 1, device=device, dtype=torch.int32)
+    cu_seqlens_k = torch.zeros(
+        len(kv_lens_tensor) + 1, device=device, dtype=torch.int32
+    )
     cu_seqlens_q[1:] = torch.cumsum(q_lens_tensor, dim=0)
     cu_seqlens_k[1:] = torch.cumsum(kv_lens_tensor, dim=0)
 
@@ -146,11 +151,19 @@ def estimate_norm(lmk, image_size=112, arcface_dst=None):
     return M
 
 
-def align_face(image_pil: Image.Image, face_kpts, extend_face_crop=False, extend_ratio=0.8, face_size=112):
+def align_face(
+    image_pil: Image.Image,
+    face_kpts,
+    extend_face_crop=False,
+    extend_ratio=0.8,
+    face_size=112,
+):
     arcface_dst = get_arcface_dst(extend_face_crop, extend_ratio)
     M = estimate_norm(face_kpts, face_size, arcface_dst)
     image_cv2 = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
-    face_image_cv2 = cv2.warpAffine(image_cv2, M, (face_size, face_size), borderValue=0.0)
+    face_image_cv2 = cv2.warpAffine(
+        image_cv2, M, (face_size, face_size), borderValue=0.0
+    )
     face_image = Image.fromarray(cv2.cvtColor(face_image_cv2, cv2.COLOR_BGR2RGB))
     return face_image
 
@@ -175,7 +188,12 @@ class FaceEncoderArcFace:
         assert landmarks is not None, "landmarks are not provided!"
         in_image = np.array(in_image)
         landmark = np.array(landmarks)
-        face_aligned = align_face(Image.fromarray(in_image), landmark, extend_face_crop=False, face_size=image_size)
+        face_aligned = align_face(
+            Image.fromarray(in_image),
+            landmark,
+            extend_face_crop=False,
+            face_size=image_size,
+        )
         return face_aligned
 
     @torch.no_grad()
@@ -273,7 +291,9 @@ class Resampler(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.pos_emb = nn.Embedding(max_seq_len, embedding_dim) if apply_pos_emb else None
+        self.pos_emb = (
+            nn.Embedding(max_seq_len, embedding_dim) if apply_pos_emb else None
+        )
         self.latents = nn.Parameter(torch.randn(1, num_queries, dim) / dim**0.5)
         self.proj_in = nn.Linear(embedding_dim, dim)
         self.proj_out = nn.Linear(dim, output_dim)
@@ -312,7 +332,9 @@ class Resampler(nn.Module):
 
         if self.to_latents_from_mean_pooled_seq:
             meanpooled_seq = masked_mean(
-                x, dim=1, mask=torch.ones(x.shape[:2], device=x.device, dtype=torch.bool)
+                x,
+                dim=1,
+                mask=torch.ones(x.shape[:2], device=x.device, dtype=torch.bool),
             )
             meanpooled_latents = self.to_latents_from_mean_pooled_seq(meanpooled_seq)
             latents = torch.cat((meanpooled_latents, latents), dim=-2)
@@ -327,7 +349,9 @@ class Resampler(nn.Module):
 
 # ----------------------------- Adapter helpers ----------------------------- #
 class WanIPAttnProcessor(nn.Module):
-    def __init__(self, cross_attention_dim: int, dim: int, n_registers: int, bias: bool):
+    def __init__(
+        self, cross_attention_dim: int, dim: int, n_registers: int, bias: bool
+    ):
         super().__init__()
         self.to_k_ip = nn.Linear(cross_attention_dim, dim, bias=bias)
         self.to_v_ip = nn.Linear(cross_attention_dim, dim, bias=bias)
@@ -336,8 +360,7 @@ class WanIPAttnProcessor(nn.Module):
             if n_registers > 0
             else None
         )
-        
-    
+
     def __call__(
         self,
         attn: Attention,
@@ -394,7 +417,9 @@ class WanIPAttnProcessor(nn.Module):
             if self.registers is not None:
                 ip_hidden_states_list = vector_to_list(ip_hidden_states, ip_lens, 1)
                 ip_hidden_states_list = merge_token_lists(
-                    ip_hidden_states_list, [self.registers] * len(ip_hidden_states_list), 1
+                    ip_hidden_states_list,
+                    [self.registers] * len(ip_hidden_states_list),
+                    1,
                 )
                 ip_hidden_states, ip_lens = list_to_vector(ip_hidden_states_list, 1)
 
@@ -426,14 +451,18 @@ class WanIPAttnProcessor(nn.Module):
         if rotary_emb is not None:
 
             def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+                x_rotated = torch.view_as_complex(
+                    hidden_states.to(torch.float64).unflatten(3, (-1, 2))
+                )
                 x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
                 return x_out.type_as(hidden_states)
 
             query = apply_rotary_emb(query, rotary_emb)
             key = apply_rotary_emb(key, rotary_emb)
 
-        hidden_states = flash_attention(query, key, value, q_lens=q_lens, kv_lens=kv_lens)
+        hidden_states = flash_attention(
+            query, key, value, q_lens=q_lens, kv_lens=kv_lens
+        )
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
 
@@ -532,14 +561,18 @@ class WanRefAttnProcessor(nn.Module):
         if rotary_emb is not None:
 
             def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
-                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+                x_rotated = torch.view_as_complex(
+                    hidden_states.to(torch.float64).unflatten(3, (-1, 2))
+                )
                 x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
                 return x_out.type_as(hidden_states)
 
             query = apply_rotary_emb(query, rotary_emb)
             key = apply_rotary_emb(key, rotary_emb)
 
-        hidden_states = flash_attention(query, key, value, q_lens=q_lens, kv_lens=kv_lens)
+        hidden_states = flash_attention(
+            query, key, value, q_lens=q_lens, kv_lens=kv_lens
+        )
         hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
         hidden_states = hidden_states.type_as(query)
 
@@ -551,7 +584,13 @@ class WanRefAttnProcessor(nn.Module):
         return hidden_states
 
 
-def register_ip_adapter(model, cross_attention_dim=None, n_registers=0, init_method="zero", dtype=torch.float32):
+def register_ip_adapter(
+    model,
+    cross_attention_dim=None,
+    n_registers=0,
+    init_method="zero",
+    dtype=torch.float32,
+):
     attn_procs = {}
     transformer_sd = model.state_dict()
     for layer_idx, block in enumerate(model.blocks):
@@ -559,7 +598,9 @@ def register_ip_adapter(model, cross_attention_dim=None, n_registers=0, init_met
         layer_name = name.split(".processor")[0]
         dim = transformer_sd[layer_name + ".to_k.weight"].shape[1]
         attn_procs[name] = WanIPAttnProcessor(
-            cross_attention_dim=dim if cross_attention_dim is None else cross_attention_dim,
+            cross_attention_dim=(
+                dim if cross_attention_dim is None else cross_attention_dim
+            ),
             dim=dim,
             n_registers=n_registers,
             bias=True,
@@ -622,14 +663,21 @@ class WanLynxHelper(BaseHelper):
         self.ref_loaded = False
         self.face_encoder: FaceEncoderArcFace | None = None
 
-    def resolve_adapter_path(self, config: Dict[str, any] | None = None, override: Optional[str] = None) -> Optional[str]:
+    def resolve_adapter_path(
+        self, config: Dict[str, any] | None = None, override: Optional[str] = None
+    ) -> Optional[str]:
         if override:
             return override
         env_path = os.getenv("LYNX_ADAPTER_PATH")
         if env_path:
             return env_path
         cfg = config or {}
-        return cfg.get("adapter_path") or cfg.get("lynx_adapter_path") or cfg.get("adapter_dir") or self.adapter_path
+        return (
+            cfg.get("adapter_path")
+            or cfg.get("lynx_adapter_path")
+            or cfg.get("adapter_dir")
+            or self.adapter_path
+        )
 
     def get_face_encoder(self, device: str | torch.device):
         if self.face_encoder is None:
@@ -649,7 +697,11 @@ class WanLynxHelper(BaseHelper):
         image_pil = (
             load_image_fn(image)
             if load_image_fn is not None
-            else (image if isinstance(image, Image.Image) else Image.open(image).convert("RGB"))
+            else (
+                image
+                if isinstance(image, Image.Image)
+                else Image.open(image).convert("RGB")
+            )
         )
         if landmarks is None:
             landmarks = get_landmarks_from_image(image_pil)
@@ -670,14 +722,18 @@ class WanLynxHelper(BaseHelper):
         self, transformer, adapter_path: str, device: torch.device, dtype: torch.dtype
     ):
         if not adapter_path:
-            raise ValueError("Lynx adapter path is required (adapter_path or LYNX_ADAPTER_PATH).")
+            raise ValueError(
+                "Lynx adapter path is required (adapter_path or LYNX_ADAPTER_PATH)."
+            )
         if not os.path.isdir(adapter_path):
             raise FileNotFoundError(f"Adapter directory not found: {adapter_path}")
 
         if self.resampler is None:
             resampler_path = os.path.join(adapter_path, "resampler.safetensors")
             if not os.path.exists(resampler_path):
-                raise FileNotFoundError(f"Missing resampler weights at {resampler_path}")
+                raise FileNotFoundError(
+                    f"Missing resampler weights at {resampler_path}"
+                )
 
             resampler = Resampler(
                 depth=4,
@@ -700,7 +756,9 @@ class WanLynxHelper(BaseHelper):
             if os.path.exists(ip_path):
                 ip_sd = load_file(ip_path, device="cpu")
                 cross_attention_dim = ip_sd["0.to_k_ip.weight"].shape[1]
-                n_registers = ip_sd["0.registers"].shape[1] if "0.registers" in ip_sd else 0
+                n_registers = (
+                    ip_sd["0.registers"].shape[1] if "0.registers" in ip_sd else 0
+                )
                 transformer, ip_layers = register_ip_adapter(
                     transformer,
                     cross_attention_dim=cross_attention_dim,
@@ -729,14 +787,22 @@ class WanLynxHelper(BaseHelper):
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         if self.resampler is None:
             raise RuntimeError("Resampler not initialized before building IP states.")
-        face_tensor = torch.tensor(face_embeds, device=device, dtype=dtype).view(1, 1, -1)
+        face_tensor = torch.tensor(face_embeds, device=device, dtype=dtype).view(
+            1, 1, -1
+        )
         ip_hidden_states = [self.resampler(face_tensor)]
         ip_hidden_states_uncond = [self.resampler(torch.zeros_like(face_tensor))]
         return ip_hidden_states, ip_hidden_states_uncond
 
     def cal_mean_and_std(self, vae, device, dtype):
-        latents_mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1).to(device, dtype)
-        latents_std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1).to(device, dtype)
+        latents_mean = (
+            torch.tensor(vae.config.latents_mean)
+            .view(1, vae.config.z_dim, 1, 1, 1)
+            .to(device, dtype)
+        )
+        latents_std = 1.0 / torch.tensor(vae.config.latents_std).view(
+            1, vae.config.z_dim, 1, 1, 1
+        ).to(device, dtype)
         return latents_mean, latents_std
 
     def encode_reference_buffer(
@@ -785,4 +851,6 @@ class WanLynxHelper(BaseHelper):
         return ref_buffer
 
     def align_face(self, face_image: Image.Image, face_landmarks, face_size: int = 256):
-        return align_face(face_image, face_landmarks, extend_face_crop=True, face_size=face_size)
+        return align_face(
+            face_image, face_landmarks, extend_face_crop=True, face_size=face_size
+        )

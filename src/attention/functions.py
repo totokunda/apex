@@ -49,6 +49,7 @@ except ImportError:
 
 attention_register = FunctionRegister()
 
+
 @attention_register("sdpa_streaming")
 def sdpa_streaming(
     q,
@@ -164,13 +165,14 @@ def flex_block_attn(
     q,
     k,
     v,
-    block_size, 
-    block_stride, 
+    block_size,
+    block_stride,
     block_mask,
     **kwargs,
 ):
     out = flex_block_attn_func(q, k, v, block_size, block_stride, block_mask)
     return out
+
 
 @attention_register("sdpa")
 def sdpa(
@@ -390,12 +392,12 @@ def flash_attention_padded(
     # Back to (B, H, Sq, D) and caller’s dtype
     return out.permute(0, 2, 1, 3).to(q.dtype)
 
+
 @attention_register("flash_varlen", available=flash_attn_varlen_func is not None)
 def flash_attention_varlen(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    *,
     cu_seqlens_q: torch.Tensor | None = None,
     cu_seqlens_k: torch.Tensor | None = None,
     max_seqlen_q: int | None = None,

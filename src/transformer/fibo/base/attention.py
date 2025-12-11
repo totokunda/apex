@@ -1,8 +1,9 @@
 import torch
 import torch.nn.functional as F
 from typing import Optional
-from src.attention import attention_register  
+from src.attention import attention_register
 from diffusers.models.embeddings import apply_rotary_emb
+
 # Copied from diffusers.models.transformers.transformer_flux.FluxAttnProcessor with FluxAttnProcessor->BriaFiboAttnProcessor, FluxAttention->BriaFiboAttention
 
 
@@ -25,10 +26,11 @@ def _get_fused_projections(attn, hidden_states, encoder_hidden_states=None):
 
     encoder_query = encoder_key = encoder_value = (None,)
     if encoder_hidden_states is not None and hasattr(attn, "to_added_qkv"):
-        encoder_query, encoder_key, encoder_value = attn.to_added_qkv(encoder_hidden_states).chunk(3, dim=-1)
+        encoder_query, encoder_key, encoder_value = attn.to_added_qkv(
+            encoder_hidden_states
+        ).chunk(3, dim=-1)
 
     return query, key, value, encoder_query, encoder_key, encoder_value
-
 
 
 def _get_qkv_projections(attn, hidden_states, encoder_hidden_states=None):
@@ -37,14 +39,15 @@ def _get_qkv_projections(attn, hidden_states, encoder_hidden_states=None):
     return _get_projections(attn, hidden_states, encoder_hidden_states)
 
 
-
 class BriaFiboAttnProcessor:
     _attention_backend = None
     _parallel_config = None
 
     def __init__(self):
         if not hasattr(F, "scaled_dot_product_attention"):
-            raise ImportError(f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version.")
+            raise ImportError(
+                f"{self.__class__.__name__} requires PyTorch 2.0. Please upgrade your pytorch version."
+            )
 
     def __call__(
         self,
@@ -54,8 +57,8 @@ class BriaFiboAttnProcessor:
         attention_mask: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        query, key, value, encoder_query, encoder_key, encoder_value = _get_qkv_projections(
-            attn, hidden_states, encoder_hidden_states
+        query, key, value, encoder_query, encoder_key, encoder_value = (
+            _get_qkv_projections(attn, hidden_states, encoder_hidden_states)
         )
 
         query = query.unflatten(-1, (attn.heads, -1))
@@ -94,7 +97,11 @@ class BriaFiboAttnProcessor:
 
         if encoder_hidden_states is not None:
             encoder_hidden_states, hidden_states = hidden_states.split_with_sizes(
-                [encoder_hidden_states.shape[1], hidden_states.shape[1] - encoder_hidden_states.shape[1]], dim=1
+                [
+                    encoder_hidden_states.shape[1],
+                    hidden_states.shape[1] - encoder_hidden_states.shape[1],
+                ],
+                dim=1,
             )
             hidden_states = attn.to_out[0](hidden_states)
             hidden_states = attn.to_out[1](hidden_states)

@@ -4,12 +4,14 @@ from .ws_manager import websocket_manager
 
 router = APIRouter(prefix="/ws")
 
+
 @router.websocket("/engine")
 async def engine_websocket(websocket: WebSocket):
     await websocket.accept()
     while True:
         data = await websocket.receive_text()
         await websocket.send_text(f"Message received: {data}")
+
 
 @router.websocket("/job/{job_id}")
 async def job_status_websocket(websocket: WebSocket, job_id: str):

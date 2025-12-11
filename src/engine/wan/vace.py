@@ -9,6 +9,7 @@ from .shared import WanShared
 
 class WanVaceEngine(WanShared):
     """WAN VACE (Video Acceleration) Engine Implementation"""
+
     def run(
         self,
         prompt: List[str] | str,
@@ -29,7 +30,6 @@ class WanVaceEngine(WanShared):
         fps: int = 16,
         num_inference_steps: int = 50,
         guidance_scale: float = 5.0,
-        use_cfg_guidance: bool = True,
         seed: int | None = None,
         num_videos: int = 1,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -47,7 +47,11 @@ class WanVaceEngine(WanShared):
         **kwargs,
     ):
 
-        safe_emit_progress(progress_callback, 0.0, "Starting VACE video generation pipeline")
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
+
+        safe_emit_progress(
+            progress_callback, 0.0, "Starting VACE video generation pipeline"
+        )
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -55,9 +59,7 @@ class WanVaceEngine(WanShared):
         self.to_device(self.text_encoder)
         safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
 
-
         num_frames = self._parse_num_frames(duration, fps=fps)
-
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -67,8 +69,6 @@ class WanVaceEngine(WanShared):
         )
 
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
-
-
 
         batch_size = prompt_embeds.shape[0]
 
@@ -85,7 +85,11 @@ class WanVaceEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -95,7 +99,6 @@ class WanVaceEngine(WanShared):
 
         if not self.transformer:
             self.load_component_by_type("transformer")
-        
 
         pt, ph, pw = self.transformer.config.patch_size
         self.to_device(self.transformer)
@@ -116,12 +119,12 @@ class WanVaceEngine(WanShared):
             num_inference_steps=num_inference_steps,
         )
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         if mask:
-            loaded_mask = self._load_video(mask, fps=fps)
-            if num_frames < len(loaded_mask):
-                loaded_mask = loaded_mask[:num_frames]
+            loaded_mask = self._load_video(mask, fps=fps, num_frames=num_frames)
 
         if isinstance(conditioning_scale, (int, float)):
             conditioning_scale = [conditioning_scale] * len(
@@ -143,27 +146,18 @@ class WanVaceEngine(WanShared):
             )
 
         if video is not None:
-            loaded_video = self._load_video(video, fps=fps)
-            if num_frames < len(loaded_video):
-                loaded_video = loaded_video[:num_frames]
-            video_height, video_width = self.video_processor.get_default_height_width(
-                loaded_video[0]
-            )
-            base = self.vae_scale_factor_spatial * ph
-            if video_height * video_width > height * width:
-                scale = min(width / video_width, height / video_height)
-                video_height, video_width = int(video_height * scale), int(
-                    video_width * scale
-                )
+            loaded_video = self._load_video(video, fps=fps, num_frames=num_frames)
 
-            if video_height % base != 0 or video_width % base != 0:
-                video_height = (video_height // base) * base
-                video_width = (video_width // base) * base
-
-            assert video_height * video_width <= height * width
+            max_area = height * width
+            loaded_video = [
+                self._aspect_ratio_resize(frame, max_area)[0] for frame in loaded_video
+            ]
+            video_height, video_width = loaded_video[0].height, loaded_video[0].width
 
             preprocessed_video = self.video_processor.preprocess_video(
-                loaded_video, video_height, video_width
+                loaded_video,
+                height=video_height,
+                width=video_width,
             )
 
             height, width = video_height, video_width
@@ -177,7 +171,6 @@ class WanVaceEngine(WanShared):
                 device=self.device,
                 dtype=torch.float32,
             )
-            
 
         if not mask:
             preprocessed_mask = torch.ones_like(preprocessed_video)
@@ -269,7 +262,7 @@ class WanVaceEngine(WanShared):
             dtype=torch.float32,
             normalize_latents_dtype=torch.float32,
         )
-        
+
         latents = torch.cat([inactive, reactive], dim=1)
 
         latent_list = []
@@ -341,7 +334,7 @@ class WanVaceEngine(WanShared):
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
-            
+
         latents = self._get_latents(
             height,
             width,
@@ -390,6 +383,7 @@ class WanVaceEngine(WanShared):
             scheduler=scheduler,
             guidance_scale=guidance_scale,
             ip_image=ip_image,
+            num_reference_images=num_reference_images,
         )
 
         if offload:
@@ -405,5 +399,7 @@ class WanVaceEngine(WanShared):
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
-            safe_emit_progress(progress_callback, 1.0, "Completed VACE video generation pipeline")
+            safe_emit_progress(
+                progress_callback, 1.0, "Completed VACE video generation pipeline"
+            )
             return postprocessed_video

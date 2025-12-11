@@ -37,7 +37,6 @@ parameters:
   type: category
 supports_image: false
 supports_video: true
-
 files:
 - path: torch/hub/checkpoints/dpflow-sintel-b44b072c.ckpt
   name: dpflow:sintel

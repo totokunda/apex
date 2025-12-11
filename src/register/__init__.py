@@ -134,6 +134,9 @@ class FunctionRegister:
     def set_default(self, key: str):
         self._default = key
 
+    def get_default(self) -> str:
+        return self._default
+
     # --------------- syntactic sugar ---------------------------------- #
     __getitem__ = get  # registry["key"]
     __iter__ = lambda self: iter(self._store)  # iterate over keys

@@ -34,11 +34,53 @@ def enhance_score(query_image, key_image, head_dim, num_frames, enhance_weight):
     return enhance_scores
 
 
-def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
+def apply_rotary_emb(
+    hidden_states: torch.Tensor,
+    freqs: torch.Tensor,
+    chunk_size: int = 256,
+):
+    # hidden_states: [B, H, T, D]
     dtype = torch.float32 if hidden_states.device.type == "mps" else torch.float64
-    x_rotated = torch.view_as_complex(hidden_states.to(dtype).unflatten(3, (-1, 2)))
-    x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
-    return x_out.type_as(hidden_states)
+
+    B, H, T, D = hidden_states.shape
+    out = torch.empty_like(hidden_states)
+
+    # Make sure freqs is in a complex dtype compatible with x_rotated
+    freqs_complex = freqs
+    if dtype == torch.float64 and freqs.dtype == torch.complex64:
+        freqs_complex = freqs.to(torch.complex128)
+
+    # Find which dim of freqs corresponds to sequence length T
+    seq_dim = None
+    for d, size in enumerate(freqs_complex.shape):
+        if size == T:
+            seq_dim = d
+            break
+    if seq_dim is None:
+        raise ValueError(
+            f"Could not find sequence dim of length {T} in freqs.shape={freqs_complex.shape}"
+        )
+
+    for start in range(0, T, chunk_size):
+        end = min(start + chunk_size, T)
+
+        # [B, H, t_chunk, D]
+        hs_chunk = hidden_states[:, :, start:end]
+        x_rotated = torch.view_as_complex(
+            hs_chunk.to(dtype).unflatten(3, (-1, 2))
+        )
+
+        # Slice freqs along its sequence dimension
+        index = [slice(None)] * freqs_complex.dim()
+        index[seq_dim] = slice(start, end)
+        freqs_chunk = freqs_complex[tuple(index)]
+
+        # [B, H, t_chunk, D]
+        x_out_chunk = torch.view_as_real(x_rotated * freqs_chunk).flatten(3, 4)
+
+        out[:, :, start:end] = x_out_chunk.type_as(hidden_states)
+
+    return out
 
 
 def rope_apply_ip_adapter(x, freqs, num_heads):

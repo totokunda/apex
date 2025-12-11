@@ -14,6 +14,7 @@ import transformers
 import inspect
 from loguru import logger
 
+
 class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
         self,
@@ -70,7 +71,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self.model = None
         self.model_loaded = False
 
-    def load_model(self, no_weights: bool = False, override_kwargs: Dict[str, Any] = None):
+    def load_model(
+        self, no_weights: bool = False, override_kwargs: Dict[str, Any] = None
+    ):
         input_kwargs = dict(
             component={
                 "config": self.model_config,
@@ -89,7 +92,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if override_kwargs is not None:
             input_kwargs.update(override_kwargs)
         model = self._load_model(**input_kwargs)
-        
+
         if not no_weights:
             self.to_device(model, device=self.device)
 
@@ -110,8 +113,9 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if lower_case:
             text = text.lower()
         return text
-    
-    def get_prompt_hash(self,
+
+    def get_prompt_hash(
+        self,
         text: str | List[str],
         max_sequence_length: int = 512,
         pad_to_max_length: bool = True,
@@ -127,8 +131,11 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         pad_with_zero: bool = True,
         clean_text: bool = True,
         process_inputs_func: Callable = None,
-        output_type: Literal["hidden_states", "pooler_output", "text_embeds", "raw"] = "hidden_states",
-        lower_case: bool = False) -> str:
+        output_type: Literal[
+            "hidden_states", "pooler_output", "text_embeds", "raw"
+        ] = "hidden_states",
+        lower_case: bool = False,
+    ) -> str:
         kwargs = {
             "text": text,
             "max_sequence_length": max_sequence_length,
@@ -146,9 +153,13 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "clean_text": clean_text,
             "output_type": output_type,
             "lower_case": lower_case,
-            "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
+            "process_inputs_func": (
+                inspect.signature(process_inputs_func).parameters
+                if process_inputs_func is not None
+                else None
+            ),
         }
-        
+
         return self.hash(kwargs)
 
     @torch.no_grad()
@@ -169,7 +180,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         pad_with_zero: bool = True,
         clean_text: bool = True,
         process_inputs_func: Callable = None,
-        output_type: Literal["hidden_states", "hidden_states_all", "pooler_output", "text_embeds", "raw"] = "hidden_states",
+        reshape_prompt_embeds: bool = True,
+        output_type: Literal[
+            "hidden_states", "hidden_states_all", "pooler_output", "text_embeds", "raw"
+        ] = "hidden_states",
         lower_case: bool = False,
     ):
         if isinstance(text, str):
@@ -180,7 +194,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if dtype is not None:
             if isinstance(dtype, str):
                 dtype = getattr(torch, dtype.lstrip("torch."))
-                
+
         batch_size = len(text)
 
         kwargs = {
@@ -200,9 +214,13 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "clean_text": clean_text,
             "output_type": output_type,
             "lower_case": lower_case,
-            "process_inputs_func": inspect.signature(process_inputs_func).parameters if process_inputs_func is not None else None
+            "process_inputs_func": (
+                inspect.signature(process_inputs_func).parameters
+                if process_inputs_func is not None
+                else None
+            ),
         }
-        
+
         prompt_hash = self.hash(kwargs)
 
         if self.enable_cache:
@@ -226,7 +244,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if not self.model_loaded:
             self.model = self.load_model(no_weights=False)
             self.model_loaded = True
-            
+
         text_inputs = self.tokenizer(
             text,
             padding="max_length" if pad_to_max_length else "longest",
@@ -257,17 +275,21 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
 
         if use_attention_mask:
             inputs["attention_mask"] = mask.to(device=self.model.device)
-            
+
         if arrange_attention_mask:
             seq_lengths = mask.sum(dim=1)
-            mask_indices = torch.arange(mask.size(1)).unsqueeze(0).expand(batch_size, -1)
+            mask_indices = (
+                torch.arange(mask.size(1)).unsqueeze(0).expand(batch_size, -1)
+            )
             mask = (mask_indices <= seq_lengths.unsqueeze(1)).long()
             inputs["attention_mask"] = mask.to(device=self.model.device)
 
         result = self.model(
             **inputs,
             output_hidden_states=(
-                output_type == "hidden_states" or output_type == "raw" or output_type == "hidden_states_all"
+                output_type == "hidden_states"
+                or output_type == "raw"
+                or output_type == "hidden_states_all"
             ),
         )
 
@@ -289,9 +311,8 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 return result
         else:
             raise ValueError(f"Invalid output type: {output_type}")
-        
+
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-        
 
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
@@ -312,29 +333,31 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 dim=0,
             )
             # duplicate text embeddings for each generation per prompt, using mps friendly method
-            _, seq_len, _ = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-            mask = mask.repeat(1, num_videos_per_prompt)
-            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
+            if reshape_prompt_embeds:
+                _, seq_len, _ = prompt_embeds.shape
+                prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+                mask = mask.repeat(1, num_videos_per_prompt)
+                mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
 
-            prompt_embeds = prompt_embeds.view(
-                batch_size * num_videos_per_prompt, seq_len, -1
-            )
-            
+                prompt_embeds = prompt_embeds.view(
+                    batch_size * num_videos_per_prompt, seq_len, -1
+                )
+
         elif output_type == "text_embeds":
-            prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
-            mask = mask.repeat(num_videos_per_prompt, 1)
+            if reshape_prompt_embeds:
+                prompt_embeds = prompt_embeds.repeat(num_videos_per_prompt, 1)
+                mask = mask.repeat(num_videos_per_prompt, 1)
         elif output_type == "hidden_states":
-            _, seq_len, _ = prompt_embeds.shape
-            prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
+            if reshape_prompt_embeds:
+                _, seq_len, _ = prompt_embeds.shape
+                prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
 
-            prompt_embeds = prompt_embeds.view(
-                batch_size * num_videos_per_prompt, seq_len, -1
-            )
-        
-            mask = mask.repeat(1, num_videos_per_prompt)
-            mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
-        
+                prompt_embeds = prompt_embeds.view(
+                    batch_size * num_videos_per_prompt, seq_len, -1
+                )
+
+                mask = mask.repeat(1, num_videos_per_prompt)
+                mask = mask.view(batch_size * num_videos_per_prompt, seq_len)
 
         if self.enable_cache:
             self.cache(

@@ -9,6 +9,7 @@ import torch.nn as nn
 
 from einops import rearrange, repeat
 
+
 def broadcat(tensors, dim=-1):
     num_tensors = len(tensors)
     shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
@@ -37,10 +38,7 @@ def rotate_half(x):
 
 class RotaryPositionalEmbedding(nn.Module):
 
-    def __init__(self,
-                 head_dim,
-                 cp_split_hw=None
-                 ):
+    def __init__(self, head_dim, cp_split_hw=None):
         """Rotary positional embedding for 3D
         Reference : https://blog.eleuther.ai/rotary-embeddings/
         Paper: https://arxiv.org/pdf/2104.09864.pdf
@@ -50,7 +48,7 @@ class RotaryPositionalEmbedding(nn.Module):
         """
         super().__init__()
         self.head_dim = head_dim
-        assert self.head_dim % 8 == 0, 'Dim must be a multiply of 8 for 3D RoPE.'
+        assert self.head_dim % 8 == 0, "Dim must be a multiply of 8 for 3D RoPE."
         self.cp_split_hw = cp_split_hw
         # We take the assumption that the longest side of grid will not larger than 512, i.e, 512 * 8 = 4098 input pixels
         self.base = 10000
@@ -58,19 +56,25 @@ class RotaryPositionalEmbedding(nn.Module):
 
     def register_grid_size(self, grid_size):
         if grid_size not in self.freqs_dict:
-            self.freqs_dict.update({
-                grid_size: self.precompute_freqs_cis_3d(grid_size)
-            })
+            self.freqs_dict.update({grid_size: self.precompute_freqs_cis_3d(grid_size)})
 
     def precompute_freqs_cis_3d(self, grid_size):
-        num_frames, height, width = grid_size     
+        num_frames, height, width = grid_size
         dim_t = self.head_dim - 4 * (self.head_dim // 6)
         dim_h = 2 * (self.head_dim // 6)
         dim_w = 2 * (self.head_dim // 6)
-        freqs_t = 1.0 / (self.base ** (torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t))
-        freqs_h = 1.0 / (self.base ** (torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h))
-        freqs_w = 1.0 / (self.base ** (torch.arange(0, dim_w, 2)[: (dim_w // 2)].float() / dim_w))
-        grid_t = np.linspace(0, num_frames, num_frames, endpoint=False, dtype=np.float32)
+        freqs_t = 1.0 / (
+            self.base ** (torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t)
+        )
+        freqs_h = 1.0 / (
+            self.base ** (torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h)
+        )
+        freqs_w = 1.0 / (
+            self.base ** (torch.arange(0, dim_w, 2)[: (dim_w // 2)].float() / dim_w)
+        )
+        grid_t = np.linspace(
+            0, num_frames, num_frames, endpoint=False, dtype=np.float32
+        )
         grid_h = np.linspace(0, height, height, endpoint=False, dtype=np.float32)
         grid_w = np.linspace(0, width, width, endpoint=False, dtype=np.float32)
         grid_t = torch.from_numpy(grid_t).float()
@@ -82,7 +86,14 @@ class RotaryPositionalEmbedding(nn.Module):
         freqs_t = repeat(freqs_t, "... n -> ... (n r)", r=2)
         freqs_h = repeat(freqs_h, "... n -> ... (n r)", r=2)
         freqs_w = repeat(freqs_w, "... n -> ... (n r)", r=2)
-        freqs = broadcat((freqs_t[:, None, None, :], freqs_h[None, :, None, :], freqs_w[None, None, :, :]), dim=-1)
+        freqs = broadcat(
+            (
+                freqs_t[:, None, None, :],
+                freqs_h[None, :, None, :],
+                freqs_w[None, None, :, :],
+            ),
+            dim=-1,
+        )
         # (T H W D)
         freqs = rearrange(freqs, "T H W D -> (T H W) D")
 
@@ -105,7 +116,7 @@ class RotaryPositionalEmbedding(nn.Module):
         q_, k_ = q.float(), k.float()
         freqs_cis = freqs_cis.float().to(q.device)
         cos, sin = freqs_cis.cos(), freqs_cis.sin()
-        cos, sin = rearrange(cos, 'n d -> 1 1 n d'), rearrange(sin, 'n d -> 1 1 n d')
+        cos, sin = rearrange(cos, "n d -> 1 1 n d"), rearrange(sin, "n d -> 1 1 n d")
         q_ = (q_ * cos) + (rotate_half(q_) * sin)
         k_ = (k_ * cos) + (rotate_half(k_) * sin)
 

@@ -16,25 +16,29 @@ class MediapipeFaceDetector(BasePreprocessor):
     def from_pretrained(cls):
         """Mediapipe face detector doesn't require pretrained models"""
         return cls()
-    
-    def process(self,
-                 input_image: InputImage,
-                 max_faces: int = 1,
-                 min_confidence: float = 0.5,
-                 detect_resolution: int = 512,
-                 image_resolution: int = 512,
-                 upscale_method="INTER_CUBIC",
-                 **kwargs) -> OutputImage:
+
+    def process(
+        self,
+        input_image: InputImage,
+        max_faces: int = 1,
+        min_confidence: float = 0.5,
+        detect_resolution: int = 512,
+        image_resolution: int = 512,
+        upscale_method="INTER_CUBIC",
+        **kwargs,
+    ) -> OutputImage:
 
         input_image = self._load_image(input_image)
-        
+
         if not isinstance(input_image, np.ndarray):
             input_image = np.array(input_image, dtype=np.uint8)
-        
-        detected_map, remove_pad = resize_image_with_pad(input_image, detect_resolution, upscale_method)
+
+        detected_map, remove_pad = resize_image_with_pad(
+            input_image, detect_resolution, upscale_method
+        )
         detected_map = generate_annotation(detected_map, max_faces, min_confidence)
         detected_map = remove_pad(HWC3(detected_map))
         detected_map = detected_map.astype(np.uint8)
         detected_map = Image.fromarray(detected_map)
-        
+
         return detected_map

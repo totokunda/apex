@@ -39,7 +39,7 @@ class MagiT2VEngine(MagiShared):
         window_size: int = 4,
         distill: bool = False,
         kv_offload: bool = True,
-        **kwargs
+        **kwargs,
     ):
         """Text-to-video generation using MAGI's chunk-based approach"""
 
@@ -89,7 +89,9 @@ class MagiT2VEngine(MagiShared):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
 
-        safe_emit_progress(progress_callback, 0.30, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.30, "Scheduler ready and timesteps computed"
+        )
 
         null_caption_embeds = self.transformer.get_null_caption_embeds(
             device=self.device,
@@ -186,5 +188,7 @@ class MagiT2VEngine(MagiShared):
                 video = self.vae_decode(latent, offload=False)
                 video = self._tensor_to_frames(video, output_type="pil")[0]
                 videos.extend(video)
-            safe_emit_progress(progress_callback, 1.0, "Completed text-to-video pipeline")
+            safe_emit_progress(
+                progress_callback, 1.0, "Completed text-to-video pipeline"
+            )
             return [videos]

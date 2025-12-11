@@ -3,9 +3,11 @@ import subprocess
 import ray
 from loguru import logger
 
+
 def _gpu_mem_info_torch():
     try:
         import torch
+
         if not torch.cuda.is_available():
             return None
         infos = []
@@ -18,9 +20,11 @@ def _gpu_mem_info_torch():
     except Exception:
         return None
 
+
 def _gpu_mem_info_nvml():
     try:
         import pynvml as nvml
+
         nvml.nvmlInit()
         n = nvml.nvmlDeviceGetCount()
         infos = []
@@ -33,31 +37,46 @@ def _gpu_mem_info_nvml():
     except Exception:
         return None
 
+
 def _gpu_mem_info_nvidia_smi():
     try:
-        out = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=memory.total,memory.used",
-             "--format=csv,noheader,nounits"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        ).strip().splitlines()
+        out = (
+            subprocess.check_output(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.total,memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            .strip()
+            .splitlines()
+        )
         infos = []
         for i, line in enumerate(out):
             total_mb, used_mb = [int(x.strip()) for x in line.split(",")]
             free_mb = max(total_mb - used_mb, 0)
             # convert MB to bytes for consistency
-            infos.append({"index": i, "free": free_mb * 1024**2, "total": total_mb * 1024**2})
+            infos.append(
+                {"index": i, "free": free_mb * 1024**2, "total": total_mb * 1024**2}
+            )
         return infos if infos else None
     except Exception:
         return None
 
+
 def _on_mps():
     try:
         import torch
+
         # Treat MPS as a single logical accelerator
-        return getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+        return (
+            getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
+        )
     except Exception:
         return False
+
 
 def get_best_gpu():
     """
@@ -82,12 +101,15 @@ def get_best_gpu():
     if infos:
         # choose the device with maximum free memory
         best = max(infos, key=lambda d: d["free"])
-        logger.info(f"Using CUDA device {best['index']} with {best['free'] / (1024**3):.2f} GB free")
+        logger.info(
+            f"Using CUDA device {best['index']} with {best['free'] / (1024**3):.2f} GB free"
+        )
         return best["index"], "cuda"
 
     # 3) Fallback to CPU
     logger.info("No GPU available, using CPU")
     return None, "cpu"
+
 
 def get_ray_resources(
     device_index: int = None,
@@ -149,7 +171,7 @@ def get_ray_resources(
         if profile == "heavy":
             target = max(1.0, total_cpus * 0.9)  # ~90% of machine
             return min(cpu_avail, target)
-        
+
         if profile == "all":
             return cpu_avail
 
@@ -229,4 +251,3 @@ def get_ray_resources(
 
     # Unknown device type -> default to 1 CPU
     return {"num_cpus": 1}
-

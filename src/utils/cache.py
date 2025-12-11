@@ -4,6 +4,7 @@ from typing import Dict, Union
 from safetensors.torch import safe_open
 import os
 
+
 def empty_cache():
     gc.collect()
     if torch.cuda.is_available():

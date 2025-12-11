@@ -5,7 +5,8 @@ metadata:
   model: wan
   name: Wan 2.1 14B VACE Reference to Video
   version: 1.0.0
-  description: Wan 2.1 14B VACE is a 14B parameter model for video editing.
+  description: Wan 2.1 14B VACE Reference to Video is a 14B parameter model for reference
+    to video generation.
   tags:
   - wan
   - vace
@@ -15,7 +16,7 @@ metadata:
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
   categories:
-  - reference-image-to-video
+  - control
 spec:
   engine: wan
   model_type: vace
@@ -63,8 +64,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 632524253270
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-VACE-14B-diffusers/resolve/main/transformer/config.json
+      file_size: 63252425327
   defaults:
     run:
       num_inference_steps: 30
@@ -76,8 +76,8 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
-    - name: reference_image
-      label: Reference Image
+    - name: input_images
+      label: Input Images
       collapsible: true
       default_open: true
       layout:
@@ -124,14 +124,12 @@ spec:
         - - seed
     inputs:
     - id: reference_images
-      label: Main Reference Image
-      description: The main reference image to use for the generation.
-      type: image
-      panel: reference_image
+      label: Reference Images
+      description: The reference images to use for the generation.
+      type: image_list
+      panel: input_images
       required: true
-      map_h: height
-      map_w: width
-      scale_by: resolution
+      max: 5
     - id: prompt
       label: Prompt
       description: Describe the video you want to edit.
@@ -157,17 +155,12 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 480
+      default: 720
       options:
       - name: HD
         value: 720
-        height: 720
-      - name: Full HD
-        value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
@@ -175,22 +168,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: '16:9'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -211,10 +204,10 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 720
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
@@ -224,7 +217,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -255,3 +248,9 @@ spec:
       min: 0.0
       max: 15.0
       step: 0.1
+  loras:
+  - scale: 1.0
+    name: Wan Lightning
+    label: Wan Lightning
+    verified: true
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/29569a7b82c9afc9ced4638d666fd2128f2d84ee106a17dd879db733fe9143b9_wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors

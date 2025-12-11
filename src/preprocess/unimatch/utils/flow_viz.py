@@ -21,13 +21,13 @@ from PIL import Image
 
 
 def make_colorwheel():
-    '''
+    """
     Generates a color wheel for optical flow visualization as presented in:
         Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
         URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
     According to the C++ source code of Daniel Scharstein
     According to the Matlab source code of Deqing Sun
-    '''
+    """
 
     RY = 15
     YG = 6
@@ -45,29 +45,29 @@ def make_colorwheel():
     colorwheel[0:RY, 1] = np.floor(255 * np.arange(0, RY) / RY)
     col = col + RY
     # YG
-    colorwheel[col:col + YG, 0] = 255 - np.floor(255 * np.arange(0, YG) / YG)
-    colorwheel[col:col + YG, 1] = 255
+    colorwheel[col : col + YG, 0] = 255 - np.floor(255 * np.arange(0, YG) / YG)
+    colorwheel[col : col + YG, 1] = 255
     col = col + YG
     # GC
-    colorwheel[col:col + GC, 1] = 255
-    colorwheel[col:col + GC, 2] = np.floor(255 * np.arange(0, GC) / GC)
+    colorwheel[col : col + GC, 1] = 255
+    colorwheel[col : col + GC, 2] = np.floor(255 * np.arange(0, GC) / GC)
     col = col + GC
     # CB
-    colorwheel[col:col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
-    colorwheel[col:col + CB, 2] = 255
+    colorwheel[col : col + CB, 1] = 255 - np.floor(255 * np.arange(CB) / CB)
+    colorwheel[col : col + CB, 2] = 255
     col = col + CB
     # BM
-    colorwheel[col:col + BM, 2] = 255
-    colorwheel[col:col + BM, 0] = np.floor(255 * np.arange(0, BM) / BM)
+    colorwheel[col : col + BM, 2] = 255
+    colorwheel[col : col + BM, 0] = np.floor(255 * np.arange(0, BM) / BM)
     col = col + BM
     # MR
-    colorwheel[col:col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
-    colorwheel[col:col + MR, 0] = 255
+    colorwheel[col : col + MR, 2] = 255 - np.floor(255 * np.arange(MR) / MR)
+    colorwheel[col : col + MR, 0] = 255
     return colorwheel
 
 
 def flow_compute_color(u, v, convert_to_bgr=False):
-    '''
+    """
     Applies the flow color wheel to (possibly clipped) flow components u and v.
     According to the C++ source code of Daniel Scharstein
     According to the Matlab source code of Deqing Sun
@@ -75,7 +75,7 @@ def flow_compute_color(u, v, convert_to_bgr=False):
     :param v: np.ndarray, input vertical flow
     :param convert_to_bgr: bool, whether to change ordering and output BGR instead of RGB
     :return:
-    '''
+    """
 
     flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
 
@@ -97,7 +97,7 @@ def flow_compute_color(u, v, convert_to_bgr=False):
         col1 = tmp[k1] / 255.0
         col = (1 - f) * col0 + f * col1
 
-        idx = (rad <= 1)
+        idx = rad <= 1
         col[idx] = 1 - rad[idx] * (1 - col[idx])
         col[~idx] = col[~idx] * 0.75  # out of range?
 
@@ -109,17 +109,17 @@ def flow_compute_color(u, v, convert_to_bgr=False):
 
 
 def flow_to_color(flow_uv, clip_flow=None, convert_to_bgr=False):
-    '''
+    """
     Expects a two dimensional flow image of shape [H,W,2]
     According to the C++ source code of Daniel Scharstein
     According to the Matlab source code of Deqing Sun
     :param flow_uv: np.ndarray of shape [H,W,2]
     :param clip_flow: float, maximum clipping value for flow
     :return:
-    '''
+    """
 
-    assert flow_uv.ndim == 3, 'input flow must have three dimensions'
-    assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
+    assert flow_uv.ndim == 3, "input flow must have three dimensions"
+    assert flow_uv.shape[2] == 2, "input flow must have shape [H,W,2]"
 
     if clip_flow is not None:
         flow_uv = np.clip(flow_uv, 0, clip_flow)
@@ -166,28 +166,34 @@ def make_color_wheel():
     col += RY
 
     # YG
-    colorwheel[col:col + YG, 0] = 255 - np.transpose(np.floor(255 * np.arange(0, YG) / YG))
-    colorwheel[col:col + YG, 1] = 255
+    colorwheel[col : col + YG, 0] = 255 - np.transpose(
+        np.floor(255 * np.arange(0, YG) / YG)
+    )
+    colorwheel[col : col + YG, 1] = 255
     col += YG
 
     # GC
-    colorwheel[col:col + GC, 1] = 255
-    colorwheel[col:col + GC, 2] = np.transpose(np.floor(255 * np.arange(0, GC) / GC))
+    colorwheel[col : col + GC, 1] = 255
+    colorwheel[col : col + GC, 2] = np.transpose(np.floor(255 * np.arange(0, GC) / GC))
     col += GC
 
     # CB
-    colorwheel[col:col + CB, 1] = 255 - np.transpose(np.floor(255 * np.arange(0, CB) / CB))
-    colorwheel[col:col + CB, 2] = 255
+    colorwheel[col : col + CB, 1] = 255 - np.transpose(
+        np.floor(255 * np.arange(0, CB) / CB)
+    )
+    colorwheel[col : col + CB, 2] = 255
     col += CB
 
     # BM
-    colorwheel[col:col + BM, 2] = 255
-    colorwheel[col:col + BM, 0] = np.transpose(np.floor(255 * np.arange(0, BM) / BM))
-    col += + BM
+    colorwheel[col : col + BM, 2] = 255
+    colorwheel[col : col + BM, 0] = np.transpose(np.floor(255 * np.arange(0, BM) / BM))
+    col += +BM
 
     # MR
-    colorwheel[col:col + MR, 2] = 255 - np.transpose(np.floor(255 * np.arange(0, MR) / MR))
-    colorwheel[col:col + MR, 0] = 255
+    colorwheel[col : col + MR, 2] = 255 - np.transpose(
+        np.floor(255 * np.arange(0, MR) / MR)
+    )
+    colorwheel[col : col + MR, 0] = 255
 
     return colorwheel
 
@@ -208,7 +214,7 @@ def compute_color(u, v):
     colorwheel = make_color_wheel()
     ncols = np.size(colorwheel, 0)
 
-    rad = np.sqrt(u ** 2 + v ** 2)
+    rad = np.sqrt(u**2 + v**2)
 
     a = np.arctan2(-v, -u) / np.pi
 
@@ -246,10 +252,10 @@ def flow_to_image(flow):
     u = flow[:, :, 0]
     v = flow[:, :, 1]
 
-    maxu = -999.
-    maxv = -999.
-    minu = 999.
-    minv = 999.
+    maxu = -999.0
+    maxv = -999.0
+    minu = 999.0
+    minv = 999.0
 
     idxUnknow = (abs(u) > UNKNOWN_FLOW_THRESH) | (abs(v) > UNKNOWN_FLOW_THRESH)
     u[idxUnknow] = 0
@@ -261,7 +267,7 @@ def flow_to_image(flow):
     maxv = max(maxv, np.max(v))
     minv = min(minv, np.min(v))
 
-    rad = np.sqrt(u ** 2 + v ** 2)
+    rad = np.sqrt(u**2 + v**2)
     maxrad = max(-1, np.max(rad))
 
     u = u / (maxrad + np.finfo(float).eps)

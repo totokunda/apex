@@ -12,7 +12,7 @@ metadata:
   - 14b
   - krea
   - realtime
-  author: Apex AI
+  author: Krea AI
   license: Apache-2.0
   demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
   categories:
@@ -22,6 +22,14 @@ spec:
   model_type: causal
   engine_type: torch
   denoise_type: base
+  default_duration_secs: 5.0
+  min_duration_secs: 1.0
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
+  fps: 16
   components:
   - type: scheduler
     label: Scheduler
@@ -100,10 +108,7 @@ spec:
       layout:
         flow: column
         rows:
-        - - num_inference_steps
-        - - guidance_scale
         - - seed
-
     inputs:
     - id: prompt
       label: Prompt
@@ -117,25 +122,18 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 480
       options:
-      - name: Ultra HD
-        value: 1024
-        height: 1024
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
-      - name: Custom
-        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: "16:9"
       options:
       - name: Square
         value: "1:1"
@@ -155,36 +153,26 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 50
-      min: 1
-      max: 100
-      step: 1
     - id: height
       label: Height
       description: Explicit height override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 480
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 832
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -195,15 +183,3 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number
-      value_type: float
-      panel: sampling
-      required: false
-      default: 5.0
-      min: 1.0
-      max: 15.0
-      step: 0.1
-
-

@@ -61,7 +61,6 @@ parameters:
   type: bool
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/body_pose_model.pth
   size_bytes: 209267595

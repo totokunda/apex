@@ -1,4 +1,3 @@
-
 from typing import Dict, Any, Callable, List, Union, Optional
 import torch
 import numpy as np
@@ -12,15 +11,16 @@ from diffusers.utils.torch_utils import randn_tensor
 from diffusers.video_processor import VideoProcessor
 from src.helpers.ltx.patchifier import Patchifier
 import copy
-from typing import Tuple    
+from typing import Tuple
 from torch.nn import functional as F
 from src.engine.base_engine import BaseEngine
 from .shared import LTXVideoCondition
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 
+
 class LTXX2VEngine(BaseEngine):
     """LTX Any-to-Video Engine Implementation"""
-    
+
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
         # Delegate properties to main engine
@@ -55,7 +55,7 @@ class LTXX2VEngine(BaseEngine):
         self.num_channels_latents: int = (
             self.vae.config.latent_channels if self.vae is not None else 128
         )
-    
+
     def denoising_step(
         self,
         latents: torch.Tensor,
@@ -116,7 +116,7 @@ class LTXX2VEngine(BaseEngine):
         noised_latents = init_latents + noise_scale * noise * (t**2)
         latents = torch.where(need_to_noise, noised_latents, latents)
         return latents
-    
+
     def _get_timesteps(
         self,
         scheduler,
@@ -162,7 +162,9 @@ class LTXX2VEngine(BaseEngine):
                     f"The current scheduler class {scheduler.__class__}'s `set_timesteps` does not support custom"
                     f" timestep schedules. Please check whether you are using the correct scheduler."
                 )
-            scheduler.set_timesteps(timesteps=timesteps.float().cpu(), device=device, **kwargs)
+            scheduler.set_timesteps(
+                timesteps=timesteps.float().cpu(), device=device, **kwargs
+            )
             timesteps = scheduler.timesteps
             num_inference_steps = len(timesteps)
         else:
@@ -183,7 +185,9 @@ class LTXX2VEngine(BaseEngine):
                 skip_initial_inference_steps : len(timesteps)
                 - skip_final_inference_steps
             ]
-            scheduler.set_timesteps(timesteps=timesteps.float().cpu(), device=device, **kwargs)
+            scheduler.set_timesteps(
+                timesteps=timesteps.float().cpu(), device=device, **kwargs
+            )
             num_inference_steps = len(timesteps)
 
         return timesteps, num_inference_steps
@@ -862,7 +866,11 @@ class LTXX2VEngine(BaseEngine):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -950,8 +958,8 @@ class LTXX2VEngine(BaseEngine):
             parse_frames=(video_input is None and initial_latents is None),
         )
         if hasattr(self.scheduler, "init_noise_sigma"):
-                    # scale the initial noise by the standard deviation required by the scheduler
-                    noise = noise * self.scheduler.init_noise_sigma
+            # scale the initial noise by the standard deviation required by the scheduler
+            noise = noise * self.scheduler.init_noise_sigma
 
         retrieve_timesteps_kwargs = {}
         if isinstance(self.scheduler, TimestepShifter):
@@ -1050,7 +1058,7 @@ class LTXX2VEngine(BaseEngine):
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
-        
+
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 do_classifier_free_guidance = guidance_scale[i] > 1.0
@@ -1223,11 +1231,14 @@ class LTXX2VEngine(BaseEngine):
                     progress_bar.update()
                     # Emit progress during denoising
                     step_progress = (i + 1) / len(timesteps)
-                    safe_emit_progress(denoise_progress_callback, step_progress, f"Denoising step {i + 1}/{len(timesteps)}")
+                    safe_emit_progress(
+                        denoise_progress_callback,
+                        step_progress,
+                        f"Denoising step {i + 1}/{len(timesteps)}",
+                    )
 
                 # if render_on_step and render_on_step_callback and i != len(timesteps) - 1:
                 #     self._render_step(latents, render_on_step_callback)
-
 
         if offload:
             self._offload(self.transformer)
@@ -1260,5 +1271,7 @@ class LTXX2VEngine(BaseEngine):
             decode_noise_scale=decode_noise_scale,
             tone_map_compression_ratio=tone_map_compression_ratio,
         )
-        safe_emit_progress(progress_callback, 1.0, "Completed LTX Any-to-Video pipeline")
+        safe_emit_progress(
+            progress_callback, 1.0, "Completed LTX Any-to-Video pipeline"
+        )
         return output

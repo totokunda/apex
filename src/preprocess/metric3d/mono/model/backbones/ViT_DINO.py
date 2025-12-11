@@ -19,30 +19,19 @@ from torch import Tensor
 import torch.utils.checkpoint
 from torch.nn.init import trunc_normal_
 
-#from dinov2.layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
+# from dinov2.layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
 
 logger = logging.getLogger("dinov2")
+
 
 class ConvBlock(nn.Module):
     def __init__(self, channels):
         super(ConvBlock, self).__init__()
 
         self.act = nn.ReLU(inplace=True)
-        self.conv1 = nn.Conv2d(
-            channels,
-            channels,
-            kernel_size=3,
-            stride=1,
-            padding=1
-        )
+        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=1)
         self.norm1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(
-            channels,
-            channels,
-            kernel_size=3,
-            stride=1,
-            padding=1
-        )
+        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=1)
         self.norm2 = nn.BatchNorm2d(channels)
 
     def forward(self, x):
@@ -55,6 +44,7 @@ class ConvBlock(nn.Module):
         out = self.conv2(out)
         return x + out
 
+
 def make_2tuple(x):
     if isinstance(x, tuple):
         assert len(x) == 2
@@ -63,16 +53,20 @@ def make_2tuple(x):
     assert isinstance(x, int)
     return (x, x)
 
+
 def drop_path(x, drop_prob: float = 0.0, training: bool = False):
     if drop_prob == 0.0 or not training:
         return x
     keep_prob = 1 - drop_prob
-    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )  # work with diff dim tensors, not just 2D ConvNets
     random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
     if keep_prob > 0.0:
         random_tensor.div_(keep_prob)
     output = x * random_tensor
     return output
+
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks)."""
@@ -83,6 +77,7 @@ class DropPath(nn.Module):
 
     def forward(self, x):
         return drop_path(x, self.drop_prob, self.training)
+
 
 class LayerScale(nn.Module):
     def __init__(
@@ -139,15 +134,21 @@ class PatchEmbed(nn.Module):
 
         self.flatten_embedding = flatten_embedding
 
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_HW, stride=patch_HW)
+        self.proj = nn.Conv2d(
+            in_chans, embed_dim, kernel_size=patch_HW, stride=patch_HW
+        )
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
     def forward(self, x: Tensor) -> Tensor:
         _, _, H, W = x.shape
         patch_H, patch_W = self.patch_size
 
-        assert H % patch_H == 0, f"Input image height {H} is not a multiple of patch height {patch_H}"
-        assert W % patch_W == 0, f"Input image width {W} is not a multiple of patch width: {patch_W}"
+        assert (
+            H % patch_H == 0
+        ), f"Input image height {H} is not a multiple of patch height {patch_H}"
+        assert (
+            W % patch_W == 0
+        ), f"Input image width {W} is not a multiple of patch width: {patch_W}"
 
         x = self.proj(x)  # B C H W
         H, W = x.size(2), x.size(3)
@@ -159,10 +160,17 @@ class PatchEmbed(nn.Module):
 
     def flops(self) -> float:
         Ho, Wo = self.patches_resolution
-        flops = Ho * Wo * self.embed_dim * self.in_chans * (self.patch_size[0] * self.patch_size[1])
+        flops = (
+            Ho
+            * Wo
+            * self.embed_dim
+            * self.in_chans
+            * (self.patch_size[0] * self.patch_size[1])
+        )
         if self.norm is not None:
             flops += Ho * Wo * self.embed_dim
         return flops
+
 
 class Mlp(nn.Module):
     def __init__(
@@ -216,11 +224,13 @@ class SwiGLUFFN(nn.Module):
 
 try:
     from xformers.ops import SwiGLU
-    #import numpy.bool
+
+    # import numpy.bool
     XFORMERS_AVAILABLE = True
 except ImportError:
     SwiGLU = SwiGLUFFN
     XFORMERS_AVAILABLE = False
+
 
 class SwiGLUFFNFused(SwiGLU):
     def __init__(
@@ -266,15 +276,19 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
-        
-        #if not self.training:
+
+        # if not self.training:
         #
         # self.attn = ScaledDotProduct()
-            #self.attn = MultiHeadDispatch(dim_model=EMB, residual_dropout=DROPOUT, num_heads=HEADS, attention=attn)
+        # self.attn = MultiHeadDispatch(dim_model=EMB, residual_dropout=DROPOUT, num_heads=HEADS, attention=attn)
 
     def forward(self, x: Tensor, attn_bias=None) -> Tensor:
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
 
         q, k, v = qkv[0] * self.scale, qkv[1], qkv[2]
         attn = q @ k.transpose(-2, -1)
@@ -294,7 +308,7 @@ class Attention(nn.Module):
 class MemEffAttention(Attention):
     def forward(self, x: Tensor, attn_bias=None) -> Tensor:
         if not XFORMERS_AVAILABLE:
-        #if True:
+            # if True:
             assert attn_bias is None, "xFormers is required for nested tensors usage"
             return super().forward(x, attn_bias)
 
@@ -312,7 +326,9 @@ class MemEffAttention(Attention):
         x = self.proj_drop(x)
         return x
 
+
 XFORMERS_AVAILABLE = False
+
 
 class Block(nn.Module):
     def __init__(
@@ -325,7 +341,7 @@ class Block(nn.Module):
         ffn_bias: bool = True,
         drop: float = 0.0,
         attn_drop: float = 0.0,
-        init_values = None,
+        init_values=None,
         drop_path: float = 0.0,
         act_layer: Callable[..., nn.Module] = nn.GELU,
         norm_layer: Callable[..., nn.Module] = nn.LayerNorm,
@@ -343,7 +359,9 @@ class Block(nn.Module):
             attn_drop=attn_drop,
             proj_drop=drop,
         )
-        self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        self.ls1 = (
+            LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        )
         self.drop_path1 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
         self.norm2 = norm_layer(dim)
@@ -355,7 +373,9 @@ class Block(nn.Module):
             drop=drop,
             bias=ffn_bias,
         )
-        self.ls2 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        self.ls2 = (
+            LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
+        )
         self.drop_path2 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
         self.sample_drop_ratio = drop_path
@@ -373,7 +393,7 @@ class Block(nn.Module):
                 x,
                 residual_func=attn_residual_func,
                 sample_drop_ratio=self.sample_drop_ratio,
-                attn_bias=attn_bias
+                attn_bias=attn_bias,
             )
             x = drop_add_residual_stochastic_depth(
                 x,
@@ -392,7 +412,8 @@ class Block(nn.Module):
 def drop_add_residual_stochastic_depth(
     x: Tensor,
     residual_func: Callable[[Tensor], Tensor],
-    sample_drop_ratio: float = 0.0, attn_bias=None
+    sample_drop_ratio: float = 0.0,
+    attn_bias=None,
 ) -> Tensor:
     # 1) extract subset using permutation
     b, n, d = x.shape
@@ -409,7 +430,9 @@ def drop_add_residual_stochastic_depth(
     residual_scale_factor = b / sample_subset_size
 
     # 3) add the residual
-    x_plus_residual = torch.index_add(x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor)
+    x_plus_residual = torch.index_add(
+        x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor
+    )
     return x_plus_residual.view_as(x)
 
 
@@ -425,10 +448,16 @@ def add_residual(x, brange, residual, residual_scale_factor, scaling_vector=None
     if scaling_vector is None:
         x_flat = x.flatten(1)
         residual = residual.flatten(1)
-        x_plus_residual = torch.index_add(x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor)
+        x_plus_residual = torch.index_add(
+            x_flat, 0, brange, residual.to(dtype=x.dtype), alpha=residual_scale_factor
+        )
     else:
         x_plus_residual = scaled_index_add(
-            x, brange, residual.to(dtype=x.dtype), scaling=scaling_vector, alpha=residual_scale_factor
+            x,
+            brange,
+            residual.to(dtype=x.dtype),
+            scaling=scaling_vector,
+            alpha=residual_scale_factor,
         )
     return x_plus_residual
 
@@ -440,7 +469,11 @@ def get_attn_bias_and_cat(x_list, branges=None):
     """
     this will perform the index select, cat the tensors, and provide the attn_bias from cache
     """
-    batch_sizes = [b.shape[0] for b in branges] if branges is not None else [x.shape[0] for x in x_list]
+    batch_sizes = (
+        [b.shape[0] for b in branges]
+        if branges is not None
+        else [x.shape[0] for x in x_list]
+    )
     all_shapes = tuple((b, x.shape[1]) for b, x in zip(batch_sizes, x_list))
     if all_shapes not in attn_bias_cache.keys():
         seqlens = []
@@ -452,7 +485,9 @@ def get_attn_bias_and_cat(x_list, branges=None):
         attn_bias_cache[all_shapes] = attn_bias
 
     if branges is not None:
-        cat_tensors = index_select_cat([x.flatten(1) for x in x_list], branges).view(1, -1, x_list[0].shape[-1])
+        cat_tensors = index_select_cat([x.flatten(1) for x in x_list], branges).view(
+            1, -1, x_list[0].shape[-1]
+        )
     else:
         tensors_bs1 = tuple(x.reshape([1, -1, *x.shape[2:]]) for x in x_list)
         cat_tensors = torch.cat(tensors_bs1, dim=1)
@@ -467,7 +502,9 @@ def drop_add_residual_stochastic_depth_list(
     scaling_vector=None,
 ) -> Tensor:
     # 1) generate random set of indices for dropping samples in the batch
-    branges_scales = [get_branges_scales(x, sample_drop_ratio=sample_drop_ratio) for x in x_list]
+    branges_scales = [
+        get_branges_scales(x, sample_drop_ratio=sample_drop_ratio) for x in x_list
+    ]
     branges = [s[0] for s in branges_scales]
     residual_scale_factors = [s[1] for s in branges_scales]
 
@@ -478,8 +515,14 @@ def drop_add_residual_stochastic_depth_list(
     residual_list = attn_bias.split(residual_func(x_cat, attn_bias=attn_bias))  # type: ignore
 
     outputs = []
-    for x, brange, residual, residual_scale_factor in zip(x_list, branges, residual_list, residual_scale_factors):
-        outputs.append(add_residual(x, brange, residual, residual_scale_factor, scaling_vector).view_as(x))
+    for x, brange, residual, residual_scale_factor in zip(
+        x_list, branges, residual_list, residual_scale_factors
+    ):
+        outputs.append(
+            add_residual(
+                x, brange, residual, residual_scale_factor, scaling_vector
+            ).view_as(x)
+        )
     return outputs
 
 
@@ -502,13 +545,17 @@ class NestedTensorBlock(Block):
                 x_list,
                 residual_func=attn_residual_func,
                 sample_drop_ratio=self.sample_drop_ratio,
-                scaling_vector=self.ls1.gamma if isinstance(self.ls1, LayerScale) else None,
+                scaling_vector=(
+                    self.ls1.gamma if isinstance(self.ls1, LayerScale) else None
+                ),
             )
             x_list = drop_add_residual_stochastic_depth_list(
                 x_list,
                 residual_func=ffn_residual_func,
                 sample_drop_ratio=self.sample_drop_ratio,
-                scaling_vector=self.ls2.gamma if isinstance(self.ls1, LayerScale) else None,
+                scaling_vector=(
+                    self.ls2.gamma if isinstance(self.ls1, LayerScale) else None
+                ),
             )
             return x_list
         else:
@@ -528,18 +575,28 @@ class NestedTensorBlock(Block):
         if isinstance(x_or_x_list, Tensor):
             return super().forward(x_or_x_list, attn_bias)
         elif isinstance(x_or_x_list, list):
-            assert XFORMERS_AVAILABLE, "Please install xFormers for nested tensors usage"
+            assert (
+                XFORMERS_AVAILABLE
+            ), "Please install xFormers for nested tensors usage"
             return self.forward_nested(x_or_x_list)
         else:
             raise AssertionError
 
 
-def named_apply(fn: Callable, module: nn.Module, name="", depth_first=True, include_root=False) -> nn.Module:
+def named_apply(
+    fn: Callable, module: nn.Module, name="", depth_first=True, include_root=False
+) -> nn.Module:
     if not depth_first and include_root:
         fn(module=module, name=name)
     for child_name, child_module in module.named_children():
         child_name = ".".join((name, child_name)) if name else child_name
-        named_apply(fn=fn, module=child_module, name=child_name, depth_first=depth_first, include_root=True)
+        named_apply(
+            fn=fn,
+            module=child_module,
+            name=child_name,
+            depth_first=depth_first,
+            include_root=True,
+        )
     if depth_first and include_root:
         fn(module=module, name=name)
     return module
@@ -570,7 +627,7 @@ class DinoVisionTransformer(nn.Module):
         proj_bias=True,
         drop_path_rate=0.0,
         drop_path_uniform=False,
-        #init_values=None,  # for layerscale: None or 0 => no layerscale
+        # init_values=None,  # for layerscale: None or 0 => no layerscale
         init_values=1e-5,  # for layerscale: None or 0 => no layerscale
         embed_layer=PatchEmbed,
         act_layer=nn.GELU,
@@ -578,7 +635,7 @@ class DinoVisionTransformer(nn.Module):
         ffn_layer="mlp",
         block_chunks=1,
         window_size=37,
-        **kwargs
+        **kwargs,
     ):
         """
         Args:
@@ -605,23 +662,34 @@ class DinoVisionTransformer(nn.Module):
         super().__init__()
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
-        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_features = self.embed_dim = (
+            embed_dim  # num_features for consistency with other models
+        )
         self.num_tokens = 1
         self.n_blocks = depth
         self.num_heads = num_heads
         self.patch_size = patch_size
         self.window_size = window_size
 
-        self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        self.patch_embed = embed_layer(
+            img_size=img_size,
+            patch_size=patch_size,
+            in_chans=in_chans,
+            embed_dim=embed_dim,
+        )
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, num_patches + self.num_tokens, embed_dim)
+        )
 
         if drop_path_uniform is True:
             dpr = [drop_path_rate] * depth
         else:
-            dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+            dpr = [
+                x.item() for x in torch.linspace(0, drop_path_rate, depth)
+            ]  # stochastic depth decay rule
 
         if ffn_layer == "mlp":
             logger.info("using MLP layer as FFN")
@@ -661,7 +729,9 @@ class DinoVisionTransformer(nn.Module):
             chunksize = depth // block_chunks
             for i in range(0, depth, chunksize):
                 # this is to keep the block index consistent if we chunk the block list
-                chunked_blocks.append([nn.Identity()] * i + blocks_list[i : i + chunksize])
+                chunked_blocks.append(
+                    [nn.Identity()] * i + blocks_list[i : i + chunksize]
+                )
             self.blocks = nn.ModuleList([BlockChunk(p) for p in chunked_blocks])
         else:
             self.chunked_blocks = False
@@ -696,20 +766,29 @@ class DinoVisionTransformer(nn.Module):
         w0, h0 = w0 + 0.1, h0 + 0.1
 
         patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            patch_pos_embed.reshape(
+                1, int(math.sqrt(N)), int(math.sqrt(N)), dim
+            ).permute(0, 3, 1, 2),
             scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
             mode="bicubic",
         )
 
-        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        assert (
+            int(w0) == patch_pos_embed.shape[-2]
+            and int(h0) == patch_pos_embed.shape[-1]
+        )
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1).to(previous_dtype)
+        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1).to(
+            previous_dtype
+        )
 
     def prepare_tokens_with_masks(self, x, masks=None):
         B, nc, w, h = x.shape
         x = self.patch_embed(x)
         if masks is not None:
-            x = torch.where(masks.unsqueeze(-1), self.mask_token.to(x.dtype).unsqueeze(0), x)
+            x = torch.where(
+                masks.unsqueeze(-1), self.mask_token.to(x.dtype).unsqueeze(0), x
+            )
 
         x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
         x = x + self.interpolate_pos_encoding(x, w, h)
@@ -717,7 +796,10 @@ class DinoVisionTransformer(nn.Module):
         return x
 
     def forward_features_list(self, x_list, masks_list):
-        x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
+        x = [
+            self.prepare_tokens_with_masks(x, masks)
+            for x, masks in zip(x_list, masks_list)
+        ]
         for blk in self.blocks:
             x = blk(x)
 
@@ -740,15 +822,17 @@ class DinoVisionTransformer(nn.Module):
             return self.forward_features_list(x, masks)
 
         B, C, H, W = x.size()
-        pad_h = (self.patch_size - H % self.patch_size)
-        pad_w = (self.patch_size - W % self.patch_size)
+        pad_h = self.patch_size - H % self.patch_size
+        pad_w = self.patch_size - W % self.patch_size
         if pad_h == self.patch_size:
             pad_h = 0
         if pad_w == self.patch_size:
-            pad_w = 0     
-        #x = nn.functional.pad(x, (pad_h//2, pad_h-pad_h//2, pad_w//2, pad_w-pad_w//2))
+            pad_w = 0
+        # x = nn.functional.pad(x, (pad_h//2, pad_h-pad_h//2, pad_w//2, pad_w-pad_w//2))
         if pad_h + pad_w > 0:
-            x = torch.nn.functional.interpolate(x, (H+pad_h, W+pad_w), mode='bilinear')
+            x = torch.nn.functional.interpolate(
+                x, (H + pad_h, W + pad_w), mode="bilinear"
+            )
 
         x = self.prepare_tokens_with_masks(x, masks)
 
@@ -760,7 +844,7 @@ class DinoVisionTransformer(nn.Module):
         #     if (idx + 1) % (len(self.blocks[0]) // 4) == 0:
         #         features.append(x)
 
-        #return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
+        # return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
 
         x_norm = self.norm(x)
         # return {
@@ -774,32 +858,43 @@ class DinoVisionTransformer(nn.Module):
         features.append(x_norm)
         features.append(x_norm)
         features.append(x_norm)
-        return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
+        return [
+            features,
+            (B, (H + pad_h) // self.patch_size, (W + pad_w) // self.patch_size, H, W),
+        ]
 
     def _get_intermediate_layers_not_chunked(self, x, n=1):
         x = self.prepare_tokens_with_masks(x)
         # If n is an int, take the n last blocks. If it's a list, take them
         output, total_block_len = [], len(self.blocks)
-        blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        blocks_to_take = (
+            range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        )
         for i, blk in enumerate(self.blocks):
             x = blk(x)
             if i in blocks_to_take:
                 output.append(x)
-        assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
+        assert len(output) == len(
+            blocks_to_take
+        ), f"only {len(output)} / {len(blocks_to_take)} blocks found"
         return output
 
     def _get_intermediate_layers_chunked(self, x, n=1):
         x = self.prepare_tokens_with_masks(x)
         output, i, total_block_len = [], 0, len(self.blocks[-1])
         # If n is an int, take the n last blocks. If it's a list, take them
-        blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        blocks_to_take = (
+            range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        )
         for block_chunk in self.blocks:
             for blk in block_chunk[i:]:  # Passing the nn.Identity()
                 x = blk(x)
                 if i in blocks_to_take:
                     output.append(x)
                 i += 1
-        assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
+        assert len(output) == len(
+            blocks_to_take
+        ), f"only {len(output)} / {len(blocks_to_take)} blocks found"
         return output
 
     def get_intermediate_layers(
@@ -821,7 +916,9 @@ class DinoVisionTransformer(nn.Module):
         if reshape:
             B, _, w, h = x.shape
             outputs = [
-                out.reshape(B, w // self.patch_size, h // self.patch_size, -1).permute(0, 3, 1, 2).contiguous()
+                out.reshape(B, w // self.patch_size, h // self.patch_size, -1)
+                .permute(0, 3, 1, 2)
+                .contiguous()
                 for out in outputs
             ]
         if return_class_token:
@@ -855,8 +952,9 @@ class PosConv(nn.Module):
         x = x.flatten(2).transpose(1, 2)
         return x
 
-    #def no_weight_decay(self):
-        #return ['proj.%d.weight' % i for i in range(4)]
+    # def no_weight_decay(self):
+    # return ['proj.%d.weight' % i for i in range(4)]
+
 
 class DinoWindowVisionTransformer(nn.Module):
     def __init__(
@@ -873,7 +971,7 @@ class DinoWindowVisionTransformer(nn.Module):
         proj_bias=True,
         drop_path_rate=0.0,
         drop_path_uniform=False,
-        #init_values=None,  # for layerscale: None or 0 => no layerscale
+        # init_values=None,  # for layerscale: None or 0 => no layerscale
         init_values=1e-5,  # for layerscale: None or 0 => no layerscale
         embed_layer=PatchEmbed,
         act_layer=nn.GELU,
@@ -881,7 +979,7 @@ class DinoWindowVisionTransformer(nn.Module):
         ffn_layer="mlp",
         block_chunks=1,
         window_size=7,
-        **kwargs
+        **kwargs,
     ):
         """
         Args:
@@ -908,29 +1006,38 @@ class DinoWindowVisionTransformer(nn.Module):
         super().__init__()
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
-        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_features = self.embed_dim = (
+            embed_dim  # num_features for consistency with other models
+        )
         self.num_tokens = 1
         self.n_blocks = depth
         self.num_heads = num_heads
         self.patch_size = patch_size
 
-        self.patch_embed = embed_layer(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        self.patch_embed = embed_layer(
+            img_size=img_size,
+            patch_size=patch_size,
+            in_chans=in_chans,
+            embed_dim=embed_dim,
+        )
         num_patches = self.patch_embed.num_patches
 
-        #self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        #self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
+        # self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
-        
+
         self.pos_conv = PosConv(self.embed_dim, self.embed_dim)
 
         self.window_size = window_size
-        #self.conv_block = nn.ModuleList([ConvBlock(embed_dim) for i in range(4)])
-        #self.conv_block = nn.ModuleList([nn.Identity() for i in range(4)])
+        # self.conv_block = nn.ModuleList([ConvBlock(embed_dim) for i in range(4)])
+        # self.conv_block = nn.ModuleList([nn.Identity() for i in range(4)])
 
         if drop_path_uniform is True:
             dpr = [drop_path_rate] * depth
         else:
-            dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+            dpr = [
+                x.item() for x in torch.linspace(0, drop_path_rate, depth)
+            ]  # stochastic depth decay rule
 
         if ffn_layer == "mlp":
             logger.info("using MLP layer as FFN")
@@ -970,7 +1077,9 @@ class DinoWindowVisionTransformer(nn.Module):
             chunksize = depth // block_chunks
             for i in range(0, depth, chunksize):
                 # this is to keep the block index consistent if we chunk the block list
-                chunked_blocks.append([nn.Identity()] * i + blocks_list[i : i + chunksize])
+                chunked_blocks.append(
+                    [nn.Identity()] * i + blocks_list[i : i + chunksize]
+                )
             self.blocks = nn.ModuleList([BlockChunk(p) for p in chunked_blocks])
         else:
             self.chunked_blocks = False
@@ -984,14 +1093,14 @@ class DinoWindowVisionTransformer(nn.Module):
         self.nh = -1
         self.nw = -1
         try:
-            H = cfg.data_basic['crop_size'][0] 
-            W = cfg.data_basic['crop_size'][1] 
-            pad_h = (self.patch_size - H % self.patch_size)
-            pad_w = (self.patch_size - W % self.patch_size)
+            H = cfg.data_basic["crop_size"][0]
+            W = cfg.data_basic["crop_size"][1]
+            pad_h = self.patch_size - H % self.patch_size
+            pad_w = self.patch_size - W % self.patch_size
             if pad_h == self.patch_size:
                 pad_h = 0
             if pad_w == self.patch_size:
-                pad_w = 0   
+                pad_w = 0
             self.nh = (H + pad_h) // self.patch_size
             self.nw = (W + pad_w) // self.patch_size
             self.prepare_attn_bias((self.nh, self.nw))
@@ -999,13 +1108,13 @@ class DinoWindowVisionTransformer(nn.Module):
             pass
         self.init_weights()
 
-        self.total_step = 10000 # For PE -> GPE transfer
+        self.total_step = 10000  # For PE -> GPE transfer
         self.start_step = 2000
         self.current_step = 20000
 
     def init_weights(self):
-        #trunc_normal_(self.pos_embed, std=0.02)
-        #nn.init.normal_(self.cls_token, std=1e-6)
+        # trunc_normal_(self.pos_embed, std=0.02)
+        # nn.init.normal_(self.cls_token, std=1e-6)
         named_apply(init_weights_vit_timm, self)
         for i in range(4):
             try:
@@ -1015,15 +1124,15 @@ class DinoWindowVisionTransformer(nn.Module):
 
     def interpolate_pos_encoding(self, x, w, h):
         previous_dtype = x.dtype
-        #npatch = x.shape[1] - 1
-        #N = self.pos_embed.shape[1] - 1
+        # npatch = x.shape[1] - 1
+        # N = self.pos_embed.shape[1] - 1
         npatch = x.shape[1]
         N = self.pos_embed.shape[1]
         if npatch == N and w == h:
             return self.pos_embed
         pos_embed = self.pos_embed.float()
-        #class_pos_embed = pos_embed[:, 0]
-        #patch_pos_embed = pos_embed[:, 1:]
+        # class_pos_embed = pos_embed[:, 0]
+        # patch_pos_embed = pos_embed[:, 1:]
         patch_pos_embed = pos_embed
         dim = x.shape[-1]
         w0 = w // self.patch_size
@@ -1033,17 +1142,24 @@ class DinoWindowVisionTransformer(nn.Module):
         w0, h0 = w0 + 0.1, h0 + 0.1
 
         patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+            patch_pos_embed.reshape(
+                1, int(math.sqrt(N)), int(math.sqrt(N)), dim
+            ).permute(0, 3, 1, 2),
             scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
             mode="bicubic",
         )
 
-        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+        assert (
+            int(w0) == patch_pos_embed.shape[-2]
+            and int(h0) == patch_pos_embed.shape[-1]
+        )
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed.to(previous_dtype)
-        #return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1).to(previous_dtype)
+        # return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1).to(previous_dtype)
 
-    def window_partition(self, x: torch.Tensor, window_size: int, hw: Tuple[int, int], conv_feature=False) -> Tuple[torch.Tensor, Tuple[int, int]]:
+    def window_partition(
+        self, x: torch.Tensor, window_size: int, hw: Tuple[int, int], conv_feature=False
+    ) -> Tuple[torch.Tensor, Tuple[int, int]]:
         """
         Partition into non-overlapping windows with padding if needed.
         Args:
@@ -1058,22 +1174,37 @@ class DinoWindowVisionTransformer(nn.Module):
             B, N, C = x.shape
             H, W = hw[0], hw[1]
 
-            x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
+            x = x.view(
+                B, H // window_size, window_size, W // window_size, window_size, C
+            )
 
-            windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size * window_size, C)
+            windows = (
+                x.permute(0, 1, 3, 2, 4, 5)
+                .contiguous()
+                .view(-1, window_size * window_size, C)
+            )
         else:
             B, C, H, W = x.shape
 
-            x = x.view(B, C, H // window_size, window_size, W // window_size, window_size)
+            x = x.view(
+                B, C, H // window_size, window_size, W // window_size, window_size
+            )
 
-            windows = x.permute(0, 2, 4, 3, 5, 1).contiguous().view(-1, window_size * window_size, C)            
+            windows = (
+                x.permute(0, 2, 4, 3, 5, 1)
+                .contiguous()
+                .view(-1, window_size * window_size, C)
+            )
 
-        #y = torch.cat((x_cls, windows), dim=1)
-        return windows   #, (Hp, Wp)
+        # y = torch.cat((x_cls, windows), dim=1)
+        return windows  # , (Hp, Wp)
 
-
-    def window_unpartition(self, 
-        windows: torch.Tensor, window_size: int, hw: Tuple[int, int], conv_feature=False
+    def window_unpartition(
+        self,
+        windows: torch.Tensor,
+        window_size: int,
+        hw: Tuple[int, int],
+        conv_feature=False,
     ) -> torch.Tensor:
         """
         Window unpartition into original sequences and removing padding.
@@ -1089,7 +1220,9 @@ class DinoWindowVisionTransformer(nn.Module):
         H, W = hw
 
         B = windows.shape[0] // (H * W // window_size // window_size)
-        x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+        x = windows.view(
+            B, H // window_size, W // window_size, window_size, window_size, -1
+        )
 
         if conv_feature == False:
             x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, Hp * Wp, -1)
@@ -1105,22 +1238,28 @@ class DinoWindowVisionTransformer(nn.Module):
         B, nc, w, h = x.shape
         x = self.patch_embed(x)
         if masks is not None:
-            x = torch.where(masks.unsqueeze(-1), self.mask_token.to(x.dtype).unsqueeze(0), x)
+            x = torch.where(
+                masks.unsqueeze(-1), self.mask_token.to(x.dtype).unsqueeze(0), x
+            )
 
-        #x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        # x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
         if step == -1:
             step = self.current_step
         else:
             self.current_step = step
-        
+
         if step < self.start_step:
             coef = 0.0
         elif step < self.total_step:
-            coef = (step - self.start_step) / (self.total_step - self.start_step) 
+            coef = (step - self.start_step) / (self.total_step - self.start_step)
         else:
             coef = 1.0
-        
-        x = x + (1 - coef) * self.interpolate_pos_encoding(x, w, h) + coef * self.pos_conv(x, (self.nh, self.nw))
+
+        x = (
+            x
+            + (1 - coef) * self.interpolate_pos_encoding(x, w, h)
+            + coef * self.pos_conv(x, (self.nh, self.nw))
+        )
 
         return x
 
@@ -1128,14 +1267,16 @@ class DinoWindowVisionTransformer(nn.Module):
         window_size = self.window_size
         if window_size <= 0:
             return
-        
+
         import xformers.components.attention.attention_patterns as AP
-        
+
         nh, nw = shape
-        radius = (window_size-1)//2 
-        mask_ori = AP.local_2d_pattern(nh, nw, distance = radius + 0.1, p=torch.inf).cuda()
-        
-        pad = (8 - (nh * nw) % 8)
+        radius = (window_size - 1) // 2
+        mask_ori = AP.local_2d_pattern(
+            nh, nw, distance=radius + 0.1, p=torch.inf
+        ).cuda()
+
+        pad = 8 - (nh * nw) % 8
         if pad == 8:
             pad = 0
         mask_pad = nn.functional.pad(mask_ori, (0, pad)).contiguous()
@@ -1143,28 +1284,39 @@ class DinoWindowVisionTransformer(nn.Module):
             mask = mask_pad[:, :-pad].view(nh, nw, nh, nw)
         else:
             mask = mask_pad[:, :].view(nh, nw, nh, nw)
-        
+
         # angle
-        mask[:radius+1,  :radius+1,  :window_size,  :window_size] = True
-        mask[:radius+1,  -radius-1:, :window_size,  -window_size:] = True
-        mask[-radius-1:, :radius+1,  -window_size:, :window_size] = True
-        mask[-radius-1:, -radius-1:, -window_size:, -window_size:] = True
+        mask[: radius + 1, : radius + 1, :window_size, :window_size] = True
+        mask[: radius + 1, -radius - 1 :, :window_size, -window_size:] = True
+        mask[-radius - 1 :, : radius + 1, -window_size:, :window_size] = True
+        mask[-radius - 1 :, -radius - 1 :, -window_size:, -window_size:] = True
 
         # edge
-        mask[radius+1:-radius-1,  :radius+1,  :,  :] = mask[radius+1:-radius-1,  radius:radius+1,    :,  :]
-        mask[radius+1:-radius-1,  -radius-1:, :,  :] = mask[radius+1:-radius-1,  -radius-1:-radius,  :,  :]
-        mask[:radius+1,   radius+1:-radius-1, :,  :] = mask[radius:radius+1,   radius+1:-radius-1,   :,  :]
-        mask[-radius-1:,  radius+1:-radius-1, :,  :] = mask[-radius-1:-radius, radius+1:-radius-1,   :,  :]
+        mask[radius + 1 : -radius - 1, : radius + 1, :, :] = mask[
+            radius + 1 : -radius - 1, radius : radius + 1, :, :
+        ]
+        mask[radius + 1 : -radius - 1, -radius - 1 :, :, :] = mask[
+            radius + 1 : -radius - 1, -radius - 1 : -radius, :, :
+        ]
+        mask[: radius + 1, radius + 1 : -radius - 1, :, :] = mask[
+            radius : radius + 1, radius + 1 : -radius - 1, :, :
+        ]
+        mask[-radius - 1 :, radius + 1 : -radius - 1, :, :] = mask[
+            -radius - 1 : -radius, radius + 1 : -radius - 1, :, :
+        ]
 
-        mask = mask.view(nh*nw, nh*nw)
+        mask = mask.view(nh * nw, nh * nw)
         bias_pad = torch.log(mask_pad)
-        #bias = bias_pad[:, :-pad]
-        self.register_buffer('attn_bias', bias_pad)
+        # bias = bias_pad[:, :-pad]
+        self.register_buffer("attn_bias", bias_pad)
 
         return bias_pad
 
     def forward_features_list(self, x_list, masks_list):
-        x = [self.prepare_tokens_with_masks(x, masks) for x, masks in zip(x_list, masks_list)]
+        x = [
+            self.prepare_tokens_with_masks(x, masks)
+            for x, masks in zip(x_list, masks_list)
+        ]
         for blk in self.blocks:
             x = blk(x)
 
@@ -1187,38 +1339,42 @@ class DinoWindowVisionTransformer(nn.Module):
             return self.forward_features_list(x, masks)
 
         B, C, H, W = x.size()
-        pad_h = (self.patch_size - H % self.patch_size)
-        pad_w = (self.patch_size - W % self.patch_size)
+        pad_h = self.patch_size - H % self.patch_size
+        pad_w = self.patch_size - W % self.patch_size
         if pad_h == self.patch_size:
             pad_h = 0
         if pad_w == self.patch_size:
-            pad_w = 0     
-        #x = nn.functional.pad(x, (pad_h//2, pad_h-pad_h//2, pad_w//2, pad_w-pad_w//2))
+            pad_w = 0
+        # x = nn.functional.pad(x, (pad_h//2, pad_h-pad_h//2, pad_w//2, pad_w-pad_w//2))
         if pad_h + pad_w > 0:
-            x = torch.nn.functional.interpolate(x, (H+pad_h, W+pad_w), mode='bilinear')
-        
-        nh = (H+pad_h)//self.patch_size
-        nw = (W+pad_w)//self.patch_size
+            x = torch.nn.functional.interpolate(
+                x, (H + pad_h, W + pad_w), mode="bilinear"
+            )
+
+        nh = (H + pad_h) // self.patch_size
+        nw = (W + pad_w) // self.patch_size
 
         if self.window_size > 0:
             if nh == self.nh and nw == self.nw:
                 attn_bias = self.attn_bias
             else:
-                attn_bias = self.prepare_attn_bias(((H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size))   
+                attn_bias = self.prepare_attn_bias(
+                    ((H + pad_h) // self.patch_size, (W + pad_w) // self.patch_size)
+                )
                 self.nh = nh
-                self.nw = nw 
+                self.nw = nw
             attn_bias = attn_bias.unsqueeze(0).repeat(B * self.num_heads, 1, 1)
         else:
             attn_bias = None
 
         x = self.prepare_tokens_with_masks(x, masks)
-        #x = self.patch_embed(x)
+        # x = self.patch_embed(x)
 
         features = []
-        #x = self.window_partition(x, self.window_size, (H // self.patch_size, W // self.patch_size))
+        # x = self.window_partition(x, self.window_size, (H // self.patch_size, W // self.patch_size))
         for blk in self.blocks:
             x = blk(x, attn_bias)
-        #x = self.window_unpartition(x, self.window_size, (H // self.patch_size, W // self.patch_size))
+        # x = self.window_unpartition(x, self.window_size, (H // self.patch_size, W // self.patch_size))
 
         # for idx in range(len(self.blocks[0])):
         #     x = self.blocks[0][idx](x, attn_bias)
@@ -1231,9 +1387,9 @@ class DinoWindowVisionTransformer(nn.Module):
         #         else:
         #             b, c, h, w = x.size()
         #             x = x.permute(0, 2, 3, 1).contiguous().view(b, h, w, c)
-                #features.append(x)
+        # features.append(x)
 
-        #return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
+        # return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
 
         x_norm = self.norm(x)
         # return {
@@ -1247,32 +1403,43 @@ class DinoWindowVisionTransformer(nn.Module):
         features.append(x_norm)
         features.append(x_norm)
         features.append(x_norm)
-        return [features, (B, (H+pad_h)//self.patch_size, (W+pad_w)//self.patch_size, H, W)]
+        return [
+            features,
+            (B, (H + pad_h) // self.patch_size, (W + pad_w) // self.patch_size, H, W),
+        ]
 
     def _get_intermediate_layers_not_chunked(self, x, n=1):
         x = self.prepare_tokens_with_masks(x)
         # If n is an int, take the n last blocks. If it's a list, take them
         output, total_block_len = [], len(self.blocks)
-        blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        blocks_to_take = (
+            range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        )
         for i, blk in enumerate(self.blocks):
             x = blk(x)
             if i in blocks_to_take:
                 output.append(x)
-        assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
+        assert len(output) == len(
+            blocks_to_take
+        ), f"only {len(output)} / {len(blocks_to_take)} blocks found"
         return output
 
     def _get_intermediate_layers_chunked(self, x, n=1):
         x = self.prepare_tokens_with_masks(x)
         output, i, total_block_len = [], 0, len(self.blocks[-1])
         # If n is an int, take the n last blocks. If it's a list, take them
-        blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        blocks_to_take = (
+            range(total_block_len - n, total_block_len) if isinstance(n, int) else n
+        )
         for block_chunk in self.blocks:
             for blk in block_chunk[i:]:  # Passing the nn.Identity()
                 x = blk(x)
                 if i in blocks_to_take:
                     output.append(x)
                 i += 1
-        assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
+        assert len(output) == len(
+            blocks_to_take
+        ), f"only {len(output)} / {len(blocks_to_take)} blocks found"
         return output
 
     def get_intermediate_layers(
@@ -1294,7 +1461,9 @@ class DinoWindowVisionTransformer(nn.Module):
         if reshape:
             B, _, w, h = x.shape
             outputs = [
-                out.reshape(B, w // self.patch_size, h // self.patch_size, -1).permute(0, 3, 1, 2).contiguous()
+                out.reshape(B, w // self.patch_size, h // self.patch_size, -1)
+                .permute(0, 3, 1, 2)
+                .contiguous()
                 for out in outputs
             ]
         if return_class_token:
@@ -1308,8 +1477,6 @@ class DinoWindowVisionTransformer(nn.Module):
         #     return ret
         # else:
         #     return self.head(ret["x_norm_clstoken"])
-
-
 
 
 def init_weights_vit_timm(module: nn.Module, name: str = ""):
@@ -1348,7 +1515,7 @@ def vit_base(patch_size=14, **kwargs):
 
 def vit_large(patch_size=14, checkpoint=None, **kwargs):
     model = DinoVisionTransformer(
-        img_size = 518,
+        img_size=518,
         patch_size=patch_size,
         embed_dim=1024,
         depth=24,
@@ -1366,14 +1533,14 @@ def vit_large(patch_size=14, checkpoint=None, **kwargs):
         except:
             new_state_dict = {}
             for key, value in state_dict.items():
-                if 'blocks' in key:
-                    key_new = 'blocks.0' + key[len('blocks'):]
+                if "blocks" in key:
+                    key_new = "blocks.0" + key[len("blocks") :]
                 else:
                     key_new = key
                 new_state_dict[key_new] = value
 
             model.load_state_dict(new_state_dict, strict=True)
-        #del model.norm
+        # del model.norm
         del model.mask_token
     return model
 
@@ -1388,7 +1555,7 @@ def vit_large(patch_size=14, checkpoint=None, **kwargs):
     #     window_size=37,
     #     **kwargs,
     # )
-    
+
     # if checkpoint is not None:
     #     with open(checkpoint, "rb") as f:
     #         state_dict = torch.load(f)
@@ -1426,30 +1593,34 @@ def vit_giant2(patch_size=16, **kwargs):
     )
     return model
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     try:
         from src.preprocess.custom_mmpkg.custom_mmcv.utils import Config
     except:
-        from mmengine import Config    
-    
-    #rgb = torch.rand((2, 3, 518, 518)).cuda()
+        from mmengine import Config
 
-    #cfg.data_basic['crop_size']['0'] 
-    #cfg.data_basic['crop_size']['1'] 
-    cfg = Config.fromfile('mu.hu/monodepth/mono/configs/HourglassDecoder/pub12.convlarge.0.3_150.py')
+    # rgb = torch.rand((2, 3, 518, 518)).cuda()
 
-    #rgb = torch.arange(0, 2*3*1036*1036, 1).cuda().float().view(2, 3, 1036, 1036)
+    # cfg.data_basic['crop_size']['0']
+    # cfg.data_basic['crop_size']['1']
+    cfg = Config.fromfile(
+        "mu.hu/monodepth/mono/configs/HourglassDecoder/pub12.convlarge.0.3_150.py"
+    )
+
+    # rgb = torch.arange(0, 2*3*1036*1036, 1).cuda().float().view(2, 3, 1036, 1036)
     rgb = torch.zeros(1, 3, 1400, 1680).cuda()
-    model = vit_large(checkpoint="pretrained_weight_repo/vit/dinov2_vitl14_pretrain.pth", kwarg=cfg).cuda()
+    model = vit_large(
+        checkpoint="pretrained_weight_repo/vit/dinov2_vitl14_pretrain.pth", kwarg=cfg
+    ).cuda()
 
-    #import timm
-    #model2 = timm.models.vision_transformer.vit_large_patch14_dinov2().cuda()
-    #timm.models.load_checkpoint(model2, '/cpfs02/shared/public/yvan/pretrained_weight_repo/vit/dinov2_vitl14_pretrain.pth', filter_fn=timm.models.vision_transformer.checkpoint_filter_fn)
+    # import timm
+    # model2 = timm.models.vision_transformer.vit_large_patch14_dinov2().cuda()
+    # timm.models.load_checkpoint(model2, '/cpfs02/shared/public/yvan/pretrained_weight_repo/vit/dinov2_vitl14_pretrain.pth', filter_fn=timm.models.vision_transformer.checkpoint_filter_fn)
 
     out1 = model(rgb)
-    #out2 = model2(rgb)
+    # out2 = model2(rgb)
     temp = 0
-
 
 
 # import time
@@ -1458,15 +1629,15 @@ if __name__ == '__main__':
 #     if window_size <= 0:
 #         return None
 #     import xformers.components.attention.attention_patterns as AP
-    
+
 #     B, nh, nw, _, _ = shape
-#     radius = (window_size-1)//2 
+#     radius = (window_size-1)//2
 #     #time0 = time.time()
 #     d = AP.local_nd_distance(nh, nw, distance = radius + 0.1, p=torch.inf).cuda()
 #     #mask = AP.local_2d_pattern(nh, nw, distance = radius + 0.1, p=torch.inf).cuda()
 #     # mask = mask.view(nh, nw, nh, nw)
 #     # #time1 = time.time() - time0
-    
+
 #     # # angle
 #     # mask[:radius+1,  :radius+1,  :window_size,  :window_size] = True
 #     # mask[:radius+1,  -radius-1:, :window_size,  -window_size:] = True
@@ -1482,7 +1653,7 @@ if __name__ == '__main__':
 #     # time3 = time.time() - time0 - time2
 #     # print(time1, time2, time3)
 
-# #     return mask.view(nw*nw, nh*nw).unsqueeze(0).repeat(B, 1)   
+# #     return mask.view(nw*nw, nh*nw).unsqueeze(0).repeat(B, 1)
 
 # shape = (1, 55, 55, None, None)
 # mask = prepare_window_masks(shape)

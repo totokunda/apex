@@ -7,8 +7,10 @@ import torch.nn.functional as F
 from src.utils.cache import empty_cache
 from diffusers.models import ModelMixin
 
+
 class WanHoloCineEngine(WanShared):
     """WAN HoloCine Engine Implementation"""
+
     def __init__(self, yaml_path: str, **kwargs):
         super().__init__(yaml_path, **kwargs)
         self.vae_scale_factor_temporal = 4
@@ -19,7 +21,7 @@ class WanHoloCineEngine(WanShared):
         shot_captions: list[str],
         duration: int | str,
         custom_shot_cut_frames: list[int] = None,
-        fps: int = 15
+        fps: int = 15,
     ) -> dict:
         """
         (Helper for Mode 1)
@@ -30,9 +32,13 @@ class WanHoloCineEngine(WanShared):
 
         # 1. Prepare 'prompt'
         if "This scene contains" not in global_caption:
-            global_caption = global_caption.strip() + f" This scene contains {num_shots} shots."
+            global_caption = (
+                global_caption.strip() + f" This scene contains {num_shots} shots."
+            )
         per_shot_string = " [shot cut] ".join(shot_captions)
-        prompt = f"[global caption] {global_caption} [per shot caption] {per_shot_string}"
+        prompt = (
+            f"[global caption] {global_caption} [per shot caption] {per_shot_string}"
+        )
 
         # 2. Prepare 'num_frames'
         processed_total_frames = self._parse_num_frames(duration, fps=fps)
@@ -43,7 +49,9 @@ class WanHoloCineEngine(WanShared):
 
         if custom_shot_cut_frames:
             # User provided custom cuts
-            print(f"Using {len(custom_shot_cut_frames)} user-defined shot cuts (enforcing 4t+1).")
+            print(
+                f"Using {len(custom_shot_cut_frames)} user-defined shot cuts (enforcing 4t+1)."
+            )
             for frame in custom_shot_cut_frames:
                 processed_shot_cuts.append(self._parse_num_frames(frame, fps=fps))
         else:
@@ -53,24 +61,27 @@ class WanHoloCineEngine(WanShared):
                 ideal_step = processed_total_frames / num_shots
                 for i in range(1, num_shots):
                     approx_cut_frame = i * ideal_step
-                    processed_shot_cuts.append(self._parse_num_frames(round(approx_cut_frame), fps=fps))
+                    processed_shot_cuts.append(
+                        self._parse_num_frames(round(approx_cut_frame), fps=fps)
+                    )
 
         processed_shot_cuts = sorted(list(set(processed_shot_cuts)))
-        processed_shot_cuts = [f for f in processed_shot_cuts if f > 0 and f < processed_total_frames]
+        processed_shot_cuts = [
+            f for f in processed_shot_cuts if f > 0 and f < processed_total_frames
+        ]
 
         return {
             "prompt": prompt,
             "shot_cut_frames": processed_shot_cuts,
-            "num_frames": processed_total_frames
+            "num_frames": processed_total_frames,
         }
-    
-    
+
     def _process_shot_cut_frames(self, shot_cut_frames, num_frames):
         if shot_cut_frames is None:
             return {}
-        
+
         num_latent_frames = (num_frames - 1) // 4 + 1
-        
+
         # Convert frame cut indices to latent cut indices
         shot_cut_latents = [0]
         for frame_idx in sorted(shot_cut_frames):
@@ -78,14 +89,14 @@ class WanHoloCineEngine(WanShared):
                 latent_idx = (frame_idx - 1) // 4 + 1
                 if latent_idx < num_latent_frames:
                     shot_cut_latents.append(latent_idx)
-        
+
         cuts = sorted(list(set(shot_cut_latents))) + [num_latent_frames]
 
         shot_indices = torch.zeros(num_latent_frames, dtype=torch.long)
         for i in range(len(cuts) - 1):
-            start_latent, end_latent = cuts[i], cuts[i+1]
+            start_latent, end_latent = cuts[i], cuts[i + 1]
             shot_indices[start_latent:end_latent] = i
-            
+
         shot_indices = shot_indices.unsqueeze(0).to(device=self.device)
 
         return shot_indices
@@ -115,7 +126,9 @@ class WanHoloCineEngine(WanShared):
 
         dit = transformer
         if dit is None:
-            raise RuntimeError("Transformer (HoloCine DiT) is not loaded on the engine.")
+            raise RuntimeError(
+                "Transformer (HoloCine DiT) is not loaded on the engine."
+            )
 
         x = latents
 
@@ -144,7 +157,6 @@ class WanHoloCineEngine(WanShared):
                 )
                 x = torch.cat([x, mask], dim=1)
 
-
         t = dit.time_embedding(self.sinusoidal_embedding_1d(dit.freq_dim, timestep))
         t_mod = dit.time_projection(t).unflatten(1, (6, dit.dim))
 
@@ -157,12 +169,14 @@ class WanHoloCineEngine(WanShared):
         if timestep.shape[0] != context.shape[0]:
             timestep = torch.concat([timestep] * context.shape[0], dim=0)
 
-
         # Camera control & patchify
         x, (f, h, w) = dit.patchify(x, None)
 
         # Optional per‑shot token embeddings
-        if getattr(dit, "shot_embedding", None) is not None and shot_indices is not None:
+        if (
+            getattr(dit, "shot_embedding", None) is not None
+            and shot_indices is not None
+        ):
             assert (
                 shot_indices.shape[0] == x.shape[0]
             ), f"Batch size mismatch between latents ({x.shape[0]}) and shot_indices ({shot_indices.shape[0]})"
@@ -174,24 +188,25 @@ class WanHoloCineEngine(WanShared):
             x = x + shot_embs
 
         # Positional frequencies
-        freqs = torch.cat(
-            [
-                dit.freqs[0][:f]
-                .view(f, 1, 1, -1)
-                .expand(f, h, w, -1),
-                dit.freqs[1][:h]
-                .view(1, h, 1, -1)
-                .expand(f, h, w, -1),
-                dit.freqs[2][:w]
-                .view(1, 1, w, -1)
-                .expand(f, h, w, -1),
-            ],
-            dim=-1,
-        ).reshape(f * h * w, 1, -1).to(x.device)
+        freqs = (
+            torch.cat(
+                [
+                    dit.freqs[0][:f].view(f, 1, 1, -1).expand(f, h, w, -1),
+                    dit.freqs[1][:h].view(1, h, 1, -1).expand(f, h, w, -1),
+                    dit.freqs[2][:w].view(1, 1, w, -1).expand(f, h, w, -1),
+                ],
+                dim=-1,
+            )
+            .reshape(f * h * w, 1, -1)
+            .to(x.device)
+        )
 
         # Cross‑attention mask based on `text_cut_positions`
         attn_mask = None
-        if text_cut_positions is not None and text_cut_positions.get("global") is not None:
+        if (
+            text_cut_positions is not None
+            and text_cut_positions.get("global") is not None
+        ):
             try:
                 B, S_q = x.shape[0], x.shape[1]
                 L_text_ctx = context.shape[1]
@@ -203,16 +218,16 @@ class WanHoloCineEngine(WanShared):
                 if shot_indices is not None and S_shots > 0:
                     max_shot_id = shot_indices.max()
                     num_defined_shots = S_shots
-                    assert (
-                        max_shot_id < num_defined_shots
-                    ), (
+                    assert max_shot_id < num_defined_shots, (
                         f"Error: Shot index out of bounds! The maximum shot ID in the data is {max_shot_id.item()}, "
                         f"but only {num_defined_shots} shots were defined (valid IDs are from 0 to {num_defined_shots - 1}). "
                         f"Please check your `shot_indices` and `text_cut_positions` inputs! "
                         f"prompt: {prompt}"
                     )
 
-                max_end = max([g1] + [int(r[1]) for r in shot_ranges]) if shot_ranges else g1
+                max_end = (
+                    max([g1] + [int(r[1]) for r in shot_ranges]) if shot_ranges else g1
+                )
                 L_text_pos = max_end + 1
 
                 device, dtype = x.device, x.dtype
@@ -267,7 +282,7 @@ class WanHoloCineEngine(WanShared):
         x = dit.head(x, t)
         x = dit.unpatchify(x, (f, h, w))
         return x
-    
+
     @staticmethod
     def sinusoidal_embedding_1d(dim: int, position: torch.Tensor) -> torch.Tensor:
         """
@@ -277,9 +292,9 @@ class WanHoloCineEngine(WanShared):
             position.to(torch.float64),
             torch.pow(
                 10000,
-                -torch.arange(dim // 2, dtype=torch.float64, device=position.device).div(
-                    dim // 2
-                ),
+                -torch.arange(
+                    dim // 2, dtype=torch.float64, device=position.device
+                ).div(dim // 2),
             ),
         )
         x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
@@ -307,7 +322,6 @@ class WanHoloCineEngine(WanShared):
                 cuts.append(s)
             cuts_list.append(cuts)
         return cuts_list
-    
 
     def encode_prompt(self, prompt, positive=True, max_sequence_length: int = 512):
 
@@ -315,34 +329,35 @@ class WanHoloCineEngine(WanShared):
         if self.text_encoder is None:
             self.load_component_by_type("text_encoder")
         self.to_device(self.text_encoder)
-        
+
         if not self.text_encoder.model_loaded:
             self.text_encoder.model = self.text_encoder.load_model(no_weights=False)
             self.text_encoder.model_loaded = True
-        
+
         cleaned_prompt = self.text_encoder.prompt_clean(prompt)
-        tokenizer =  self.text_encoder.tokenizer
+        tokenizer = self.text_encoder.tokenizer
         prompt_parts = []
-        
-        global_match = re.search(r'\[global caption\]', cleaned_prompt)
-        per_shot_match = re.search(r'\[per shot caption\]', cleaned_prompt)
-        shot_cut_matches = list(re.finditer(r'\[shot cut\]', cleaned_prompt))
+
+        global_match = re.search(r"\[global caption\]", cleaned_prompt)
+        per_shot_match = re.search(r"\[per shot caption\]", cleaned_prompt)
+        shot_cut_matches = list(re.finditer(r"\[shot cut\]", cleaned_prompt))
 
         if global_match is None:
-            output = tokenizer(cleaned_prompt, 
-                return_attention_mask=True, 
-                add_special_tokens=True, 
+            output = tokenizer(
+                cleaned_prompt,
+                return_attention_mask=True,
+                add_special_tokens=True,
                 return_tensors="pt",
                 padding="max_length",
                 max_length=max_sequence_length,
                 truncation=True,
             )
-            
-            ids = output['input_ids'].to(device)
-            mask = output['attention_mask'].to(device)
+
+            ids = output["input_ids"].to(device)
+            mask = output["attention_mask"].to(device)
             seq_lens = mask.gt(0).sum(dim=1).long()
             prompt_emb = self.text_encoder.model(ids, mask)[0]
-            for i, v in enumerate(seq_lens): 
+            for i, v in enumerate(seq_lens):
                 prompt_emb[:, v:] = 0
             return prompt_emb, {"global": None, "shots": []}
 
@@ -351,35 +366,32 @@ class WanHoloCineEngine(WanShared):
             end_pos = per_shot_match.start() if per_shot_match else len(cleaned_prompt)
             global_text = cleaned_prompt[start_pos:end_pos].strip()
             if global_text:
-                prompt_parts.append({'id': -1, 'text': global_text})
-
+                prompt_parts.append({"id": -1, "text": global_text})
 
         if per_shot_match:
             current_start_pos = per_shot_match.start()
             shot_id = 0
 
-
             for shot_cut_match in shot_cut_matches:
                 end_pos = shot_cut_match.start()
                 shot_text = cleaned_prompt[current_start_pos:end_pos].strip()
                 if shot_text:
-                    prompt_parts.append({'id': shot_id, 'text': shot_text})
-                
+                    prompt_parts.append({"id": shot_id, "text": shot_text})
+
                 current_start_pos = shot_cut_match.start()
                 shot_id += 1
 
-
             last_shot_text = cleaned_prompt[current_start_pos:].strip()
             if last_shot_text:
-                prompt_parts.append({'id': shot_id, 'text': last_shot_text})
+                prompt_parts.append({"id": shot_id, "text": last_shot_text})
 
         embeddings_list = []
         positions = {"global": None, "shots": {}}
         current_token_idx = 0
 
         for part in prompt_parts:
-            text = part['text']
-            shot_id = part['id']
+            text = part["text"]
+            shot_id = part["id"]
 
             enc_output = tokenizer(
                 text,
@@ -388,58 +400,61 @@ class WanHoloCineEngine(WanShared):
                 truncation=True,
                 padding="max_length",
                 max_length=max_sequence_length,
-                return_tensors="pt"
+                return_tensors="pt",
             )
-            ids = enc_output['input_ids'].to(device)
-            mask = enc_output['attention_mask'].to(device)
-            
+            ids = enc_output["input_ids"].to(device)
+            mask = enc_output["attention_mask"].to(device)
 
             part_emb = self.text_encoder.model(ids, mask)[0]
 
             seq_len = mask.sum().item()
-            
-     
+
             start_idx = current_token_idx
             end_idx = current_token_idx + seq_len
-            
-            if shot_id == -1: # Global prompt
+
+            if shot_id == -1:  # Global prompt
                 positions["global"] = [start_idx, end_idx]
-            else: # Per-shot prompt
+            else:  # Per-shot prompt
                 positions["shots"][shot_id] = [start_idx, end_idx]
 
             embeddings_list.append(part_emb[0, :seq_len, :])
-    
+
             current_token_idx += seq_len
-   
+
         if not embeddings_list:
-            return torch.zeros(1, max_sequence_length, self.text_encoder.model.config.hidden_size, device=device), {"global": None, "shots": []}
-      
-        concatenated_emb = torch.cat(embeddings_list, dim=0) # shape: (total_seq_len, hidden_dim)
-        
-       
+            return torch.zeros(
+                1,
+                max_sequence_length,
+                self.text_encoder.model.config.hidden_size,
+                device=device,
+            ), {"global": None, "shots": []}
+
+        concatenated_emb = torch.cat(
+            embeddings_list, dim=0
+        )  # shape: (total_seq_len, hidden_dim)
+
         total_len = concatenated_emb.shape[0]
         if total_len > max_sequence_length:
             concatenated_emb = concatenated_emb[:max_sequence_length, :]
             total_len = max_sequence_length
 
         pad_len = max_sequence_length - total_len
-        
-        prompt_emb = F.pad(concatenated_emb, (0, 0, 0, pad_len), 'constant', 0)
+
+        prompt_emb = F.pad(concatenated_emb, (0, 0, 0, pad_len), "constant", 0)
         prompt_emb = prompt_emb.unsqueeze(0)
-        
-  
+
         final_positions = {"global": positions["global"], "shots": []}
         if positions["shots"]:
-            
+
             sorted_shots = sorted(positions["shots"].items())
-        
+
             max_shot_id = sorted_shots[-1][0]
             shot_map = dict(sorted_shots)
             for i in range(max_shot_id + 1):
-                final_positions["shots"].append(shot_map.get(i, None)) 
+                final_positions["shots"].append(shot_map.get(i, None))
 
         return prompt_emb, final_positions
-    
+
     def check_sparse_self_attn(self, transformer_name: str):
         comp = self.get_component_by_name(transformer_name) or {}
         transformer = getattr(self, transformer_name)
@@ -449,59 +464,75 @@ class WanHoloCineEngine(WanShared):
             else:
                 setattr(transformer, "use_sparse_self_attn", False)
         else:
-            self.logger.warning(f"Transformer {transformer_name} not found. Skipping sparse self-attention check.")
+            self.logger.warning(
+                f"Transformer {transformer_name} not found. Skipping sparse self-attention check."
+            )
 
     def run(
-            self,
-            prompt: str = None,
-            global_caption: str | None = None,
-            shot_captions: List[str] | None = None,
-            duration: int | str = 241,
-            shot_cut_frames: List[int] = None,
-            negative_prompt: str = None,
-            fps: int = 15,
-            seed: int | None = None,
-            generator: torch.Generator | None = None,   
-            tiled: bool = True,
-            height: int = 480,
-            width: int = 832,
-            num_inference_steps: int = 50,
-            guidance_scale: float | List[float] = 5.0,
-            boundary_ratio: float = 0.875,
-            progress_callback: Callable = None,
-            render_on_step_callback: Callable = None,
-            render_on_step: bool = False,
-            render_on_step_interval: int = 3,
-            timesteps: List[int] | None = None,
-            return_latents: bool = False,
-            offload: bool = True,
-            **kwargs
-            ) -> torch.Tensor:
+        self,
+        prompt: str = None,
+        global_caption: str | None = None,
+        shot_captions: List[str] | None = None,
+        duration: int | str = 241,
+        shot_cut_frames: List[int] = None,
+        shot_cut_points: List[float] = None,
+        negative_prompt: str = None,
+        fps: int = 15,
+        seed: int | None = None,
+        generator: torch.Generator | None = None,
+        tiled: bool = True,
+        height: int = 480,
+        width: int = 832,
+        num_inference_steps: int = 50,
+        guidance_scale: float | List[float] = 5.0,
+        boundary_ratio: float = 0.875,
+        progress_callback: Callable = None,
+        render_on_step_callback: Callable = None,
+        render_on_step: bool = False,
+        render_on_step_interval: int = 3,
+        timesteps: List[int] | None = None,
+        return_latents: bool = False,
+        offload: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
         """
         Run the inference pipeline.
         """
         # num_frames = None
         # shot_cut_frames = None
-
+        safe_emit_progress(progress_callback, 0.0, "Starting holocine pipeline")
+        safe_emit_progress(progress_callback, 0.05, "Preparing inputs")
         if global_caption and shot_captions:
-            inputs = self.prepare_multishot_inputs(global_caption, shot_captions, duration, shot_cut_frames, fps)
+            inputs = self.prepare_multishot_inputs(
+                global_caption, shot_captions, duration, shot_cut_frames, fps
+            )
             prompt = inputs["prompt"]
             shot_cut_frames = inputs["shot_cut_frames"]
             num_frames = inputs["num_frames"]
         elif prompt:
             num_frames = self._parse_num_frames(duration, fps)
-            shot_cut_frames = [self._parse_num_frames(frame, fps) for frame in shot_cut_frames]
+            if shot_cut_points:
+                shot_cut_frames = [int(point * fps) for point in shot_cut_points]
+            else:
+                shot_cut_frames = [
+                    self._parse_num_frames(frame, fps) for frame in shot_cut_frames
+                ]
+            # remove any frames that are greater than the number of frames
+            shot_cut_frames = [frame for frame in shot_cut_frames if frame < num_frames]
 
-        
+        safe_emit_progress(progress_callback, 0.10, "Preparing shot indices")
 
         shot_indices = self._process_shot_cut_frames(shot_cut_frames, num_frames)
-        positive_context, positive_text_cut_positions = self.encode_prompt(prompt, positive=True)
+        positive_context, positive_text_cut_positions = self.encode_prompt(
+            prompt, positive=True
+        )
         negative_context, _ = self.encode_prompt(negative_prompt, positive=False)
         negative_text_cut_positions = {"global": None, "shots": []}
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
- 
- 
+
+        safe_emit_progress(progress_callback, 0.15, "Preparing latents")
+
         latents = self._get_latents(
             height,
             width,
@@ -510,7 +541,7 @@ class WanHoloCineEngine(WanShared):
             dtype=torch.float32,
             generator=generator,
         )
-        
+
         if self.scheduler is None:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
@@ -520,20 +551,24 @@ class WanHoloCineEngine(WanShared):
             timesteps=timesteps,
             num_inference_steps=num_inference_steps,
         )
-        
-        
+
+        safe_emit_progress(progress_callback, 0.20, "Preparing transformer")
         transformer_dtype = self.component_dtypes.get("transformer")
         boundary_timestep = boundary_ratio * self.scheduler.num_train_timesteps
-        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.25, 0.90)
         total_steps = len(timesteps) if timesteps is not None else 0
-        safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
-        
-        
-        
+        safe_emit_progress(progress_callback, 0.30, "Starting denoise")
+
         with self._progress_bar(total_steps, desc="Denoising") as pbar:
             for i, timestep in enumerate(timesteps):
-                safe_emit_progress(denoise_progress_callback, float(i) / float(total_steps) if total_steps else 0.0, f"Denoising step {i + 1}/{total_steps}")
-                timestep = timestep.unsqueeze(0).to(dtype=transformer_dtype, device=self.device)
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i) / float(total_steps) if total_steps else 0.0,
+                    f"Denoising step {i + 1}/{total_steps}",
+                )
+                timestep = timestep.unsqueeze(0).to(
+                    dtype=transformer_dtype, device=self.device
+                )
                 latent_model_input = latents.to(transformer_dtype)
 
                 positive_input_kwargs = {
@@ -552,9 +587,9 @@ class WanHoloCineEngine(WanShared):
                     "text_cut_positions": negative_text_cut_positions,
                     "prompt": negative_prompt,
                 }
-                
+
                 if boundary_timestep is not None and timestep >= boundary_timestep:
-                   
+
                     if hasattr(self, "transformer_2") and self.transformer_2:
                         safe_emit_progress(
                             denoise_progress_callback,
@@ -617,24 +652,40 @@ class WanHoloCineEngine(WanShared):
                         guidance_scale = guidance_scale[1]
 
                 # Inference
-                noise_pred_posi = self._run_inference_step(**positive_input_kwargs, transformer=transformer)
+                noise_pred_posi = self._run_inference_step(
+                    **positive_input_kwargs, transformer=transformer
+                )
                 if guidance_scale != 1.0:
-                    noise_pred_nega = self._run_inference_step(**negative_input_kwargs, transformer=transformer)
-                    noise_pred = noise_pred_nega + guidance_scale * (noise_pred_posi - noise_pred_nega)
+                    noise_pred_nega = self._run_inference_step(
+                        **negative_input_kwargs, transformer=transformer
+                    )
+                    noise_pred = noise_pred_nega + guidance_scale * (
+                        noise_pred_posi - noise_pred_nega
+                    )
                 else:
                     noise_pred = noise_pred_posi
 
                 # Scheduler
-                latents = self.scheduler.step(noise_pred, timestep, latents, return_dict=False)[0]
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != total_steps - 1:
+                latents = self.scheduler.step(
+                    noise_pred, timestep, latents, return_dict=False
+                )[0]
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != total_steps - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
                 pbar.update(1)
-                
+
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         if offload:
             if hasattr(self, "transformer") and self.transformer:
@@ -642,7 +693,7 @@ class WanHoloCineEngine(WanShared):
             if hasattr(self, "transformer_2") and self.transformer_2:
                 self._offload(self.transformer_2)
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
-        
+
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents

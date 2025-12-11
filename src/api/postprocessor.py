@@ -1,6 +1,7 @@
 """
 API endpoints for postprocessor operations (e.g., frame interpolation)
 """
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -40,7 +41,9 @@ def frame_interpolate(request: FrameInterpolateRequest):
     """
     input_path = Path(request.input_path)
     if not input_path.exists():
-        raise HTTPException(status_code=404, detail=f"Input file not found: {request.input_path}")
+        raise HTTPException(
+            status_code=404, detail=f"Input file not found: {request.input_path}"
+        )
 
     if not (request.target_fps and request.target_fps > 0):
         raise HTTPException(status_code=400, detail="target_fps must be > 0")
@@ -52,7 +55,9 @@ def frame_interpolate(request: FrameInterpolateRequest):
     try:
         job_id = request.job_id or str(uuid.uuid4())
         bridge = get_ray_ws_bridge()
-        logger.info(f"Submitting RIFE frame interpolation for {input_path} -> {request.target_fps} fps with resources {resources}")
+        logger.info(
+            f"Submitting RIFE frame interpolation for {input_path} -> {request.target_fps} fps with resources {resources}"
+        )
 
         task_ref = run_frame_interpolation.options(**resources).remote(
             str(input_path),
@@ -63,15 +68,22 @@ def frame_interpolate(request: FrameInterpolateRequest):
             request.scale if request.scale is not None else 1.0,
         )
 
-        register_job(job_id, task_ref, 'postprocessor', {
-            'method': 'frame-interpolate',
-            'input_path': str(input_path),
-            'target_fps': float(request.target_fps),
-        })
+        register_job(
+            job_id,
+            task_ref,
+            "postprocessor",
+            {
+                "method": "frame-interpolate",
+                "input_path": str(input_path),
+                "target_fps": float(request.target_fps),
+            },
+        )
 
-        return JobResponse(job_id=job_id, status="queued", message="RIFE interpolation job submitted")
+        return JobResponse(
+            job_id=job_id, status="queued", message="RIFE interpolation job submitted"
+        )
     except Exception as e:
         logger.error(f"Failed to submit RIFE job: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit Ray task: {str(e)}")
-
-
+        raise HTTPException(
+            status_code=500, detail=f"Failed to submit Ray task: {str(e)}"
+        )

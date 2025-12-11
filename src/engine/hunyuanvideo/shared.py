@@ -5,6 +5,7 @@ import numpy as np
 from src.engine.base_engine import BaseEngine
 from diffusers.video_processor import VideoProcessor
 
+
 class HunyuanVideoShared(BaseEngine):
     """Base class for Hunyuan engine implementations containing common functionality"""
 
@@ -27,7 +28,6 @@ class HunyuanVideoShared(BaseEngine):
             vae_scale_factor=self.vae_scale_factor_spatial
         )
 
-
     def _calculate_shift(
         self,
         image_seq_len,
@@ -41,8 +41,6 @@ class HunyuanVideoShared(BaseEngine):
         b = base_shift - m * base_seq_len
         mu = image_seq_len * m + b
         return mu
-
-    
 
     def _encode_prompt(
         self,
@@ -115,7 +113,7 @@ class HunyuanVideoShared(BaseEngine):
             guidance_rescale * noise_pred_rescaled + (1 - guidance_rescale) * noise_cfg
         )
         return noise_cfg
-    
+
     def base_denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps", None)
         latents = kwargs.get("latents", None)
@@ -188,7 +186,12 @@ class HunyuanVideoShared(BaseEngine):
                         0
                     ]
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 pbar.update(1)

@@ -79,7 +79,6 @@ parameters:
 supports_alpha_channel: true
 supports_image: true
 supports_video: true
-
 files:
 - path: rembg/u2net.onnx
   size_bytes: 175997641

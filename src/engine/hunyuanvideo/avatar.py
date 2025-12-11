@@ -278,7 +278,7 @@ class HunyuanAvatarEngine(HunyuanVideoShared):
             )
         elif not use_cache:
             no_cache_steps = list(range(len(timesteps)))
-        
+
         if video_length == frame_per_batch or infer_length == frame_per_batch:
             infer_length = frame_per_batch
             shift_offset = 0

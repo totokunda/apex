@@ -172,10 +172,8 @@ spec:
       options:
       - name: HD
         value: 720
-        height: 720
       - name: SD
         value: 480
-        height: 480
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video

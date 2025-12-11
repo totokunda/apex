@@ -39,7 +39,14 @@ class WanT2VEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
-        use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
+        if guidance_scale is not None and isinstance(guidance_scale, list):
+            use_cfg_guidance = (
+                negative_prompt is not None
+                and guidance_scale[0] > 1.0
+                and guidance_scale[1] > 1.0
+            )
+        else:
+            use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -72,7 +79,11 @@ class WanT2VEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -102,7 +113,9 @@ class WanT2VEngine(WanShared):
             num_inference_steps=num_inference_steps,
         )
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         vae_config = self.load_config_by_type("vae")
         vae_scale_factor_spatial = getattr(
@@ -111,7 +124,6 @@ class WanT2VEngine(WanShared):
         vae_scale_factor_temporal = getattr(
             vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
         )
-        
 
         latents = self._get_latents(
             height,
@@ -188,5 +200,7 @@ class WanT2VEngine(WanShared):
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)
-            safe_emit_progress(progress_callback, 1.0, "Completed text-to-video pipeline")
+            safe_emit_progress(
+                progress_callback, 1.0, "Completed text-to-video pipeline"
+            )
             return postprocessed_video

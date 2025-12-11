@@ -152,9 +152,11 @@ def cancel_all_jobs() -> Dict[str, Any]:
 
     return {
         "status": "complete",
-        "cancelled": [r for r in results if r.get("status") in {"cancelled", "canceled"}],
-        "failed": [r for r in results if r.get("status") not in {"cancelled", "canceled"}],
+        "cancelled": [
+            r for r in results if r.get("status") in {"cancelled", "canceled"}
+        ],
+        "failed": [
+            r for r in results if r.get("status") not in {"cancelled", "canceled"}
+        ],
         "results": results,
     }
-
-

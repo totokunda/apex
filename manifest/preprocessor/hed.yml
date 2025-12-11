@@ -49,7 +49,6 @@ parameters:
   type: category
 supports_image: true
 supports_video: true
-
 files:
 - path: lllyasviel/Annotators/ControlNetHED.pth
   size_bytes: 29444406

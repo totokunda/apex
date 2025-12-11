@@ -51,8 +51,10 @@ class HidreamT2IEngine(HidreamShared):
 
         self.to_device(self.text_encoder)
         safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
-        
-        batch_size = num_images * len(prompt) if isinstance(prompt, list) else num_images   
+
+        batch_size = (
+            num_images * len(prompt) if isinstance(prompt, list) else num_images
+        )
 
         use_cfg_guidance = guidance_scale >= 1.0
 
@@ -90,13 +92,27 @@ class HidreamT2IEngine(HidreamShared):
         )
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
-        
 
         if use_cfg_guidance:
-            llama_prompt_embeds = torch.cat([llama_negative_prompt_embeds.to(self.device), llama_prompt_embeds.to(self.device)], dim=1).to(transformer_dtype)
-            prompt_embeds = torch.cat([negative_prompt_embeds.to(self.device), prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
-            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds.to(self.device), pooled_prompt_embeds.to(self.device)], dim=0).to(transformer_dtype)
-    
+            llama_prompt_embeds = torch.cat(
+                [
+                    llama_negative_prompt_embeds.to(self.device),
+                    llama_prompt_embeds.to(self.device),
+                ],
+                dim=1,
+            ).to(transformer_dtype)
+            prompt_embeds = torch.cat(
+                [negative_prompt_embeds.to(self.device), prompt_embeds.to(self.device)],
+                dim=0,
+            ).to(transformer_dtype)
+            pooled_prompt_embeds = torch.cat(
+                [
+                    negative_pooled_prompt_embeds.to(self.device),
+                    pooled_prompt_embeds.to(self.device),
+                ],
+                dim=0,
+            ).to(transformer_dtype)
+
         safe_emit_progress(progress_callback, 0.20, "Preparing latents")
         latents = self._get_latents(
             batch_size=batch_size,
@@ -158,7 +174,7 @@ class HidreamT2IEngine(HidreamShared):
         self._preview_offload = offload
 
         safe_emit_progress(progress_callback, 0.50, "Starting denoise")
-        
+
         total_steps = len(timesteps) if timesteps is not None else 0
         if denoise_progress_callback is not None:
             try:
@@ -204,7 +220,12 @@ class HidreamT2IEngine(HidreamShared):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
@@ -215,10 +236,13 @@ class HidreamT2IEngine(HidreamShared):
 
                 if denoise_progress_callback is not None and total_steps > 0:
                     try:
-                        denoise_progress_callback(min((i + 1) / total_steps, 1.0), f"Denoising step {i + 1}/{total_steps}")
+                        denoise_progress_callback(
+                            min((i + 1) / total_steps, 1.0),
+                            f"Denoising step {i + 1}/{total_steps}",
+                        )
                     except Exception:
                         pass
-        
+
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:

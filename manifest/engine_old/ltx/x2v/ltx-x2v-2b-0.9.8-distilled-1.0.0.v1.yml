@@ -17,7 +17,6 @@ spec:
   - i2v
   - control
   engine_type: torch
-  
   components:
   - type: text_encoder
     name: ltx/text_encoder
@@ -35,8 +34,6 @@ spec:
   - type: transformer
     base: ltx.base
     model_path: https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.6-dev-04-25.safetensors
-
-    
   defaults:
     run:
       num_inference_steps: 30

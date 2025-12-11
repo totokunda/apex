@@ -80,8 +80,6 @@ class WanInpEngine(WanShared):
             min_num_frames = min_num_frames - 1
         num_frames = self._parse_num_frames(duration, fps, min_num_frames)
 
-
-
         if negative_prompt is not None and use_cfg_guidance:
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
@@ -95,7 +93,11 @@ class WanInpEngine(WanShared):
         safe_emit_progress(
             progress_callback,
             0.08,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -144,23 +146,30 @@ class WanInpEngine(WanShared):
 
             assert video_height * video_width <= height * width
 
-            video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+            video = torch.from_numpy(
+                np.array([np.array(frame) for frame in loaded_video])
+            )[:num_frames]
 
             video = video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
-            video = self.video_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+            video = self.video_processor.preprocess(
+                rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width
+            )
             video = video.to(dtype=torch.float32)
 
             video = rearrange(video, "(b f) c h w -> b c f h w", f=num_frames)
 
-
             batch_size, latent_num_frames, _, _, _ = latents.shape
             loaded_mask = self._load_video(mask, fps=fps)
-            mask = torch.from_numpy(np.array([np.array(frame) for frame in loaded_mask]))[:num_frames]
+            mask = torch.from_numpy(
+                np.array([np.array(frame) for frame in loaded_mask])
+            )[:num_frames]
             mask = mask.permute([3, 0, 1, 2]).unsqueeze(0) / 255
-            mask = self.video_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
+            mask = self.video_processor.preprocess(
+                rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width
+            )
             mask = mask.to(dtype=torch.float32)
             mask = rearrange(mask, "(b f) c h w -> b c f h w", f=num_frames)
-            
+
             mask = torch.clamp((mask + 1) / 2, min=0, max=1)
 
             if (mask == 0).all():
@@ -172,7 +181,11 @@ class WanInpEngine(WanShared):
                     self.device, transformer_dtype
                 )
                 if self.vae_scale_factor_spatial >= 16:
-                    _mask = torch.ones_like(latents).to(self.device, transformer_dtype)[:, :1].to(self.device, transformer_dtype)
+                    _mask = (
+                        torch.ones_like(latents)
+                        .to(self.device, transformer_dtype)[:, :1]
+                        .to(self.device, transformer_dtype)
+                    )
                 else:
                     _mask = None
             else:
@@ -188,7 +201,6 @@ class WanInpEngine(WanShared):
                 #     masked_video, dtype=torch.float32, generator=generator
                 # )
 
-
                 # mask_f: float [0,1]
                 mask_f = mask.float()
                 if mask_f.max() > 1:
@@ -197,14 +209,11 @@ class WanInpEngine(WanShared):
                 # collapse to 1 channel
                 mask1 = mask_f[:, :1]  # [B,1,T,H,W]
 
-
                 masked_video = video * (mask1 < 0.5).expand(-1, 3, -1, -1, -1)
-
 
                 masked_video_latents = self._prepare_fun_control_latents(
                     masked_video, dtype=torch.float32, generator=generator
                 )
-
 
                 # mask_condition = torch.concat(
                 #     [
@@ -220,7 +229,6 @@ class WanInpEngine(WanShared):
                 # )
                 # mask_condition = mask_condition.transpose(1, 2)
 
-
                 mask_condition = torch.concat(
                     [
                         torch.repeat_interleave(mask1[:, :, 0:1], repeats=4, dim=2),
@@ -231,17 +239,23 @@ class WanInpEngine(WanShared):
 
                 mask_condition = mask_condition.view(
                     batch_size, mask_condition.shape[2] // 4, 4, height, width
-                ) 
-                
+                )
 
-                mask_condition = mask_condition.transpose(1, 2) 
-                mask_latents = self._resize_mask(1 - mask_condition, masked_video_latents, True).to(self.device, transformer_dtype) 
-                
+                mask_condition = mask_condition.transpose(1, 2)
+                mask_latents = self._resize_mask(
+                    1 - mask_condition, masked_video_latents, True
+                ).to(self.device, transformer_dtype)
+
                 if self.vae_scale_factor_spatial >= 16:
-                    _mask = F.interpolate(mask_condition[:, :1], size=latents.size()[-3:], mode='trilinear', align_corners=True).to(self.device, transformer_dtype)
+                    _mask = F.interpolate(
+                        mask_condition[:, :1],
+                        size=latents.size()[-3:],
+                        mode="trilinear",
+                        align_corners=True,
+                    ).to(self.device, transformer_dtype)
                     if not _mask[:, :, 0, :, :].any():
                         _mask[:, :, 1:, :, :] = 1
-                        latents = (1 - _mask) * masked_video_latents + _mask * latents 
+                        latents = (1 - _mask) * masked_video_latents + _mask * latents
                 else:
                     _mask = None
 
@@ -252,7 +266,6 @@ class WanInpEngine(WanShared):
         if reference_image is not None and transformer_config.get(
             "add_ref_conv", False
         ):
-
 
             loaded_image = self._load_image(reference_image)
             loaded_image, height, width = self._aspect_ratio_resize(
@@ -317,7 +330,9 @@ class WanInpEngine(WanShared):
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
-                getattr(self.scheduler, "config", self.scheduler), "num_train_timesteps", 1000
+                getattr(self.scheduler, "config", self.scheduler),
+                "num_train_timesteps",
+                1000,
             )
         else:
             boundary_timestep = None

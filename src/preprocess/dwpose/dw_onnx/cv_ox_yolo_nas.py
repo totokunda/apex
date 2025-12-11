@@ -4,6 +4,7 @@
 import numpy as np
 import cv2
 
+
 def preprocess(img, input_size, swap=(2, 0, 1)):
     if len(img.shape) == 3:
         padded_img = np.ones((input_size[0], input_size[1], 3), dtype=np.uint8) * 114
@@ -22,6 +23,7 @@ def preprocess(img, input_size, swap=(2, 0, 1)):
     padded_img = np.ascontiguousarray(padded_img, dtype=np.float32)
     return padded_img, r
 
+
 def inference_detector(session, oriImg, detect_classes=[0], dtype=np.uint8):
     """
     This function is only compatible with onnx models exported from the new API with built-in NMS
@@ -39,7 +41,7 @@ def inference_detector(session, oriImg, detect_classes=[0], dtype=np.uint8):
     )
     ```
     """
-    input_shape = (640,640)
+    input_shape = (640, 640)
     img, ratio = preprocess(oriImg, input_shape)
     input = img[None, :, :, :]
     input = input.astype(dtype)
@@ -51,10 +53,13 @@ def inference_detector(session, oriImg, detect_classes=[0], dtype=np.uint8):
         session.setInput(input)
         output = session.forward(outNames)
     num_preds, pred_boxes, pred_scores, pred_classes = output
-    num_preds = num_preds[0,0]
+    num_preds = num_preds[0, 0]
     if num_preds == 0:
         return None
-    idxs = np.where((np.isin(pred_classes[0, :num_preds], detect_classes)) & (pred_scores[0, :num_preds] > 0.3))
+    idxs = np.where(
+        (np.isin(pred_classes[0, :num_preds], detect_classes))
+        & (pred_scores[0, :num_preds] > 0.3)
+    )
     if (len(idxs) == 0) or (idxs[0].size == 0):
         return None
     return pred_boxes[0, idxs].squeeze(axis=0) / ratio

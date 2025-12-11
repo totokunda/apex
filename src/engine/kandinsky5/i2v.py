@@ -48,9 +48,9 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
 
         latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
 
-        image_tensor = self.video_processor.preprocess(image, height=height, width=width).to(
-            device=device, dtype=dtype
-        )
+        image_tensor = self.video_processor.preprocess(
+            image, height=height, width=width
+        ).to(device=device, dtype=dtype)
         image_video = image_tensor.unsqueeze(2)
         image_latents = self.vae_encode(
             image_video,
@@ -127,7 +127,12 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
             self.logger.warning(
                 f"`num_frames - 1` has to be divisible by {self.vae_scale_factor_temporal}. Rounding to the nearest number."
             )
-            num_frames = num_frames // self.vae_scale_factor_temporal * self.vae_scale_factor_temporal + 1
+            num_frames = (
+                num_frames
+                // self.vae_scale_factor_temporal
+                * self.vae_scale_factor_temporal
+                + 1
+            )
         num_frames = max(num_frames, 1)
 
         self._guidance_scale = guidance_scale
@@ -148,36 +153,42 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
             batch_size = prompt_embeds_qwen.shape[0]
 
         if prompt_embeds_qwen is None:
-            prompt_embeds_qwen, prompt_embeds_clip, prompt_cu_seqlens = self.encode_prompt(
-                prompt=prompt,
-                num_videos_per_prompt=num_videos_per_prompt,
-                max_sequence_length=max_sequence_length,
-                device=device,
-                dtype=dtype,
+            prompt_embeds_qwen, prompt_embeds_clip, prompt_cu_seqlens = (
+                self.encode_prompt(
+                    prompt=prompt,
+                    num_videos_per_prompt=num_videos_per_prompt,
+                    max_sequence_length=max_sequence_length,
+                    device=device,
+                    dtype=dtype,
+                )
             )
 
         if self.do_classifier_free_guidance:
             if negative_prompt is None:
-                negative_prompt = (
-                    "Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality, low quality, ugly, deformed, walking backwards"
-                )
+                negative_prompt = "Static, 2D cartoon, cartoon, 2d animation, paintings, images, worst quality, low quality, ugly, deformed, walking backwards"
 
             if isinstance(negative_prompt, str):
-                negative_prompt = [negative_prompt] * len(prompt) if prompt is not None else [negative_prompt]
+                negative_prompt = (
+                    [negative_prompt] * len(prompt)
+                    if prompt is not None
+                    else [negative_prompt]
+                )
             elif len(negative_prompt) != len(prompt):
                 raise ValueError(
                     f"`negative_prompt` must have same length as `prompt`. Got {len(negative_prompt)} vs {len(prompt)}."
                 )
 
             if negative_prompt_embeds_qwen is None:
-                negative_prompt_embeds_qwen, negative_prompt_embeds_clip, negative_prompt_cu_seqlens = (
-                    self.encode_prompt(
-                        prompt=negative_prompt,
-                        num_videos_per_prompt=num_videos_per_prompt,
-                        max_sequence_length=max_sequence_length,
-                        device=device,
-                        dtype=dtype,
-                    )
+                (
+                    negative_prompt_embeds_qwen,
+                    negative_prompt_embeds_clip,
+                    negative_prompt_cu_seqlens,
+                ) = self.encode_prompt(
+                    prompt=negative_prompt,
+                    num_videos_per_prompt=num_videos_per_prompt,
+                    max_sequence_length=max_sequence_length,
+                    device=device,
+                    dtype=dtype,
                 )
         # Offload text encoders before heavy steps
         self._offload(self.text_encoder)
@@ -196,7 +207,9 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
 
         num_channels_latents = self.transformer.config.in_visual_dim
         image = self._load_image(image)
-        image, height, width = self._aspect_ratio_resize(image, mod_value=64, max_area=height*width)
+        image, height, width = self._aspect_ratio_resize(
+            image, mod_value=64, max_area=height * width
+        )
         latents = self.prepare_latents_with_image(
             image=image,
             batch_size=batch_size * num_videos_per_prompt,
@@ -217,7 +230,9 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
             torch.arange(width // self.vae_scale_factor_spatial // 2, device=device),
         ]
 
-        text_rope_pos = torch.arange(prompt_cu_seqlens.diff().max().item(), device=device)
+        text_rope_pos = torch.arange(
+            prompt_cu_seqlens.diff().max().item(), device=device
+        )
         negative_text_rope_pos = (
             torch.arange(negative_prompt_cu_seqlens.diff().max().item(), device=device)
             if negative_prompt_cu_seqlens is not None
@@ -230,7 +245,10 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
         self._num_timesteps = len(timesteps)
         component = self.get_component_by_type("transformer")
         extra_kwargs = component.get("extra_kwargs", {})
-        if "attention_backend" in extra_kwargs and extra_kwargs["attention_backend"] == "flex":
+        if (
+            "attention_backend" in extra_kwargs
+            and extra_kwargs["attention_backend"] == "flex"
+        ):
             self.logger.info("Setting attention backend to flex")
             self.transformer.set_attention_backend("flex")
             self.transformer.compile(
@@ -240,7 +258,9 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
 
         scale_factor = self._get_scale_factor(height, width)
 
-        with self._progress_bar(total=num_inference_steps, desc="Denoising Kandinsky 5.0 I2V") as pbar:
+        with self._progress_bar(
+            total=num_inference_steps, desc="Denoising Kandinsky 5.0 I2V"
+        ) as pbar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
@@ -259,7 +279,10 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
                     return_dict=True,
                 ).sample
 
-                if self.do_classifier_free_guidance and negative_prompt_embeds_qwen is not None:
+                if (
+                    self.do_classifier_free_guidance
+                    and negative_prompt_embeds_qwen is not None
+                ):
                     uncond_pred_velocity = self.transformer(
                         hidden_states=latents.to(dtype),
                         encoder_hidden_states=negative_prompt_embeds_qwen.to(dtype),
@@ -272,13 +295,16 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
                         return_dict=True,
                     ).sample
 
-                    pred_velocity = uncond_pred_velocity + guidance_scale * (pred_velocity - uncond_pred_velocity)
+                    pred_velocity = uncond_pred_velocity + guidance_scale * (
+                        pred_velocity - uncond_pred_velocity
+                    )
 
                 latents[:, 1:, :, :, :num_channels_latents] = self.scheduler.step(
-                    pred_velocity[:, 1:], t, latents[:, 1:, :, :, :num_channels_latents], return_dict=False
+                    pred_velocity[:, 1:],
+                    t,
+                    latents[:, 1:, :, :, :num_channels_latents],
+                    return_dict=False,
                 )[0]
-
-                
 
                 if progress_callback is not None:
                     progress_callback(
@@ -293,7 +319,9 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
                 ):
                     self._render_step(latents, render_on_step_callback)
 
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     pbar.update()
 
         latents = latents[:, :, :, :, :num_channels_latents]

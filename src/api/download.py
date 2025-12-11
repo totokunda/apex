@@ -49,7 +49,9 @@ def _canonical_source(source: Union[str, List[str]]) -> Union[str, List[str]]:
     return str(source).strip()
 
 
-def _request_key(item_type: str, source: Union[str, List[str]], save_path: Optional[str]) -> str:
+def _request_key(
+    item_type: str, source: Union[str, List[str]], save_path: Optional[str]
+) -> str:
     canonical = {
         "item_type": _normalize_item_type(item_type),
         "source": _canonical_source(source),
@@ -58,12 +60,16 @@ def _request_key(item_type: str, source: Union[str, List[str]], save_path: Optio
     return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
 
 
-def _deterministic_job_id(item_type: str, source: Union[str, List[str]], save_path: Optional[str]) -> str:
+def _deterministic_job_id(
+    item_type: str, source: Union[str, List[str]], save_path: Optional[str]
+) -> str:
     key = _request_key(item_type, source, save_path)
     return str(uuid.uuid5(_NAMESPACE_UUID, key))
 
 
-def _already_downloaded(item_type: str, source: Union[str, List[str]], save_path: Optional[str]) -> Tuple[bool, str]:
+def _already_downloaded(
+    item_type: str, source: Union[str, List[str]], save_path: Optional[str]
+) -> Tuple[bool, str]:
     """
     Returns (downloaded, base_dir)
     """
@@ -147,10 +153,12 @@ class BatchResolveResponse(BaseModel):
 class DeleteRequest(BaseModel):
     path: str
     item_type: Optional[str] = None  # Optional: 'component' | 'lora' | 'preprocessor'
-    source: Optional[Union[str, List[str]]] = None  # Optional: to unmark preprocessor and clear mappings
+    source: Optional[Union[str, List[str]]] = (
+        None  # Optional: to unmark preprocessor and clear mappings
+    )
     save_path: Optional[str] = None  # Optional: used to target mapping cleanup
     lora_name: Optional[str] = None  # Optional: used to target mapping cleanup
-    
+
     @validator("item_type")
     def _valid_item_type(cls, v: Optional[str]) -> Optional[str]:
         return _normalize_item_type(v) if v else v
@@ -173,7 +181,9 @@ def start_unified_download(request: UnifiedDownloadRequest):
     """
     try:
         # Determine deterministic job id and request key
-        job_id = request.job_id or _deterministic_job_id(request.item_type, request.source, request.save_path)
+        job_id = request.job_id or _deterministic_job_id(
+            request.item_type, request.source, request.save_path
+        )
         req_key = _request_key(request.item_type, request.source, request.save_path)
         # If a job with this request key was already started, return existing job id
         existing_job_id = _request_key_to_job_id.get(req_key)
@@ -181,24 +191,39 @@ def start_unified_download(request: UnifiedDownloadRequest):
             status_info = unified_job_store.status(existing_job_id)
             status = status_info.get("status", "unknown")
             if status in {"running", "queued"}:
-                return JobResponse(job_id=existing_job_id, status=status, message="Existing job in progress")
+                return JobResponse(
+                    job_id=existing_job_id,
+                    status=status,
+                    message="Existing job in progress",
+                )
             # If completed and assets are present, reuse id
-            downloaded, _ = _already_downloaded(request.item_type, request.source, request.save_path)
+            downloaded, _ = _already_downloaded(
+                request.item_type, request.source, request.save_path
+            )
             if downloaded:
-                return JobResponse(job_id=existing_job_id, status="complete", message="Already downloaded")
+                return JobResponse(
+                    job_id=existing_job_id,
+                    status="complete",
+                    message="Already downloaded",
+                )
             # Otherwise start a new one below
 
         # If already downloaded and no need to start a job
-        downloaded, _ = _already_downloaded(request.item_type, request.source, request.save_path)
+        downloaded, _ = _already_downloaded(
+            request.item_type, request.source, request.save_path
+        )
         if downloaded and request.item_type != "lora":
             # Cache the deterministic id mapping even when not starting a Ray job
             _request_key_to_job_id[req_key] = job_id
-            return JobResponse(job_id=job_id, status="complete", message="Already downloaded")
+            return JobResponse(
+                job_id=job_id, status="complete", message="Already downloaded"
+            )
 
         # Start the Ray job
         # Clear any cached/stale websocket state for this deterministic job_id to avoid replaying "complete"
         try:
             from .ws_manager import websocket_manager
+
             websocket_manager.clear_latest(job_id)
         except Exception:
             pass
@@ -208,7 +233,7 @@ def start_unified_download(request: UnifiedDownloadRequest):
             ray.get(bridge.clear_updates.remote(job_id))
         except Exception:
             pass
-    
+
         ref = download_unified.remote(
             request.item_type,
             request.source,
@@ -218,15 +243,22 @@ def start_unified_download(request: UnifiedDownloadRequest):
             request.manifest_id,
             request.lora_name,
         )
-        register_job(job_id, ref, "download", {
-            "item_type": request.item_type,
-            "source": request.source,
-            "save_path": request.save_path,
-            "request_key": req_key,
-        })
+        register_job(
+            job_id,
+            ref,
+            "download",
+            {
+                "item_type": request.item_type,
+                "source": request.source,
+                "save_path": request.save_path,
+                "request_key": req_key,
+            },
+        )
         _request_key_to_job_id[req_key] = job_id
         logger.info(f"Started unified download job {job_id} for {request.item_type}")
-        return JobResponse(job_id=job_id, status="queued", message="Download job created")
+        return JobResponse(
+            job_id=job_id, status="queued", message="Download job created"
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -242,8 +274,12 @@ def resolve_job_id(request: ResolveRequest):
     """
     try:
         req_key = _request_key(request.item_type, request.source, request.save_path)
-        job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(request.item_type, request.source, request.save_path)
-        downloaded, base_dir = _already_downloaded(request.item_type, request.source, request.save_path)
+        job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(
+            request.item_type, request.source, request.save_path
+        )
+        downloaded, base_dir = _already_downloaded(
+            request.item_type, request.source, request.save_path
+        )
 
         running = False
         exists = False
@@ -263,7 +299,7 @@ def resolve_job_id(request: ResolveRequest):
             save_dir=base_dir,
             source=request.source,
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to resolve job id: {e}")
 
@@ -294,8 +330,12 @@ def resolve_job_ids_batch(request: BatchResolveRequest):
         results: List[ResolveResponse] = []
         for src in request.sources or []:
             req_key = _request_key(request.item_type, src, request.save_path)
-            job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(request.item_type, src, request.save_path)
-            downloaded, base_dir = _already_downloaded(request.item_type, src, request.save_path)
+            job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(
+                request.item_type, src, request.save_path
+            )
+            downloaded, base_dir = _already_downloaded(
+                request.item_type, src, request.save_path
+            )
 
             running = False
             exists = False
@@ -306,18 +346,22 @@ def resolve_job_ids_batch(request: BatchResolveRequest):
                     status = unified_job_store.status(job_id).get("status", "unknown")
                     running = status in {"running", "queued"}
 
-            results.append(ResolveResponse(
-                job_id=job_id,
-                exists=exists,
-                running=running,
-                downloaded=downloaded,
-                bucket=_normalize_item_type(request.item_type),
-                save_dir=base_dir,
-                source=src,
-            ))
+            results.append(
+                ResolveResponse(
+                    job_id=job_id,
+                    exists=exists,
+                    running=running,
+                    downloaded=downloaded,
+                    bucket=_normalize_item_type(request.item_type),
+                    save_dir=base_dir,
+                    source=src,
+                )
+            )
         return BatchResolveResponse(results=results)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to resolve batch job ids: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to resolve batch job ids: {e}"
+        )
 
 
 @router.delete("/delete", response_model=DeleteResponse)
@@ -335,14 +379,20 @@ def delete_downloaded_path(request: DeleteRequest):
             allowed_bases.append(Path(base).resolve())
         else:
             # Default to all known buckets if not specified
-            allowed_bases.extend([
-                Path(get_components_path()).resolve(),
-                Path(get_lora_path()).resolve(),
-                Path(get_preprocessor_path()).resolve(),
-            ])
+            allowed_bases.extend(
+                [
+                    Path(get_components_path()).resolve(),
+                    Path(get_lora_path()).resolve(),
+                    Path(get_preprocessor_path()).resolve(),
+                ]
+            )
 
         target = Path(request.path)
-        target_resolved = (allowed_bases[0] / target).resolve() if not target.is_absolute() else target.resolve()
+        target_resolved = (
+            (allowed_bases[0] / target).resolve()
+            if not target.is_absolute()
+            else target.resolve()
+        )
 
         # Ensure within one of the allowed roots
         def _is_within_any_base(p: Path, bases: List[Path]) -> bool:
@@ -355,7 +405,10 @@ def delete_downloaded_path(request: DeleteRequest):
             return False
 
         if not _is_within_any_base(target_resolved, allowed_bases):
-            raise HTTPException(status_code=400, detail="path must be within an allowed download directory")
+            raise HTTPException(
+                status_code=400,
+                detail="path must be within an allowed download directory",
+            )
 
         # Perform deletion
         if not target_resolved.exists():
@@ -377,7 +430,9 @@ def delete_downloaded_path(request: DeleteRequest):
                     continue
             if containing_base:
                 current = target_resolved.parent
-                while current != containing_base and current.exists() and current.is_dir():
+                while (
+                    current != containing_base and current.exists() and current.is_dir()
+                ):
                     try:
                         # Only remove if empty; stop when a non-empty directory is encountered
                         if any(current.iterdir()):
@@ -403,7 +458,10 @@ def delete_downloaded_path(request: DeleteRequest):
                 for key, jid in _request_key_to_job_id.items():
                     try:
                         parsed = json.loads(key)
-                        if parsed.get("item_type") == norm_type and parsed.get("source") == norm_source:
+                        if (
+                            parsed.get("item_type") == norm_type
+                            and parsed.get("source") == norm_source
+                        ):
                             to_delete.append(key)
                     except Exception:
                         continue
@@ -415,8 +473,13 @@ def delete_downloaded_path(request: DeleteRequest):
 
         # If this was a preprocessor id deletion, unmark it
         try:
-            if request.item_type == "preprocessor" and isinstance(request.source, str) and request.source:
+            if (
+                request.item_type == "preprocessor"
+                and isinstance(request.source, str)
+                and request.source
+            ):
                 from src.preprocess.base_preprocessor import BasePreprocessor
+
                 BasePreprocessor._unmark_as_downloaded(request.source)
                 unmarked = True
         except Exception:
@@ -432,4 +495,3 @@ def delete_downloaded_path(request: DeleteRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete path: {e}")
-

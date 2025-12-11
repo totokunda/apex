@@ -13,6 +13,7 @@ import torch
 import torch.distributed as dist
 
 from src.utils.defaults import get_torch_device
+
 device = get_torch_device()
 
 

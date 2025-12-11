@@ -4,12 +4,14 @@ from typing import Union, List, Optional, Dict, Any, Callable
 from PIL import Image
 from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
-from src.engine.base_engine import BaseEngine 
+from src.engine.base_engine import BaseEngine
 from src.utils.progress import safe_emit_progress
 from loguru import logger
 
+
 class FluxShared(TextualInversionLoaderMixin, BaseEngine):
     """Shared functionality for Flux engine implementations"""
+
     def __init__(self, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
@@ -20,9 +22,8 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor * 2
         )
-        
+
         self.default_sample_size = 128
-        
 
     @staticmethod
     def _pack_latents(latents, batch_size, num_channels_latents, height, width):
@@ -128,16 +129,24 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         offload=True,
         timestep=None,
     ):
-        
+
         if image is not None:
             image_latents = self.vae_encode(image, offload=offload)
             image_latent_height, image_latent_width = image_latents.shape[2:]
             if timestep is None:
                 image_latents = self._pack_latents(
-                    image_latents, batch_size, num_channels_latents, image_latent_height, image_latent_width
+                    image_latents,
+                    batch_size,
+                    num_channels_latents,
+                    image_latent_height,
+                    image_latent_width,
                 )
                 latent_image_ids = self._prepare_latent_image_ids(
-                    batch_size, image_latent_height // 2, image_latent_width // 2, device, dtype
+                    batch_size,
+                    image_latent_height // 2,
+                    image_latent_width // 2,
+                    device,
+                    dtype,
                 )
                 # image ids are the same as latent ids with the first dimension set to 1 instead of 0
                 latent_image_ids[..., 0] = 1
@@ -146,7 +155,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         else:
             image_latents = None
             latent_image_ids = None
-            
+
         # VAE applies 8x compression on images but we must also account for packing which requires
         # latent height and width to be divisible by 2.
         height = 2 * (int(height) // (self.vae_scale_factor * 2))
@@ -159,11 +168,13 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 batch_size, height // 2, width // 2, device, dtype
             )
             return latents.to(device=device, dtype=dtype), latent_ids
-    
+
         noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-            
+
         if timestep is not None:
-            assert image_latents is not None, "Image latents are required for timestep scaling"
+            assert (
+                image_latents is not None
+            ), "Image latents are required for timestep scaling"
             image_latents = torch.cat([image_latents] * batch_size, dim=0)
             latents = self.scheduler.scale_noise(image_latents, timestep, noise)
         else:
@@ -172,11 +183,11 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         latents = self._pack_latents(
             latents, batch_size, num_channels_latents, height, width
         )
-        
+
         latent_ids = self._prepare_latent_image_ids(
             batch_size, height // 2, width // 2, device, dtype
         )
-        
+
         if image_latents is not None and timestep is None:
             return latents, image_latents, latent_ids, latent_image_ids
 
@@ -201,7 +212,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         )
 
         return latent_image_ids.to(device=device, dtype=dtype)
-    
+
     def encode_prompt(
         self,
         prompt: Union[str, List[str]] = None,
@@ -217,16 +228,17 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         if not hasattr(self, "text_encoder") or not self.text_encoder:
             self.load_component_by_name("text_encoder")
 
-        self.to_device(self.text_encoder)   
-        
-        
+        self.to_device(self.text_encoder)
+
         if isinstance(prompt, str):
             prompt = [prompt]
         prompt = self.maybe_convert_prompt(prompt, self.text_encoder.tokenizer)
         if negative_prompt is not None:
             if isinstance(negative_prompt, str):
                 negative_prompt = [negative_prompt]
-            negative_prompt = self.maybe_convert_prompt(negative_prompt, self.text_encoder.tokenizer)
+            negative_prompt = self.maybe_convert_prompt(
+                negative_prompt, self.text_encoder.tokenizer
+            )
 
         pooled_prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -261,16 +273,17 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
 
         if not negative_prompt_2:
             negative_prompt_2 = negative_prompt
-            
-        
+
         if isinstance(prompt_2, str):
             prompt_2 = [prompt_2]
         prompt_2 = self.maybe_convert_prompt(prompt_2, self.text_encoder_2.tokenizer)
         if negative_prompt_2 is not None:
             if isinstance(negative_prompt_2, str):
                 negative_prompt_2 = [negative_prompt_2]
-            negative_prompt_2 = self.maybe_convert_prompt(negative_prompt_2, self.text_encoder_2.tokenizer)
- 
+            negative_prompt_2 = self.maybe_convert_prompt(
+                negative_prompt_2, self.text_encoder_2.tokenizer
+            )
+
         prompt_embeds = self.text_encoder_2.encode(
             prompt_2,
             device=self.device,
@@ -297,10 +310,16 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         else:
             negative_prompt_embeds = None
             negative_text_ids = None
-        
-        return pooled_prompt_embeds, negative_pooled_prompt_embeds, prompt_embeds, negative_prompt_embeds, text_ids, negative_text_ids
-    
-    
+
+        return (
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+            prompt_embeds,
+            negative_prompt_embeds,
+            text_ids,
+            negative_text_ids,
+        )
+
     def resize_to_preferred_resolution(self, image: Image.Image):
         PREFERRED_KONTEXT_RESOLUTIONS = [
             (672, 1568),
@@ -321,28 +340,32 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             (1504, 688),
             (1568, 672),
         ]
-        
+
         original_width, original_height = image.size
         original_aspect = original_width / original_height
-        
+
         best_resolution = None
-        min_area_diff = float('inf')
-        
+        min_area_diff = float("inf")
+
         for width, height in PREFERRED_KONTEXT_RESOLUTIONS:
             target_aspect = width / height
             area_diff = abs((width * height) - (original_width * original_height))
             aspect_diff = abs(target_aspect - original_aspect)
-            
+
             if area_diff < min_area_diff and aspect_diff < 0.2:
                 min_area_diff = area_diff
                 best_resolution = (width, height)
-        
+
         if best_resolution is None:
-            best_resolution = min(PREFERRED_KONTEXT_RESOLUTIONS, 
-                                key=lambda res: abs((res[0] * res[1]) - (original_width * original_height)))
-        
+            best_resolution = min(
+                PREFERRED_KONTEXT_RESOLUTIONS,
+                key=lambda res: abs(
+                    (res[0] * res[1]) - (original_width * original_height)
+                ),
+            )
+
         return image.resize(best_resolution, Image.Resampling.LANCZOS)
-    
+
     def prepare_mask_latents(
         self,
         mask,
@@ -385,7 +408,9 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                     f" to a total batch size of {batch_size}, but {masked_image_latents.shape[0]} images were passed."
                     " Make sure the number of images that you pass is divisible by the total requested batch size."
                 )
-            masked_image_latents = masked_image_latents.repeat(batch_size // masked_image_latents.shape[0], 1, 1, 1)
+            masked_image_latents = masked_image_latents.repeat(
+                batch_size // masked_image_latents.shape[0], 1, 1, 1
+            )
 
         # 4. pack the masked_image_latents
         # batch_size, num_channels_latents, height, width -> batch_size, height//2 * width//2 , num_channels_latents*4
@@ -398,7 +423,9 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         )
 
         # 5.resize mask to latents shape we we concatenate the mask to the latents
-        mask = mask[:, 0, :, :]  # batch_size, 8 * height, 8 * width (mask has not been 8x compressed)
+        mask = mask[
+            :, 0, :, :
+        ]  # batch_size, 8 * height, 8 * width (mask has not been 8x compressed)
         mask = mask.view(
             batch_size, height, self.vae_scale_factor, width, self.vae_scale_factor
         )  # batch_size, height, 8, width, 8
@@ -422,7 +449,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
 
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         """Override: unpack latents for image decoding and render a preview frame.
-        
+
         Falls back to base implementation if preview dimensions are unavailable.
         """
         try:
@@ -444,7 +471,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 super()._render_step(latents, render_on_step_callback)
             except Exception:
                 pass
-            
+
     def base_denoise(self, *args, **kwargs):
         latents = kwargs.get("latents")
         timesteps = kwargs.get("timesteps")
@@ -469,7 +496,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         concat_latents = kwargs.get("concat_latents")
         denoise_progress_callback = kwargs.get("denoise_progress_callback")
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
-        
+
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -478,7 +505,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                     joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-                
+
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1)
                 elif concat_latents is not None:
@@ -498,7 +525,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                         joint_attention_kwargs=joint_attention_kwargs,
                         return_dict=False,
                     )[0]
-                    
+
                     if image_latents is not None:
                         noise_pred = noise_pred[:, : latents.size(1)]
 
@@ -522,7 +549,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                         )[0]
                         if image_latents is not None:
                             neg_noise_pred = neg_noise_pred[:, : latents.size(1)]
-                        
+
                     noise_pred = neg_noise_pred + true_cfg_scale * (
                         noise_pred - neg_noise_pred
                     )
@@ -538,7 +565,12 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                         # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
                         latents = latents.to(latents_dtype)
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
 
                 # call the callback, if provided
@@ -546,7 +578,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
                 ):
                     progress_bar.update()
-                
+
                 # external progress callback
                 safe_emit_progress(
                     denoise_progress_callback,

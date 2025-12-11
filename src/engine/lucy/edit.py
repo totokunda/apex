@@ -7,8 +7,10 @@ from src.utils.progress import safe_emit_progress, make_mapped_progress
 from src.utils.cache import empty_cache
 import torchvision.transforms.functional as F
 
+
 class LucyEditEngine(WanShared):
     """Lucy Edit Engine Implementation"""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_channels_latents = 48
@@ -42,16 +44,14 @@ class LucyEditEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting edit pipeline")
-        
+
         # make sure height and width are divisible by 32
         height = height // 32 * 32
         width = width // 32 * 32
-        
-        
 
         # 1. Check inputs and setup defaults
         if self.config.get("boundary_ratio") is not None and boundary_ratio is None:
-             boundary_ratio = self.config.get("boundary_ratio")
+            boundary_ratio = self.config.get("boundary_ratio")
 
         if boundary_ratio is not None and guidance_scale_2 is None:
             guidance_scale_2 = guidance_scale
@@ -60,11 +60,11 @@ class LucyEditEngine(WanShared):
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
         self.to_device(self.text_encoder)
-        
+
         if isinstance(prompt, str):
             prompt = [prompt]
         if isinstance(negative_prompt, str):
-             negative_prompt = [negative_prompt]
+            negative_prompt = [negative_prompt]
 
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
@@ -72,7 +72,7 @@ class LucyEditEngine(WanShared):
             num_videos=num_videos,
             progress_callback=progress_callback,
             text_encoder_kwargs=text_encoder_kwargs,
-            offload=offload
+            offload=offload,
         )
 
         transformer_dtype = self.component_dtypes.get("transformer", torch.float32)
@@ -84,7 +84,7 @@ class LucyEditEngine(WanShared):
         if not self.scheduler:
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
-        
+
         self.scheduler.set_timesteps(num_inference_steps, device=self.device)
         timesteps = self.scheduler.timesteps
 
@@ -92,16 +92,16 @@ class LucyEditEngine(WanShared):
         if not self.vae:
             self.load_component_by_type("vae")
         self.to_device(self.vae)
-        
+
         video = self._load_video(video, fps=fps)
 
         for i in range(len(video)):
             video[i] = video[i].resize((width, height))
-        
-
 
         # Preprocess video
-        video_tensor = self.video_processor.preprocess_video(video, height=height, width=width)
+        video_tensor = self.video_processor.preprocess_video(
+            video, height=height, width=width
+        )
         video_tensor = video_tensor.to(self.device, dtype=torch.float32)
         num_frames = self._parse_num_frames(duration, fps)
 
@@ -114,7 +114,6 @@ class LucyEditEngine(WanShared):
                 num_frames = (video_tensor.shape[2] // 4) * 4 + 1
             video_tensor = video_tensor[:, :, :num_frames, :, :]
 
-
         # Prepare noise latents
         latents = self._get_latents(
             height,
@@ -126,13 +125,10 @@ class LucyEditEngine(WanShared):
             batch_size=len(prompt),
             seed=seed,
             dtype=torch.float32,
-            generator=generator
+            generator=generator,
         )
 
-
         safe_emit_progress(progress_callback, 0.35, "Initialized latent noise")
-
-
 
         # Prepare condition latents
         condition_latents_list = []
@@ -141,32 +137,32 @@ class LucyEditEngine(WanShared):
             cond = self.vae_encode(vid, offload=False)
             condition_latents_list.append(cond)
 
-
         condition_latents = torch.cat(condition_latents_list, dim=0).to(torch.float32)
         if offload:
             self._offload(self.vae)
 
-        
         # 5. Boundary timestep
         if boundary_ratio is not None:
-             boundary_timestep = boundary_ratio * self.scheduler.config.num_train_timesteps
+            boundary_timestep = (
+                boundary_ratio * self.scheduler.config.num_train_timesteps
+            )
         else:
-             boundary_timestep = None
+            boundary_timestep = None
 
         # 6. Denoise
         mapped_denoise_progress = make_mapped_progress(progress_callback, 0.40, 0.92)
         denoise_progress_callback = denoise_progress_callback or mapped_denoise_progress
         safe_emit_progress(progress_callback, 0.40, "Starting denoising")
-        
+
         self._preview_height = height
         self._preview_width = width
         self._preview_offload = offload
-        
+
         expand_timesteps = self.config.get("expand_timesteps", False)
-        
+
         final_guidance_scale = guidance_scale
         if guidance_scale_2 is not None:
-             final_guidance_scale = [guidance_scale, guidance_scale_2]
+            final_guidance_scale = [guidance_scale, guidance_scale_2]
 
         # Use custom denoise loop to support Lucy specific logic
         latents = self.lucy_denoise(
@@ -186,21 +182,22 @@ class LucyEditEngine(WanShared):
             denoise_progress_callback=denoise_progress_callback,
             expand_timesteps=expand_timesteps,
         )
-        
+
         safe_emit_progress(progress_callback, 0.94, "Denoising complete")
-        
+
         # 7. Decode
         if offload:
-             if getattr(self, "transformer", None): self._offload(self.transformer)
-             if getattr(self, "transformer_2", None): self._offload(self.transformer_2)
+            if getattr(self, "transformer", None):
+                self._offload(self.transformer)
+            if getattr(self, "transformer_2", None):
+                self._offload(self.transformer_2)
 
         safe_emit_progress(progress_callback, 0.96, "Transformers offloaded")
-
 
         # Denormalize
         video = self.vae_decode(latents, offload=offload)
         video = self._tensor_to_frames(video)
-            
+
         safe_emit_progress(progress_callback, 1.0, "Completed edit pipeline")
         return video
 
@@ -222,48 +219,60 @@ class LucyEditEngine(WanShared):
         denoise_progress_callback: Callable,
         expand_timesteps: bool = False,
     ) -> torch.Tensor:
-        
+
         total_steps = len(timesteps)
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
         mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
-        
+
         with self._progress_bar(len(timesteps), desc=f"Sampling Lucy") as pbar:
             for i, t in enumerate(timesteps):
-                
+
                 if boundary_timestep is None or t >= boundary_timestep:
                     # High noise stage
-                    if hasattr(self, "transformer_2") and getattr(self, "transformer_2", None):
+                    if hasattr(self, "transformer_2") and getattr(
+                        self, "transformer_2", None
+                    ):
                         self._offload(self.transformer_2)
                         empty_cache()
-                        
+
                     if not getattr(self, "transformer", None):
                         self.load_component_by_type("transformer")
                         self.to_device(self.transformer)
-                        
+
                     current_model = self.transformer
-                    current_guidance_scale = guidance_scale[0] if isinstance(guidance_scale, list) else guidance_scale
+                    current_guidance_scale = (
+                        guidance_scale[0]
+                        if isinstance(guidance_scale, list)
+                        else guidance_scale
+                    )
                 else:
                     # Low noise stage
                     if getattr(self, "transformer", None):
                         self._offload(self.transformer)
                         empty_cache()
-                        
+
                     if not getattr(self, "transformer_2", None):
                         # Check if transformer_2 is loaded, if not load it
                         if not hasattr(self, "transformer_2"):
-                             # If not in attributes, maybe load by name "transformer_2"
-                             # The config should have it.
-                             self.load_component_by_name("transformer_2")
+                            # If not in attributes, maybe load by name "transformer_2"
+                            # The config should have it.
+                            self.load_component_by_name("transformer_2")
                         self.to_device(self.transformer_2)
-                    
-                    current_model = self.transformer_2
-                    current_guidance_scale = guidance_scale[1] if isinstance(guidance_scale, list) else guidance_scale
 
-                latent_model_input = torch.cat([latents, latent_condition], dim=1).to(transformer_dtype)
-                
+                    current_model = self.transformer_2
+                    current_guidance_scale = (
+                        guidance_scale[1]
+                        if isinstance(guidance_scale, list)
+                        else guidance_scale
+                    )
+
+                latent_model_input = torch.cat([latents, latent_condition], dim=1).to(
+                    transformer_dtype
+                )
+
                 if expand_timesteps:
-                     # seq_len: num_latent_frames * latent_height//2 * latent_width//2
+                    # seq_len: num_latent_frames * latent_height//2 * latent_width//2
                     temp_ts = (mask[0][0][:, ::2, ::2] * t).flatten()
                     # batch_size, seq_len
                     timestep = temp_ts.unsqueeze(0).expand(latents.shape[0], -1)
@@ -288,13 +297,20 @@ class LucyEditEngine(WanShared):
                             attention_kwargs=attention_kwargs,
                             return_dict=False,
                         )[0]
-                    noise_pred = noise_uncond + current_guidance_scale * (noise_pred - noise_uncond)
+                    noise_pred = noise_uncond + current_guidance_scale * (
+                        noise_pred - noise_uncond
+                    )
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
-                
+
                 pbar.update(1)
                 safe_emit_progress(
                     denoise_progress_callback,
@@ -303,4 +319,3 @@ class LucyEditEngine(WanShared):
                 )
 
         return latents
-

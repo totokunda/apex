@@ -8,6 +8,7 @@ from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
 from einops import rearrange
 
+
 class WanControlEngine(WanShared):
     """WAN Control Engine Implementation for camera control and video guidance"""
 
@@ -41,7 +42,7 @@ class WanControlEngine(WanShared):
             List[Image.Image], List[str], str, np.ndarray, torch.Tensor, None
         ] = None,
         camera_poses: Union[List[float], str, List[Camera], Camera, None] = None,
-        process_first_mask_frame_only: bool = True, 
+        process_first_mask_frame_only: bool = True,
         prompt: List[str] | str = None,
         negative_prompt: List[str] | str = None,
         duration: int | str = 16,
@@ -86,17 +87,20 @@ class WanControlEngine(WanShared):
         )
 
         loaded_video = self._load_video(video, fps=fps) if video is not None else None
-        control_loaded_video = self._load_video(control_video, fps=fps) if control_video is not None else None
+        control_loaded_video = (
+            self._load_video(control_video, fps=fps)
+            if control_video is not None
+            else None
+        )
 
         frame_counts = [
-            len(v) for v in (loaded_video, control_loaded_video)
-            if v is not None
+            len(v) for v in (loaded_video, control_loaded_video) if v is not None
         ]
 
         min_num_frames = min(frame_counts) if frame_counts else None
-        
+
         num_frames = self._parse_num_frames(duration, fps, min_num_frames)
-        
+
         batch_size = prompt_embeds.shape[0]
 
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
@@ -110,11 +114,15 @@ class WanControlEngine(WanShared):
             )
         else:
             negative_prompt_embeds = None
- 
+
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
@@ -140,12 +148,10 @@ class WanControlEngine(WanShared):
                 preprocessed_image, dtype=torch.float32, generator=generator
             )
 
-
-        
         transformer_config = self.load_config_by_type("transformer")
-        
+
         transformer_dtype = self.component_dtypes["transformer"]
-        
+
         latents = self._get_latents(
             height,
             width,
@@ -158,9 +164,8 @@ class WanControlEngine(WanShared):
             generator=generator,
         )
 
-
         if self.denoise_type == "moe" and start_image is not None:
-            # convert start image into video 
+            # convert start image into video
             start_image = self._load_image(start_image)
             video = [start_image] * num_frames
             mask = [Image.new("RGB", (width, height), (0, 0, 0))] * num_frames
@@ -203,7 +208,7 @@ class WanControlEngine(WanShared):
                 .view(b, f // 4, c * 4, h, w)
                 .transpose(1, 2)
             )
-        
+
         elif control_video is not None:
             pt, ph, pw = transformer_config.get("patch_size", (1, 2, 2))
             video_height, video_width = self.video_processor.get_default_height_width(
@@ -222,91 +227,143 @@ class WanControlEngine(WanShared):
                 video_width = (video_width // base) * base
 
             assert video_height * video_width <= height * width
-            
-            control_video = torch.from_numpy(np.array([np.array(frame) for frame in control_loaded_video]))[:num_frames]
+
+            control_video = torch.from_numpy(
+                np.array([np.array(frame) for frame in control_loaded_video])
+            )[:num_frames]
 
             control_video = control_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
-            
+
             video_length = control_video.shape[2]
-            control_video = self.video_processor.preprocess(rearrange(control_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+            control_video = self.video_processor.preprocess(
+                rearrange(control_video, "b c f h w -> (b f) c h w"),
+                height=height,
+                width=width,
+            )
             control_video = control_video.to(dtype=torch.float32)
-            control_video = rearrange(control_video, "(b f) c h w -> b c f h w", f=video_length)
+            control_video = rearrange(
+                control_video, "(b f) c h w -> b c f h w", f=video_length
+            )
 
             control_latents = self._prepare_fun_control_latents(
                 control_video, dtype=torch.float32, generator=generator
             )
 
-
             control_camera_latents = None
         else:
             control_latents = torch.zeros_like(latents)
             control_camera_latents = None
-        
-        
-        
+
         if video is not None and self.denoise_type == "moe":
             if mask is not None:
                 mask = self._load_video(mask, fps=fps)
-                mask = torch.from_numpy(np.array([np.array(frame) for frame in mask]))[:num_frames]
+                mask = torch.from_numpy(np.array([np.array(frame) for frame in mask]))[
+                    :num_frames
+                ]
                 mask = mask.permute([3, 0, 1, 2]).unsqueeze(0) / 255
-                mask = self.video_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
+                mask = self.video_processor.preprocess(
+                    rearrange(mask, "b c f h w -> (b f) c h w"),
+                    height=height,
+                    width=width,
+                )
                 mask = mask.to(dtype=torch.float32)
                 mask = rearrange(mask, "(b f) c h w -> b c f h w", f=num_frames)
 
-                
             if mask is None or (mask == 1.0).all():
                 mask_latents = torch.tile(
-                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype), [1, 4, 1, 1, 1]
+                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype),
+                    [1, 4, 1, 1, 1],
                 )
-                masked_video_latents = torch.zeros_like(latents).to(self.device, transformer_dtype)
+                masked_video_latents = torch.zeros_like(latents).to(
+                    self.device, transformer_dtype
+                )
                 if self.vae_scale_factor_spatial >= 16:
-                    _mask = torch.ones_like(latents).to(self.device, transformer_dtype)[:, :1].to(self.device, transformer_dtype)
+                    _mask = (
+                        torch.ones_like(latents)
+                        .to(self.device, transformer_dtype)[:, :1]
+                        .to(self.device, transformer_dtype)
+                    )
                 else:
                     _mask = None
             else:
                 # Ensure we preprocess the provided input video, not an undefined variable
                 loaded_video = self._load_video(video, fps=fps)
-                video = torch.from_numpy(np.array([np.array(frame) for frame in loaded_video]))[:num_frames]
+                video = torch.from_numpy(
+                    np.array([np.array(frame) for frame in loaded_video])
+                )[:num_frames]
                 video = video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
-                video = self.video_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width) 
+                video = self.video_processor.preprocess(
+                    rearrange(video, "b c f h w -> (b f) c h w"),
+                    height=height,
+                    width=width,
+                )
                 video = video.to(dtype=torch.float32)
                 video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
-                
-                bs, _, video_length, height, width = video.size()
-                mask_condition = self.mask_processor.preprocess(rearrange(mask, "b c f h w -> (b f) c h w"), height=height, width=width) 
-                mask_condition = mask_condition.to(dtype=torch.float32)
-                mask_condition = rearrange(mask_condition, "(b f) c h w -> b c f h w", f=video_length)
 
-                masked_video = video * (torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5)
+                bs, _, video_length, height, width = video.size()
+                mask_condition = self.mask_processor.preprocess(
+                    rearrange(mask, "b c f h w -> (b f) c h w"),
+                    height=height,
+                    width=width,
+                )
+                mask_condition = mask_condition.to(dtype=torch.float32)
+                mask_condition = rearrange(
+                    mask_condition, "(b f) c h w -> b c f h w", f=video_length
+                )
+
+                masked_video = video * (
+                    torch.tile(mask_condition, [1, 3, 1, 1, 1]) < 0.5
+                )
                 masked_video_latents = self._prepare_fun_control_latents(
                     masked_video, dtype=torch.float32, generator=generator
                 )
-                
+
                 mask_condition = torch.concat(
                     [
-                        torch.repeat_interleave(mask_condition[:, :, 0:1], repeats=4, dim=2), 
-                        mask_condition[:, :, 1:]
-                    ], dim=2
+                        torch.repeat_interleave(
+                            mask_condition[:, :, 0:1], repeats=4, dim=2
+                        ),
+                        mask_condition[:, :, 1:],
+                    ],
+                    dim=2,
                 )
-                mask_condition = mask_condition.view(bs, mask_condition.shape[2] // 4, 4, height, width)
+                mask_condition = mask_condition.view(
+                    bs, mask_condition.shape[2] // 4, 4, height, width
+                )
                 mask_condition = mask_condition.transpose(1, 2)
-                mask_latents = self._resize_mask(1 - mask_condition, masked_video_latents, process_first_mask_frame_only).to(self.device, transformer_dtype) 
+                mask_latents = self._resize_mask(
+                    1 - mask_condition,
+                    masked_video_latents,
+                    process_first_mask_frame_only,
+                ).to(self.device, transformer_dtype)
 
                 if self.vae_scale_factor_spatial >= 16:
-                    _mask = F.interpolate(mask_condition[:, :1], size=latents.size()[-3:], mode='trilinear', align_corners=True).to(self.device, transformer_dtype)
+                    _mask = F.interpolate(
+                        mask_condition[:, :1],
+                        size=latents.size()[-3:],
+                        mode="trilinear",
+                        align_corners=True,
+                    ).to(self.device, transformer_dtype)
                     if not _mask[:, :, 0, :, :].any():
                         _mask[:, :, 1:, :, :] = 1
-                        latents = (1 - _mask) * masked_video_latents + _mask * latents 
+                        latents = (1 - _mask) * masked_video_latents + _mask * latents
                 else:
                     _mask = None
-                
+
         elif self.denoise_type == "moe":
             mask_latents = torch.tile(
-                    torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype), [1, 4, 1, 1, 1]
-                )
-            masked_video_latents = torch.zeros_like(latents).to(self.device, transformer_dtype)
+                torch.zeros_like(latents)[:, :1].to(self.device, transformer_dtype),
+                [1, 4, 1, 1, 1],
+            )
+            masked_video_latents = torch.zeros_like(latents).to(
+                self.device, transformer_dtype
+            )
             if self.vae_scale_factor_spatial >= 16:
-                _mask = torch.ones_like(latents).to(self.device, transformer_dtype)[:, :1].to(self.device, transformer_dtype)
+                _mask = (
+                    torch.ones_like(latents)
+                    .to(self.device, transformer_dtype)[:, :1]
+                    .to(self.device, transformer_dtype)
+                )
             else:
                 _mask = None
         else:
@@ -319,9 +376,7 @@ class WanControlEngine(WanShared):
                 loaded_image = self._load_image(reference_image)
                 loaded_image = loaded_image.resize((width, height))
                 preprocessed_image = (
-                    self.video_processor.preprocess(
-                        loaded_image
-                    )
+                    self.video_processor.preprocess(loaded_image)
                     .to(self.device, dtype=torch.float32)
                     .unsqueeze(2)
                 )
@@ -333,7 +388,7 @@ class WanControlEngine(WanShared):
                 reference_image_latents = torch.zeros_like(latents)[:, :, 0]
         else:
             reference_image_latents = None
-        
+
         if reference_image is not None:
             clip_image = reference_image
         elif start_image is not None:
@@ -350,7 +405,6 @@ class WanControlEngine(WanShared):
         else:
             image_embeds = None
 
-
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
 
         if negative_prompt_embeds is not None:
@@ -365,7 +419,9 @@ class WanControlEngine(WanShared):
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
 
-        safe_emit_progress(progress_callback, 0.20, "Scheduler ready and timesteps computed")
+        safe_emit_progress(
+            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+        )
 
         scheduler = self.scheduler
         scheduler.set_timesteps(
@@ -374,7 +430,9 @@ class WanControlEngine(WanShared):
 
         if boundary_ratio is not None:
             boundary_timestep = boundary_ratio * getattr(
-                getattr(self.scheduler, "config", self.scheduler), "num_train_timesteps", 1000
+                getattr(self.scheduler, "config", self.scheduler),
+                "num_train_timesteps",
+                1000,
             )
         else:
             boundary_timestep = None
@@ -387,7 +445,11 @@ class WanControlEngine(WanShared):
             **scheduler_kwargs,
         )
 
-        if control_latents is not None and start_image_latents_in is not None and mask_latents is None:
+        if (
+            control_latents is not None
+            and start_image_latents_in is not None
+            and mask_latents is None
+        ):
             control_latents = torch.concat(
                 [
                     control_latents,
@@ -397,30 +459,24 @@ class WanControlEngine(WanShared):
             )
         elif control_latents is None and start_image_latents_in is not None:
             control_latents = start_image_latents_in
-        
+
         if mask_latents is not None and masked_video_latents is not None:
 
             mask_latents = torch.concat(
-                [
-                    mask_latents,
-                    masked_video_latents
-                ],
+                [mask_latents, masked_video_latents],
                 dim=1,
             )
 
         if mask_latents is not None and control_latents is not None:
 
             control_latents = torch.concat(
-                [
-                    control_latents,
-                    mask_latents
-                ],
+                [control_latents, mask_latents],
                 dim=1,
             )
 
         elif mask_latents is not None and control_latents is None:
             control_latents = mask_latents
-        
+
         # Set preview context for per-step rendering on the main engine when available
         self._preview_height = height
         self._preview_width = width
@@ -429,7 +485,6 @@ class WanControlEngine(WanShared):
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
-
 
         latents = self.denoise(
             boundary_timestep=boundary_timestep,

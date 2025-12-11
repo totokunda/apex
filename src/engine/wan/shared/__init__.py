@@ -14,6 +14,7 @@ from src.utils.cache import empty_cache
 from .mlx import WanMLXDenoise
 from torch import Tensor
 
+
 class WanShared(BaseEngine, WanMLXDenoise):
     """Base class for WAN engine implementations containing common functionality"""
 
@@ -38,12 +39,13 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 "vae_scale_factor", self.vae_scale_factor_spatial
             )
         )
-        
-        self.mask_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae_scale_factor_spatial, do_normalize=False, do_binarize=True, do_convert_grayscale=True
-        )
 
-   
+        self.mask_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor_spatial,
+            do_normalize=False,
+            do_binarize=True,
+            do_convert_grayscale=True,
+        )
 
     def _prepare_fun_control_latents(
         self, control, dtype=torch.float32, generator: torch.Generator | None = None
@@ -64,7 +66,6 @@ class WanShared(BaseEngine, WanMLXDenoise):
         control = torch.cat(new_control, dim=0)
 
         return control
-    
 
     def resize_and_centercrop(self, cond_image, target_size):
         """
@@ -117,7 +118,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
             cropped_tensor = cropped_tensor[:, :, None, :, :]
 
         return cropped_tensor
-    
+
     def _resize_mask(self, mask, latent, process_first_frame_only=True):
         latent_size = latent.size()
         batch_size, channels, num_frames, height, width = mask.shape
@@ -128,8 +129,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
             first_frame_resized = F.interpolate(
                 mask[:, :, 0:1, :, :],
                 size=target_size,
-                mode='trilinear',
-                align_corners=False
+                mode="trilinear",
+                align_corners=False,
             )
 
             target_size = list(latent_size[2:])
@@ -138,32 +139,32 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 remaining_frames_resized = F.interpolate(
                     mask[:, :, 1:, :, :],
                     size=target_size,
-                    mode='trilinear',
-                    align_corners=False
+                    mode="trilinear",
+                    align_corners=False,
                 )
-                resized_mask = torch.cat([first_frame_resized, remaining_frames_resized], dim=2)
+                resized_mask = torch.cat(
+                    [first_frame_resized, remaining_frames_resized], dim=2
+                )
             else:
                 resized_mask = first_frame_resized
         else:
             target_size = list(latent_size[2:])
             resized_mask = F.interpolate(
-                mask,
-                size=target_size,
-                mode='trilinear',
-                align_corners=False
+                mask, size=target_size, mode="trilinear", align_corners=False
             )
         return resized_mask
 
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         self.logger.info(f"Rendering step for model type: {self.model_type}")
-        if self.model_type == 't2i':
+        if self.model_type == "t2i":
             tensor_image = self.vae_decode(latents)[:, :, 0]
             image = self._tensor_to_frame(tensor_image)
             render_on_step_callback(image[0])
         else:
             super()._render_step(latents, render_on_step_callback)
-            
-    def encode_prompt(self,
+
+    def encode_prompt(
+        self,
         prompt: List[str] | str,
         negative_prompt: List[str] | str = None,
         use_cfg_guidance: bool = True,
@@ -173,7 +174,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         text_encoder_kwargs: Dict[str, Any] = {},
         offload: bool = True,
     ) -> Tuple[Tensor, Tensor]:
-        
+
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
@@ -203,15 +204,18 @@ class WanShared(BaseEngine, WanMLXDenoise):
         safe_emit_progress(
             progress_callback,
             0.13,
-            "Prepared negative prompt embeds" if negative_prompt is not None and use_cfg_guidance else "Skipped negative prompt embeds",
+            (
+                "Prepared negative prompt embeds"
+                if negative_prompt is not None and use_cfg_guidance
+                else "Skipped negative prompt embeds"
+            ),
         )
 
         if offload:
             self._offload(self.text_encoder)
-        
 
         return prompt_embeds, negative_prompt_embeds
-    
+
     def _encode_ip_image(
         self,
         ip_image: Image.Image | str | np.ndarray | torch.Tensor,
@@ -226,7 +230,6 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
         encoded_image = self.vae_encode(ip_image, sample_mode="mode", dtype=dtype)
         return encoded_image
-            
 
     def moe_denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps", None)
@@ -241,16 +244,15 @@ class WanShared(BaseEngine, WanMLXDenoise):
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
         transformer_kwargs = kwargs.get("transformer_kwargs", {})
-        unconditional_transformer_kwargs = kwargs.get("unconditional_transformer_kwargs", {})
+        unconditional_transformer_kwargs = (
+            kwargs.get("unconditional_transformer_kwargs", {}) or {}
+        )
         transformer_kwargs.pop("encoder_hidden_states_image", None)
         unconditional_transformer_kwargs.pop("encoder_hidden_states_image", None)
         mask_kwargs = kwargs.get("mask_kwargs", {})
         mask = mask_kwargs.get("mask", None)
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
-
-
-
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -269,7 +271,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 timestep = t.expand(latents.shape[0])
 
                 if boundary_timestep is not None and t >= boundary_timestep:
-                   
+
                     if hasattr(self, "transformer_2") and self.transformer_2:
                         safe_emit_progress(
                             denoise_progress_callback,
@@ -347,13 +349,22 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     noise_pred = uncond_noise_pred + guidance_scale * (
                         noise_pred - uncond_noise_pred
                     )
- 
+
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-            
-                if self.vae_scale_factor_spatial >= 16 and mask is not None and not mask[:, :, 0, :, :].any():
+
+                if (
+                    self.vae_scale_factor_spatial >= 16
+                    and mask is not None
+                    and not mask[:, :, 0, :, :].any()
+                ):
                     latents = (1 - mask) * masked_video_latents + mask * latents
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
                     self._render_step(latents, render_on_step_callback)
                 pbar.update(1)
                 safe_emit_progress(
@@ -382,6 +393,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         ip_image = kwargs.get("ip_image", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
         num_warmup_steps = kwargs.get("num_warmup_steps", 0)
+        num_reference_images = kwargs.get("num_reference_images", 0)
 
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
@@ -456,12 +468,21 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
                 latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback)
-                    
-                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                if (
+                    render_on_step
+                    and render_on_step_callback
+                    and ((i + 1) % render_on_step_interval == 0 or i == 0)
+                    and i != len(timesteps) - 1
+                ):
+                    self._render_step(
+                        latents[:, :, num_reference_images:], render_on_step_callback
+                    )
+
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
                     pbar.update(1)
-                    
+
                 safe_emit_progress(
                     denoise_progress_callback,
                     float(i + 1) / float(total_steps),

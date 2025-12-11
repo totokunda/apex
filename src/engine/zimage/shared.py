@@ -4,17 +4,21 @@ from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
+
 class ZImageShared(BaseEngine):
     """Base class for ZImage engine implementations containing common functionality"""
 
     def __init__(self, yaml_path: str, *args, **kwargs):
         super().__init__(yaml_path, *args, **kwargs)
         self.vae_scale_factor = (
-            2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
+            2 ** (len(self.vae.config.block_out_channels) - 1)
+            if hasattr(self, "vae") and self.vae is not None
+            else 8
         )
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
-        
-    
+        self.image_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor * 2
+        )
+
     def encode_prompt(
         self,
         prompt: Union[str, List[str]],
@@ -32,13 +36,16 @@ class ZImageShared(BaseEngine):
             prompt_embeds=prompt_embeds,
             max_sequence_length=max_sequence_length,
         )
-        
 
         if do_classifier_free_guidance:
             if negative_prompt is None:
                 negative_prompt = ["" for _ in prompt]
             else:
-                negative_prompt = [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
+                negative_prompt = (
+                    [negative_prompt]
+                    if isinstance(negative_prompt, str)
+                    else negative_prompt
+                )
             assert len(prompt) == len(negative_prompt)
             negative_prompt_embeds = self._encode_prompt(
                 prompt=negative_prompt,
@@ -80,8 +87,6 @@ class ZImageShared(BaseEngine):
                 enable_thinking=True,
             )
             prompt[i] = prompt_item
-            
-
 
         prompt_embeds, prompt_masks = self.text_encoder.encode(
             prompt,
@@ -95,7 +100,7 @@ class ZImageShared(BaseEngine):
             clean_text=False,
             output_type="hidden_states_all",
         )
-        
+
         prompt_embeds = prompt_embeds[-2].to(device=device, dtype=dtype)
         prompt_masks = prompt_masks.bool().to(device=device)
 
@@ -105,7 +110,7 @@ class ZImageShared(BaseEngine):
             embeddings_list.append(prompt_embeds[i][prompt_masks[i]])
 
         return embeddings_list
-    
+
     def prepare_latents(
         self,
         batch_size,
@@ -123,9 +128,13 @@ class ZImageShared(BaseEngine):
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            latents = randn_tensor(
+                shape, generator=generator, device=device, dtype=dtype
+            )
         else:
             if latents.shape != shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
+                raise ValueError(
+                    f"Unexpected latents shape, got {latents.shape}, expected {shape}"
+                )
             latents = latents.to(device)
         return latents

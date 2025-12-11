@@ -69,4 +69,4 @@ class WanRecam:
             relative_poses.append(torch.as_tensor(relative_pose)[:, :3, :][1])
         pose_embedding = torch.stack(relative_poses, dim=0)  # 21x3x4
         pose_embedding = rearrange(pose_embedding, "b c d -> b (c d)")
-        return pose_embedding
+        return pose_embedding.to(torch.bfloat16)

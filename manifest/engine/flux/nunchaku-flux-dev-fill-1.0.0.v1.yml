@@ -25,6 +25,8 @@ spec:
   model_type: fill
   engine_type: torch
   denoise_type: base
+  engine_kwargs:
+    check_weights: false
   compute_requirements:
     min_cuda_compute_capability: 7.5
     supported_compute_types:
@@ -194,13 +196,10 @@ spec:
       options:
       - name: HD
         value: 720  
-        height: 720
       - name: Ultra HD
         value: 1024
-        height: 1024
       - name: SD
         value: 480
-        height: 480
       - name: Custom
         value: custom
     - id: aspect_ratio
