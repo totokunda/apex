@@ -13,6 +13,10 @@ from src.utils.module import find_class_recursive
 import transformers
 import inspect
 
+def nan_hook(module, inputs, outputs):
+    if isinstance(outputs, torch.Tensor):
+        if not torch.isfinite(outputs).all():
+            raise RuntimeError(f"NaN/Inf in {module}")
 
 class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
     def __init__(
@@ -282,7 +286,10 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             )
             mask = (mask_indices <= seq_lengths.unsqueeze(1)).long()
             inputs["attention_mask"] = mask.to(device=self.model.device)
-
+            
+        self.model.apply(lambda m: m.register_forward_hook(nan_hook))
+        
+        
         result = self.model(
             **inputs,
             output_hidden_states=(

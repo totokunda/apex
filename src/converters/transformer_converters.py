@@ -46,39 +46,9 @@ class TransformerConverter:
                 handler_fn_inplace(key, state_dict)
 
 
-class KohyaToPeftTransformerConverter(TransformerConverter):
-    """
-    Base converter that performs a generic Kohya-style LoRA -> PEFT-style LoRA key normalization
-    before running the usual `TransformerConverter.convert` logic.
-
-    It converts:
-      - `*.lora_down.weight` / `*.lora_down.bias` -> `*.lora_A.weight` / `*.lora_A.bias`
-      - `*.lora_up.weight`   / `*.lora_up.bias`   -> `*.lora_B.weight` / `*.lora_B.bias`
-    """
-
-    def convert(self, state_dict: Dict[str, Any]):
-        # First, normalize Kohya-style LoRA keys to PEFT-style keys.
-        for key in list(state_dict.keys()):
-            new_key = key
-
-            if ".lora_down." in new_key:
-                new_key = new_key.replace(".lora_down.", ".lora_A.")
-
-            if ".lora_up." in new_key:
-                new_key = new_key.replace(".lora_up.", ".lora_B.")
-
-            if new_key != key:
-                update_state_dict_(state_dict, key, new_key)
-
-        # Then run the standard transformer conversion logic.
-        super().convert(state_dict)
 
 
-class LoraTransformerConverter(KohyaToPeftTransformerConverter):
-    pass
-
-
-class WanTransformerConverter(KohyaToPeftTransformerConverter):
+class WanTransformerConverter(TransformerConverter):
     def __init__(self):
         self.rename_dict = {
             "time_embedding.0": "condition_embedder.time_embedder.linear_1",
@@ -142,46 +112,6 @@ class WanTransformerConverter(KohyaToPeftTransformerConverter):
             ".diff": self.remove_keys_inplace,
             "scaled_fp8": self.remove_keys_inplace,
         }
-
-    @staticmethod
-    def _remap_lora_unet_blocks_underscore_keys(state_dict: Dict[str, Any]):
-        """
-        Support LoRA weights produced with `--lora_unet_blocks` where keys use
-        underscore-separated segments instead of dot notation, e.g.:
-
-          lora_unet_blocks_0_cross_attn_k.lora_down.weight
-          lora_unet_blocks_0_self_attn_q.lora_up.weight
-          lora_unet_blocks_0_ffn_0.lora_down.weight
-
-        These are mapped to Wan transformer block keys so that the rest of the
-        rename rules can apply:
-
-          blocks.0.cross_attn.k.lora_down.weight
-          blocks.0.self_attn.q.lora_up.weight
-          blocks.0.ffn.0.lora_down.weight
-        """
-        pattern = re.compile(
-            r"^lora_unet_blocks_(\d+)_(cross_attn|self_attn|ffn)_(\d+|[qkvo])(\..+)$"
-        )
-
-        for key in list(state_dict.keys()):
-            m = pattern.match(key)
-            if not m:
-                continue
-
-            layer_idx, block_type, sub_key, suffix = m.groups()
-            new_key = f"blocks.{layer_idx}.{block_type}.{sub_key}{suffix}"
-            update_state_dict_(state_dict, key, new_key)
-
-    def convert(self, state_dict: Dict[str, Any]):
-        # First, normalize any underscore-style `lora_unet_blocks_*` keys to
-        # proper Wan transformer block names.
-        self._remap_lora_unet_blocks_underscore_keys(state_dict)
-
-        # Then delegate to the generic Kohya-style → PEFT-style conversion and
-        # the standard TransformerConverter rename logic.
-        super().convert(state_dict)
-
 
 class SkyReelsTransformerConverter(WanTransformerConverter):
     def __init__(self):
@@ -253,7 +183,6 @@ class WanMultiTalkTransformerConverter(TransformerConverter):
         # so we drop them early during conversion.
         self.pre_special_keys_map = {
             "scaled_fp8": self.remove_keys_inplace,
-            ".scale_weight": self.remove_keys_inplace,
         }
 
 
@@ -1176,3 +1105,26 @@ class NoOpTransformerConverter(TransformerConverter):
         self.rename_dict = {}
         self.pre_special_keys_map = {}
         self.special_keys_map = {}
+
+
+class LoraTransformerConverter(TransformerConverter):
+    """
+    Thin adapter that delegates to `src.lora.lora_converter.LoraConverter` so it
+    can be used from the generic converter utilities in `src.converters.convert`.
+
+    This mirrors the simple `convert(state_dict)` API used by other
+    `TransformerConverter` subclasses, but internally relies on the more
+    specialized LoRA-to-PEFT conversion logic.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # Import here to avoid any potential import cycles at module import time.
+        from src.lora.lora_converter import LoraConverter
+
+        self._lora_converter = LoraConverter()
+
+    def convert(self, state_dict: Dict[str, Any]):
+        # Delegate the heavy lifting to the dedicated LoRA converter.
+        self._lora_converter.convert(state_dict)
+        return state_dict

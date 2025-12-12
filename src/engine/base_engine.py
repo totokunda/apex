@@ -50,7 +50,7 @@ from src.utils.compute import validate_compute_requirements, get_compute_capabil
 
 import tempfile
 from src.transformer import _auto_register_transformers
-from src.mixins import LoaderMixin, ToMixin, OffloadMixin
+from src.mixins import LoaderMixin, ToMixin, OffloadMixin, CompileMixin
 from glob import glob
 from safetensors import safe_open
 import mlx.core as mx
@@ -66,7 +66,15 @@ from torchvision import transforms as TF
 import inspect
 from src.lora import LoraManager, LoraItem
 from src.helpers.helpers import helpers
-
+from src.utils.torch_patches import patch_torch_linalg_solve_for_cusolver
+try:
+    torch.backends.cuda.preferred_linalg_library()
+except Exception as e:
+    logger.warning(f"Error setting preferred linalg library: {e}")
+try:
+    patch_torch_linalg_solve_for_cusolver()
+except Exception as e:
+    logger.warning(f"Error patching torch.linalg.solve for cuSOLVER failures: {e}")
 _auto_register_transformers()
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -176,7 +184,7 @@ class AutoLoadingHelperDict(dict):
             return default
 
 
-class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
+class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
     engine_type: Literal["torch", "mlx"] = "torch"
     config: Dict[str, Any]
     scheduler: SchedulerInterface | None = None
@@ -893,6 +901,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         module_label=component.get("name") or "text_encoder",
                     )
                     setattr(text_encoder, "_group_offloading_enabled", True)
+                    
+                self._maybe_compile_module(text_encoder.model, component)
                 return text_encoder.model
 
             text_encoder.load_model = _patched_load_model  # type: ignore
@@ -942,18 +952,86 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             setattr(self, name_or_type, transformer)
             # filter loras by component if specified
             preloaded_loras = [
-                (lora.source, lora.scale)
+                (lora.source, lora.scale, lora.name)
                 for lora in self.preloaded_loras.values()
                 if lora.component is None or lora.component == name_or_type
             ]
             self.logger.info(f"Applying {len(preloaded_loras)} loras to {name_or_type}")
             self.apply_loras(
-                preloaded_loras,
-                adapter_names=list(self.preloaded_loras.keys()),
+                [(lora[0], lora[1]) for lora in preloaded_loras],
+                adapter_names=[lora[2] for lora in preloaded_loras],
                 model=transformer,
             )
+        
+        # Apply transformer group offloading *after* any post-load mutations
+        # (e.g. auto-apply LoRAs above). We intentionally skip enabling group
+        # offloading inside LoaderMixin for transformers, because it caches CPU
+        # tensors keyed by Parameter identity and can break if parameters are
+        # replaced after load.
+        
+        mm_config = self._resolve_memory_config_for_component(component)
+
+        if mm_config is not None and not no_weights:
+            label = component.get("name") or component.get("type") or "transformer"
+            offloading_module = component.get("offloading_module", None)
+
+            # If this engine will apply LoRAs/adapters later (e.g. Lynx), defer.
+            should_defer = bool(
+                (not getattr(self, "auto_apply_loras", True))
+                and getattr(self, "preloaded_loras", None)
+            )
+            if should_defer:
+                setattr(
+                    transformer,
+                    "_apex_pending_group_offloading",
+                    (mm_config, label, offloading_module),
+                )
+            else:
+                try:
+                    model_to_offload = (
+                        transformer.get_submodule(offloading_module)
+                        if offloading_module
+                        else transformer
+                    )
+                    self._apply_group_offloading(
+                        model_to_offload, mm_config, module_label=label
+                    )
+                except Exception as e:
+                    if hasattr(self, "logger"):
+                        self.logger.warning(
+                            f"Failed to enable group offloading for '{label}': {e}"
+                        )
+
+        # Optionally compile the fully initialized module according to config.
+        if not no_weights and component.get("type") != "transformer":
+            maybe_compile = getattr(self, "_maybe_compile_module", None)
+            if callable(maybe_compile):
+                model = maybe_compile(model, component)
 
         return transformer
+
+    def _apply_pending_group_offloading(self, module: torch.nn.Module) -> bool:
+        """If `module` has deferred group offloading config, apply it now."""
+        pending = getattr(module, "_apex_pending_group_offloading", None)
+        if not pending:
+            return False
+
+        mm_config, label, offloading_module = pending
+        try:
+            model_to_offload = (
+                module.get_submodule(offloading_module) if offloading_module else module
+            )
+            self._apply_group_offloading(
+                model_to_offload, mm_config, module_label=label
+            )
+        finally:
+            # Always clear the pending marker to avoid repeated attempts.
+            try:
+                delattr(module, "_apex_pending_group_offloading")
+            except Exception:
+                pass
+
+        return True
 
     def _get_safetensors_keys(
         self, model_path: str, model_key: str | None = None, framework: str = "pt"
@@ -1020,13 +1098,35 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     # Model size estimation helpers
     # -------------------------
     def _estimate_component_model_size_bytes(self, component: Dict[str, Any]) -> int:
-        """Roughly estimate total on-disk size of the model weights for a component."""
+        """Estimate total weight size for a component.
+
+        Notes:
+        - For `.safetensors`, we use `safe_open(...).get_slice()` to read tensor shapes/dtypes
+          without materializing tensors, and sum `numel * element_size` for accurate totals.
+          If `component_dtypes` is configured, we estimate the *effective* in-memory size after
+          casting floating-point tensors to the target dtype (except float8).
+        - For GGUF, we keep using raw on-disk file size.
+        - For torch checkpoints (`.bin/.pt/.pth/.ckpt`), we try to `torch.load(..., map_location="meta",
+          mmap=True, weights_only=True)` and compute the same `numel * element_size` estimate without
+          allocating weight storage. If that fails, we fall back to raw on-disk size + optional scaling.
+        """
         model_path = component.get("model_path")
         if not model_path:
             return 0
 
-        # First, estimate raw size of weight files on disk
-        total_size = 0
+        # Determine configured dtype early; we only need the float8 probe if we would
+        # otherwise apply dtype-based scaling.
+        component_type = component.get("type")
+        target_dtype = None
+        if getattr(self, "component_dtypes", None) is not None and component_type:
+            target_dtype = self.component_dtypes.get(component_type)
+
+        # Track raw on-disk size (used for GGUF and as fallback).
+        total_on_disk_size = 0
+        has_gguf = False
+        safetensors_files: List[str] = []
+        other_weight_files: List[str] = []
+        other_on_disk_size = 0
 
         # Normalize to list so we can handle main + extra paths uniformly
         paths: List[str] = [model_path]
@@ -1047,27 +1147,206 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                     for ext in extensions:
                         for f in glob(os.path.join(path, f"*.{ext}")):
                             try:
-                                total_size += os.path.getsize(f)
+                                fsize = os.path.getsize(f)
+                                total_on_disk_size += fsize
+                                if f.endswith(".gguf"):
+                                    has_gguf = True
+                                elif f.endswith(".safetensors"):
+                                    safetensors_files.append(f)
+                                else:
+                                    other_weight_files.append(f)
+                                    other_on_disk_size += fsize
                             except OSError:
                                 continue
                 elif os.path.isfile(path):
                     # Only count files that look like weights
                     if path.endswith(extensions):
                         try:
-                            total_size += os.path.getsize(path)
+                            fsize = os.path.getsize(path)
+                            total_on_disk_size += fsize
+                            if path.endswith(".gguf"):
+                                has_gguf = True
+                            elif path.endswith(".safetensors"):
+                                safetensors_files.append(path)
+                            else:
+                                other_weight_files.append(path)
+                                other_on_disk_size += fsize
                         except OSError:
                             continue
             except Exception:
                 # This is a best-effort heuristic; ignore unexpected errors
                 continue
 
-        # Adjust the estimate based on the configured in-memory dtype for this component,
-        # since weights may be stored as fp32 on disk but used as fp16 / bf16 in memory.
-        component_type = component.get("type")
-        target_dtype = None
-        if getattr(self, "component_dtypes", None) is not None and component_type:
-            target_dtype = self.component_dtypes.get(component_type)
+        # For GGUF models, the file size already reflects the model size on disk and is
+        # the most reliable estimate; do not apply dtype-based scaling heuristics.
+        if has_gguf:
+            return total_on_disk_size
 
+        def _is_float8_dtype(dtype: Any) -> bool:
+            # Torch float8 dtypes (available depending on torch build/version)
+            for name in (
+                "float8_e4m3fn",
+                "float8_e5m2",
+                "float8_e4m3fnuz",
+                "float8_e5m2fnuz",
+            ):
+                dt = getattr(torch, name, None)
+                if dt is not None and dtype == dt:
+                    return True
+            return False
+
+        def _target_fp_element_size() -> Optional[int]:
+            if target_dtype is None:
+                return None
+            try:
+                return int(torch.tensor([], dtype=target_dtype).element_size())
+            except Exception:
+                return None
+
+        target_fp_es = _target_fp_element_size()
+
+        # Accurate estimation for safetensors: sum(numel * element_size) using slice metadata.
+        def _estimate_safetensors_bytes(path: str) -> Optional[int]:
+            try:
+                # Map safetensors dtype strings to torch dtype for element_size() where possible.
+                elem_size_map: Dict[str, int] = {
+                    "F64": 8,
+                    "F32": 4,
+                    "BF16": 2,
+                    "F16": 2,
+                    "F8_E4M3": 1,
+                    "F8_E5M2": 1,
+                    "I64": 8,
+                    "I32": 4,
+                    "I16": 2,
+                    "U8": 1,
+                    "I8": 1,
+                    "BOOL": 1,
+                }
+
+                total = 0
+                with safe_open(path, framework="pt", device="cpu") as f:
+                    for k in f.keys():
+                        try:
+                            if hasattr(f, "get_slice"):
+                                s = f.get_slice(k)
+                                dtype_str = s.get_dtype()
+                                shape = s.get_shape()
+                            else:
+                                t = f.get_tensor(k)
+                                dtype_str = str(getattr(t, "dtype", ""))
+                                shape = list(getattr(t, "shape", []))
+
+                            # Compute numel (shape may be list[int])
+                            numel = 1
+                            for d in shape:
+                                numel *= int(d)
+
+                            stored_es = elem_size_map.get(dtype_str)
+                            if stored_es is None:
+                                # Unknown dtype; fall back to raw on-disk file size by signaling None.
+                                return None
+
+                            # If a target dtype is configured, estimate the effective in-memory
+                            # size after casting floating-point tensors (except float8).
+                            effective_es = stored_es
+                            if (
+                                target_fp_es is not None
+                                and dtype_str in {"F64", "F32", "BF16", "F16"}
+                            ):
+                                effective_es = target_fp_es
+
+                            total += int(numel) * int(effective_es)
+                        except Exception:
+                            # Best-effort: ignore individual tensor issues.
+                            continue
+                return int(total)
+            except Exception:
+                return None
+
+        safetensors_estimated = 0
+        for st in safetensors_files:
+            est = _estimate_safetensors_bytes(st)
+            if est is None:
+                # Fall back to raw file size for this file if we can't estimate via metadata.
+                try:
+                    safetensors_estimated += int(os.path.getsize(st))
+                except Exception:
+                    pass
+            else:
+                safetensors_estimated += int(est)
+
+        # Accurate estimation for torch checkpoints: meta-load and sum(numel * element_size).
+        def _iter_tensors(obj: Any):
+            if isinstance(obj, torch.Tensor):
+                yield obj
+                return
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    yield from _iter_tensors(v)
+                return
+            if isinstance(obj, (list, tuple)):
+                for v in obj:
+                    yield from _iter_tensors(v)
+                return
+
+        def _estimate_torch_checkpoint_bytes_meta(path: str) -> Optional[int]:
+            try:
+                state = torch.load(
+                    path, map_location="meta", mmap=True, weights_only=True
+                )
+                # Common pattern: a single wrapper key around the actual state dict.
+                if isinstance(state, dict) and len(state.keys()) < 2:
+                    try:
+                        state = state[list(state.keys())[0]]
+                    except Exception:
+                        pass
+
+                total = 0
+                for t in _iter_tensors(state):
+                    try:
+                        numel = int(t.numel())
+                        stored_es = int(t.element_size())
+                        effective_es = stored_es
+                        # If a target dtype is configured, estimate effective size after casting
+                        # floating point tensors (except float8).
+                        if (
+                            target_fp_es is not None
+                            and isinstance(t, torch.Tensor)
+                            and torch.is_floating_point(t)
+                            and not _is_float8_dtype(t.dtype)
+                        ):
+                            effective_es = target_fp_es
+                        total += numel * int(effective_es)
+                    except Exception:
+                        continue
+                return int(total)
+            except Exception:
+                return None
+
+        other_estimated = 0
+        other_failed_on_disk = 0
+        # De-dup while preserving order (best-effort)
+        seen = set()
+        unique_other: List[str] = []
+        for wf in other_weight_files:
+            if wf and wf not in seen:
+                unique_other.append(wf)
+                seen.add(wf)
+
+        for wf in unique_other:
+            est = _estimate_torch_checkpoint_bytes_meta(wf)
+            if est is None:
+                try:
+                    other_failed_on_disk += int(os.path.getsize(wf))
+                except Exception:
+                    pass
+            else:
+                other_estimated += int(est)
+
+        # Adjust the estimate based on the configured in-memory dtype for this component,
+        # since some (non-safetensors) weights may be stored as fp32 on disk but used as
+        # fp16 / bf16 in memory. This scaling is only applied to files we could not meta-estimate.
         try:
             if target_dtype is not None:
                 target_element_size = torch.tensor(
@@ -1079,12 +1358,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 ).element_size()
                 if source_element_size > 0:
                     scale = float(target_element_size) / float(source_element_size)
-                    return int(total_size * scale)
+                    return int(
+                        safetensors_estimated
+                        + other_estimated
+                        + int(other_failed_on_disk * scale)
+                    )
         except Exception:
             # If anything goes wrong with dtype-based scaling, fall back to the raw size.
             pass
 
-        return total_size
+        # No scaling applied: return accurate safetensors estimate + raw on-disk for remaining.
+        return int(safetensors_estimated + other_estimated + other_failed_on_disk)
 
     def _estimate_block_structure(
         self, component: Dict[str, Any]
@@ -1247,6 +1531,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             return None
 
         total_size_gb = float(total_size_bytes) / 1e9
+        
+
 
         # No GPU or model doesn't fit? Need offloading
         needs_offload = False
@@ -1254,13 +1540,18 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             # No GPU available
             return None
 
+        # Heuristic headroom for activations, KV cache, temporary buffers, etc.
+        # This replaces the older percent-of-VRAM rule which was too coarse.
+        activation_overhead_gb = 8.0
+        required_gpu_gb = total_size_gb + activation_overhead_gb
+
         if gpu_available_gb is not None:
             # Use available memory for more accurate decision
-            if total_size_gb >= 0.75 * gpu_available_gb:
+            if required_gpu_gb >= gpu_available_gb:
                 needs_offload = True
         else:
             # Fallback to total memory
-            if total_size_gb >= 0.75 * gpu_total_gb:
+            if required_gpu_gb >= gpu_total_gb:
                 needs_offload = True
 
         if not needs_offload:
@@ -1331,6 +1622,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             if strategy is not None:
                 key = comp.get("name") or ctype
                 auto_map[key] = strategy
+
 
         return auto_map or None
 
@@ -1425,7 +1717,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
     # -------------------------
     # Memory management helpers
     # -------------------------
-
     def _has_memory_management_parameters(self, value: Dict[str, Any]) -> bool:
         # if a dict has any of the keys: group_offload_type, group_offload_num_blocks_per_group, group_offload_use_stream, group_offload_record_stream, group_offload_non_blocking, group_offload_low_cpu_mem_usage, group_offload_offload_device, group_offload_disk_path
         return any(
@@ -1474,6 +1765,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 if key not in normalized:
                     normalized[key] = cfg
 
+        
         return normalized if normalized else None
 
     def _resolve_memory_config_for_component(
@@ -1587,6 +1879,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 ignore_load_dtype = component.get("extra_kwargs", {}).get(
                     "ignore_load_dtype", False
                 )
+                
                 component_module = self.load_component(
                     component,
                     (
@@ -2032,6 +2325,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
 
         return timesteps, num_inference_steps
 
+    
     def denoise(self, *args, **kwargs):
         """
         Dispatch denoising to a type-specific implementation.

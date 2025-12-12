@@ -26,11 +26,10 @@ import cv2
 import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
-from src.quantize.ggml_layer import patch_model
+from src.quantize.ggml_layer import patch_model as patch_model_ggml
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
-
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
@@ -132,6 +131,7 @@ class LoaderMixin(DownloadMixin):
             get_transformer_converter,
             get_vae_converter,
             NoOpConverter,
+            get_text_encoder_converter,
         )
 
         # Decide which converter (if any) is needed for this component.
@@ -139,14 +139,18 @@ class LoaderMixin(DownloadMixin):
             converter = get_vae_converter(model_base)
         elif component.get("type") == "transformer":
             converter = get_transformer_converter(model_base)
+        elif component.get("type") == "text_encoder":
+            converter = get_text_encoder_converter(model_base)
         else:
             converter = NoOpConverter()
-
+    
+ 
         # Only take the diffusers `from_pretrained` fast-path when we *don't*
         # need to run any custom conversion logic. If a converter is required,
         # we fall through to the manual loading path below where we explicitly
         # load checkpoints and call `converter.convert(state_dict)` before
         # assigning weights.
+        
         requires_conversion = extra_kwargs.get("require_conversion", False)
 
         if (
@@ -207,7 +211,7 @@ class LoaderMixin(DownloadMixin):
 
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
 
-            if mm_config is not None and not no_weights:
+            if mm_config is not None and not no_weights and component.get("type") != "transformer":
                 apply_group_offloading = getattr(self, "_apply_group_offloading", None)
                 if callable(apply_group_offloading):
                     label = (
@@ -229,6 +233,12 @@ class LoaderMixin(DownloadMixin):
                             self.logger.warning(
                                 f"Failed to enable group offloading for '{label}': {e}"
                             )
+
+            # Optionally compile the fully initialized module according to config.
+            if not no_weights:
+                maybe_compile = getattr(self, "_maybe_compile_module", None)
+                if callable(maybe_compile):
+                    model = maybe_compile(model, component)
 
             return model
 
@@ -292,13 +302,12 @@ class LoaderMixin(DownloadMixin):
             logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
             state_dict, _ = load_gguf(
-                model_path, type=component.get("type"), **gguf_kwargs
+                model_path, type=component.get("type"), dequant_dtype=load_dtype, **gguf_kwargs
             )
             converter.convert(state_dict)
             # Load GGMLTensors without replacing nn.Parameters by copying data
-            patch_model(model)
+            patch_model_ggml(model, default_dequant_dtype=load_dtype)
             model.load_state_dict(state_dict, assign=True, strict=False)
-
         else:
             if os.path.isdir(model_path):
                 extensions = component.get(
@@ -322,8 +331,8 @@ class LoaderMixin(DownloadMixin):
             if extra_kwargs.get("load_extra_model_paths", True):
                 files_to_load.extend(extra_model_paths)
 
-            # Track whether we've already patched this model for FP8 scaled weights
-            patched_for_fp8_scaled = False
+            # Track whether we've already patched this model for FP-scaled weights
+            patched_for_fpscaled = False
 
             for file_path in files_to_load:
                 self.logger.info(f"Loading weights from {file_path}")
@@ -361,42 +370,62 @@ class LoaderMixin(DownloadMixin):
 
                 converter.convert(state_dict)
 
-                # Detect FP8 scaled checkpoints (e.g., Wan2.2 FP8 e4m3fn scaled)
-                # and patch the model with FP8Scaled* layers *before* loading
+                # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
+                # and patch the model with FPScaled* layers *before* loading
                 # the state dict. We only do this once per model.
+
+
+                if hasattr(self, "engine_type") and self.engine_type == "mlx":
+                    check_mlx_convolutional_weights(state_dict, model)
+
                 if (
-                    not patched_for_fp8_scaled
-                    and hasattr(self, "engine_type")
-                    and self.engine_type == "torch"
+                    not patched_for_fpscaled
+                    and getattr(self, "engine_type", "torch") == "torch"
                     and isinstance(state_dict, dict)
-                    and any(k.endswith("scale_weight") for k in state_dict.keys())
+                    and (
+                        any(k.endswith("scale_weight") for k in state_dict.keys())
+                        or any(
+                            (
+                                v.dtype == torch.float8_e4m3fn
+                                or v.dtype == torch.float8_e5m2
+                            )
+                            for v in state_dict.values()
+                        )
+                    )
                 ):
-                    from src.quantize import patch_fp8_scaled_model
+                    from src.quantize import (
+                        patch_fpscaled_model,
+                        restore_fpscaled_parameters,
+                    )
 
                     # Prefer the explicit load_dtype (if it's a torch dtype)
-                    # as the compute dtype for FP8 dequantization; otherwise
+                    # as the compute dtype for FP dequantization; otherwise
                     # let the scaled layers infer it from their inputs.
                     default_compute_dtype = (
                         load_dtype if isinstance(load_dtype, torch.dtype) else None
                     )
 
                     self.logger.info(
-                        "Detected FP8 scaled checkpoint (found '*.scale_weight' "
-                        "keys). Patching model with FP8Scaled layers."
+                        "Detected FP-scaled checkpoint (found '*.scale_weight' "
+                        "keys). Patching model with FPScaled layers."
                     )
 
-                    patch_fp8_scaled_model(
+                    patch_fpscaled_model(
                         model,
                         default_compute_dtype=default_compute_dtype,
                     )
 
                     # Mark the model so we can treat leftover meta scale_weight
-                    # parameters more leniently in the post-load meta check.
-                    setattr(model, "_patched_for_fp8_scaled", True)
-                    patched_for_fp8_scaled = True
-
-                if hasattr(self, "engine_type") and self.engine_type == "mlx":
-                    check_mlx_convolutional_weights(state_dict, model)
+                    # parameters more leniently in the post-load meta check, and
+                    # stash the default compute dtype so we can restore FP
+                    # parameter subclasses after loading.
+                    setattr(model, "_patched_for_fpscaled", True)
+                    setattr(
+                        model,
+                        "_fpscaled_default_compute_dtype",
+                        default_compute_dtype,
+                    )
+                    patched_for_fpscaled = True
 
                 if hasattr(model, "load_state_dict"):
                     model.load_state_dict(
@@ -408,19 +437,35 @@ class LoaderMixin(DownloadMixin):
                     raise ValueError(
                         f"Model {model} does not have a load_state_dict or load_weights method"
                     )
-
-        if hasattr(self, "engine_type") and self.engine_type == "torch":
+                    
+        
+  
+        if getattr(self, "engine_type", "torch") == "torch":
             has_meta_params = False
-            patched_for_fp8_scaled = getattr(model, "_patched_for_fp8_scaled", False)
+            patched_for_fpscaled = getattr(model, "_patched_for_fpscaled", False)
+
+            # If this is an FP-scaled model, re-wrap any FP weights as
+            # FPScaledParameter after loading, since some load_state_dict
+            # code paths may strip custom Parameter subclasses.
+            if patched_for_fpscaled:
+                from src.quantize import restore_fpscaled_parameters
+
+                default_compute_dtype = getattr(
+                    model, "_fpscaled_default_compute_dtype", None
+                )
+                restore_fpscaled_parameters(
+                    model, default_compute_dtype=default_compute_dtype
+                )
+
             for name, param in model.named_parameters():
                 if param.device.type == "meta":
-                    # If this is an FP8-scaled model and the offending parameter
+                    # If this is an FP-scaled model and the offending parameter
                     # is a residual `scale_weight` that never got real weights
                     # loaded, we can safely drop it instead of erroring out.
-                    if patched_for_fp8_scaled and name.endswith("scale_weight"):
+                    if patched_for_fpscaled and name.endswith("scale_weight"):
                         self.logger.warning(
                             f"Dropping unused meta-device scale_weight parameter '{name}' "
-                            "on FP8-scaled model."
+                            "on FP-scaled model."
                         )
                         # Remove the parameter from the owning module so it no
                         # longer appears as a meta device parameter.
@@ -440,9 +485,7 @@ class LoaderMixin(DownloadMixin):
                     "Model has parameters on meta device, this is not supported"
                 )
 
-        # If memory management is enabled for this component and weights are loaded,
-        # activate group offloading on the fully initialized module.
-        if mm_config is not None and not no_weights:
+        if mm_config is not None and not no_weights and component.get("type") != "transformer" and component.get("type") != "text_encoder": 
             apply_group_offloading = getattr(self, "_apply_group_offloading", None)
             if callable(apply_group_offloading):
                 label = (
@@ -464,6 +507,14 @@ class LoaderMixin(DownloadMixin):
                         self.logger.warning(
                             f"Failed to enable group offloading for '{label}': {e}"
                         )
+
+        # Optionally compile the fully initialized module according to config.
+        if not no_weights and component.get("type") != "transformer" and component.get("type") != "text_encoder":
+            maybe_compile = getattr(self, "_maybe_compile_module", None)
+            if callable(maybe_compile):
+                model = maybe_compile(model, component)
+                
+
         return model
 
     def _load_config_file(self, file_path: str | Path):

@@ -190,7 +190,7 @@ class UniversalEngine:
         if not self.model_type:
             self.model_type = self.engine.model_type
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def run(self, *args, **kwargs):
         """Run the engine with given parameters"""
         default_kwargs = self.engine._get_default_kwargs("run")
