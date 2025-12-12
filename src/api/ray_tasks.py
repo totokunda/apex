@@ -1789,7 +1789,7 @@ def run_engine_from_manifest(
             if model_type.lower() != "ovi"
             else render_on_step_callback_ovi
         )
-        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+        # _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),
