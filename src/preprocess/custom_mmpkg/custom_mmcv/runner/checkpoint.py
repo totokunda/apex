@@ -21,6 +21,7 @@ from ..fileio import load as load_file
 from ..parallel import is_module_wrapper
 from ..utils import mkdir_or_exist
 from .dist_utils import get_dist_info
+from logger import logger
 
 ENV_MMCV_HOME = "MMCV_HOME"
 ENV_XDG_CACHE_HOME = "XDG_CACHE_HOME"
@@ -55,6 +56,8 @@ def load_state_dict(module, state_dict, strict=False, logger=None):
         logger (:obj:`logging.Logger`, optional): Logger to log the error
             message. If not specified, print function will be used.
     """
+
+
     unexpected_keys = []
     all_missing_keys = []
     err_msg = []

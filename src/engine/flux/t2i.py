@@ -4,6 +4,8 @@ from PIL import Image
 import numpy as np
 from .shared import FluxShared
 from src.utils.progress import safe_emit_progress, make_mapped_progress
+from loguru import logger
+import psutil
 
 
 class FluxT2IEngine(FluxShared):
@@ -75,9 +77,10 @@ class FluxT2IEngine(FluxShared):
 
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
 
+
         if offload:
-            self._offload(self.text_encoder_2)
-        safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
+            del self.text_encoder_2
+
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
         batch_size = prompt_embeds.shape[0]
@@ -133,6 +136,8 @@ class FluxT2IEngine(FluxShared):
 
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
+
+
 
         self.to_device(self.transformer)
 

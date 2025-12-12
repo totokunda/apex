@@ -9,6 +9,7 @@ from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.utils.torch_utils import randn_tensor
 import re
+from loguru import logger
 
 
 class HunyuanImageT2IEngine(BaseEngine):
@@ -155,7 +156,8 @@ class HunyuanImageT2IEngine(BaseEngine):
             )
 
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
+
 
         if prompt_embeds_2 is None:
             prompt_embeds_2_list = []
@@ -191,7 +193,8 @@ class HunyuanImageT2IEngine(BaseEngine):
                 prompt_embeds_mask_2_list.append(glyph_text_embeds_mask)
 
             if offload and hasattr(self, "text_encoder_2"):
-                self._offload(self.text_encoder_2)
+                del self.text_encoder_2
+
 
             prompt_embeds_2 = torch.cat(prompt_embeds_2_list, dim=0)
             prompt_embeds_mask_2 = torch.cat(prompt_embeds_mask_2_list, dim=0)
@@ -357,6 +360,7 @@ class HunyuanImageT2IEngine(BaseEngine):
                 offload=offload,
             )
         )
+
         safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
 
         if self.transformer is None:
@@ -369,7 +373,6 @@ class HunyuanImageT2IEngine(BaseEngine):
 
         prompt_embeds = prompt_embeds.to(dtype)
         prompt_embeds_2 = prompt_embeds_2.to(dtype)
-
         # select guider
         if (
             not torch.all(prompt_embeds_2 == 0)

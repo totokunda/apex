@@ -254,17 +254,11 @@ class ChromaT2IEngine(BaseEngine):
             negative_text_ids = None
 
         if offload:
-            self._offload(self.text_encoder)
-
-        return (
-            prompt_embeds,
-            prompt_embeds_mask,
-            negative_prompt_embeds,
-            negative_prompt_embeds_mask,
-            text_ids,
-            negative_text_ids,
-        )
-
+            del self.text_encoder
+            
+        return prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids
+    
+    
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         """Override: unpack latents for image decoding and render a preview frame.
 

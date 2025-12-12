@@ -129,7 +129,7 @@ def _persist_run_config(
             "inputs": persisted_inputs,
         }
 
-        json_path = run_dir / "inputs.json"
+        json_path = run_dir / "model_inputs.json"
         with json_path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=4)
 

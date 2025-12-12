@@ -320,6 +320,7 @@ class LoraManager(DownloadMixin):
 
                     keys = list(local_path_state_dict.keys())
 
+
                     prefix = None
                     if keys[0].startswith("transformer") and keys[-1].startswith(
                         "transformer"

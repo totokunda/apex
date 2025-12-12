@@ -107,6 +107,7 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 14
       file_size: 12727035168
+    config_path: black-forest-labs/FLUX.1-Fill-dev/transformer/config.json
   defaults:
     run:
       num_inference_steps: 40

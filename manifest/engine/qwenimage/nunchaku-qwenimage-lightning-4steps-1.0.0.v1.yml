@@ -113,6 +113,7 @@ spec:
         add_special_tokens: false
         clean_text: false
       attention_kwargs: {}
+      num_inference_steps: 4
   ui:
     panels:
     - name: prompting

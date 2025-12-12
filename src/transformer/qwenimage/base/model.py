@@ -412,6 +412,8 @@ class QwenImageTransformer2DModel(
             The dimensions to use for the rotary positional embeddings.
     """
 
+
+
     _supports_gradient_checkpointing = True
     _no_split_modules = ["QwenImageTransformerBlock"]
     _skip_layerwise_casting_patterns = ["pos_embed", "norm"]

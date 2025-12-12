@@ -1578,6 +1578,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                         else None
                     ),
                 )
+
                 setattr(self, component.get("type"), component_module)
                 break
 

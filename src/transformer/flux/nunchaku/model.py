@@ -4,8 +4,9 @@ from nunchaku.models.transformers.transformer_flux import (
 import torch
 from typing import Optional
 from warnings import warn
+from src.transformer import TRANSFORMERS_REGISTRY
 
-
+@TRANSFORMERS_REGISTRY("flux.nunchaku")
 class FluxTransformer2dModel(NunchakuFluxTransformer2dModel):
     """
     Apex wrapper around Nunchaku's quantized FLUX transformer.
@@ -14,6 +15,7 @@ class FluxTransformer2dModel(NunchakuFluxTransformer2dModel):
       mirrors the semantics used in the QwenImage wrapper.
     - Exposes a helper for enabling Nunchaku's block offloading.
     """
+
 
     def enable_group_offload(
         self,

@@ -94,6 +94,7 @@ spec:
       variant: nf4_r32
       precision: nf4
       type: safetensors
+    config_path: black-forest-labs/FLUX.1-Fill-dev/transformer/config.json
   defaults:
     run:
       num_inference_steps: 40

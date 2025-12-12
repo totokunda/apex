@@ -76,6 +76,30 @@ spec:
       resource_requirements:
         min_vram_gb: 24
         recommended_vram_gb: 32
+    - path: https://huggingface.co/jayn7/Z-Image-Turbo-GGUF/resolve/main/z_image_turbo-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 4660000000
+    - path: https://huggingface.co/jayn7/Z-Image-Turbo-GGUF/resolve/main/z_image_turbo-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 5910000000
+    - path: https://huggingface.co/jayn7/Z-Image-Turbo-GGUF/resolve/main/z_image_turbo-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 10
+        recommended_vram_gb: 14
+      file_size: 7220000000
   defaults:
     run:
       num_inference_steps: 9
