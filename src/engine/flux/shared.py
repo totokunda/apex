@@ -6,6 +6,7 @@ from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
 from src.engine.base_engine import BaseEngine
 from src.utils.progress import safe_emit_progress
+from loguru import logger
 
 
 class FluxShared(TextualInversionLoaderMixin, BaseEngine):
@@ -257,9 +258,10 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             )
         else:
             negative_pooled_prompt_embeds = None
-
+        
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
+
 
         if not hasattr(self, "text_encoder_2") or not self.text_encoder_2:
             self.load_component_by_name("text_encoder_2")

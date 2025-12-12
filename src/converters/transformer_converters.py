@@ -707,13 +707,11 @@ class FluxTransformerConverter(TransformerConverter):
             "linear2": "proj_out",
             "final_layer.linear": "proj_out",
         }
-        # These rename rules aren't used in the overridden `convert` method below,
-        # but are kept for compatibility with the general pattern used elsewhere.
+        # Not used directly in convert but kept for API parity
         self.pre_special_keys_map = {}
         self.special_keys_map = {}
 
         # Defaults taken from the Flux dev config used in `test_flux.py`.
-        # These act as fallbacks if we can't infer values from the checkpoint.
         self.num_layers = 19
         self.num_single_layers = 38
         self.inner_dim = 3072
@@ -724,7 +722,6 @@ class FluxTransformerConverter(TransformerConverter):
         Infer num_layers, num_single_layers, inner_dim and mlp_ratio directly from the
         checkpoint state_dict when possible, falling back to the defaults otherwise.
         """
-        # Start with no inference; fall back to existing attributes if needed
         num_layers = None
         num_single_layers = None
         inner_dim = None
@@ -801,7 +798,7 @@ class FluxTransformerConverter(TransformerConverter):
         if mlp_ratio is None:
             mlp_ratio = self.mlp_ratio
 
-        # Persist inferred values on the instance for potential debugging
+        # Persist inferred values
         self.num_layers = num_layers
         self.num_single_layers = num_single_layers
         self.inner_dim = inner_dim
@@ -813,10 +810,24 @@ class FluxTransformerConverter(TransformerConverter):
         """
         Convert a Flux transformer checkpoint to the diffusers format.
 
-        This mirrors the logic in `convert_flux_transformer_checkpoint_to_diffusers`
-        from `test_flux.py`, but mutates `state_dict` in-place to conform to the
-        converter API used elsewhere in this module.
+        - If a mapping exists and the source key is present, we rename it.
+        - If a mapping exists but the source key is missing, we skip it.
+        - Any keys that are never touched/mapped are kept with their original names.
         """
+
+        def maybe_assign(dst: Dict[str, Any], dst_key: str,
+                         src: Dict[str, Any], src_key: str,
+                         transform=None):
+            """Pop src[src_key] if present and assign to dst[dst_key]."""
+            if src_key in src:
+                val = src.pop(src_key)
+                if transform is not None:
+                    val = transform(val)
+                dst[dst_key] = val
+
+        def all_keys_present(src: Dict[str, Any], keys):
+            return all(k in src for k in keys)
+
         # Work on a copy so we can freely pop while building a fresh dict
         original_state_dict = dict(state_dict)
         converted_state_dict: Dict[str, Any] = {}
@@ -825,7 +836,33 @@ class FluxTransformerConverter(TransformerConverter):
             self._infer_hyperparams_from_state_dict(original_state_dict)
         )
 
+        # ------------------------------------------------------------------
         # time_text_embed.timestep_embedder <- time_in
+        # ------------------------------------------------------------------
+        maybe_assign(
+            converted_state_dict,
+            "time_text_embed.timestep_embedder.linear_1.weight",
+            original_state_dict,
+            "time_in.in_layer.weight",
+        )
+        maybe_assign(
+            converted_state_dict,
+            "time_text_embed.timestep_embedder.linear_1.bias",
+            original_state_dict,
+            "time_in.in_layer.bias",
+        )
+        maybe_assign(
+            converted_state_dict,
+            "time_text_embed.timestep_embedder.linear_2.weight",
+            original_state_dict,
+            "time_in.out_layer.weight",
+        )
+        maybe_assign(
+            converted_state_dict,
+            "time_text_embed.timestep_embedder.linear_2.bias",
+            original_state_dict,
+            "time_in.out_layer.bias",
+        )
 
         converted_state_dict["time_text_embed.timestep_embedder.linear_1.weight"] = (
             original_state_dict.pop("time_in.in_layer.weight")
@@ -854,7 +891,9 @@ class FluxTransformerConverter(TransformerConverter):
             original_state_dict.pop("vector_in.out_layer.bias")
         )
 
-        # guidance
+        # ------------------------------------------------------------------
+        # guidance (optional)
+        # ------------------------------------------------------------------
         has_guidance = any("guidance" in k for k in original_state_dict)
         if has_guidance:
             converted_state_dict[
@@ -870,21 +909,36 @@ class FluxTransformerConverter(TransformerConverter):
                 original_state_dict.pop("guidance_in.out_layer.bias")
             )
 
+        # ------------------------------------------------------------------
         # context_embedder
-        converted_state_dict["context_embedder.weight"] = original_state_dict.pop(
-            "txt_in.weight"
+        # ------------------------------------------------------------------
+        maybe_assign(
+            converted_state_dict,
+            "context_embedder.weight",
+            original_state_dict,
+            "txt_in.weight",
         )
-        converted_state_dict["context_embedder.bias"] = original_state_dict.pop(
-            "txt_in.bias"
+        maybe_assign(
+            converted_state_dict,
+            "context_embedder.bias",
+            original_state_dict,
+            "txt_in.bias",
         )
 
+        # ------------------------------------------------------------------
         # x_embedder
-        converted_state_dict["x_embedder.weight"] = original_state_dict.pop(
-            "img_in.weight"
+        # ------------------------------------------------------------------
+        maybe_assign(
+            converted_state_dict,
+            "x_embedder.weight",
+            original_state_dict,
+            "img_in.weight",
         )
         converted_state_dict["x_embedder.bias"] = original_state_dict.pop("img_in.bias")
 
+        # ------------------------------------------------------------------
         # double transformer blocks
+        # ------------------------------------------------------------------
         for i in range(num_layers):
             block_prefix = f"transformer_blocks.{i}."
 
@@ -911,10 +965,11 @@ class FluxTransformerConverter(TransformerConverter):
                 dim=0,
             )
 
-            context_q, context_k, context_v = ggml_chunk(
-                original_state_dict.pop(f"double_blocks.{i}.txt_attn.qkv.weight"),
-                3,
-                dim=0,
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}norm1_context.linear.weight",
+                original_state_dict,
+                f"double_blocks.{i}.txt_mod.lin.weight",
             )
             sample_q_bias, sample_k_bias, sample_v_bias = ggml_chunk(
                 original_state_dict.pop(f"double_blocks.{i}.img_attn.qkv.bias"),
@@ -931,61 +986,99 @@ class FluxTransformerConverter(TransformerConverter):
                 [sample_q]
             )
 
-            converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
-                [sample_q_bias]
-            )
-            converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat(
-                [sample_k]
-            )
-            converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
-                [sample_k_bias]
-            )
-            converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat(
-                [sample_v]
-            )
-            converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
-                [sample_v_bias]
-            )
+            # Q, K, V for sample/context (only if all needed keys exist)
+            img_qkv_w_key = f"double_blocks.{i}.img_attn.qkv.weight"
+            txt_qkv_w_key = f"double_blocks.{i}.txt_attn.qkv.weight"
+            img_qkv_b_key = f"double_blocks.{i}.img_attn.qkv.bias"
+            txt_qkv_b_key = f"double_blocks.{i}.txt_attn.qkv.bias"
 
-            converted_state_dict[f"{block_prefix}attn.add_q_proj.weight"] = ggml_cat(
-                [context_q]
-            )
-            converted_state_dict[f"{block_prefix}attn.add_q_proj.bias"] = ggml_cat(
-                [context_q_bias]
-            )
-            converted_state_dict[f"{block_prefix}attn.add_k_proj.weight"] = ggml_cat(
-                [context_k]
-            )
-            converted_state_dict[f"{block_prefix}attn.add_k_proj.bias"] = ggml_cat(
-                [context_k_bias]
-            )
-            converted_state_dict[f"{block_prefix}attn.add_v_proj.weight"] = ggml_cat(
-                [context_v]
-            )
-            converted_state_dict[f"{block_prefix}attn.add_v_proj.bias"] = ggml_cat(
-                [context_v_bias]
-            )
+            if all_keys_present(
+                original_state_dict,
+                [img_qkv_w_key, txt_qkv_w_key, img_qkv_b_key, txt_qkv_b_key],
+            ):
+                sample_q, sample_k, sample_v = ggml_chunk(
+                    original_state_dict.pop(img_qkv_w_key),
+                    3,
+                    dim=0,
+                )
+                context_q, context_k, context_v = ggml_chunk(
+                    original_state_dict.pop(txt_qkv_w_key),
+                    3,
+                    dim=0,
+                )
+                sample_q_bias, sample_k_bias, sample_v_bias = ggml_chunk(
+                    original_state_dict.pop(img_qkv_b_key),
+                    3,
+                    dim=0,
+                )
+                context_q_bias, context_k_bias, context_v_bias = ggml_chunk(
+                    original_state_dict.pop(txt_qkv_b_key),
+                    3,
+                    dim=0,
+                )
+
+                converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat(
+                    [sample_q]
+                )
+                converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
+                    [sample_q_bias]
+                )
+                converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat(
+                    [sample_k]
+                )
+                converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
+                    [sample_k_bias]
+                )
+                converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat(
+                    [sample_v]
+                )
+                converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
+                    [sample_v_bias]
+                )
+
+                converted_state_dict[
+                    f"{block_prefix}attn.add_q_proj.weight"
+                ] = ggml_cat([context_q])
+                converted_state_dict[
+                    f"{block_prefix}attn.add_q_proj.bias"
+                ] = ggml_cat([context_q_bias])
+                converted_state_dict[
+                    f"{block_prefix}attn.add_k_proj.weight"
+                ] = ggml_cat([context_k])
+                converted_state_dict[
+                    f"{block_prefix}attn.add_k_proj.bias"
+                ] = ggml_cat([context_k_bias])
+                converted_state_dict[
+                    f"{block_prefix}attn.add_v_proj.weight"
+                ] = ggml_cat([context_v])
+                converted_state_dict[
+                    f"{block_prefix}attn.add_v_proj.bias"
+                ] = ggml_cat([context_v_bias])
 
             # qk_norm
-            converted_state_dict[f"{block_prefix}attn.norm_q.weight"] = (
-                original_state_dict.pop(
-                    f"double_blocks.{i}.img_attn.norm.query_norm.scale"
-                )
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}attn.norm_q.weight",
+                original_state_dict,
+                f"double_blocks.{i}.img_attn.norm.query_norm.scale",
             )
-            converted_state_dict[f"{block_prefix}attn.norm_k.weight"] = (
-                original_state_dict.pop(
-                    f"double_blocks.{i}.img_attn.norm.key_norm.scale"
-                )
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}attn.norm_k.weight",
+                original_state_dict,
+                f"double_blocks.{i}.img_attn.norm.key_norm.scale",
             )
-            converted_state_dict[f"{block_prefix}attn.norm_added_q.weight"] = (
-                original_state_dict.pop(
-                    f"double_blocks.{i}.txt_attn.norm.query_norm.scale"
-                )
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}attn.norm_added_q.weight",
+                original_state_dict,
+                f"double_blocks.{i}.txt_attn.norm.query_norm.scale",
             )
-            converted_state_dict[f"{block_prefix}attn.norm_added_k.weight"] = (
-                original_state_dict.pop(
-                    f"double_blocks.{i}.txt_attn.norm.key_norm.scale"
-                )
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}attn.norm_added_k.weight",
+                original_state_dict,
+                f"double_blocks.{i}.txt_attn.norm.key_norm.scale",
             )
 
             # ff img_mlp
@@ -1029,7 +1122,9 @@ class FluxTransformerConverter(TransformerConverter):
                 original_state_dict.pop(f"double_blocks.{i}.txt_attn.proj.bias")
             )
 
+        # ------------------------------------------------------------------
         # single transformer blocks
+        # ------------------------------------------------------------------
         for i in range(num_single_layers):
             block_prefix = f"single_transformer_blocks.{i}."
 
@@ -1050,11 +1145,9 @@ class FluxTransformerConverter(TransformerConverter):
                 dim=0,
             )
 
-            q_bias, k_bias, v_bias, mlp_bias = ggml_split(
-                original_state_dict.pop(f"single_blocks.{i}.linear1.bias"),
-                split_size,
-                dim=0,
-            )
+            # Q, K, V, mlp from linear1 (only if both weight & bias exist)
+            lin1_w_key = f"single_blocks.{i}.linear1.weight"
+            lin1_b_key = f"single_blocks.{i}.linear1.bias"
 
             converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat([q])
             converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat([q_bias])
@@ -1074,30 +1167,59 @@ class FluxTransformerConverter(TransformerConverter):
             )
 
             # output projections
-            converted_state_dict[f"{block_prefix}proj_out.weight"] = (
-                original_state_dict.pop(f"single_blocks.{i}.linear2.weight")
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}proj_out.weight",
+                original_state_dict,
+                f"single_blocks.{i}.linear2.weight",
             )
-            converted_state_dict[f"{block_prefix}proj_out.bias"] = (
-                original_state_dict.pop(f"single_blocks.{i}.linear2.bias")
+            maybe_assign(
+                converted_state_dict,
+                f"{block_prefix}proj_out.bias",
+                original_state_dict,
+                f"single_blocks.{i}.linear2.bias",
             )
 
-        converted_state_dict["proj_out.weight"] = original_state_dict.pop(
-            "final_layer.linear.weight"
+        # ------------------------------------------------------------------
+        # final layer
+        # ------------------------------------------------------------------
+        maybe_assign(
+            converted_state_dict,
+            "proj_out.weight",
+            original_state_dict,
+            "final_layer.linear.weight",
         )
-        converted_state_dict["proj_out.bias"] = original_state_dict.pop(
-            "final_layer.linear.bias"
+        maybe_assign(
+            converted_state_dict,
+            "proj_out.bias",
+            original_state_dict,
+            "final_layer.linear.bias",
         )
-        converted_state_dict["norm_out.linear.weight"] = swap_scale_shift(
-            original_state_dict.pop("final_layer.adaLN_modulation.1.weight")
+        maybe_assign(
+            converted_state_dict,
+            "norm_out.linear.weight",
+            original_state_dict,
+            "final_layer.adaLN_modulation.1.weight",
+            transform=swap_scale_shift,
         )
-        converted_state_dict["norm_out.linear.bias"] = swap_scale_shift(
-            original_state_dict.pop("final_layer.adaLN_modulation.1.bias")
+        maybe_assign(
+            converted_state_dict,
+            "norm_out.linear.bias",
+            original_state_dict,
+            "final_layer.adaLN_modulation.1.bias",
+            transform=swap_scale_shift,
         )
+
+        # ------------------------------------------------------------------
+        # Merge any remaining (unmapped) original keys, unchanged.
+        # These are keys we never popped/renamed above.
+        # ------------------------------------------------------------------
+        for k, v in original_state_dict.items():
+            converted_state_dict[k] = v
 
         # Mutate input dict in-place to follow the converter API
         state_dict.clear()
         state_dict.update(converted_state_dict)
-
 
 class NoOpTransformerConverter(TransformerConverter):
     def __init__(self):

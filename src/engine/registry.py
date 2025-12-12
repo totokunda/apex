@@ -133,7 +133,6 @@ class EngineRegistry:
 
         resolved = resolve_manifest_reference(yaml_path) or yaml_path
         engine_kwargs = {}
-
         if engine_type is None or model_type is None:
             # read from yaml_path
             data = load_yaml(resolved)

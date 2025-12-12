@@ -12,6 +12,7 @@ from src.mixins.cache_mixin import CacheMixin
 from src.utils.module import find_class_recursive
 import transformers
 import inspect
+from loguru import logger
 
 def nan_hook(module, inputs, outputs):
     if isinstance(outputs, torch.Tensor):

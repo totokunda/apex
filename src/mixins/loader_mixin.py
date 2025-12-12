@@ -90,6 +90,8 @@ class LoaderMixin(DownloadMixin):
         extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
 
+
+
         if extra_kwargs is None:
             extra_kwargs = {}
 
@@ -110,6 +112,7 @@ class LoaderMixin(DownloadMixin):
         model_base = component.get("base")
         model_path = component.get("model_path")
 
+
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -118,11 +121,14 @@ class LoaderMixin(DownloadMixin):
             )
         if model_class is None:
             raise ValueError(f"Model class for base '{model_base}' not found")
-
         config_path = component.get("config_path")
         config = {}
+
+
+
         if config_path:
             config.update(self.fetch_config(config_path))
+
         if component.get("config"):
             config.update(component.get("config"))
 
@@ -162,9 +168,10 @@ class LoaderMixin(DownloadMixin):
                     and os.path.exists(os.path.join(model_path, "config.json"))
                 )
             )
-            and (not component.get("extra_model_paths"))
-            and not extra_kwargs.get("load_from_config")
-        ):
+        ) and (
+            not component.get("extra_model_paths")
+        ) and not extra_kwargs.get("load_from_config"):
+
             if (
                 (
                     hasattr(self, "engine_type")
@@ -180,6 +187,7 @@ class LoaderMixin(DownloadMixin):
 
             self.logger.info(f"Loading {model_class} from {model_path}")
             context = init_empty_weights() if no_weights else nullcontext()
+
             with context:
                 # remove all kwargs that are null
                 extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
@@ -301,6 +309,7 @@ class LoaderMixin(DownloadMixin):
         elif model_path.endswith(".gguf"):
             logger.info(f"Loading GGUF model from {model_path}")
             gguf_kwargs = component.get("gguf_kwargs", {})
+
             state_dict, _ = load_gguf(
                 model_path, type=component.get("type"), dequant_dtype=load_dtype, **gguf_kwargs
             )

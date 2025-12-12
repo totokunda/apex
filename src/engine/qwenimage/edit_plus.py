@@ -132,7 +132,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
         safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
