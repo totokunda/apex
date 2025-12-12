@@ -131,3 +131,7 @@ thirdparty/SageAttention
 InfiniteTalk/
 **/debug/*
 .env
+Wan2.2-Lightning
+VideoX-Fun
+LongCat-Video
+test_t2v_wan_22_a14b

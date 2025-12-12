@@ -588,6 +588,7 @@ class WanTransformerBlock(nn.Module):
         rotary_emb: torch.Tensor,
         hidden_states_ip: torch.Tensor = None,
         timestep_proj_ip: torch.Tensor = None,
+        rotary_emb_chunk_size: int | None = None,
     ) -> torch.Tensor:
 
         if temb.ndim == 4:
@@ -635,7 +636,7 @@ class WanTransformerBlock(nn.Module):
             self.attn1.kv_cache = None
 
         attn_output = self.attn1(
-            hidden_states=norm_hidden_states, rotary_emb=rotary_emb
+            hidden_states=norm_hidden_states, rotary_emb=rotary_emb, rotary_emb_chunk_size=rotary_emb_chunk_size
         )
 
         if hidden_states_ip is not None:
@@ -654,6 +655,7 @@ class WanTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
             no_cache=True,
+            rotary_emb_chunk_size=rotary_emb_chunk_size,
         )
 
         hidden_states = hidden_states + attn_output
@@ -943,6 +945,7 @@ class WanTransformer3DModel(
                     rotary_emb,
                     hidden_states_ip,
                     timestep_proj_ip,
+                    rotary_emb_chunk_size=attention_kwargs.get("rotary_emb_chunk_size", None) if attention_kwargs is not None else None
                 )
                 if hidden_states_ip is not None:
                     hidden_states, hidden_states_ip = (

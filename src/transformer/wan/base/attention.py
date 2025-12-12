@@ -33,34 +33,66 @@ def enhance_score(query_image, key_image, head_dim, num_frames, enhance_weight):
     enhance_scores = enhance_scores.clamp(min=1)
     return enhance_scores
 
-
 def apply_rotary_emb(
     hidden_states: torch.Tensor,
     freqs: torch.Tensor,
-    chunk_size: int = 256,
+    chunk_size: int | None = None,
 ):
-    # hidden_states: [B, H, T, D]
+    """
+    Apply RoPE in a single fused complex multiply, matching the behavior used in
+    Wan's native implementations. For low-VRAM scenarios, an optional chunked
+    path can be enabled via `chunk_size`, but this is **disabled by default**.
+
+    Args:
+        hidden_states: [B, H, T, D]
+        freqs:        broadcastable to [1, 1, T, D/2] with complex dtype
+        chunk_size:   if not None, apply RoPE over the sequence dimension in
+                      chunks of this size to reduce peak memory.
+    """
+    # Prefer fp32 on MPS, fp64 elsewhere (for stable complex ops)
     dtype = torch.float32 if hidden_states.device.type == "mps" else torch.float64
 
     B, H, T, D = hidden_states.shape
-    out = torch.empty_like(hidden_states)
+    if D % 2 != 0:
+        raise ValueError(f"Last dim D must be even for RoPE, got D={D}")
 
-    # Make sure freqs is in a complex dtype compatible with x_rotated
+    # Ensure freqs is complex with a dtype compatible with our real dtype
     freqs_complex = freqs
-    if dtype == torch.float64 and freqs.dtype == torch.complex64:
-        freqs_complex = freqs.to(torch.complex128)
+    if not torch.is_complex(freqs_complex):
+        raise TypeError(
+            f"Expected complex freqs for RoPE, got dtype={freqs_complex.dtype}"
+        )
+    if dtype == torch.float64 and freqs_complex.dtype == torch.complex64:
+        freqs_complex = freqs_complex.to(torch.complex128)
 
-    # Find which dim of freqs corresponds to sequence length T
-    seq_dim = None
-    for d, size in enumerate(freqs_complex.shape):
-        if size == T:
-            seq_dim = d
-            break
-    if seq_dim is None:
+    # Normalize freqs shape so it broadcasts cleanly to [B, H, T, D/2]
+    # Typical RoPE table from WanRotaryPosEmbed is [1, 1, T, D/2].
+    while freqs_complex.dim() < 4:
+        freqs_complex = freqs_complex.unsqueeze(0)
+
+    if freqs_complex.shape[-2] != T:
         raise ValueError(
-            f"Could not find sequence dim of length {T} in freqs.shape={freqs_complex.shape}"
+            f"Sequence length mismatch: T={T}, freqs.shape[-2]={freqs_complex.shape[-2]}"
+        )
+    if freqs_complex.shape[-1] != D // 2:
+        raise ValueError(
+            f"Head-dim mismatch: D/2={D // 2}, freqs.shape[-1]={freqs_complex.shape[-1]}"
         )
 
+    # [B, H, T, D/2] as complex
+    if chunk_size is None:
+        # Fast, fully vectorized path (default).
+        x_rotated = torch.view_as_complex(
+            hidden_states.to(dtype).unflatten(3, (-1, 2))
+        )
+        x_out = torch.view_as_real(x_rotated * freqs_complex).flatten(3, 4)
+        return x_out.type_as(hidden_states)
+
+    # Low-VRAM path: process sequence dimension in chunks.
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+
+    out = torch.empty_like(hidden_states)
     for start in range(0, T, chunk_size):
         end = min(start + chunk_size, T)
 
@@ -70,14 +102,10 @@ def apply_rotary_emb(
             hs_chunk.to(dtype).unflatten(3, (-1, 2))
         )
 
-        # Slice freqs along its sequence dimension
-        index = [slice(None)] * freqs_complex.dim()
-        index[seq_dim] = slice(start, end)
-        freqs_chunk = freqs_complex[tuple(index)]
+        # [1, 1, t_chunk, D/2] → broadcast to [B, H, t_chunk, D/2]
+        freqs_chunk = freqs_complex[:, :, start:end]
 
-        # [B, H, t_chunk, D]
         x_out_chunk = torch.view_as_real(x_rotated * freqs_chunk).flatten(3, 4)
-
         out[:, :, start:end] = x_out_chunk.type_as(hidden_states)
 
     return out
@@ -275,6 +303,7 @@ class WanAttnProcessor2_0:
 
             return hidden_states
 
+
     def __call__(
         self,
         attn: Attention,
@@ -283,6 +312,7 @@ class WanAttnProcessor2_0:
         attention_mask: Optional[torch.Tensor] = None,
         rotary_emb: Optional[torch.Tensor] = None,
         no_cache: bool = False,
+        rotary_emb_chunk_size: int | None = None,
     ) -> torch.Tensor:
 
         if hasattr(attn, "cond_size") and attn.cond_size is not None and not no_cache:
@@ -326,8 +356,8 @@ class WanAttnProcessor2_0:
         value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
 
         if rotary_emb is not None:
-            query = apply_rotary_emb(query, rotary_emb)
-            key = apply_rotary_emb(key, rotary_emb)
+            query = apply_rotary_emb(query, rotary_emb, chunk_size=rotary_emb_chunk_size)
+            key = apply_rotary_emb(key, rotary_emb, chunk_size=rotary_emb_chunk_size)
 
         if self.use_enhance:
             enhance_scores = self._get_enhance_scores(query, key)

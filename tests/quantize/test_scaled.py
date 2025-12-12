@@ -2,7 +2,7 @@ from src.transformer.wan.base.model import WanTransformer3DModel
 from src.converters.transformer_converters import WanTransformerConverter
 from safetensors.torch import load_file
 from accelerate import init_empty_weights
-from src.quantize.scaled_layer import patch_fp8_scaled_model
+from src.quantize.scaled_layer import patch_fpscaled_model
 
 with init_empty_weights():
     model = WanTransformer3DModel.from_config({
@@ -30,7 +30,7 @@ with init_empty_weights():
         "text_dim": 4096
         }
     )
-    patch_fp8_scaled_model(model)
+    patch_fpscaled_model(model)
     path = "/home/tosin_coverquick_co/apex-diffusion/components/d22bd8433943ec62b41672dc9a9e9d9a901197b912a4e4159b04b25908f79ea5_Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
 
 

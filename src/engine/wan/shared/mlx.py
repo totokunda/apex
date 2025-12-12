@@ -49,6 +49,7 @@ class WanMLXDenoise(BaseClass):
         scheduler = kwargs.get("scheduler", None)
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         boundary_timestep = kwargs.get("boundary_timestep", None)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 
@@ -67,24 +68,29 @@ class WanMLXDenoise(BaseClass):
 
             timestep = mx.broadcast_to(t, (latents.shape[0],))
 
-            if boundary_timestep is None or t >= boundary_timestep:
-                if hasattr(self, "transformer_2") and self.transformer_2:
-                    self._offload(self.transformer_2)
-                    setattr(self, "transformer_2", None)
-                if not self.transformer:
-                    self.load_component_by_name("transformer")
-                transformer = self.transformer
-                if isinstance(guidance_scale, list):
-                    guidance_scale = guidance_scale[1]
-            else:
-                if self.transformer:
-                    self._offload(self.transformer)
-                    setattr(self, "transformer", None)
-                if not hasattr(self, "transformer_2") or not self.transformer_2:
-                    self.load_component_by_name("transformer_2")
-                transformer = self.transformer_2
+            # Match PyTorch WAN MOE behavior:
+            # - For boundary_timestep is not None and t >= boundary_timestep:
+            #     use the "main" transformer and guidance_scale[0]
+            # - Otherwise:
+            #     use the alternate transformer_2 and guidance_scale[1]
+            if boundary_timestep is not None and t >= boundary_timestep:
+                if hasattr(self, "high_noise_transformer") and self.high_noise_transformer:
+                    self._offload(self.high_noise_transformer)
+                    setattr(self, "high_noise_transformer", None)
+                if not self.high_noise_transformer:
+                    self.load_component_by_name("high_noise_transformer")
+                transformer = self.high_noise_transformer
                 if isinstance(guidance_scale, list):
                     guidance_scale = guidance_scale[0]
+            else:
+                if self.low_noise_transformer:
+                    self._offload(self.low_noise_transformer)
+                    setattr(self, "low_noise_transformer", None)
+                if not hasattr(self, "low_noise_transformer") or not self.low_noise_transformer:
+                    self.load_component_by_name("low_noise_transformer")
+                transformer = self.low_noise_transformer
+                if isinstance(guidance_scale, list):
+                    guidance_scale = guidance_scale[1]
                     # Standard denoising
 
             noise_pred = transformer(
@@ -150,6 +156,7 @@ class WanMLXDenoise(BaseClass):
         guidance_scale = kwargs.get("guidance_scale", 5.0)
         expand_timesteps: bool = kwargs.get("expand_timesteps", False)
         first_frame_mask: Optional[mx.array] = kwargs.get("first_frame_mask", None)
+        render_on_step_interval = kwargs.get("render_on_step_interval", 3)
 
         transformer_dtype = convert_dtype_to_mlx(transformer_dtype)
 

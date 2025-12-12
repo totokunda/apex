@@ -3,10 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import gguf
 from typing import Optional, Tuple
-
 from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.quantize.ggml_tensor import GGMLTensor
-
 
 def cast_to(
     t: Optional[torch.Tensor],
@@ -77,10 +75,12 @@ class GGMLLayer(nn.Module):
 
         # Non-quantized GGML (F16/F32) or plain torch tensor → just cast
         if not is_quantized(t):
-            out = t
+            out = t.to(dtype=target_dtype, device=device)
         else:
             # Quantized → dequantize first
+           
             dq_dtype = self._effective_dequant_dtype(target_dtype, t)
+            
             # dequantize_tensor interfaces differ across repos; prefer (tensor, out_dtype),
             # and fall back to (tensor, out_dtype, dq_dtype_hint) if available.
             try:
@@ -106,6 +106,7 @@ class GGMLLayer(nn.Module):
             device = input.device if device is None else device
             if dtype is None:
                 dtype = input.dtype
+        
 
         # Weight
         weight = self._materialize_weight(
@@ -115,18 +116,10 @@ class GGMLLayer(nn.Module):
         # Bias (if present)
         bias = None
         if hasattr(self, "bias") and self.bias is not None:
-            bdtype = (
-                bias_dtype
-                if bias_dtype is not None
-                else (
-                    dtype
-                    if dtype is not None
-                    else self._effective_dequant_dtype(None, self.bias)
-                )
-            )
             bias = self._materialize_weight(
-                self.bias, target_dtype=bdtype, device=device
+                self.bias, target_dtype=dtype, device=device
             )
+        
 
         return weight, bias
 
@@ -136,7 +129,7 @@ class GGMLLayer(nn.Module):
         # if any GGML quant present or this is Linear/large Embedding, route to custom loader
         weight = state_dict.get(f"{prefix}weight", None)
         bias = state_dict.get(f"{prefix}bias", None)
-
+        
         should_route = self.is_ggml_quantized(weight=weight, bias=bias) or isinstance(
             self, nn.Linear
         )
@@ -162,9 +155,15 @@ class GGMLLayer(nn.Module):
         unexpected_keys,
         error_msgs,
     ):
-        # only consider keys that actually start with this prefix
+        # Only consider keys that actually start with this prefix
         pfx = str(prefix)
         pfx_len = len(pfx)
+
+        # Fast path: if this prefix never appears in the incoming state_dict at all,
+        # do nothing. This is the common case when loading *adapter-only* (LoRA)
+        # checkpoints with strict=False, where base GGML weights are not present.
+        if not any(k.startswith(pfx) for k in state_dict.keys()):
+            return
 
         got_weight = False
         got_bias = False
@@ -183,12 +182,24 @@ class GGMLLayer(nn.Module):
             else:
                 unexpected_keys.append(k)
 
-        # If linear is missing weight, create a placeholder of correct shape
+        # If linear is missing weight, create a placeholder of correct shape.
+        #
+        # IMPORTANT: we *only* synthesize a dense FP32 placeholder when doing a
+        # strict checkpoint load. For adapter-only / LoRA loads (strict=False),
+        # the base GGML weights are intentionally absent; allocating a full dense
+        # matrix here would effectively de-quantize the whole model and can
+        # easily OOM. In the non-strict case, we simply record the missing key
+        # and leave the existing quantized weight untouched.
         if not got_weight and isinstance(self, nn.Linear):
-            # Correct ordering: (out_features, in_features)
-            w = torch.zeros(self.out_features, self.in_features, dtype=torch.float32)
-            self.weight = nn.Parameter(w, requires_grad=False)
-            missing_keys.append(prefix + "weight")
+            if strict:
+                # Correct ordering: (out_features, in_features)
+                w = torch.zeros(self.out_features, self.in_features, dtype=torch.float32)
+                self.weight = nn.Parameter(w, requires_grad=False)
+                missing_keys.append(prefix + "weight")
+            else:
+                # Adapter-only state dict: keep quantized weight, just mark missing
+                if prefix + "weight" not in missing_keys:
+                    missing_keys.append(prefix + "weight")
 
         # Mark for VRAM estimation if needed
         if getattr(self.weight, "is_largest_weight", False):
@@ -208,9 +219,13 @@ class GGMLLayer(nn.Module):
 
 class GGMLLinear(GGMLLayer, nn.Linear):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        w, b = self.cast_bias_weight(x)
+        w, b = self.cast_bias_weight(x) 
         return F.linear(x, w, b)
 
+class GGMLConv3d(GGMLLayer, nn.Conv3d):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w, b = self.cast_bias_weight(x)
+        return F.conv3d(x, w, b, self.stride, self.padding, self.dilation, self.groups)
 
 class GGMLConv2d(GGMLLayer, nn.Conv2d):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -261,6 +276,7 @@ class GGMLGroupNorm(GGMLLayer, nn.GroupNorm):
 
 _TYPE_MAP = {
     nn.Linear: GGMLLinear,
+    nn.Conv3d: GGMLConv3d,
     nn.Conv2d: GGMLConv2d,
     nn.Conv1d: GGMLConv1d,
     nn.Embedding: GGMLEmbedding,

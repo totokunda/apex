@@ -1,7 +1,5 @@
 import torch
-import logging
 from typing import Any, Optional, Iterable
-
 
 class GGMLTensor(torch.Tensor):
     """
@@ -50,9 +48,22 @@ class GGMLTensor(torch.Tensor):
         out.tensor_shape = torch.Size(getattr(self, "tensor_shape", base.shape))
         out.dequant_dtype = getattr(self, "dequant_dtype", None)
         out.patches = list(getattr(self, "patches", []))
+        
         return out
 
     # ---- tensor API overrides (preserve metadata) -------------------------
+    @property
+    def dtype(self) -> torch.dtype:  # type: ignore[override]
+        """
+        Expose the *logical* dtype instead of the storage dtype.
+
+        Quantized GGML tensors may store data as uint8/int8/etc., but all high-level
+        PyTorch code should see their dequantization dtype (e.g. float16/float32).
+        This makes checks like `hidden_states.dtype` in HF modules behave as if the
+        tensor were already dequantized, avoiding spurious casts based on uint8.
+        """
+        return getattr(self, "dequant_dtype", None) or super().dtype
+
     def to(self, *args, **kwargs):
         base = super().to(*args, **kwargs)
         # Keep it as GGMLTensor to preserve metadata
