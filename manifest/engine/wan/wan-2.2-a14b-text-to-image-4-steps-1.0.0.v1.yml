@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-2-a14b-text-to-image
+  id: wan-2-2-a14b-text-to-image-4-steps
   model: wan
-  name: Wan 2.2 A14B Text to Image
+  name: Wan 2.2 A14B Text to Image 4 Steps
   version: 1.0.0
-  description: Wan 2.2 A14B is a 14B parameter model for text-to-image generation.
+  description: Wan 2.2 A14B is a 14B parameter model for text-to-image generation with 4 steps.
   tags:
   - wan
   - t2i
@@ -18,9 +18,24 @@ metadata:
   - text-to-image
 spec:
   engine: wan
-  model_type: t2i
+  model_type: t2v
   engine_type: torch
   denoise_type: moe
+  attention_types:
+  - sdpa
+  loras:
+  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
+    scale: 1.0
+    name: Wan Lightning High Noise
+    label: Wan Lightning High Noise
+    verified: true
+    component: transformer
+  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
+    scale: 1.0
+    name: Wan Lightning Low Noise
+    label: Wan Lightning Low Noise
+    verified: true
+    component: transformer_2
   components:
   - type: scheduler
     label: Scheduler
@@ -267,7 +282,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 4
       min: 1
       max: 100
       step: 1

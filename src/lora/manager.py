@@ -301,6 +301,7 @@ class LoraManager(DownloadMixin):
                 final_names.append(adapter_name)
                 final_scales.append(item.scale)
                 # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
+
                 for local_path in item.local_paths:
                     class_name = getattr(model.config, "_class_name", "lora")
                     local_path_state_dict, converted = self.maybe_convert_state_dict(
@@ -314,9 +315,11 @@ class LoraManager(DownloadMixin):
                     # Normalize keys that include an embedded adapter name, e.g.:
                     # "vace_blocks.0.attn2.to_k.lora_B.default.weight"
                     # becomes "vace_blocks.0.attn2.to_k.lora_B.weight"
+
                     local_path_state_dict = self._strip_adapter_name_from_keys(
                         local_path_state_dict
                     )
+
 
                     keys = list(local_path_state_dict.keys())
 
@@ -335,6 +338,8 @@ class LoraManager(DownloadMixin):
 
                     # ensure adapter name is not too long and does not have . or / in it if so remove it
                     adapter_name = self._clean_adapter_name(adapter_name)
+
+
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )

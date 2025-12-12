@@ -85,7 +85,7 @@ class WanT2IEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            del self.text_encoder
         safe_emit_progress(progress_callback, 0.16, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]

@@ -952,6 +952,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
                 adapter_names=list(self.preloaded_loras.keys()),
                 model=transformer,
             )
+            logger.info(f"\n\nloaded_loras: {self.loaded_loras}\n\n")
 
         return transformer
 
@@ -1657,6 +1658,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin):
             scales=scales,
             replace_keys=replace_keys,
         )
+
 
         # Track by adapter name
         for i, item in enumerate(resolved):

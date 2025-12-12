@@ -11,9 +11,8 @@ import os
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
-with open("/home/divineade/apex/src/runs/srpo-text-to-image-1.0.0.v1/model_inputs.json", "r") as f:
+with open("/home/divineade/apex/runs/wan-2.2-a14b-text-to-image-4-steps-1.0.0.v1/model_inputs.json", "r") as f:
    data = json.load(f)
-
 
 engine_kwargs = data["engine_kwargs"]
 
@@ -28,12 +27,18 @@ inputs = data["inputs"]
 yaml_path = engine_kwargs.get("yaml_path")
 engine = UniversalEngine(yaml_path=yaml_path, selected_components = {
 
-    "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/e27fa98ae4ea9da8e49be42f0f4828afa21cab6d38d264954edb898de68db5d4_srpo-Q4_K.gguf",
-                "variant": "q4_k",
-                "precision": "q4_k",
-                "type": "gguf"
-            }
+        "transformer": {
+            "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/d7bc3a77364b57cbdf51b2d26ed84368d85339bff907dbb97068f53ab534d694_Wan2.2-T2V-A14B-HighNoise-Q3_K_S.gguf",
+            "variant": "GGUF_Q3_K_S",
+            "precision": "q3_k_s",
+            "type": "gguf"
+        },
+        "transformer_2": {
+            "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/7be2d844c9e4e313619edbd22c794bfdc46bcaf755d7e4dff1863a760f611be2_Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf",
+            "variant": "GGUF_Q3_K_S",
+            "precision": "q3_k_s",
+            "type": "gguf"
+        }
 })
 
 
