@@ -231,6 +231,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
         encoded_image = self.vae_encode(ip_image, sample_mode="mode", dtype=dtype)
         return encoded_image
 
+
+    
     def moe_denoise(self, *args, **kwargs) -> torch.Tensor:
         timesteps = kwargs.get("timesteps", None)
         latents = kwargs.get("latents", None)
@@ -253,9 +255,11 @@ class WanShared(BaseEngine, WanMLXDenoise):
         mask = mask_kwargs.get("mask", None)
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
-
+        offload = kwargs.get("offload", True)
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+        
+        
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MOE") as pbar:
             total_steps = len(timesteps)
@@ -271,72 +275,75 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 timestep = t.expand(latents.shape[0])
 
                 if boundary_timestep is not None and t >= boundary_timestep:
-
-                    if hasattr(self, "transformer_2") and self.transformer_2:
+                    if hasattr(self, "low_noise_transformer") and self.low_noise_transformer:
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Offloading previous transformer",
                         )
-                        self._offload(self.transformer)
-                        setattr(self, "transformer", None)
+                        self._offload(self.low_noise_transformer)
                         empty_cache()
 
-                    if not self.transformer:
+                    if not getattr(self, "high_noise_transformer", None):
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Loading new transformer",
                         )
+                        
+                        
 
-                        self.load_component_by_name("transformer")
-                        self.to_device(self.transformer)
+                        self.load_component_by_name("high_noise_transformer")
+                        self.to_device(self.high_noise_transformer)
+
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "New transformer ready",
                         )
 
-                    transformer = self.transformer
+                    transformer = self.high_noise_transformer
 
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[0]
                 else:
-                    if self.transformer:
+                    if getattr(self, "high_noise_transformer", None):
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Switching model boundary, offloading previous transformer",
                         )
-                        self._offload(self.transformer)
-                        setattr(self, "transformer", None)
+                        self._offload(self.high_noise_transformer)
                         empty_cache()
 
-                    if not hasattr(self, "transformer_2") or not self.transformer_2:
+                    if not getattr(self, "low_noise_transformer", None):
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Loading alternate transformer",
                         )
-                        self.load_component_by_name("transformer_2")
-                        self.to_device(self.transformer_2)
+                        self.load_component_by_name("low_noise_transformer")
+                        self.to_device(self.low_noise_transformer)
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Alternate transformer ready",
                         )
 
-                    transformer = self.transformer_2
+                    transformer = self.low_noise_transformer
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[1]
                     # Standard denoising
+                    
+                
+
                 noise_pred = transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,
                     return_dict=False,
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
-
+                
                 if use_cfg_guidance and kwargs.get(
                     "unconditional_transformer_kwargs", None
                 ):
@@ -346,6 +353,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         return_dict=False,
                         **kwargs.get("unconditional_transformer_kwargs", {}),
                     )[0]
+                    
                     noise_pred = uncond_noise_pred + guidance_scale * (
                         noise_pred - uncond_noise_pred
                     )
@@ -374,6 +382,12 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 )
 
             self.logger.info("Denoising completed.")
+            
+        if offload:
+            if hasattr(self, "low_noise_transformer") and self.low_noise_transformer:
+                self._offload(self.low_noise_transformer)
+            if hasattr(self, "high_noise_transformer") and self.high_noise_transformer:
+                self._offload(self.high_noise_transformer)
 
         return latents
 
@@ -394,7 +408,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
         num_warmup_steps = kwargs.get("num_warmup_steps", 0)
         num_reference_images = kwargs.get("num_reference_images", 0)
-
+        offload = kwargs.get("offload", True)
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
@@ -495,5 +509,9 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 ) * latent_condition + first_frame_mask * latents
 
             self.logger.info("Denoising completed.")
+            
+        if offload:
+            if hasattr(self, "transformer") and self.transformer:
+                self._offload(self.transformer)
 
         return latents

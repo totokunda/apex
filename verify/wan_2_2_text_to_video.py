@@ -1,34 +1,48 @@
 from src.engine import UniversalEngine
 from diffusers.utils import export_to_video
+import os
+
+variants = ["GGUF_Q2_K", "GGUF_Q3_K_S", "GGUF_Q3_K_M", "GGUF_Q4_K_S", "GGUF_Q4_K_M", "GGUF_Q5_K_S", "GGUF_Q5_K_M", "GGUF_Q6_K", "GGUF_Q8_0", "FP8", "default"]
+variant = "FP8"
 
 engine = UniversalEngine(
-    yaml_path="/home/tosin_coverquick_co/apex/manifest/verified/video/wan-2.2-a14b-text-to-video-1.0.0.v1.yml", 
-   selected_components={
-    "transformer": {
-        "variant": "FP8"
+    yaml_path="/home/tosin_coverquick_co/apex/manifest/verified/video/wan-2.2-a14b-text-to-video-1.0.0.v1.yml",
+    selected_components={
+        "low_noise_transformer": {
+            "variant": variant
+        },
+        "high_noise_transformer": {
+            "variant": variant
+        },
+        "text_encoder": {
+            "variant": "FP8"
+        },
     },
-    "transformer_2": {
-        "variant": "FP8"
-    },
-    "text_encoder": {
-        "variant": "FP8"
-    }
-})
+    attention_type="sage",
+)
 
-space_prompt = "A velvet-black void studded with shimmering stars. Center frame: a colossal spiral galaxy, its cerulean and rose arms rotating against cosmic darkness. In the foreground, a sleek silver spacecraft hovers silently, its hull reflecting swirling nebulae.  \
-Through panoramic windows, two astronauts drift weightlessly, their visors glowing with the light of a nearby supernova. Suddenly, iridescent plasma tendrils burst from a distant pulsar, casting rippling shadows as electric arcs dance like liquid light through glittering interstellar dust. \
-Below, a ringed ice planet spins serenely, its pale rings fractured by twin moons that cast elongated shadows across frozen plains. A golden beam of starlight pierces a drifting gas cloud, igniting the spacecraft in a brief halo before fading into silence. Ethereal synths swell as the spiral galaxy pulses ever so faintly, hinting at a living universe that endures long after the scene fades to black."
-negative_prompt="lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature"
+dir_path = "test_t2v_wan_22_a14b"
+os.makedirs(dir_path, exist_ok=True)
+
+prompt = "A young dancer performs energetic hip-hop moves in the middle of a busy street in Shibuya, Tokyo. Neon signs glow overhead, crowds flow around the dancer, blurred motion from passing pedestrians and traffic. Vibrant night lights reflect off wet pavement. Dynamic camera movement: smooth tracking shots, slight handheld realism. High-contrast cinematic lighting, rich colors, detailed urban textures. Atmosphere feels lively, modern, and electric, capturing the iconic Shibuya nightlife energy."
 
 video = engine.run(
-    prompt=space_prompt,
-    negative_prompt=negative_prompt,
+    prompt=prompt,
     height=480,
     width=832,
     duration=81,
     num_videos=1,
     num_inference_steps=4,
-    guidance_scale=[1.0, 1.0]
+    guidance_scale=[1.0, 1.0],
+    boundary_ratio=0.875,
+    seed=42,
 )
 
-export_to_video(video[0], "test_wan_22_t2v_space.mp4", fps=16, quality=8)
+export_to_video(
+    video[0],
+    os.path.join(
+        dir_path, f"test_wan_22_t2v_a14b_{variant.lower()}_lightning_lora_sage.mp4"
+    ),
+    fps=16,
+    quality=8,
+)

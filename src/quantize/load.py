@@ -84,11 +84,16 @@ def load_text_encoder_gguf(
     dequant_dtype: torch.dtype | str = torch.float16,
     **kwargs,
 ):
+    
+    if key_map is None:
+        key_map = "t5"
+    
     if isinstance(dequant_dtype, str):
         dequant_dtype = convert_str_dtype(dequant_dtype)
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
+    
     for tensor in tqdm(reader.tensors):
         name = remap_key(tensor.name, key_map)
         shape = torch.Size(tuple(int(v) for v in reversed(tensor.shape)))
@@ -200,6 +205,7 @@ def load_gguf(
     **kwargs,
 ):
     if type == "text_encoder":
+        print(key_map)
         return load_text_encoder_gguf(path, key_map, **kwargs)
     elif type == "transformer":
         return load_transformer_gguf(path, **kwargs)

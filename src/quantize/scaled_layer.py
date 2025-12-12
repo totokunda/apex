@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Callable
+from typing import Optional, Callable, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,7 +35,6 @@ def get_fp_maxval(
     maxval = mantissa * 2 ** (2**E - 1 - bias)
     return maxval
 
-
 def quantize_to_fp8(
     x: torch.Tensor,
     bits: int = 8,
@@ -70,6 +69,59 @@ def quantize_to_fp8(
     # Dequantize back to the original dtype/grid
     qdq_out = torch.round(input_clamp / log_scales) * log_scales
     return qdq_out, log_scales
+
+
+def quantize_to_fp4(
+    x: torch.Tensor,
+    *,
+    per_channel_dim: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Block-FP4 / int4-like quantization with a shared pow2 scale:
+      - `per_channel_dim` controls along which dimension the scale is computed.
+        For Linear/Conv weights shaped [out, in, ...], use the default 0.
+      - Codes are 4-bit signed in [-7, 7].
+
+    Returns:
+      - q: int8 tensor (only 4 bits used)
+      - scales: pow2 scale tensor, broadcastable to `x`
+    """
+    device = x.device
+    dtype = x.dtype
+
+    # Choose per-channel or per-tensor amax
+    if per_channel_dim is None:
+        amax = x.abs().max()
+    else:
+        amax = x.abs().amax(dim=per_channel_dim, keepdim=True)
+
+    # Avoid degenerate all-zero / tiny scales
+    eps = torch.finfo(dtype).tiny
+    amax = torch.clamp(amax, min=eps)
+
+    max_code = 7.0  # 4-bit signed range [-7, 7]
+
+    # Block-floating pow2 scale: 2^round(log2(amax / max_code))
+    raw_scale = amax / max_code
+    log2_scale = torch.round(torch.log2(raw_scale))
+    scales = torch.pow(2.0, log2_scale).to(dtype).to(device)
+
+    # Quantize and clamp to 4-bit range
+    q = torch.round(x / scales).to(torch.int8)
+    q = torch.clamp(q, min=-7, max=7)
+
+    return q, scales
+
+def dequantize_from_fp4(
+    q: torch.Tensor,
+    scales: torch.Tensor,
+    out_dtype: torch.dtype = torch.float32,
+) -> torch.Tensor:
+    """
+    q: int8 tensor containing FP4 codes
+    scales: same shape as q (or broadcastable)
+    """
+    return (q.to(out_dtype) * scales.to(out_dtype))
 
 
 def fp8_tensor_quant(
@@ -112,9 +164,168 @@ def fp8_activation_dequant(
     return quant_dequant_x
 
 
-class FP8ScaledLayer(nn.Module):
+class FPScaledTensor(torch.Tensor):
     """
-    Base class for FP8-scaled layers.
+    Tensor subclass used for FP8-scaled weights.
+
+    It exposes a *logical* compute dtype via ``.dtype`` while still keeping the
+    underlying storage dtype (FP8) available via ``.physical_dtype`` for
+    low-level dequantization logic.
+    """
+
+    logical_dtype: Optional[torch.dtype] = None
+
+    @staticmethod
+    def _from_base(base: torch.Tensor, *, logical_dtype: Optional[torch.dtype]) -> "FPScaledTensor":
+        out = torch.Tensor._make_subclass(
+            FPScaledTensor, base, require_grad=base.requires_grad
+        )
+        out.logical_dtype = logical_dtype
+        return out
+
+    def _wrap_like(self, base: torch.Tensor) -> "FPScaledTensor":
+        out = torch.Tensor._make_subclass(
+            FPScaledTensor, base, require_grad=base.requires_grad
+        )
+        out.logical_dtype = getattr(self, "logical_dtype", None)
+        return out
+
+    @property
+    def physical_dtype(self) -> torch.dtype:
+        """
+        True storage dtype, ignoring any logical/compute dtype override.
+        """
+        return super().dtype
+
+    @property  # type: ignore[override]
+    def dtype(self) -> torch.dtype:
+        """
+        Logical/compute dtype exposed to high-level code.
+
+        This is what external libraries (e.g. attention blocks that inspect
+        ``weight.dtype``) will see, allowing us to "pretend" the weights live
+        in ``compute_dtype`` while they are actually stored as FP8.
+        """
+        return self.logical_dtype or super().dtype
+    
+    def to(self, *args, **kwargs):
+        base = super().to(*args, **kwargs)
+        return self._wrap_like(base)
+
+    def clone(self, *args, **kwargs):
+        base = super().clone(*args, **kwargs)
+        return self._wrap_like(base)
+
+
+class FPScaledParameter(nn.Parameter):
+    """
+    Parameter subclass for FP8-scaled weights.
+
+    Mirrors `FP8ScaledTensor` semantics but ensures the tensor is still
+    registered as an `nn.Parameter` on modules.
+    """
+
+    logical_dtype: Optional[torch.dtype] = None
+
+    @staticmethod
+    def _from_base(
+        base: torch.Tensor,
+        *,
+        logical_dtype: Optional[torch.dtype],
+        requires_grad: bool,
+    ) -> "FPScaledParameter":
+        out = torch.Tensor._make_subclass(
+            FPScaledParameter, base, require_grad=requires_grad
+        )
+        out.logical_dtype = logical_dtype
+        return out
+
+    def _wrap_like(self, base: torch.Tensor) -> "FPScaledParameter":
+        out = torch.Tensor._make_subclass(
+            FPScaledParameter, base, require_grad=base.requires_grad
+        )
+        out.logical_dtype = getattr(self, "logical_dtype", None)
+        return out
+
+    @property
+    def physical_dtype(self) -> torch.dtype:
+        """
+        True storage dtype, ignoring any logical/compute dtype override.
+        """
+        return super().dtype
+
+    @property  # type: ignore[override]
+    def dtype(self) -> torch.dtype:
+        """
+        Logical/compute dtype exposed to high-level code.
+        """
+        return self.logical_dtype or super().dtype
+
+    def to(self, *args, **kwargs):
+        base = super().to(*args, **kwargs)
+        return self._wrap_like(base)
+
+    def clone(self, *args, **kwargs):
+        base = super().clone(*args, **kwargs)
+        return self._wrap_like(base)
+
+
+def restore_fpscaled_parameters(
+    model: nn.Module,
+    *,
+    default_compute_dtype: Optional[torch.dtype] = None,
+) -> None:
+    """
+    Re-wrap FP-scaled weights as FPScaledParameter after state_dict loading.
+
+    Some `load_state_dict` pathways may replace custom Parameter subclasses with
+    plain `nn.Parameter` instances. This helper re-applies FPScaledParameter to
+    all FPScaled* layers, preserving logical vs. physical dtype semantics.
+    """
+
+    for module in model.modules():
+        if isinstance(module, FPScaledLayer):
+            weight = getattr(module, "weight", None)
+            # Skip if there's no weight or it's already an FPScaledParameter
+            if not isinstance(weight, nn.Parameter) or isinstance(
+                weight, FPScaledParameter
+            ):
+                continue
+
+            # Prefer the module's compute_dtype, then an explicit default, then
+            # fall back to the current weight dtype.
+            logical_dtype = (
+                getattr(module, "compute_dtype", None)
+                or default_compute_dtype
+                or weight.dtype
+            )
+
+            module.weight = _wrap_fpscaled_weight_parameter(
+                weight, logical_dtype=logical_dtype
+            )
+
+
+def _wrap_fpscaled_weight_parameter(
+    param: nn.Parameter,
+    *,
+    logical_dtype: Optional[torch.dtype],
+) -> nn.Parameter:
+    """
+    Wrap a weight parameter in FPScaledTensor so that:
+
+      * ``param.dtype`` appears as ``logical_dtype`` to callers, and
+      * the underlying storage dtype remains intact for FP8 handling.
+    """
+    base = param.detach()
+    wrapped = FPScaledParameter._from_base(
+        base, logical_dtype=logical_dtype, requires_grad=param.requires_grad
+    )
+    return wrapped
+
+
+class FPScaledLayer(nn.Module):
+    """
+    Base class for FP-scaled layers.
 
     Assumptions:
       - The *stored* weights are in FP8 (e4m3fn / e5m2) or another low-precision dtype.
@@ -124,17 +335,17 @@ class FP8ScaledLayer(nn.Module):
           2. Apply `scale_weight`
           3. Run the corresponding op (linear / conv / embedding / etc.)
 
-    The model should be patched *before* loading an FP8-scaled state_dict so that
+    The model should be patched *before* loading an FP-scaled state_dict so that
     `scale_weight` parameters are correctly created and populated.
     """
 
     # Preferred compute dtype. If None, we fall back to the input dtype,
-    # defaulting to float16 for FP8 inputs.
+    # defaulting to float16 for FP inputs.
     compute_dtype: Optional[torch.dtype] = None
 
     def __init__(self, *, compute_dtype: Optional[torch.dtype] = None) -> None:
         # NOTE: Do not call super().__init__() here because in multiple
-        # inheritance subclasses like FP8ScaledLinear(FP8ScaledLayer, nn.Linear)
+        # inheritance subclasses like FPScaledLinear(FPScaledLayer, nn.Linear)
         # the next class in the MRO is nn.Linear, whose __init__ expects
         # (in_features, out_features, ...). Calling nn.Module.__init__
         # directly avoids that TypeError while still initializing the
@@ -161,7 +372,59 @@ class FP8ScaledLayer(nn.Module):
                 torch.float32,
             ):
                 return x.dtype
+
         return torch.float16
+
+    # NOTE:
+    # ----
+    # Some FP checkpoints may store `scale_weight` as a 0-d scalar tensor
+    # (shape `[]`) while our modules register it as a length-1 tensor
+    # (shape `[1]`), or vice versa.  PyTorch's `load_state_dict` is strict
+    # about shape mismatches and would normally error in this case.
+    #
+    # To avoid halting model loading, we normalize these cases by allowing
+    # 0-d and 1-d length-1 tensors to load interchangeably for
+    # `{prefix}scale_weight`, reshaping the incoming tensor to match the
+    # module parameter shape when they both contain a single element.
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        key = prefix + "scale_weight"
+        if key in state_dict:
+            tensor = state_dict[key]
+            param = getattr(self, "scale_weight", None)
+            # Only handle the simple "single-element tensor" case and leave all
+            # other behaviour to the default Module implementation.
+            if isinstance(param, torch.nn.Parameter):
+                try:
+                    if tensor.numel() == 1 and param.numel() == 1 and tensor.shape != param.shape:
+                        # View the incoming checkpoint tensor as the current
+                        # parameter shape (e.g. [] <-> [1]).
+                        state_dict[key] = tensor.view_as(param)
+                except Exception:
+                    # If anything goes wrong, fall back to default behaviour
+                    # and let the underlying implementation surface an error.
+                    pass
+                
+        key = prefix + "weight"
+
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+
 
     def _scale_and_cast_weight(
         self,
@@ -183,9 +446,20 @@ class FP8ScaledLayer(nn.Module):
         # Fast path: FP8 weights + explicit scale tensor → use the provided
         # FP8 dequant helper directly. This matches the user-provided
         # fp8_activation_dequant semantics.
-
-        if weight.dtype == torch.float8_e4m3fn or weight.dtype == torch.float8_e5m2 and scale_weight is not None:
+        #
+        # NOTE: when using FP8ScaledTensor, ``weight.dtype`` may expose the
+        # logical compute dtype; for dequant we must check the physical dtype.
+        physical_dtype = getattr(weight, "physical_dtype", weight.dtype)
+        if (
+            physical_dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+            and scale_weight is not None
+        ):
             return fp8_activation_dequant(weight, scale_weight, target_dtype)
+        if (
+            physical_dtype in (torch.float4_e2m1fn_x2, torch.uint8)
+            and scale_weight is not None
+        ):
+            return dequantize_from_fp4(weight, scale_weight, target_dtype)
 
         # Dequantize / cast from FP8 (or any low-precision) to target_dtype.
         w = weight.to(target_dtype)
@@ -210,13 +484,12 @@ class FP8ScaledLayer(nn.Module):
 
         return w
 
-
-class FP8ScaledLinear(FP8ScaledLayer, nn.Linear):
+class FPScaledLinear(FPScaledLayer, nn.Linear):
     """
-    Linear layer with FP8 weights and `scale_weight` support.
+    Linear layer with FP weights and `scale_weight` support.
 
     If Transformer Engine is available, we still keep the public API identical
-    (so that FP8 checkpoints load cleanly) but we optionally wrap the matmul in
+    (so that FP checkpoints load cleanly) but we optionally wrap the matmul in
     TE's `fp8_autocast` context for optimized kernels.
     """
 
@@ -230,7 +503,7 @@ class FP8ScaledLinear(FP8ScaledLayer, nn.Linear):
         device=None,
         dtype=None,
     ) -> None:
-        FP8ScaledLayer.__init__(self, compute_dtype=compute_dtype)
+        FPScaledLayer.__init__(self, compute_dtype=compute_dtype)
         nn.Linear.__init__(
             self,
             in_features,
@@ -239,14 +512,20 @@ class FP8ScaledLinear(FP8ScaledLayer, nn.Linear):
             device=device,
             dtype=dtype,
         )
+        # Wrap the weight parameter so that external code sees the *compute*
+        # dtype (logical) via ``weight.dtype``, while we still retain the true
+        # FP storage dtype for dequantization via ``weight.physical_dtype``.
+        logical_dtype = getattr(self, "compute_dtype", None) or self.weight.dtype
+        self.weight = _wrap_fpscaled_weight_parameter(self.weight, logical_dtype=logical_dtype)
 
-        # Placeholder scale; real values are loaded from the FP8 checkpoint.
-        # The Wan FP8 checkpoint stores `scale_weight` as a scalar ([1]),
-        # so we initialize it that way and rely on broadcasting in
-        # `_scale_and_cast_weight` for per-out-feature application.
         self.scale_weight = nn.Parameter(
             torch.ones(1, dtype=torch.float32), requires_grad=False
         )
+        
+
+    @property
+    def effective_dtype(self):
+        return self.compute_dtype or self.weight.dtype
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         compute_dtype = self._effective_compute_dtype(x)
@@ -274,7 +553,7 @@ class FP8ScaledLinear(FP8ScaledLayer, nn.Linear):
         return out
 
 
-class FP8ScaledConv2d(FP8ScaledLayer, nn.Conv2d):
+class FPScaledConv2d(FPScaledLayer, nn.Conv2d):
     def __init__(
         self,
         in_channels: int,
@@ -291,7 +570,7 @@ class FP8ScaledConv2d(FP8ScaledLayer, nn.Conv2d):
         device=None,
         dtype=None,
     ) -> None:
-        FP8ScaledLayer.__init__(self, compute_dtype=compute_dtype)
+        FPScaledLayer.__init__(self, compute_dtype=compute_dtype)
         nn.Conv2d.__init__(
             self,
             in_channels,
@@ -306,7 +585,7 @@ class FP8ScaledConv2d(FP8ScaledLayer, nn.Conv2d):
             device=device,
             dtype=dtype,
         )
-        # Wan FP8 checkpoints store `scale_weight` as a scalar; we rely on
+        # Wan FP checkpoints store `scale_weight` as a scalar; we rely on
         # broadcasting in `_scale_and_cast_weight` to apply it per out-channel.
         self.scale_weight = nn.Parameter(
             torch.ones(1, dtype=torch.float32), requires_grad=False
@@ -339,7 +618,7 @@ class FP8ScaledConv2d(FP8ScaledLayer, nn.Conv2d):
         return out
 
 
-class FP8ScaledConv1d(FP8ScaledLayer, nn.Conv1d):
+class FPScaledConv1d(FPScaledLayer, nn.Conv1d):
     def __init__(
         self,
         in_channels: int,
@@ -356,7 +635,7 @@ class FP8ScaledConv1d(FP8ScaledLayer, nn.Conv1d):
         device=None,
         dtype=None,
     ) -> None:
-        FP8ScaledLayer.__init__(self, compute_dtype=compute_dtype)
+        FPScaledLayer.__init__(self, compute_dtype=compute_dtype)
         nn.Conv1d.__init__(
             self,
             in_channels,
@@ -371,7 +650,7 @@ class FP8ScaledConv1d(FP8ScaledLayer, nn.Conv1d):
             device=device,
             dtype=dtype,
         )
-        # Wan FP8 checkpoints store `scale_weight` as a scalar; we rely on
+        # Wan FP checkpoints store `scale_weight` as a scalar; we rely on
         # broadcasting in `_scale_and_cast_weight` to apply it per out-channel.
         self.scale_weight = nn.Parameter(
             torch.ones(1, dtype=torch.float32), requires_grad=False
@@ -403,7 +682,7 @@ class FP8ScaledConv1d(FP8ScaledLayer, nn.Conv1d):
         # Always return in compute dtype (float16/bfloat16/float32), not FP8.
         return out
 
-class FP8ScaledEmbedding(FP8ScaledLayer, nn.Embedding):
+class FPScaledEmbedding(FPScaledLayer, nn.Embedding):
     def __init__(
         self,
         num_embeddings: int,
@@ -418,7 +697,7 @@ class FP8ScaledEmbedding(FP8ScaledLayer, nn.Embedding):
         device=None,
         dtype=None,
     ) -> None:
-        FP8ScaledLayer.__init__(self, compute_dtype=compute_dtype)
+        FPScaledLayer.__init__(self, compute_dtype=compute_dtype)
         nn.Embedding.__init__(
             self,
             num_embeddings,
@@ -431,7 +710,7 @@ class FP8ScaledEmbedding(FP8ScaledLayer, nn.Embedding):
             device=device,
             dtype=dtype,
         )
-        # Wan FP8 checkpoints store `scale_weight` as a scalar; we rely on
+        # Wan FP checkpoints store `scale_weight` as a scalar; we rely on
         # broadcasting in `_scale_and_cast_weight` to apply it per embedding-dim.
         self.scale_weight = nn.Parameter(
             torch.ones(1, dtype=torch.float32), requires_grad=False
@@ -457,27 +736,27 @@ class FP8ScaledEmbedding(FP8ScaledLayer, nn.Embedding):
 
 
 _TYPE_MAP = {
-    nn.Linear: FP8ScaledLinear,
-    nn.Conv2d: FP8ScaledConv2d,
-    nn.Conv1d: FP8ScaledConv1d,
-    nn.Embedding: FP8ScaledEmbedding,
+    nn.Linear: FPScaledLinear,
+    nn.Conv2d: FPScaledConv2d,
+    nn.Conv1d: FPScaledConv1d,
+    nn.Embedding: FPScaledEmbedding,
 }
 
 
-def patch_fp8_scaled_model(
+def patch_fpscaled_model(
     model: nn.Module,
     name_filter: Optional[Callable[[str], bool]] = None,
     *,
     default_compute_dtype: Optional[torch.dtype] = None,
 ) -> None:
     """
-    In-place patch of a model to use FP8Scaled* layers.
+    In-place patch of a model to use FPScaled* layers.
 
-    This should be called *before* loading an FP8-scaled checkpoint whose
-    state_dict contains both `{name}.weight` (in FP8) and `{name}.scale_weight`.
+    This should be called *before* loading an FP-scaled checkpoint whose
+    state_dict contains both `{name}.weight` (in FP) and `{name}.scale_weight`.
 
     The function prefers a Transformer Engine-backed pathway when
-    `transformer_engine.pytorch` is importable (via the FP8Scaled* layers using
+    `transformer_engine.pytorch` is importable (via the FPScaled* layers using
     TE matmul kernels where applicable) and otherwise falls back to pure PyTorch
     implementations.
     """
@@ -490,8 +769,8 @@ def patch_fp8_scaled_model(
             t = type(child)
 
             if t in _TYPE_MAP and (name_filter is None or name_filter(qname)):
-                # Recreate the module as an FP8Scaled* of the appropriate type,
-                # copying over the existing (non-FP8) weights. The FP8 / scale
+                # Recreate the module as an FPScaled* of the appropriate type,
+                # copying over the existing (non-FP) weights. The FP / scale
                 # weights will then be loaded from the FP8 checkpoint.
                 cls = _TYPE_MAP[t]
 

@@ -33,10 +33,15 @@ from src.converters.utils import (
     strip_common_prefix,
 )
 
+from src.converters.text_encoder_converters import (
+    T5TextEncoderConverter,
+    LlamaTextEncoderConverter,
+    StepTextEncoderConverter
+)
+
 from src.converters.vae_converters import (
     LTXVAEConverter,
     MagiVAEConverter,
-    NoOpVAEConverter,
     MMAudioVAEConverter,
 )
 
@@ -107,7 +112,7 @@ def get_transformer_converter_by_model_name(model_name: str):
         return FluxTransformerConverter()
     elif "lora" in model_name:
         return LoraTransformerConverter()
-    return NoOpTransformerConverter()
+    return NoOpConverter()
 
 
 def get_vae_converter(vae_type: str, **additional_kwargs):
@@ -118,7 +123,19 @@ def get_vae_converter(vae_type: str, **additional_kwargs):
     elif vae_type == "mmaudio":
         return MMAudioVAEConverter()
     else:
-        return NoOpVAEConverter()
+        return NoOpConverter()
+    
+    
+def get_text_encoder_converter(text_encoder_type: str):
+    text_encoder_type = text_encoder_type.lower()
+    if "t5" in text_encoder_type or "umt5" in text_encoder_type:
+        return T5TextEncoderConverter()
+    elif "llama" in text_encoder_type:
+        return LlamaTextEncoderConverter()
+    elif "step" in text_encoder_type:
+        return StepTextEncoderConverter()
+    else:
+        return NoOpConverter()
 
 
 def load_safetensors(dir: pathlib.Path):

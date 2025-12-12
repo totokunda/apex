@@ -153,15 +153,24 @@ class LynxEngine(WanShared):
         if self.transformer is None:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
+        # Preserve any deferred group offloading config across adapter wrapping.
+        pending_offload = getattr(self.transformer, "_apex_pending_group_offloading", None)
         self.transformer = helper.load_adapters(
             self.transformer, adapter_root, device=self.device, dtype=transformer_dtype
         )
+        if (
+            pending_offload is not None
+            and getattr(self.transformer, "_apex_pending_group_offloading", None) is None
+        ):
+            setattr(self.transformer, "_apex_pending_group_offloading", pending_offload)
 
         lora_items, adapter_names = list(self.preloaded_loras.values()), list(
             self.preloaded_loras.keys()
         )
         if lora_items:
             self.apply_loras(lora_items, adapter_names=adapter_names)
+            # Group offloading for transformers must be enabled after LoRA/adapters.
+            self._apply_pending_group_offloading(self.transformer)
 
         ip_states, ip_states_uncond = helper.build_ip_states(
             embeds, device=self.device, dtype=transformer_dtype

@@ -1,13 +1,13 @@
 import os
 import re
 import hashlib
-import traceback
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Union
 from src.converters.convert import (
     get_transformer_converter_by_model_name,
     strip_common_prefix,
 )
+from src.lora.lora_converter import LoraConverter
 import torch
 from loguru import logger
 from diffusers.loaders import PeftAdapterMixin
@@ -15,9 +15,61 @@ from safetensors.torch import load_file
 from src.mixins.download_mixin import DownloadMixin
 from src.utils.defaults import DEFAULT_LORA_SAVE_PATH
 from urllib.parse import urlencode
+import torch.nn as nn
+from safetensors.torch import safe_open
 
 # Ensure PEFT is patched to handle GGML / FP8-scaled linears with a custom LoRA wrapper.
 from src.lora.quantized_lora import patch_peft_for_quantized_lora
+
+def build_lora_names(key, lora_down_key, lora_up_key, is_native_weight):
+    base = "diffusion_model." if is_native_weight else ""
+    lora_down = base + key.replace(".weight", lora_down_key)
+    lora_up = base + key.replace(".weight", lora_up_key)
+    lora_alpha = base + key.replace(".weight", ".alpha")
+    return lora_down, lora_up, lora_alpha
+
+def load_and_merge_lora_weight(
+    model: nn.Module,
+    lora_state_dict: dict,
+    lora_down_key: str=".lora_A.weight",
+    lora_up_key: str=".lora_B.weight"):
+
+    is_native_weight = any("diffusion_model." in key for key in lora_state_dict)
+    for key, value in model.named_parameters():
+        lora_down_name, lora_up_name, lora_alpha_name = build_lora_names(
+            key, lora_down_key, lora_up_key, is_native_weight
+        )
+        if lora_down_name in lora_state_dict:
+            lora_down = lora_state_dict[lora_down_name]
+            lora_up = lora_state_dict[lora_up_name]
+            lora_alpha = float(lora_state_dict[lora_alpha_name])
+            rank = lora_down.shape[0]
+            scaling_factor = lora_alpha / rank
+            assert lora_up.dtype == torch.float32
+            assert lora_down.dtype == torch.float32
+            delta_W = scaling_factor * torch.matmul(lora_up, lora_down)
+            value.data = (value.data + delta_W).to(value.dtype)
+
+    return model
+
+def load_and_merge_lora_weight_from_safetensors(
+    model: nn.Module,
+    lora_weight_path:str,
+    lora_down_key:str=".lora_A.weight",
+    lora_up_key:str=".lora_B.weight"):
+    lora_state_dict = {}
+    with safe_open(lora_weight_path, framework="pt", device="cpu") as f:
+        for key in f.keys():
+            lora_state_dict[key] = f.get_tensor(key)
+    
+    converter = get_transformer_converter_by_model_name(model.__class__.__name__)
+    lora_converter = LoraConverter()
+    if converter is not None:
+        converter.convert(lora_state_dict)
+    lora_converter.convert(lora_state_dict)
+    
+    model = load_and_merge_lora_weight(model, lora_state_dict, lora_down_key, lora_up_key)
+    return model
 
 patch_peft_for_quantized_lora()
 
@@ -47,62 +99,6 @@ class LoraManager(DownloadMixin):
     def _hash(self, text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()[:16]
 
-    def _replace_up_down_to_AB_keys(
-        self, state_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        # Replace all keys that end with _up or _down with _A or _B
-        # and make sure the LoRA rank is on the **second** dimension for lora_B
-        # to match how diffusers / PEFT infer rank (see `peft.py` around rank[f"^{key}"] = val.shape[1]).
-        new_state_dict: Dict[str, torch.Tensor] = {}
-
-        # First, normalize key names `.lora_up` / `.lora_down` -> `.lora_A` / `.lora_B`
-        for key, value in state_dict.items():
-            if ".lora_up" in key:
-                new_key = key.replace(".lora_up", ".lora_A")
-            elif ".lora_down" in key:
-                new_key = key.replace(".lora_down", ".lora_B")
-            else:
-                new_key = key
-            new_state_dict[new_key] = value
-
-        # Heuristic: some LoRAs store matrices with rank on the **first** dim for `lora_B`
-        # (shape `[r, out]`) instead of the second dim (`[out, r]`).
-        # Since PEFT determines rank from `val.shape[1]` for `lora_B`, we transpose both
-        # `lora_A` and `lora_B` for a pair when we detect that the smaller dimension of
-        # `lora_B` is the first one.
-
-        lora_pairs: Dict[str, Dict[str, str]] = {}
-        for key in list(new_state_dict.keys()):
-            if ".lora_A" in key:
-                base = key.split(".lora_A", 1)[0]
-                lora_pairs.setdefault(base, {})["A"] = key
-            elif ".lora_B" in key:
-                base = key.split(".lora_B", 1)[0]
-                lora_pairs.setdefault(base, {})["B"] = key
-
-        for base, pair in lora_pairs.items():
-            a_key = pair.get("A")
-            b_key = pair.get("B")
-            if a_key is None or b_key is None:
-                continue
-
-            a_val = new_state_dict.get(a_key)
-            b_val = new_state_dict.get(b_key)
-            if not isinstance(a_val, torch.Tensor) or not isinstance(
-                b_val, torch.Tensor
-            ):
-                continue
-
-            # Only handle simple linear-style LoRA weights
-            if a_val.ndim != 2 or b_val.ndim != 2:
-                continue
-
-            b0, b1 = b_val.shape
-            # If the smaller dimension (candidate rank) is on dim 0 for lora_B,
-            # transpose both A and B so that rank becomes the second dim for lora_B.
-
-        del state_dict
-        return new_state_dict
 
     def resolve(
         self,
@@ -238,6 +234,22 @@ class LoraManager(DownloadMixin):
         if "." in name or "/" in name:
             name = name.replace(".", "_").replace("/", "_")
         return name
+    
+    def _get_prefix_key(self, keys:List[str]):
+        prefix = None
+        if keys[0].startswith("transformer") and keys[-1].startswith(
+            "transformer"
+        ):
+            prefix = "transformer"
+        elif keys[0].startswith("diffusion_model") and keys[-1].startswith(
+            "diffusion_model"
+        ):
+            prefix = "diffusion_model"
+        elif keys[0].startswith("model") and keys[-1].startswith("model"):
+            prefix = "model"
+            
+        return prefix
+        
 
     def load_into(
         self,
@@ -304,7 +316,10 @@ class LoraManager(DownloadMixin):
 
                 for local_path in item.local_paths:
                     class_name = getattr(model.config, "_class_name", "lora")
-                    local_path_state_dict, converted = self.maybe_convert_state_dict(
+                    #model = load_and_merge_lora_weight_from_safetensors(model, local_path)
+                    #continue
+
+                    local_path_state_dict = self.maybe_convert_state_dict(
                         local_path, class_name
                     )
 
@@ -322,27 +337,14 @@ class LoraManager(DownloadMixin):
 
 
                     keys = list(local_path_state_dict.keys())
-
-
-                    prefix = None
-                    if keys[0].startswith("transformer") and keys[-1].startswith(
-                        "transformer"
-                    ):
-                        prefix = "transformer"
-                    elif keys[0].startswith("diffusion_model") and keys[-1].startswith(
-                        "diffusion_model"
-                    ):
-                        prefix = "diffusion_model"
-                    elif keys[0].startswith("model") and keys[-1].startswith("model"):
-                        prefix = "model"
-
+                    prefix = self._get_prefix_key(keys)
                     # ensure adapter name is not too long and does not have . or / in it if so remove it
                     adapter_name = self._clean_adapter_name(adapter_name)
-
-
+                    
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
+
 
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 
@@ -355,16 +357,17 @@ class LoraManager(DownloadMixin):
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
+        
         return loaded_resolved
 
-    def maybe_convert_state_dict(self, local_path: str, model_name: str) -> str:
+    def maybe_convert_state_dict(self, local_path: str, model_name: str):
         state_dict = self.load_file(local_path)
         converter = get_transformer_converter_by_model_name(model_name)
-        converted = False
         if converter is not None:
             converter.convert(state_dict)
-            converted = True
-        return state_dict, converted
+        lora_converter = LoraConverter()
+        lora_converter.convert(state_dict)
+        return state_dict
 
     def _format_to_extension(self, format: str) -> str:
         format = format.lower()
@@ -452,7 +455,7 @@ class LoraManager(DownloadMixin):
 
         raise RuntimeError(f"No downloadable files found for CivitAI model {model_id}")
 
-    def load_file(self, local_path: str) -> str:
+    def load_file(self, local_path: str) -> Dict[str, torch.Tensor]:
         if local_path.endswith(".safetensors"):
             return load_file(local_path)
         else:

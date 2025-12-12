@@ -4,17 +4,17 @@ import torch.nn as nn
 from peft.tuners._buffer_dict import BufferDict
 from peft.tuners.lora import layer as lora_layer
 
-from src.quantize.scaled_layer import FP8ScaledLayer
+from src.quantize.scaled_layer import FPScaledLayer
 from src.quantize.ggml_layer import GGMLLayer
 
 
 class QuantizedLinearLora(lora_layer.Linear):
     """
-    LoRA wrapper for quantized linear layers (GGML / FP8Scaled).
+    LoRA wrapper for quantized linear layers (GGML / FPScaled).
 
     Differences from the default PEFT `Linear` wrapper:
     - Adapter weights (lora_A/B, etc.) are always kept in a *compute* dtype
-      (e.g. float16 / bfloat16) even when the base layer stores FP8 / GGML
+      (e.g. float16 / bfloat16) even when the base layer stores FP / GGML
       weights.
     - This avoids running LoRA matmuls in unsupported dtypes like float8,
       while still calling the quantized base layer for the main projection.
@@ -48,13 +48,13 @@ class QuantizedLinearLora(lora_layer.Linear):
         # - For FP8Scaled layers, use their effective compute dtype.
         # - For GGML layers, use their dequant dtype or fallback to float16.
         # - Otherwise, mirror the base layer's weight dtype (PEFT default).
-        if isinstance(base_layer, FP8ScaledLayer):
+        if isinstance(base_layer, FPScaledLayer):
             try:
                 compute_dtype = base_layer._effective_compute_dtype(None)
             except Exception:
-                compute_dtype = torch.float16
+                compute_dtype = torch.bfloat16
         elif isinstance(base_layer, GGMLLayer):
-            compute_dtype = getattr(base_layer, "dequant_dtype", None) or torch.float16
+            compute_dtype = getattr(base_layer, "dequant_dtype", None) or torch.bfloat16
         else:
             # Fallback to the original behavior
             w = getattr(base_layer, "weight", None) or getattr(base_layer, "qweight", None)
@@ -197,7 +197,7 @@ def _dispatch_default_with_quant(
     # --- Linear family (this is where we hook GGML / FP8Scaled) ---
     if isinstance(target_base_layer, nn.Linear):
         # If this is one of our quantized/scaled linear types, use custom LoRA.
-        if isinstance(target_base_layer, (FP8ScaledLayer, GGMLLayer)):
+        if isinstance(target_base_layer, (FPScaledLayer, GGMLLayer)):
             # PEFT expects fan_in_fan_out=False for torch.nn.Linear
             if kwargs.get("fan_in_fan_out", False):
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False

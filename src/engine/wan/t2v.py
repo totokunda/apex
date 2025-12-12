@@ -147,6 +147,8 @@ class WanT2VEngine(WanShared):
             )
         else:
             boundary_timestep = None
+            
+        
 
         # Set preview context for per-step rendering on the main engine when available
         self._preview_height = height
@@ -156,6 +158,9 @@ class WanT2VEngine(WanShared):
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+        
+        
+
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -187,9 +192,6 @@ class WanT2VEngine(WanShared):
             guidance_scale=guidance_scale,
             ip_image=ip_image,
         )
-
-        if offload:
-            self._offload(self.transformer)
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 

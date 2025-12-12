@@ -50,40 +50,46 @@ class OffloadMixin:
 
         if not module:
             return
+        # 1)  Off-load PARAMETERS & BUFFERS using PyTorch's highly-optimized machinery.
+        #
+        # For the common (recurse=True) case this uses a single `_apply` traversal
+        # underneath `module.to("cpu")`, which is substantially faster than
+        # walking `named_parameters` / `named_buffers` multiple times in Python.
+        if recurse:
+            # `non_blocking=True` can overlap device-to-host copies when the source
+            # storage is pinned, without hurting the CPU-only case.
+            module.to(device=torch.device("cpu"), non_blocking=True)
+        else:
+            # Non-recursive mode: only touch tensors directly owned by `module`.
+            for _, param in module.named_parameters(recurse=False):
+                if param.device.type != "cpu":
+                    param.data = param.data.to("cpu", non_blocking=True)
+                if param.grad is not None and param.grad.device.type != "cpu":
+                    param.grad.data = param.grad.data.to("cpu", non_blocking=True)
 
-        # 1)  Off-load PARAMETERS
-        for name, param in module.named_parameters(recurse=recurse):
-            if param.device.type != "cpu":
-                param.data = param.data.cpu()
-                if param.grad is not None:
-                    param.grad.data = param.grad.data.cpu()
+            for name, buf in module.named_buffers(recurse=False):
+                if buf.device.type != "cpu":
+                    module._buffers[name] = buf.to("cpu", non_blocking=True)
 
-        # 2)  Off-load BUFFERS (e.g. running stats from BatchNorm)
-        for name, buf in module.named_buffers(recurse=recurse):
-            if buf.device.type != "cpu":
-                # Need to replace the reference inside the owning module
-                parent, _, key = name.rpartition(".")
-                owner = module.get_submodule(parent) if parent else module
-                owner._buffers[key] = buf.cpu()
-
-        # 2b)  Optionally drop PARAMETERS and BUFFERS from the module entirely so it
-        #      holds no tensor memory (CPU or accelerator).  This does *not* clear
-        #      external references (e.g. optimizers), but removes everything owned by
-        #      the module itself.
+        # 2)  Optionally drop PARAMETERS and BUFFERS from the module entirely so it
+        #     holds no tensor memory (CPU or accelerator). This does *not* clear
+        #     external references (e.g. optimizers), but removes everything owned by
+        #     the module itself.
         if delete_from_cpu:
-            # Drop parameters
-            for name, _ in list(module.named_parameters(recurse=recurse)):
-                parent, _, key = name.rpartition(".")
-                owner = module.get_submodule(parent) if parent else module
-                if hasattr(owner, "_parameters") and key in owner._parameters:
-                    owner._parameters[key] = None
+            # Decide which modules to touch based on recursion flag.
+            modules = module.modules() if recurse else (module,)
 
-            # Drop buffers
-            for name, _ in list(module.named_buffers(recurse=recurse)):
-                parent, _, key = name.rpartition(".")
-                owner = module.get_submodule(parent) if parent else module
-                if hasattr(owner, "_buffers") and key in owner._buffers:
-                    owner._buffers.pop(key, None)
+            for submodule in modules:
+                # Drop parameters: preserve keys but set to None to maintain the
+                # same semantics as the previous implementation.
+                if hasattr(submodule, "_parameters") and submodule._parameters:
+                    for key in list(submodule._parameters.keys()):
+                        submodule._parameters[key] = None
+
+                # Drop buffers
+                if hasattr(submodule, "_buffers") and submodule._buffers:
+                    for key in list(submodule._buffers.keys()):
+                        submodule._buffers.pop(key, None)
 
         # 3)  Reclaim Python-level / CPU RAM
         gc.collect()
