@@ -34,6 +34,7 @@ class WanAnimateEngine(WanShared):
             do_normalize=False,
             do_convert_grayscale=True,
         )
+        self.fps = 16
 
     def get_i2v_mask(
         self,
@@ -398,7 +399,7 @@ class WanAnimateEngine(WanShared):
         face_video: Optional[InputVideo] = None,
         background_video: Optional[InputVideo] = None,
         mask_video: Optional[InputVideo] = None,
-        prompt: Union[str, List[str]] = None,
+        prompt: Union[str, List[str]] = '视频中的人在做动作',
         negative_prompt: Union[str, List[str]] = None,
         height: int = 720,
         width: int = 1280,
@@ -450,12 +451,12 @@ class WanAnimateEngine(WanShared):
         image = self._load_image(image)
         image, height, width = self._aspect_ratio_resize(image, max_area=height * width)
 
-        pose_video = self._load_video(pose_video)
-        face_video = self._load_video(face_video)
+        pose_video = self._load_video(pose_video, fps=self.fps)
+        face_video = self._load_video(face_video, fps=self.fps)
         if background_video is not None:
-            background_video = self._load_video(background_video)
+            background_video = self._load_video(background_video, fps=self.fps)
         if mask_video is not None:
-            mask_video = self._load_video(mask_video)
+            mask_video = self._load_video(mask_video, fps=self.fps)
 
         self._guidance_scale = guidance_scale
 
@@ -504,11 +505,6 @@ class WanAnimateEngine(WanShared):
             negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
         # 4. Preprocess and encode the reference (character) image
-        image_height, image_width = self.video_processor.get_default_height_width(image)
-        if image_height != height or image_width != width:
-            self.logger.warning(
-                f"Reshaping reference image from ({image_width}, {image_height}) to ({width}, {height})"
-            )
         image_pixels = self.vae_image_processor.preprocess(
             image, height=height, width=width, resize_mode="fill"
         ).to(device, dtype=torch.float32)
@@ -541,14 +537,19 @@ class WanAnimateEngine(WanShared):
 
         face_video_width, face_video_height = face_video[0].size
         expected_face_size = self.transformer.motion_encoder_size
-        if (
-            face_video_width != expected_face_size
-            or face_video_height != expected_face_size
-        ):
+        # check if face_video is square 
+        if face_video_width != face_video_height:
             self.logger.warning(
-                f"Reshaping face video from ({face_video_width}, {face_video_height}) to ({expected_face_size},"
-                f" {expected_face_size})"
+                f"Reshaping face video from ({face_video_width}, {face_video_height}) to ({face_video_height},"
+                f" {face_video_height})"
             )
+            face_video = [frame.resize((face_video_height, face_video_height)) for frame in face_video]
+        
+        if face_video_width != expected_face_size or face_video_height != expected_face_size:
+            # we will resize the face video to the expected face size
+            self.logger.info(f"Reshaping face video from ({face_video_width}, {face_video_height}) to ({expected_face_size}, {expected_face_size})")
+            face_video = [frame.resize((expected_face_size, expected_face_size)) for frame in face_video]
+        
         face_video = self.video_processor.preprocess_video(
             face_video, height=expected_face_size, width=expected_face_size
         ).to(device, dtype=torch.float32)

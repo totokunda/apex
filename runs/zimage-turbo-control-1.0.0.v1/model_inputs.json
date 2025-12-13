@@ -1,31 +1,31 @@
 {
     "engine_kwargs": {
         "engine_type": "zimage",
-        "yaml_path": "/home/divineade/apex/manifest/engine/zimage/zimage-turbo-control-1.0.0.v1.yml",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/engine/zimage/zimage-turbo-control-1.0.0.v1.yml",
         "model_type": "control",
         "selected_components": {
             "scheduler": {
                 "name": "scheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
+                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
                 "type": "scheduler",
                 "label": "Scheduler",
                 "default": "FlowMatchEulerDiscreteScheduler"
             },
             "vae": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/vae",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/text_encoder",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/transformer",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/transformer",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
@@ -34,14 +34,14 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "control_image": "assets/3975f838-2393-4a3d-a1a3-2cd78dec904c-5293387d-0290-4005-bb5b-12d3a4635a80_control_image_0_4.png",
+        "control_image": "assets/7177398a-2bd3-4b7b-ac9d-5a96696edc5f-b5c9740a-5def-4fef-9152-fb647d0cc320_control_image_13.png",
         "control_context_scale": 0.75,
-        "prompt": "An MMA fighter with their hands up ",
+        "prompt": "A group of people are running away in fear as the air around them is on fire as a heavy flame burns. ",
         "resolution": "custom",
         "aspect_ratio": "custom",
-        "height": 832,
-        "width": 480,
-        "seed": 43,
+        "height": 480,
+        "width": 864,
+        "seed": 3513438693,
         "duration": "5s"
     }
 }

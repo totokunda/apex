@@ -47,6 +47,10 @@ class WanT2VEngine(WanShared):
             )
         else:
             use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
+            
+        
+        if num_inference_steps <= 8:
+            render_on_step = False
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -61,7 +65,7 @@ class WanT2VEngine(WanShared):
             num_videos_per_prompt=num_videos,
             **text_encoder_kwargs,
         )
-
+        
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
 
         batch_size = prompt_embeds.shape[0]
@@ -106,6 +110,7 @@ class WanT2VEngine(WanShared):
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
+
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -148,8 +153,6 @@ class WanT2VEngine(WanShared):
         else:
             boundary_timestep = None
             
-        
-
         # Set preview context for per-step rendering on the main engine when available
         self._preview_height = height
         self._preview_width = width
@@ -158,14 +161,13 @@ class WanT2VEngine(WanShared):
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+        mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         
-        
-
-
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
             boundary_timestep=boundary_timestep,
             timesteps=timesteps,
+            mask=mask,
             latents=latents,
             latent_condition=None,
             transformer_kwargs=dict(
