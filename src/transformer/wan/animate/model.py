@@ -155,13 +155,13 @@ class MotionConv2d(nn.Module):
                 self.in_channels, 1, -1, -1
             )
             x = F.conv2d(
-                x, expanded_kernel, padding=self.blur_padding, groups=self.in_channels
+                x, expanded_kernel.to(x.dtype), padding=self.blur_padding, groups=self.in_channels
             )
 
         # Main Conv2D with scaling
         x = F.conv2d(
             x,
-            self.weight * self.scale,
+            self.weight.to(x.dtype) * self.scale,
             bias=self.bias,
             stride=self.stride,
             padding=self.padding,

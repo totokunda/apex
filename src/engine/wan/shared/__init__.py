@@ -256,10 +256,12 @@ class WanShared(BaseEngine, WanMLXDenoise):
         masked_video_latents = mask_kwargs.get("masked_video_latents", None)
         render_on_step_interval = kwargs.get("render_on_step_interval", 3)
         offload = kwargs.get("offload", True)
+        extra_step_kwargs = kwargs.get("extra_step_kwargs", {})
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
         
-        
+        if total_steps <= 8:
+            render_on_step = False
 
         with self._progress_bar(len(timesteps), desc=f"Sampling MOE") as pbar:
             total_steps = len(timesteps)
@@ -292,7 +294,6 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         )
                         
                         
-
                         self.load_component_by_name("high_noise_transformer")
                         self.to_device(self.high_noise_transformer)
 
@@ -358,7 +359,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         noise_pred - uncond_noise_pred
                     )
 
-                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
                 if (
                     self.vae_scale_factor_spatial >= 16
@@ -411,13 +412,16 @@ class WanShared(BaseEngine, WanMLXDenoise):
         offload = kwargs.get("offload", True)
         total_steps = len(timesteps) if timesteps is not None else 0
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
+        
+        if total_steps <= 8:
+            render_on_step = False
 
         if ip_image is not None:
             ip_image_latent = self._encode_ip_image(ip_image, dtype=transformer_dtype)
         else:
             ip_image_latent = None
 
-        if expand_timesteps and first_frame_mask is not None:
+        if expand_timesteps and first_frame_mask is None:
             mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         else:
             mask = None
@@ -433,6 +437,9 @@ class WanShared(BaseEngine, WanMLXDenoise):
         ) as pbar:
             total_steps = len(timesteps)
             for i, t in enumerate(timesteps):
+                # check if transformer group offload is enabled
+                if getattr(self.transformer, "_apex_group_offloading_enabled", False):
+                    empty_cache()
                 if expand_timesteps:
                     # seq_len: num_latent_frames * latent_height//2 * latent_width//2
                     if latent_condition is not None and first_frame_mask is not None:
@@ -456,7 +463,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         ).to(transformer_dtype)
                     else:
                         latent_model_input = latents.to(transformer_dtype)
-
+                    
+ 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     ip_image_hidden_states=ip_image_latent,
@@ -510,8 +518,4 @@ class WanShared(BaseEngine, WanMLXDenoise):
 
             self.logger.info("Denoising completed.")
             
-        if offload:
-            if hasattr(self, "transformer") and self.transformer:
-                self._offload(self.transformer)
-
         return latents

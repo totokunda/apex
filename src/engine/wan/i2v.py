@@ -19,8 +19,6 @@ class WanI2VEngine(WanShared):
         duration: int | str = 16,
         height: int = 480,
         width: int = 832,
-        aspect_ratio: str | None = None,
-        resolution: int | None = None,
         num_inference_steps: int = 30,
         num_videos: int = 1,
         seed: int | None = None,
@@ -43,9 +41,15 @@ class WanI2VEngine(WanShared):
         **kwargs,
     ):
 
-        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
-
         safe_emit_progress(progress_callback, 0.0, "Starting image-to-video pipeline")
+        if guidance_scale is not None and isinstance(guidance_scale, list):
+            use_cfg_guidance = (
+                negative_prompt is not None
+                and guidance_scale[0] > 1.0
+                and guidance_scale[1] > 1.0
+            )
+        else:
+            use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -91,25 +95,6 @@ class WanI2VEngine(WanShared):
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         loaded_image = self._load_image(image)
-
-        # Prefer explicit height/width; otherwise derive from aspect_ratio/resolution; fallback to image area
-        if (height is None or width is None) and (
-            aspect_ratio is not None or resolution is not None
-        ):
-            if aspect_ratio is not None:
-                h, w = self._aspect_ratio_to_height_width(
-                    aspect_ratio,
-                    int(resolution or max(loaded_image.size)),
-                    mod_value=32 if expand_timesteps else 16,
-                )
-                height = h
-                width = w
-            elif resolution is not None:
-                h, w = self._resolution_to_height_width(
-                    int(resolution), mod_value=32 if expand_timesteps else 16
-                )
-                height = h
-                width = w
 
         loaded_image, height, width = self._aspect_ratio_resize(
             loaded_image,

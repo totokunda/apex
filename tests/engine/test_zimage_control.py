@@ -6,13 +6,19 @@ from src.engine.registry import UniversalEngine
 yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/zimage/zimage-turbo-control-1.0.0.v1.yml"
 engine = UniversalEngine(yaml_path=yaml_path)
 
-prompt = "一位年轻女子站在阳光明媚的海岸线上，白裙在轻拂的海风中微微飘动。她拥有一头鲜艳的紫色长发，在风中轻盈舞动，发间系着一个精致的黑色蝴蝶结，与身后柔和的蔚蓝天空形成鲜明对比。她面容清秀，眉目精致，透着一股甜美的青春气息；神情柔和，略带羞涩，目光静静地凝望着远方的地平线，双手自然交叠于身前，仿佛沉浸在思绪之中。在她身后，是辽阔无垠、波光粼粼的大海，阳光洒在海面上，映出温暖的金色光晕。"
-control_image = "/home/tosin_coverquick_co/apex/VideoX-Fun/asset/pose.jpg"
+prompt = """A man in his early thirties with a solid, well-balanced build and a calm, grounded presence. His head is slightly broad with a smooth, rounded crown. He has short, closely cropped dark hair, kept neat along the sides and back, with a subtle natural wave on top. His eyebrows are thick but tidy, framing deep-set eyes of a dark brown color that give him a steady, observant look. His eyes are relaxed rather than sharp, conveying quiet confidence.
+
+His nose is straight and prominent, medium in width, with a softly rounded tip. His cheeks are full but firm, suggesting strength rather than softness. He has a strong, rounded jawline with a solid chin, not sharply angular but clearly defined. His lips are medium-full, naturally shaped, usually resting in a neutral expression.
+
+His skin tone is medium to warm brown, even and smooth, with subtle natural shading around the eyes and jaw. Light stubble lines his jaw and upper lip, giving him a slightly rugged, mature appearance. His ears are average in size and sit close to the head. Overall, his features feel natural, masculine, and composed—someone who appears dependable, thoughtful, and quietly self-assured."""
+control_image = "/home/tosin_coverquick_co/apex/assets/man.png"
 out = engine.run(
     control_image=control_image,
+    height=1088,
+    width=720,
     prompt=prompt,
     seed=43,
-    control_context_scale=0.75
+    control_context_scale=0.8
 )
 
 out[0].save("output_zimage_control.png")

@@ -129,7 +129,8 @@ spec:
       timesteps_as_indices: true
       boundary_ratio: 0.875
       expand_timesteps: false
-      text_encoder_kwargs: {}
+      text_encoder_kwargs: 
+        use_attention_mask: true
       attention_kwargs: {}
   ui:
     panels:

@@ -18,6 +18,11 @@ class ZImageShared(BaseEngine):
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor * 2
         )
+        self.mask_processor = VaeImageProcessor(
+            vae_scale_factor=self.vae_scale_factor, do_normalize=False, do_binarize=True, do_convert_grayscale=True
+        )
+        
+        self.num_channels_latents = self.transformer.in_channels if self.transformer is not None else 16
 
     def encode_prompt(
         self,

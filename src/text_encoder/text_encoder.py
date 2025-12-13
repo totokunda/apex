@@ -157,6 +157,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "clean_text": clean_text,
             "output_type": output_type,
             "lower_case": lower_case,
+            "model_path": self.model_path,
             "process_inputs_func": (
                 inspect.signature(process_inputs_func).parameters
                 if process_inputs_func is not None
@@ -218,6 +219,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             "clean_text": clean_text,
             "output_type": output_type,
             "lower_case": lower_case,
+            "model_path": self.model_path,
             "process_inputs_func": (
                 inspect.signature(process_inputs_func).parameters
                 if process_inputs_func is not None
@@ -262,6 +264,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             text_inputs = process_inputs_func(text_inputs)
 
         text_input_ids, mask = text_inputs.input_ids, text_inputs.attention_mask
+
         seq_lens = mask.gt(0).sum(dim=1).long()
         inputs = {"input_ids": text_input_ids.to(device=self.model.device)}
 
@@ -289,8 +292,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             inputs["attention_mask"] = mask.to(device=self.model.device)
             
         self.model.apply(lambda m: m.register_forward_hook(nan_hook))
-        
-        
+      
         result = self.model(
             **inputs,
             output_hidden_states=(
@@ -320,7 +322,6 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             raise ValueError(f"Invalid output type: {output_type}")
 
         prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
-
         if output_type == "pooler_output":
             prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
             prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, -1)

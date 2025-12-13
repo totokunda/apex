@@ -50,6 +50,11 @@ class GGMLTensor(torch.Tensor):
         out.patches = list(getattr(self, "patches", []))
         
         return out
+    
+    
+    @property
+    def base_dtype(self) -> torch.dtype:
+        return super().dtype
 
     # ---- tensor API overrides (preserve metadata) -------------------------
     @property
