@@ -526,7 +526,8 @@ class LoaderMixin(DownloadMixin):
             maybe_compile = getattr(self, "_maybe_compile_module", None)
             if callable(maybe_compile):
                 model = maybe_compile(model, component)
-                
+
+
         return model
 
     def _load_config_file(self, file_path: str | Path):
