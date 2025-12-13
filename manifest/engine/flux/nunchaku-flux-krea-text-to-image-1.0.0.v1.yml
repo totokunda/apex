@@ -92,6 +92,7 @@ spec:
       precision: nf4
       type: safetensors
       file_size: 7048192000
+    
 
   defaults:
     run:

@@ -27,6 +27,12 @@ spec:
     - cpu
   attention_types:
   - sdpa
+  loras:
+  - source: https://huggingface.co/gokaygokay/Flux-Krea-Realism-LoRA/blob/main/Flux_Krea_Real.safetensors
+    scale: 1.0
+    name: Flux Krea Realism LoRA
+    label: Flux Krea Realism LoRA
+    verified: true
   components:
   - type: scheduler
     label: Scheduler
