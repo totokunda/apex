@@ -1,14 +1,75 @@
 from typing import Dict, Any
 from src.converters.utils import update_state_dict_, swap_proj_gate, swap_scale_shift
 from src.quantize.ggml_ops import ggml_cat, ggml_chunk, ggml_split
+import torch
 import re
-
 
 class TransformerConverter:
     def __init__(self):
         self.rename_dict = {}
         self.special_keys_map = {}
         self.pre_special_keys_map = {}
+
+    @staticmethod
+    def _is_specific_marker(s: str) -> bool:
+        """
+        Return True if `s` is a "specific" key fragment that can be used as a reliable
+        signal when determining whether a checkpoint has already been converted.
+
+        We intentionally ignore very generic fragments (e.g. "norm2") that may appear
+        in *both* source and target key formats.
+        """
+        if not s:
+            return False
+        # Common ambiguous fragments that can exist in both source & target layouts.
+        if s in {"norm", "norm1", "norm2", "norm3", "weight", "bias"}:
+            return False
+        # Prefer dotted/underscored fragments; otherwise require sufficient length.
+        return ("." in s) or ("_" in s) or (len(s) >= 8)
+
+    def _already_converted(self, state_dict: Dict[str, Any]) -> bool:
+        """
+        Best-effort heuristic to detect whether `state_dict` appears to already be in
+        the *target* key format for this converter.
+
+        This is intentionally conservative:
+        - Requires *positive* evidence of target keys (target markers present)
+        - Requires *absence* of source markers that strongly suggest an unconverted ckpt
+        - Refuses to early-exit if we'd otherwise drop keys via pre/special handlers
+        """
+        if not state_dict:
+            return True
+
+        keys = list(state_dict.keys())
+
+        # Guard against partially-converted states introduced by placeholder hacks.
+        if any("norm__placeholder" in k for k in keys):
+            return False
+
+        # If we'd drop or synthesize keys, we are not "fully matching" yet.
+        if self.pre_special_keys_map:
+            for pre_special_key in self.pre_special_keys_map.keys():
+                if any(pre_special_key in k for k in keys):
+                    return False
+        if self.special_keys_map:
+            for special_key in self.special_keys_map.keys():
+                if any(special_key in k for k in keys):
+                    return False
+
+        # Build conservative marker sets from the rename map.
+        source_markers = [k for k in self.rename_dict.keys() if self._is_specific_marker(k)]
+        target_markers = [v for v in self.rename_dict.values() if self._is_specific_marker(v)]
+
+        # Without target markers we cannot safely assert the dict is already converted.
+        if not target_markers:
+            return False
+
+        has_target = any(any(m in k for m in target_markers) for k in keys)
+        if not has_target:
+            return False
+
+        has_source = any(any(m in k for m in source_markers) for k in keys)
+        return not has_source
 
     @staticmethod
     def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
@@ -24,6 +85,10 @@ class TransformerConverter:
 
     def convert(self, state_dict: Dict[str, Any]):
         self._sort_rename_dict()
+        # If this looks like a checkpoint that already matches the target key layout,
+        # exit early to keep conversion idempotent.
+        if self._already_converted(state_dict):
+            return state_dict
         # Apply pre-special keys map
         for key in list(state_dict.keys()):
             for (
@@ -34,19 +99,17 @@ class TransformerConverter:
                     handler_fn_inplace(key, state_dict)
 
         for key in list(state_dict.keys()):
-            new_key = key[:]
+            new_key = key
             for replace_key, rename_key in self.rename_dict.items():
                 new_key = new_key.replace(replace_key, rename_key)
-                update_state_dict_(state_dict, key, new_key)
+            update_state_dict_(state_dict, key, new_key)
 
         for key in list(state_dict.keys()):
             for special_key, handler_fn_inplace in self.special_keys_map.items():
                 if special_key not in key:
                     continue
                 handler_fn_inplace(key, state_dict)
-
-
-
+        return state_dict
 
 class WanTransformerConverter(TransformerConverter):
     def __init__(self):
@@ -112,6 +175,239 @@ class WanTransformerConverter(TransformerConverter):
             ".diff": self.remove_keys_inplace,
             "scaled_fp8": self.remove_keys_inplace,
         }
+
+
+class WanAnimateTransformerConverter(TransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            "time_embedding.0": "condition_embedder.time_embedder.linear_1",
+            "time_embedding.2": "condition_embedder.time_embedder.linear_2",
+            "text_embedding.0": "condition_embedder.text_embedder.linear_1",
+            "text_embedding.2": "condition_embedder.text_embedder.linear_2",
+            "time_projection.1": "condition_embedder.time_proj",
+            "head.modulation": "scale_shift_table",
+            "head.head": "proj_out",
+            "modulation": "scale_shift_table",
+            "ffn.0": "ffn.net.0.proj",
+            "ffn.2": "ffn.net.2",
+            # Hack to swap the layer names
+            # The original model calls the norms in following order: norm1, norm3, norm2
+            # We convert it to: norm1, norm2, norm3
+            "norm2": "norm__placeholder",
+            "norm3": "norm2",
+            "norm__placeholder": "norm3",
+            "img_emb.proj.0": "condition_embedder.image_embedder.norm1",
+            "img_emb.proj.1": "condition_embedder.image_embedder.ff.net.0.proj",
+            "img_emb.proj.3": "condition_embedder.image_embedder.ff.net.2",
+            "img_emb.proj.4": "condition_embedder.image_embedder.norm2",
+            # Add attention component mappings
+            "self_attn.q": "attn1.to_q",
+            "self_attn.k": "attn1.to_k",
+            "self_attn.v": "attn1.to_v",
+            "self_attn.o": "attn1.to_out.0",
+            "self_attn.norm_q": "attn1.norm_q",
+            "self_attn.norm_k": "attn1.norm_k",
+            "cross_attn.q": "attn2.to_q",
+            "cross_attn.k": "attn2.to_k",
+            "cross_attn.v": "attn2.to_v",
+            "cross_attn.o": "attn2.to_out.0",
+            "cross_attn.norm_q": "attn2.norm_q",
+            "cross_attn.norm_k": "attn2.norm_k",
+            "cross_attn.k_img": "attn2.to_k_img",
+            "cross_attn.v_img": "attn2.to_v_img",
+            "cross_attn.norm_k_img": "attn2.norm_k_img",
+            # After cross_attn -> attn2 rename, we need to rename the img keys
+            "attn2.to_k_img": "attn2.add_k_proj",
+            "attn2.to_v_img": "attn2.add_v_proj",
+            "attn2.norm_k_img": "attn2.norm_added_k",
+            # Wan Animate-specific mappings (motion encoder, face encoder, face adapter)
+            # Motion encoder mappings
+            # The name mapping is complicated for the convolutional part so we handle that in its own function
+            "motion_encoder.enc.fc": "motion_encoder.motion_network",
+            "motion_encoder.dec.direction.weight": "motion_encoder.motion_synthesis_weight",
+            # Face encoder mappings - CausalConv1d has a .conv submodule that we need to flatten
+            "face_encoder.conv1_local.conv": "face_encoder.conv1_local",
+            "face_encoder.conv2.conv": "face_encoder.conv2",
+            "face_encoder.conv3.conv": "face_encoder.conv3",
+            # Face adapter mappings are handled in a separate function
+        }
+
+        # Special handling for Animate-only auxiliary modules.
+        # - Motion encoder: rename sequential indices, drop blur-kernel buffers, fix bias shapes
+        # - Face adapter: split fused KV projections into separate K/V projections
+        self.special_keys_map = {
+            "motion_encoder": convert_animate_motion_encoder_weights,
+            "face_adapter": convert_animate_face_adapter_weights,
+            ".diff_b": self.remove_keys_inplace,
+            ".diff": self.remove_keys_inplace,
+            "scaled_fp8": self.remove_keys_inplace,
+        }
+
+        
+    def convert(self, state_dict: Dict[str, Any]):
+        for key in list(state_dict.keys()):
+            new_key = key[:]
+            for replace_key, rename_key in self.rename_dict.items():
+                new_key = new_key.replace(replace_key, rename_key)
+            update_state_dict_(state_dict, key, new_key)
+    
+        for key in list(state_dict.keys()):
+            for special_key, handler_fn_inplace in self.special_keys_map.items():
+                if special_key not in key:
+                    continue
+                handler_fn_inplace(key, state_dict)
+
+    
+# TODO: Verify this and simplify if possible.
+def convert_animate_motion_encoder_weights(key: str, state_dict: Dict[str, Any], final_conv_idx: int = 8) -> None:
+    """
+    Convert all motion encoder weights for Animate model.
+
+    In the original model:
+    - All Linear layers in fc use EqualLinear
+    - All Conv2d layers in convs use EqualConv2d (except blur_conv which is initialized separately)
+    - Blur kernels are stored as buffers in Sequential modules
+    - ConvLayer is nn.Sequential with indices: [Blur (optional), EqualConv2d, FusedLeakyReLU (optional)]
+
+    Conversion strategy:
+    1. Drop .kernel buffers (blur kernels)
+    2. Rename sequential indices to named components (e.g., 0 -> conv2d, 1 -> bias_leaky_relu)
+    """
+    # Skip if not a weight, bias, or kernel
+    if ".weight" not in key and ".bias" not in key and ".kernel" not in key:
+        return
+
+    # Handle Blur kernel buffers from original implementation.
+    # After renaming, these appear under: motion_encoder.res_blocks.*.conv{2,skip}.blur_kernel
+    # Diffusers constructs blur kernels as a non-persistent buffer so we must drop these keys
+    if ".kernel" in key and "motion_encoder" in key:
+        # Remove unexpected blur kernel buffers to avoid strict load errors
+        state_dict.pop(key, None)
+        return
+
+    # Rename Sequential indices to named components in ConvLayer and ResBlock
+    if ".enc.net_app.convs." in key and (".weight" in key or ".bias" in key):
+        parts = key.split(".")
+
+        # Find the sequential index (digit) after convs or after conv1/conv2/skip
+        # Examples:
+        # - enc.net_app.convs.0.0.weight -> conv_in.weight (initial conv layer weight)
+        # - enc.net_app.convs.0.1.bias -> conv_in.act_fn.bias (initial conv layer bias)
+        # - enc.net_app.convs.{n:1-7}.conv1.0.weight -> res_blocks.{(n-1):0-6}.conv1.weight (conv1 weight)
+        #     - e.g. enc.net_app.convs.1.conv1.0.weight -> res_blocks.0.conv1.weight
+        # - enc.net_app.convs.{n:1-7}.conv1.1.bias -> res_blocks.{(n-1):0-6}.conv1.act_fn.bias (conv1 bias)
+        #     - e.g. enc.net_app.convs.1.conv1.1.bias -> res_blocks.0.conv1.act_fn.bias
+        # - enc.net_app.convs.{n:1-7}.conv2.1.weight -> res_blocks.{(n-1):0-6}.conv2.weight (conv2 weight)
+        # - enc.net_app.convs.1.conv2.2.bias -> res_blocks.0.conv2.act_fn.bias (conv2 bias)
+        # - enc.net_app.convs.{n:1-7}.skip.1.weight -> res_blocks.{(n-1):0-6}.conv_skip.weight (skip conv weight)
+        # - enc.net_app.convs.8 -> conv_out (final conv layer)
+
+        convs_idx = parts.index("convs") if "convs" in parts else -1
+        if convs_idx >= 0 and len(parts) - convs_idx >= 2:
+            bias = False
+            # The nn.Sequential index will always follow convs
+            sequential_idx = int(parts[convs_idx + 1])
+            if sequential_idx == 0:
+                if key.endswith(".weight"):
+                    new_key = "motion_encoder.conv_in.weight"
+                elif key.endswith(".bias"):
+                    new_key = "motion_encoder.conv_in.act_fn.bias"
+                    bias = True
+            elif sequential_idx == final_conv_idx:
+                if key.endswith(".weight"):
+                    new_key = "motion_encoder.conv_out.weight"
+            else:
+                # Intermediate .convs. layers, which get mapped to .res_blocks.
+                prefix = "motion_encoder.res_blocks."
+
+                layer_name = parts[convs_idx + 2]
+                if layer_name == "skip":
+                    layer_name = "conv_skip"
+
+                if key.endswith(".weight"):
+                    param_name = "weight"
+                elif key.endswith(".bias"):
+                    param_name = "act_fn.bias"
+                    bias = True
+
+                suffix_parts = [str(sequential_idx - 1), layer_name, param_name]
+                suffix = ".".join(suffix_parts)
+                new_key = prefix + suffix
+
+            param = state_dict.pop(key)
+            if bias:
+                param = param.squeeze()
+            state_dict[new_key] = param
+
+            return
+        return
+    return
+
+
+def convert_animate_face_adapter_weights(key: str, state_dict: Dict[str, Any]) -> None:
+    """
+    Convert face adapter weights for the Animate model.
+
+    The original model uses a fused KV projection but the diffusers models uses separate K and V projections.
+    """
+    # Skip if not a weight or bias
+    if ".weight" not in key and ".bias" not in key:
+        return
+
+    prefix = "face_adapter."
+    if ".fuser_blocks." in key:
+        parts = key.split(".")
+
+        module_list_idx = parts.index("fuser_blocks") if "fuser_blocks" in parts else -1
+        if module_list_idx >= 0 and (len(parts) - 1) - module_list_idx == 3:
+            block_idx = parts[module_list_idx + 1]
+            layer_name = parts[module_list_idx + 2]
+            param_name = parts[module_list_idx + 3]
+
+            if layer_name == "linear1_kv":
+                layer_name_k = "to_k"
+                layer_name_v = "to_v"
+
+                suffix_k = ".".join([block_idx, layer_name_k, param_name])
+                suffix_v = ".".join([block_idx, layer_name_v, param_name])
+                new_key_k = prefix + suffix_k
+                new_key_v = prefix + suffix_v
+
+                kv_proj = state_dict.pop(key)
+                k_proj, v_proj = ggml_chunk(kv_proj, 2, dim=0)
+                state_dict[new_key_k] = k_proj
+                state_dict[new_key_v] = v_proj
+                # check for scale_weight
+                if ".weight" in key:
+                    scale_weight_key = key.replace(".weight", ".scale_weight")
+                    if scale_weight_key in state_dict:
+                        scale_weight = state_dict.pop(scale_weight_key)
+                        state_dict[new_key_k.replace(".weight", ".scale_weight")] = scale_weight
+                        state_dict[new_key_v.replace(".weight", ".scale_weight")] = scale_weight
+                return
+            else:
+                if layer_name == "q_norm":
+                    new_layer_name = "norm_q"
+                elif layer_name == "k_norm":
+                    new_layer_name = "norm_k"
+                elif layer_name == "linear1_q":
+                    new_layer_name = "to_q"
+                elif layer_name == "linear2":
+                    new_layer_name = "to_out"
+
+                suffix_parts = [block_idx, new_layer_name, param_name]
+                suffix = ".".join(suffix_parts)
+                new_key = prefix + suffix
+                state_dict[new_key] = state_dict.pop(key)
+                # check for scale_weight
+                if ".weight" in key:
+                    scale_weight_key = key.replace(".weight", ".scale_weight")
+                    if scale_weight_key in state_dict:
+                        scale_weight = state_dict.pop(scale_weight_key)
+                        state_dict[new_key.replace(".weight", ".scale_weight")] = scale_weight
+                return
+    return
 
 class SkyReelsTransformerConverter(WanTransformerConverter):
     def __init__(self):

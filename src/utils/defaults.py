@@ -65,6 +65,14 @@ if isinstance(_persisted, dict):
     DEFAULT_POSTPROCESSOR_SAVE_PATH = _persisted.get(
         "postprocessor_path", DEFAULT_POSTPROCESSOR_SAVE_PATH
     )
+    # Persisted render-step toggles for inference progress callbacks
+    # (stored as env-var-compatible "true"/"false" strings).
+    _enable_image_render_step = _persisted.get("ENABLE_IMAGE_RENDER_STEP")
+    if isinstance(_enable_image_render_step, str) and _enable_image_render_step.strip():
+        os.environ["ENABLE_IMAGE_RENDER_STEP"] = _enable_image_render_step.strip().lower()
+    _enable_video_render_step = _persisted.get("ENABLE_VIDEO_RENDER_STEP")
+    if isinstance(_enable_video_render_step, str) and _enable_video_render_step.strip():
+        os.environ["ENABLE_VIDEO_RENDER_STEP"] = _enable_video_render_step.strip().lower()
     # HF token persistence for backend process
     _hf_token = _persisted.get("hf_token")
     if isinstance(_hf_token, str) and _hf_token.strip():

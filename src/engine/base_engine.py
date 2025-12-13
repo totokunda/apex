@@ -55,11 +55,6 @@ from glob import glob
 from safetensors import safe_open
 import mlx.core as mx
 import mlx.nn as mx_nn
-from src.converters import (
-    get_transformer_keys,
-    convert_transformer,
-    convert_vae,
-)
 import numpy as np
 from PIL import Image
 from torchvision import transforms as TF
@@ -787,23 +782,25 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         vae = vae.eval()
         return vae
 
-    def enable_vae_tiling(self):
+    def enable_vae_tiling(self, component_name: str = "vae"):
         self.vae_tiling = True
-        if self.vae is None:
+        if getattr(self, component_name, None) is None:
             return
-        if hasattr(self.vae, "enable_tiling"):
-            self.vae.enable_tiling()
+        if hasattr(getattr(self, component_name), "enable_tiling"):
+            getattr(self, component_name).enable_tiling()
+            self.logger.info(f"Enabled tiling for {component_name}")
         else:
-            self.logger.warning("VAE does not support tiling")
+            self.logger.warning(f"{component_name} does not support tiling")
 
-    def enable_vae_slicing(self):
+    def enable_vae_slicing(self, component_name: str = "vae"):
         self.vae_slicing = True
-        if self.vae is None:
+        if getattr(self, component_name, None) is None:
             return
-        if hasattr(self.vae, "enable_slicing"):
-            self.vae.enable_slicing()
+        if hasattr(getattr(self, component_name), "enable_slicing"):
+            getattr(self, component_name).enable_slicing()
+            self.logger.info(f"Enabled slicing for {component_name}")
         else:
-            self.logger.warning("VAE does not support slicing")
+            self.logger.warning(f"{component_name} does not support slicing")
 
     def load_config_by_type(self, component_type: str):
         with accelerate.init_empty_weights():
@@ -839,7 +836,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         return {}
             raise ValueError(f"Component type {component_type} not found")
 
-    def load_config_by_name(self, component_name: str):
+    def load_config_by_name(self, component_name: str, component_type: str = None):
         with accelerate.init_empty_weights():
             for component in self.config.get("components", []):
                 if component.get("name") == component_name:
@@ -872,7 +869,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         return config
                     else:
                         return {}
-            raise ValueError(f"Component name {component_name} not found")
+            if component_type:
+                return self.load_config_by_type(component_type)
+            else:
+                raise ValueError(f"Component name {component_name} not found")
 
     def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
         component["load_dtype"] = self.component_load_dtypes.get("text_encoder", None)
@@ -894,9 +894,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 already_enabled = getattr(
                     text_encoder, "_group_offloading_enabled", False
                 )
+
                 if not already_enabled:
+                    offloading_module = component.get("offloading_module", None)
+                    if offloading_module:
+                        model_to_offload = text_encoder.model.get_submodule(offloading_module)
+                    else:
+                        model_to_offload = text_encoder.model
                     self._apply_group_offloading(
-                        text_encoder.model,
+                        model_to_offload,
                         mm_config,
                         module_label=component.get("name") or "text_encoder",
                     )
@@ -1568,6 +1574,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # Decide on offloading strategy
         config = MemoryConfig.for_block_level()
+        
+        if (component.get("type") == "transformer" and self.config.get("metadata", {}).get("id") == "zimage-turbo-control"):
+            config.group_offload_record_stream = False
+            config.group_offload_use_stream = False
+            self.logger.info(f"Component {component.get('name') or ctype}: using no stream offload")
 
         # Determine if we need disk offload
         # Calculate how many blocks will be in CPU memory at once (rough estimate: 2-3 blocks)
@@ -1645,6 +1656,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             )
         else:
             denormalized_latents = latents
+            
+        self.enable_vae_tiling(component_name=component_name)
 
         video = getattr(self, component_name).decode(
             denormalized_latents, return_dict=False
@@ -1825,7 +1838,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             else:
 
                 from diffusers.hooks import apply_group_offloading
-
+                
+                
                 apply_group_offloading(module, **kwargs)
 
         except Exception as exc:
@@ -1875,7 +1889,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 setattr(self, component.get("type"), component_module)
                 break
 
-    def load_component_by_name(self, component_name: str):
+    def load_component_by_name(self, component_name: str, component_type: str = None):
+        loaded_component = False
         for component in self.config.get("components", []):
             if component.get("name") == component_name:
                 ignore_load_dtype = component.get("extra_kwargs", {}).get(
@@ -1891,7 +1906,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                     ),
                 )
                 setattr(self, component.get("name"), component_module)
-                break
+                loaded_component = True
+                return component_module
+    
+        if not loaded_component and component_type:
+            return self.load_component_by_type(component_type)
 
     def get_component_by_name(self, component_name: str):
         for component in self.config.get("components", []):
@@ -1961,7 +1980,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 else item.name or f"lora_{i}"
             )
             self.loaded_loras[name] = item
-        self.logger.info(f"Applied {len(resolved)} LoRA(s) to transformer")
+        
 
     def _load_loras(self):
         """If the YAML config includes a top-level `loras` list, apply them on init.
@@ -2223,13 +2242,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         image: Optional[bool] = False,
     ):
         if image:
-            image = self.vae_decode(latents, timestep=timestep)
-            rendered_image = self._tensor_to_frame(image)
-            render_on_step_callback(rendered_image[0])
+            if os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "true":
+                image = self.vae_decode(latents, timestep=timestep)
+                rendered_image = self._tensor_to_frame(image)
+                render_on_step_callback(rendered_image[0])
         else:
-            video = self.vae_decode(latents, timestep=timestep)
-            rendered_video = self._tensor_to_frames(video)
-            render_on_step_callback(rendered_video)
+            if os.environ.get("ENABLE_VIDEO_RENDER_STEP", "true") == "true":
+                video = self.vae_decode(latents, timestep=timestep)
+                rendered_video = self._tensor_to_frames(video)
+                render_on_step_callback(rendered_video)
 
     def _tensor_to_frames(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
@@ -2280,6 +2301,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 timestep_ids = torch.tensor(
                     timesteps, dtype=torch.long, device=self.device
                 )
+                
                 num_train_timesteps = getattr(
                     self.scheduler, "num_train_timesteps", 1000
                 )

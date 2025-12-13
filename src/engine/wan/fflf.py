@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import WanShared
+from src.types import InputImage
 
 
 class WanFFLFEngine(WanShared):
@@ -11,12 +12,8 @@ class WanFFLFEngine(WanShared):
 
     def run(
         self,
-        first_frame: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
-        ],
-        last_frame: Union[
-            Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
-        ],
+        first_frame: InputImage,
+        last_frame: InputImage,
         prompt: List[str] | str,
         fps: int = 16,
         height: int = 480,
@@ -48,9 +45,16 @@ class WanFFLFEngine(WanShared):
         Generates video content conditioned on both first and last frames.
         """
 
-        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         safe_emit_progress(progress_callback, 0.0, "Starting FFLF pipeline")
+        if guidance_scale is not None and isinstance(guidance_scale, list):
+            use_cfg_guidance = (
+                negative_prompt is not None
+                and guidance_scale[0] > 1.0
+                and guidance_scale[1] > 1.0
+            )
+        else:
+            use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
@@ -112,11 +116,7 @@ class WanFFLFEngine(WanShared):
             loaded_last_frame, height=height, width=width
         ).to(self.device, dtype=torch.float32)
 
-        if not self.transformer:
-            self.load_component_by_type("transformer")
-
-        self.to_device(self.transformer)
-
+    
         transformer_dtype = self.component_dtypes["transformer"]
 
         if boundary_ratio is None:
@@ -133,8 +133,10 @@ class WanFFLFEngine(WanShared):
                 self.device, dtype=transformer_dtype
             )
 
-        if offload:
+        if offload and boundary_ratio is None:
             self._offload(self.helpers["clip"])
+            
+        self.to_device(self.transformer)
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -275,9 +277,6 @@ class WanFFLFEngine(WanShared):
             guidance_scale=guidance_scale,
             ip_image=ip_image,
         )
-
-        if offload:
-            self._offload(self.transformer)
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 

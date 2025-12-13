@@ -4,10 +4,13 @@ from src.utils.progress import safe_emit_progress
 from .shared import ZImageShared
 from PIL import Image
 import numpy as np
-
+from torch.nn import functional as F
 
 class ZImageControlEngine(ZImageShared):
     """ZImage Control Engine Implementation"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.control_in_dim = 33
 
     @property
     def guidance_scale(self):
@@ -66,13 +69,26 @@ class ZImageControlEngine(ZImageShared):
         ref_image = ref_image.unsqueeze(0).permute([3, 0, 1, 2]).unsqueeze(0) / 255
 
         return ref_image
+    
+    def get_image_latent(self, ref_image=None, sample_size=None, padding=False):
+        if ref_image is not None:
+            ref_image = self._load_image(ref_image)
+            if padding:
+                ref_image = self.padding_image(ref_image, sample_size[1], sample_size[0])
+            ref_image = ref_image.resize((sample_size[1], sample_size[0]))
+            ref_image = torch.from_numpy(np.array(ref_image))
+            ref_image = ref_image.unsqueeze(0).permute([3, 0, 1, 2]).unsqueeze(0) / 255
+
+        return ref_image
 
     def run(
         self,
         prompt: Union[str, List[str]] = None,
         height: Optional[int] = None,
         width: Optional[int] = None,
+        inpaint_image: Union[torch.FloatTensor] = None,
         control_image: Union[torch.FloatTensor] = None,
+        mask_image: Union[torch.FloatTensor] = None,
         control_context_scale: float = 1.0,
         num_inference_steps: int = 50,
         sigmas: Optional[List[float]] = None,
@@ -102,9 +118,6 @@ class ZImageControlEngine(ZImageShared):
         height = height or 1024
         width = width or 1024
 
-        if seed is not None:
-            generator = torch.Generator(device=self.device).manual_seed(seed)
-
         vae_scale = self.vae_scale_factor * 2
         if height % vae_scale != 0:
             raise ValueError(
@@ -116,6 +129,20 @@ class ZImageControlEngine(ZImageShared):
                 f"Width must be divisible by {vae_scale} (got {width}). "
                 f"Please adjust the width to a multiple of {vae_scale}."
             )
+        
+        sample_size = [height, width]
+        if inpaint_image is not None:
+            image = self.get_image_latent(inpaint_image, sample_size=sample_size)[:, :, 0]
+        else:
+            image = torch.zeros([1, 3, sample_size[0], sample_size[1]])
+
+        if mask_image is not None:
+            mask_image = self.get_image_latent(mask_image, sample_size=sample_size)[:, :1, 0]
+        else:
+            mask_image = torch.ones([1, 1, sample_size[0], sample_size[1]]) * 255
+
+        if control_image is not None:
+            control_image = self.get_image_latent(control_image, sample_size=sample_size)[:, :, 0]
 
         self._guidance_scale = guidance_scale
         self._joint_attention_kwargs = joint_attention_kwargs
@@ -131,19 +158,43 @@ class ZImageControlEngine(ZImageShared):
             batch_size = len(prompt_embeds)
 
         device = self.device
-        weight_dtype = self.component_dtypes.get("transformer", None)
+        weight_dtype = self.component_dtypes["transformer"]
+        num_channels_latents = self.num_channels_latents
+
+        # Prepare mask latent variables
+        if num_channels_latents != self.control_in_dim:
+            if mask_image is not None:
+                mask_condition = self.mask_processor.preprocess(mask_image, height=height, width=width) 
+                mask_condition = torch.tile(mask_condition, [1, 3, 1, 1]).to(dtype=weight_dtype, device=device)
+            
+            if image is not None:
+                init_image = self.image_processor.preprocess(image, height=height, width=width)
+                init_image = init_image.to(dtype=weight_dtype, device=device) * (mask_condition < 0.5)
+                inpaint_latent = self.vae_encode(init_image)
+            else:
+                inpaint_latent = torch.zeros((batch_size, num_channels_latents, 2 * (int(height) // (self.vae_scale_factor * 2)), 2 * (int(width) // (self.vae_scale_factor * 2)))).to(device, weight_dtype)
 
         if control_image is not None:
-            control_image = self.prepare_image(control_image, (height, width))[:, :, 0]
-            control_image = self.image_processor.preprocess(
-                control_image, height=height, width=width
-            )
+            control_image = self.image_processor.preprocess(control_image, height=height, width=width) 
             control_image = control_image.to(dtype=weight_dtype, device=device)
-            control_latents = self.vae_encode(control_image, offload=offload)
-            safe_emit_progress(progress_callback, 0.10, "Control image encoded")
+            control_latents = self.vae_encode(control_image)
+        else:
+            control_latents = torch.zeros_like(inpaint_latent)
 
-        control_context = control_latents.unsqueeze(2)
+        # Unsqueeze
+        if num_channels_latents != self.control_in_dim:
+            inpaint_latent = inpaint_latent.unsqueeze(2)
+            mask_condition = F.interpolate(1 - mask_condition[:, :1], size=inpaint_latent.size()[-2:], mode='nearest').to(device, weight_dtype)
+            mask_condition = mask_condition.unsqueeze(2)
 
+        control_latents = control_latents.unsqueeze(2)
+
+        # Concat
+        if num_channels_latents != self.control_in_dim:
+            control_context = torch.concat([control_latents, mask_condition, inpaint_latent], dim=1)
+        else:
+            control_context = control_latents
+        
         # If prompt_embeds is provided and prompt is None, skip encoding
         if prompt_embeds is not None and prompt is None:
             if self.do_classifier_free_guidance and negative_prompt_embeds is None:
@@ -164,18 +215,6 @@ class ZImageControlEngine(ZImageShared):
                 device=device,
                 max_sequence_length=max_sequence_length,
             )
-            safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
-            
-        if offload:
-            self._offload(self.text_encoder)
-            safe_emit_progress(progress_callback, 0.20, "Text encoder offloaded")
-
-        if not self.transformer:
-            self.load_component_by_type("transformer")
-            self.to_device(self.transformer)
-        
-        safe_emit_progress(progress_callback, 0.25, "Transformer ready")        
-        num_channels_latents = self.transformer.in_channels
 
         # 4. Prepare latent variables
         latents = self.prepare_latents(
@@ -188,28 +227,19 @@ class ZImageControlEngine(ZImageShared):
             generator,
             latents,
         )
-        safe_emit_progress(progress_callback, 0.32, "Initialized latent noise")
 
         # Repeat prompt_embeds for num_images_per_prompt
         if num_images_per_prompt > 1:
-            prompt_embeds = [
-                pe for pe in prompt_embeds for _ in range(num_images_per_prompt)
-            ]
+            prompt_embeds = [pe for pe in prompt_embeds for _ in range(num_images_per_prompt)]
             if self.do_classifier_free_guidance and negative_prompt_embeds:
-                negative_prompt_embeds = [
-                    npe
-                    for npe in negative_prompt_embeds
-                    for _ in range(num_images_per_prompt)
-                ]
+                negative_prompt_embeds = [npe for npe in negative_prompt_embeds for _ in range(num_images_per_prompt)]
 
         actual_batch_size = batch_size * num_images_per_prompt
         image_seq_len = (latents.shape[2] // 2) * (latents.shape[3] // 2)
-
+        
         if not self.scheduler:
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
-        
-        safe_emit_progress(progress_callback, 0.36, "Scheduler ready")
 
         # 5. Prepare timesteps
         mu = self.calculate_shift(
@@ -219,24 +249,25 @@ class ZImageControlEngine(ZImageShared):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
-
         self.scheduler.sigma_min = 0.0
+        scheduler_kwargs = {"mu": mu}
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
-            timesteps=timesteps,
-            mu=mu,
+            **scheduler_kwargs,
         )
-
-        num_warmup_steps = max(
-            len(timesteps) - num_inference_steps * self.scheduler.order, 0
-        )
-        safe_emit_progress(progress_callback, 0.40, "Timesteps computed; starting denoise")
-        
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
         
+        
+        if not self.transformer:
+            self.load_component_by_type("transformer")
+            self.to_device(self.transformer)
+            
+ 
+
+        # 6. Denoising loop
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -259,9 +290,7 @@ class ZImageControlEngine(ZImageShared):
                         current_guidance_scale = 0.0
 
                 # Run CFG only if configured AND scale is non-zero
-                apply_cfg = (
-                    self.do_classifier_free_guidance and current_guidance_scale > 0
-                )
+                apply_cfg = self.do_classifier_free_guidance and current_guidance_scale > 0
 
                 if apply_cfg:
                     latents_typed = latents.to(self.transformer.dtype)
@@ -297,10 +326,7 @@ class ZImageControlEngine(ZImageShared):
                         pred = pos + current_guidance_scale * (pos - neg)
 
                         # Renormalization
-                        if (
-                            self._cfg_normalization
-                            and float(self._cfg_normalization) > 0.0
-                        ):
+                        if self._cfg_normalization and float(self._cfg_normalization) > 0.0:
                             ori_pos_norm = torch.linalg.vector_norm(pos)
                             new_pos_norm = torch.linalg.vector_norm(pred)
                             max_new_norm = ori_pos_norm * float(self._cfg_normalization)
@@ -317,18 +343,11 @@ class ZImageControlEngine(ZImageShared):
                 noise_pred = -noise_pred
 
                 # compute the previous noisy sample x_t -> x_t-1
-                latents = self.scheduler.step(
-                    noise_pred.to(torch.float32), t, latents, return_dict=False
-                )[0]
+                latents = self.scheduler.step(noise_pred.to(torch.float32), t, latents, return_dict=False)[0]
                 assert latents.dtype == torch.float32
 
-                if render_on_step and render_on_step_callback and ((i + 1) % render_on_step_interval == 0 or i == 0) and i != len(timesteps) - 1:
-                    self._render_step(latents, render_on_step_callback, image=True)
-
                 # call the callback, if provided
-                if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
-                ):
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
         
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")

@@ -38,7 +38,7 @@ from src.utils.mlx import check_mlx_convolutional_weights
 from src.utils.defaults import DEFAULT_CONFIG_SAVE_PATH
 from src.types import InputImage, InputVideo, InputAudio
 import librosa
-
+import gguf
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 IMAGE_EXTS = [
     "jpg",
@@ -316,7 +316,13 @@ class LoaderMixin(DownloadMixin):
             converter.convert(state_dict)
             # Load GGMLTensors without replacing nn.Parameters by copying data
             patch_model_ggml(model, default_dequant_dtype=load_dtype)
+            for key, value in state_dict.items():
+                if load_dtype:
+                    if getattr(value, "tensor_type", None) in {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16}:
+                        state_dict[key] = value.to(load_dtype)
+            
             model.load_state_dict(state_dict, assign=True, strict=False)
+
         else:
             if os.path.isdir(model_path):
                 extensions = component.get(
@@ -385,7 +391,6 @@ class LoaderMixin(DownloadMixin):
                 # and patch the model with FPScaled* layers *before* loading
                 # the state dict. We only do this once per model.
 
-
                 if hasattr(self, "engine_type") and self.engine_type == "mlx":
                     check_mlx_convolutional_weights(state_dict, model)
 
@@ -442,6 +447,7 @@ class LoaderMixin(DownloadMixin):
                     model.load_state_dict(
                         state_dict, strict=False, assign=True
                     )  # must be false as we are iteratively loading the state dict
+
                 elif hasattr(model, "load_weights"):
                     model.load_weights(state_dict, strict=False)
                 else:
@@ -520,7 +526,8 @@ class LoaderMixin(DownloadMixin):
             maybe_compile = getattr(self, "_maybe_compile_module", None)
             if callable(maybe_compile):
                 model = maybe_compile(model, component)
-                
+
+
         return model
 
     def _load_config_file(self, file_path: str | Path):

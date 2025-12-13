@@ -137,8 +137,8 @@ class EngineRegistry:
             # read from yaml_path
             data = load_yaml(resolved)
             spec = data.get("spec", {})
-            engine_type = spec.get("engine")
-            model_type = spec.get("model_type")
+            engine_type = engine_type or spec.get("engine")
+            model_type = model_type or spec.get("model_type") 
             engine_kwargs = spec.get("engine_kwargs", {})
             if engine_type is None or model_type is None:
                 raise ValueError(

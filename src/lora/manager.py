@@ -340,6 +340,9 @@ class LoraManager(DownloadMixin):
                     prefix = self._get_prefix_key(keys)
                     # ensure adapter name is not too long and does not have . or / in it if so remove it
                     adapter_name = self._clean_adapter_name(adapter_name)
+                    # convert to dtype of the model
+                    model_dtype = next(model.parameters()).dtype
+                    local_path_state_dict = {k: v.to(model_dtype) for k, v in local_path_state_dict.items()}
                     
                     model.load_lora_adapter(
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
@@ -352,7 +355,6 @@ class LoraManager(DownloadMixin):
                 model.set_adapters(final_names, weights=final_scales)
                 loaded_resolved.append(resolved[i])
             except Exception as e:
-                raise e  # For now
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )

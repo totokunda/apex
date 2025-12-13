@@ -57,6 +57,7 @@ spec:
   - type: text_encoder
     label: WAN Text Encoder
     base: UMT5EncoderModel
+    offloading_module: encoder
     model_path:
     - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder
       variant: default
@@ -80,6 +81,7 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 57154174431
     - path: Kijai/WanVideo_comfy_fp8_scaled/T2V/Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
@@ -142,11 +144,12 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 57154174431
     - path: Kijai/WanVideo_comfy_fp8_scaled/T2V/Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
-      file_size: 15001361458 
+      file_size: 15001361458
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
@@ -201,7 +204,8 @@ spec:
       timesteps_as_indices: true
       boundary_ratio: 0.875
       expand_timesteps: false
-      text_encoder_kwargs: {}
+      text_encoder_kwargs: 
+        use_attention_mask: true
       attention_kwargs: {}
   ui:
     panels:

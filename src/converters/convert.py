@@ -23,6 +23,7 @@ from src.converters.transformer_converters import (
     HunyuanAvatarTransformerConverter,
     MagiTransformerConverter,
     FluxTransformerConverter,
+    WanAnimateTransformerConverter,
     NoOpTransformerConverter,
     LoraTransformerConverter,
 )
@@ -61,6 +62,8 @@ def get_transformer_converter(model_base: str):
         return WanTransformerConverter()
     elif model_base == "wan.vace":
         return WanVaceTransformerConverter()
+    elif model_base == "wan.animate":
+        return WanAnimateTransformerConverter()
     elif model_base == "wan.multitalk":
         return WanMultiTalkTransformerConverter()
     elif model_base == "cogvideox.base":
@@ -86,6 +89,8 @@ def get_transformer_converter(model_base: str):
 
 
 def get_transformer_converter_by_model_name(model_name: str):
+    if "WanAnimate" in model_name:
+        return WanAnimateTransformerConverter()
     if "WanVace" in model_name:
         return WanVaceTransformerConverter()
     elif "WanMultiTalk" in model_name:
