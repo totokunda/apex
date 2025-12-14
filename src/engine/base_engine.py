@@ -1836,6 +1836,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             if callable(enable_method):
                 enable_method(**kwargs)
             else:
+
                 from diffusers.hooks import apply_group_offloading
                 
                 
