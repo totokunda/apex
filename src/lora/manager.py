@@ -345,7 +345,6 @@ class LoraManager(DownloadMixin):
                         local_path_state_dict, adapter_name=adapter_name, prefix=prefix
                     )
 
-
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 
             # Activate all adapters with their weights in one call

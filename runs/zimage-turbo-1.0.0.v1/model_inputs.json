@@ -1,8 +1,8 @@
 {
     "engine_kwargs": {
         "engine_type": "zimage",
-        "yaml_path": "/home/divineade/apex/manifest/engine/zimage/zimage-turbo-control-1.0.0.v1.yml",
-        "model_type": "control",
+        "yaml_path": "/home/divineade/apex/manifest/engine/zimage/zimage-turbo-1.0.0.v1.yml",
+        "model_type": "t2i",
         "selected_components": {
             "scheduler": {
                 "name": "scheduler",
@@ -34,14 +34,12 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "control_image": "/home/divineade/apex/runs/zimage-turbo-control-1.0.0.v1/assets/a64a22b1-f793-4414-a2df-1327161bedc8-5293387d-0290-4005-bb5b-12d3a4635a80_control_image_0_10.png",
-        "control_context_scale": 0.75,
-        "prompt": "An MMA fighter with their hands up ",
-        "resolution": "custom",
+        "prompt": "Pixel art style: A young dancer performs energetic hip-hop moves in the middle of a busy street in Shibuya, Tokyo. Neon signs glow overhead, crowds flow around the dancer, blurred motion from passing pedestrians and traffic. Vibrant night lights reflect off wet pavement. Dynamic camera movement: smooth tracking shots, slight handheld realism. High-contrast cinematic lighting, rich colors, detailed urban textures. Atmosphere feels lively, modern, and electric, capturing the iconic Shibuya nightlife energy.",
+        "resolution": 1024,
         "aspect_ratio": "custom",
-        "height": 832,
-        "width": 480,
-        "seed": 43,
+        "height": 1024,
+        "width": 1856,
+        "seed": 3173437038,
         "duration": "5s"
     }
 }

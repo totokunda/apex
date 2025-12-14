@@ -32,9 +32,15 @@ spec:
     - cuda
     - cpu
     excluded_cuda_architectures:
-    - sm_90  # Nunchaku does not support H100 (Hopper)
+    - sm_90
   attention_types:
   - sdpa
+  loras: 
+  - source: https://huggingface.co/strangerzonehf/Flux-Kontext-Ultimate-LoRA/resolve/main/Kontext-Top-Down-View.safetensors
+    scale: 1.0
+    name: Top Down
+    label: Top Down
+    verified: false
   components:
   - type: scheduler
     label: Scheduler
@@ -86,12 +92,10 @@ spec:
     label: Flux Transformer
     base: flux.nunchaku
     model_path:
-    # INT4 (SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-kontext-dev
     - path: nunchaku-tech/nunchaku-flux.1-kontext-dev/svdq-int4_r32-flux.1-kontext-dev.safetensors
       variant: int4_r32
       precision: int4
       type: safetensors
-    # NF4 (FP4 SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-kontext-dev
     - path: nunchaku-tech/nunchaku-flux.1-kontext-dev/svdq-fp4_r32-flux.1-kontext-dev.safetensors
       variant: nf4_r32
       precision: nf4
@@ -165,9 +169,9 @@ spec:
       description: The input image to condition on.
       type: image
       panel: input
-      map_h: "height"
-      map_w: "width"
-      scale_by: "resolution"
+      map_h: height
+      map_w: width
+      scale_by: resolution
       required: true
     - id: prompt
       label: Prompt
@@ -203,22 +207,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: '1:1'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

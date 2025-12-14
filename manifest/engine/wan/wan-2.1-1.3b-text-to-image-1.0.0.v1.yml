@@ -152,7 +152,7 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: "16:9"
       options:
       - name: Square
         value: "1:1"
