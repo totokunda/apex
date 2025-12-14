@@ -627,6 +627,14 @@ class ZImageControlTransformer2DModel(ZImageTransformer2DModel):
             else:
                 unified = layer(unified, **kwargs)
 
+        if self.sp_world_size > 1:
+            unified_out = []
+            for i in range(bsz):
+                x_len = x_item_seqlens[i]
+                unified_out.append(unified[i, :x_len])
+            unified = torch.stack(unified_out)
+            unified = self.all_gather(unified, dim=1)
+
         unified = self.all_final_layer[f"{patch_size}-{f_patch_size}"](unified, adaln_input)
         unified = list(unified.unbind(dim=0))
         x = self.unpatchify(unified, x_size, patch_size, f_patch_size)
