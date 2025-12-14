@@ -18,24 +18,24 @@ metadata:
   - text-to-image
 spec:
   engine: wan
-  model_type: t2v
+  model_type: t2i
   engine_type: torch
   denoise_type: moe
   attention_types:
   - sdpa
   loras:
   - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
-    scale: 1.0
+    scale: 0.125
     name: Wan Lightning High Noise
     label: Wan Lightning High Noise
     verified: true
-    component: transformer
+    component: high_noise_transformer
   - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
-    scale: 1.0
+    scale: 0.125
     name: Wan Lightning Low Noise
     label: Wan Lightning Low Noise
     verified: true
-    component: transformer_2
+    component: low_noise_transformer
   components:
   - type: scheduler
     label: Scheduler
@@ -72,7 +72,7 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     label: High Noise Transformer
-    name: transformer
+    name: high_noise_transformer
     base: wan.base
     model_path:
     - path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer
@@ -119,7 +119,7 @@ spec:
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer/config.json
   - type: transformer
     label: Low Noise Transformer
-    name: transformer_2
+    name: low_noise_transformer
     base: wan.base
     model_path:
     - path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer_2
@@ -166,14 +166,15 @@ spec:
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer_2/config.json
   defaults:
     run:
-      num_inference_steps: 30
-      guidance_scale: 5.0
+      num_inference_steps: 4
+      guidance_scale: [1,1]
       return_latents: false
       timesteps_as_indices: true
       boundary_ratio: 0.875
       expand_timesteps: false
       text_encoder_kwargs: {}
       attention_kwargs: {}
+      
   ui:
     panels:
     - name: prompting
@@ -276,16 +277,6 @@ spec:
         ratio_h: 3
       - name: Custom
         value: custom
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 4
-      min: 1
-      max: 100
-      step: 1
     - id: height
       label: Height
       description: Explicit height override
@@ -316,26 +307,6 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: high_noise_guidance_scale
-      label: High Noise Guidance Scale
-      type: number
-      value_type: float
-      panel: sampling
-      required: false
-      default: 4.0
-      min: 1.0
-      max: 15.0
-      step: 0.1
-    - id: low_noise_guidance_scale
-      label: Low Noise Guidance Scale
-      type: number
-      value_type: float
-      panel: sampling
-      required: false
-      default: 3.0
-      min: 1.0
-      max: 15.0
-      step: 0.1
     - id: boundary_ratio
       label: Boundary Ratio
       description: The ratio of the boundary of the image

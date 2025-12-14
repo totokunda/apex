@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: nunchaku-qwenimage-edit-lightning-8steps
+  id: nunchaku-qwenimage-edit-2509-lightning-8steps
   model: qwenimage
-  name: Nunchaku QwenImage Edit Lightning 8 Steps
+  name: Nunchaku QwenImage Edit 2509 Lightning 8 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage Edit Lightning v1.0 8-step is a 20B parameter model for fast, higher-quality image editing.
+  description: Nunchaku QwenImage Edit 2509 Lightning v1.0 8-step is a 20B parameter model for fast, higher-quality image editing.
   tags:
   - qwenimage
   - edit
@@ -23,7 +23,7 @@ metadata:
   - image-edit
 spec:
   engine: qwenimage
-  model_type: edit
+  model_type: edit_plus
   engine_type: torch
   denoise_type: base
   compute_requirements:
@@ -108,21 +108,21 @@ spec:
     base: qwenimage.nunchaku
     model_path:
     # INT4 (SVDQuant) lightning v1.0 8-step variants
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r32-qwen-image-edit-lightningv1.0-8steps.safetensors
-      variant: int4_r32_lightning_v1_0_8steps
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r32-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
+      variant: int4_r32_lightning_v2_0_8steps
       precision: int4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors
-      variant: int4_r128_lightning_v1_0_8steps
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
+      variant: int4_r128_lightning_v2_0_8steps
       precision: int4
       type: safetensors
     # NF4 (FP4 SVDQuant) lightning v1.0 8-step variants
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r32-qwen-image-edit-lightningv1.0-8steps.safetensors
-      variant: nf4_r32_lightning_v1_0_8steps
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
+      variant: nf4_r32_lightning_v2_0_8steps
       precision: nf4
       type: safetensors
-    - path: nunchaku-tech/nunchaku-qwen-image-edit/svdq-fp4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors
-      variant: nf4_r128_lightning_v1_0_8steps
+    - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
+      variant: nf4_r128_lightning_v2_0_8steps
       precision: nf4
       type: safetensors
   - type: helper
@@ -141,6 +141,7 @@ spec:
         add_special_tokens: false
         clean_text: false
       attention_kwargs: {}
+      num_inference_steps: 8
   ui:
     panels:
     - name: input
@@ -150,7 +151,7 @@ spec:
       layout:
         flow: column
         rows:
-        - - image
+        - - image_list
     - name: prompting
       label: Prompting
       collapsible: true
@@ -188,15 +189,12 @@ spec:
         - - true_cfg_scale
         - - seed
     inputs:
-    - id: image
-      label: Image
-      description: The input image to edit.
-      type: image
+    - id: image_list
+      label: Control Images
+      description: The control images to use for the generation.
+      type: image_list
       panel: input
       required: true
-      map_h: height
-      map_w: width
-      scale_by: resolution
     - id: prompt
       label: Prompt
       description: The prompt to edit the image.
