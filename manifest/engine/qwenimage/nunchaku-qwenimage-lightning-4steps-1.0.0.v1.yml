@@ -5,7 +5,8 @@ metadata:
   model: qwenimage
   name: Nunchaku QwenImage Text-to-Image Lightning 4 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage Lightning v1.0 4-step is a 20B parameter model for fast text-to-image generation.
+  description: Nunchaku QwenImage Lightning v1.0 4-step is a 20B parameter model for
+    fast text-to-image generation.
   tags:
   - svdquant
   - fp4
@@ -32,7 +33,7 @@ spec:
     - cuda
     - cpu
     excluded_cuda_architectures:
-    - sm_90  # Nunchaku does not support H100 (Hopper)
+    - sm_90
   attention_types:
   - sdpa
   components:
@@ -80,6 +81,22 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 16584475660
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 8098524096
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 6254197696
     tokenizer_class: Qwen2Tokenizer
     tokenizer_name: Qwen/Qwen-Image
     tokenizer_kwargs:
@@ -189,22 +206,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -259,3 +276,4 @@ spec:
       min: 0.0
       max: 10.0
       step: 0.1
+  loras: []

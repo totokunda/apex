@@ -21,7 +21,6 @@ class WanT2IEngine(WanShared):
         guidance_scale: float = 5.0,
         high_noise_guidance_scale: float | None = None,
         low_noise_guidance_scale: float | None = None,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -40,6 +39,15 @@ class WanT2IEngine(WanShared):
         denoise_progress_callback: Callable = None,
         **kwargs,
     ):
+
+        if guidance_scale is not None and isinstance(guidance_scale, list):
+            use_cfg_guidance = (
+                negative_prompt is not None
+                and guidance_scale[0] > 1.0
+                and guidance_scale[1] > 1.0
+            )
+        else:
+            use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         safe_emit_progress(progress_callback, 0.0, "Starting t2i pipeline")
 

@@ -1,0 +1,55 @@
+{
+    "engine_kwargs": {
+        "engine_type": "qwenimage",
+        "yaml_path": "/home/divineade/apex/manifest/engine/qwenimage/nunchaku-qwenimage-edit-2509-lightning-8steps-1.0.0.v1.yml",
+        "model_type": "edit_plus",
+        "selected_components": {
+            "scheduler": {
+                "name": "scheduler",
+                "base": "diffusers.FlowMatchEulerDiscreteScheduler",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/ddad6fcc41e8f75ee9d69bc659fc405da69b4c0cb68c25286a5bbb23cba6fa2c_scheduler_config.json",
+                "type": "scheduler",
+                "label": "Scheduler",
+                "default": "FlowMatchEulerDiscreteScheduler"
+            },
+            "vae": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Qwen_Qwen-Image/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/fa930ab1fca0ce9dcaad08630e8d84c62447635794cdb39d23fbd14d90f09458_svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
+                "variant": "int4_r128_lightning_v2_0_8steps",
+                "precision": "int4",
+                "type": "safetensors"
+            },
+            "image.processor": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Qwen_Qwen-Image-Edit/processor",
+                "type": "safetensors"
+            }
+        },
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "image_list": [
+            "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/025e001d-b575-4cfe-b08f-dba266ee15be-40e99142-98dd-447f-9cb1-114613e44910_image_list_0_30.png",
+            "/home/ext_diviade_gmail_com/apex-diffusion/cache/uploads/1aff01dc-339d-4539-a0f9-c66dc0e7341a-40e99142-98dd-447f-9cb1-114613e44910_image_list_0_31.png"
+        ],
+        "prompt": "A woman in the large desert in front of a pyramid with a dog with a blue collar by her side",
+        "negative_prompt": " ",
+        "resolution": 720,
+        "aspect_ratio": "16:9",
+        "height": 704,
+        "width": 704,
+        "seed": 382992609,
+        "true_cfg_scale": 4,
+        "duration": "5s"
+    }
+}
