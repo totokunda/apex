@@ -3,6 +3,8 @@ from typing import Dict, Any, Callable, List
 from .shared import QwenImageShared
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
+import time
+from loguru import logger
 
 
 class QwenImageT2IEngine(QwenImageShared):
@@ -80,7 +82,6 @@ class QwenImageT2IEngine(QwenImageShared):
 
         if not self.transformer:
             self.load_component_by_type("transformer")
-
         self.to_device(self.transformer)
         safe_emit_progress(progress_callback, 0.25, "Transformer ready")
 
@@ -200,7 +201,7 @@ class QwenImageT2IEngine(QwenImageShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            del self.transformer
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

@@ -947,7 +947,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
             if isinstance(transformer, torch.nn.Module):
+
                 self.to_dtype(transformer, self.component_dtypes["transformer"])
+
             elif isinstance(transformer, mx_nn.Module):
                 self.to_mlx_dtype(transformer, self.component_dtypes["transformer"])
 
@@ -974,10 +976,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         # offloading inside LoaderMixin for transformers, because it caches CPU
         # tensors keyed by Parameter identity and can break if parameters are
         # replaced after load.
-        
+
         mm_config = self._resolve_memory_config_for_component(component)
 
         if mm_config is not None and not no_weights:
+
             label = component.get("name") or component.get("type") or "transformer"
             offloading_module = component.get("offloading_module", None)
 
@@ -994,14 +997,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 )
             else:
                 try:
+
                     model_to_offload = (
                         transformer.get_submodule(offloading_module)
                         if offloading_module
                         else transformer
                     )
+                    print(f"\n\nTransformer group offloading model to offload resolved\n\n")
                     self._apply_group_offloading(
                         model_to_offload, mm_config, module_label=label
                     )
+                    print(f"\n\nTransformer group offloading applied\n\n")
                 except Exception as e:
                     if hasattr(self, "logger"):
                         self.logger.warning(
@@ -1830,10 +1836,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             if callable(enable_method):
                 enable_method(**kwargs)
             else:
+
                 from diffusers.hooks import apply_group_offloading
                 
                 
                 apply_group_offloading(module, **kwargs)
+
         except Exception as exc:
             self.logger.warning(
                 f"Failed to enable group offloading for '{module_label}': {exc}"
@@ -1845,6 +1853,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             f"Enabled group offloading for '{module_label}' "
             f"({kwargs.get('offload_type', 'leaf_level')})"
         )
+
         return True
 
     def _maybe_apply_memory_management(self, component: Dict[str, Any], module: Any):

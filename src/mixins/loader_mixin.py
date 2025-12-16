@@ -144,6 +144,7 @@ class LoaderMixin(DownloadMixin):
         if component.get("type") == "vae":
             converter = get_vae_converter(model_base)
         elif component.get("type") == "transformer":
+            
             converter = get_transformer_converter(model_base)
         elif component.get("type") == "text_encoder":
             converter = get_text_encoder_converter(model_base)
@@ -216,7 +217,6 @@ class LoaderMixin(DownloadMixin):
                 except (TypeError, ValueError):
                     # If inspection fails for any reason, fall back to passing all kwargs.
                     pass
-
                 model = model_class.from_pretrained(model_path, **extra_kwargs)
 
             if mm_config is not None and not no_weights and component.get("type") != "transformer":
@@ -368,6 +368,7 @@ class LoaderMixin(DownloadMixin):
                         file_path, map_location="cpu", weights_only=True, mmap=True
                     )
 
+                
                 if load_dtype and not is_safetensors:
                     for k, v in state_dict.items():
                         state_dict[k] = v.to(load_dtype)
@@ -382,6 +383,7 @@ class LoaderMixin(DownloadMixin):
                                 new_state_dict[k2] = v2
 
                     state_dict = new_state_dict
+
 
                 converter.convert(state_dict)
 
@@ -453,7 +455,6 @@ class LoaderMixin(DownloadMixin):
                         f"Model {model} does not have a load_state_dict or load_weights method"
                     )
                     
-        
   
         if getattr(self, "engine_type", "torch") == "torch":
             has_meta_params = False
@@ -471,7 +472,6 @@ class LoaderMixin(DownloadMixin):
                 restore_fpscaled_parameters(
                     model, default_compute_dtype=default_compute_dtype
                 )
-
             for name, param in model.named_parameters():
                 if param.device.type == "meta":
                     # If this is an FP-scaled model and the offending parameter
@@ -494,12 +494,10 @@ class LoaderMixin(DownloadMixin):
                     # For all other parameters on meta, this is still an error.
                     self.logger.error(f"Parameter {name} is on meta device")
                     has_meta_params = True
-
             if has_meta_params:
                 raise ValueError(
                     "Model has parameters on meta device, this is not supported"
                 )
-
         if mm_config is not None and not no_weights and component.get("type") != "transformer" and component.get("type") != "text_encoder": 
             apply_group_offloading = getattr(self, "_apply_group_offloading", None)
             if callable(apply_group_offloading):
@@ -517,12 +515,12 @@ class LoaderMixin(DownloadMixin):
                     apply_group_offloading(
                         model_to_offload, mm_config, module_label=label
                     )
+
                 except Exception as e:
                     if hasattr(self, "logger"):
                         self.logger.warning(
                             f"Failed to enable group offloading for '{label}': {e}"
                         )
-
         # Optionally compile the fully initialized module according to config.
         if not no_weights and component.get("type") != "transformer" and component.get("type") != "text_encoder":
             maybe_compile = getattr(self, "_maybe_compile_module", None)
