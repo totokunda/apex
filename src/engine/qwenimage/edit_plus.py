@@ -280,6 +280,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
 
         if offload:
             self._offload(self.transformer)
+            
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

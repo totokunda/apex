@@ -1,24 +1,22 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: qwenimage-edit-2509
+  id: qwenimage-t2i
   model: qwenimage
-  name: QwenImage Edit 2509
+  name: QwenImage Text-to-Image
   version: 1.0.0
-  description: QwenImage Edit 2509 is a 20B parameter model for image editing with up to three input images.
+  description: QwenImage is a 20B parameter model for text-to-image generation.
   tags:
   - qwenimage
-  - edit
-  - multi-image
-  - '2509'
+  - t2i
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://qianwen-res.oss-accelerate-overseas.aliyuncs.com/Qwen-Image/edit2509/edit2509_top.jpg
+  demo_path: https://alizila.oss-us-west-1.aliyuncs.com/uploads/2025/08/Qwen-Image-cover.jpg
   categories:
-  - image-edit
+  - text-to-image
 spec:
   engine: qwenimage
-  model_type: edit_plus
+  model_type: t2i
   engine_type: torch
   denoise_type: base
   attention_types:
@@ -31,9 +29,19 @@ spec:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
-        Edit model.
+        T2I model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/scheduler/scheduler_config.json
+      config_path: https://huggingface.co/Qwen/Qwen-Image/resolve/main/scheduler/scheduler_config.json
+    - name: EulerDiscreteScheduler
+      label: Euler Discrete Scheduler
+      description: The Euler Discrete Scheduler is a scheduler for the QwenImage T2I
+        model.
+      base: diffusers.EulerDiscreteScheduler
+    - name: DPMSolverMultistepScheduler
+      label: DPMSolver Multistep Scheduler
+      description: The DPMSolver Multistep Scheduler is a scheduler for the QwenImage
+        T2I model.
+      base: diffusers.DPMSolverMultistepScheduler
   - type: vae
     label: QwenImage VAE
     base: qwenimage
@@ -58,6 +66,22 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 16584475660
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 8098524096
+    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 6254197696
     tokenizer_class: Qwen2Tokenizer
     tokenizer_name: Qwen/Qwen-Image
     tokenizer_kwargs:
@@ -65,57 +89,48 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.base
-    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/transformer/config.json
+    config_path: https://huggingface.co/Qwen/Qwen-Image/resolve/main/transformer/config.json
     model_path:
-    - path: Qwen/Qwen-Image-Edit-2509/transformer
+    - path: Qwen/Qwen-Image/transformer
       variant: default
       precision: fp16
       type: safetensors
       resource_requirements:
         min_vram_gb: 16
         recommended_vram_gb: 24
-      file_size: 40861227514
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q2_K.gguf
+      file_size: 40861227138
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
       resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 7683715616
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 7062518304
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
       resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 18
-      file_size: 13107200000
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q6_K.gguf
+        min_vram_gb: 14
+        recommended_vram_gb: 20
+      file_size: 12140608032
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
       resource_requirements:
-        min_vram_gb: 16
-        recommended_vram_gb: 24
-      file_size: 18015297536
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q8_0.gguf
+        min_vram_gb: 18
+        recommended_vram_gb: 28
+      file_size: 16824990240
+    - path: https://huggingface.co/QuantStack/Qwen-Image-GGUF/resolve/main/Qwen_Image-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
       resource_requirements:
-        min_vram_gb: 20
-        recommended_vram_gb: 30
-      file_size: 23426031616
-  - type: helper
-    name: image.processor
-    label: Image Processor
-    module: transformers.models.qwen2_vl.processing_qwen2_vl
-    base: Qwen2VLProcessor
-    model_path:
-    - path: Qwen/Qwen-Image-Edit-2509/processor
-      type: safetensors
-      file_size: 15879236
+        min_vram_gb: 24
+        recommended_vram_gb: 36
+      file_size: 21761817120
   defaults:
     run:
       num_inference_steps: 40
@@ -126,14 +141,6 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
-    - name: Image
-      label: Input
-      collapsible: true
-      default_open: true
-      layout:
-        flow: column
-        rows:
-        - - image_list
     - name: prompting
       label: Prompting
       collapsible: true
@@ -153,7 +160,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
-      default_open: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -170,20 +177,13 @@ spec:
         rows:
         - - num_inference_steps
         - - true_cfg_scale
+        - - guidance_scale
         - - seed
     inputs:
-    - id: image_list
-      label: Image List
-      description: Select the images to use for the generation.
-      panel: Image
-      type: image_list
-      required: true
-      min: 1
-      max: 3
     - id: prompt
       label: Prompt
-      description: The prompt to edit the image.
-      placeholder: A beautiful woman with long brown hair and blue eyes.
+      description: The prompt for text-to-image generation.
+      placeholder: A serene lake surrounded by pine trees at sunrise, ultra realistic.
       type: text
       panel: prompting
       required: true
@@ -194,17 +194,16 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: 'blurry, low quality, distorted, artifacts'
+      default: ' '
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 768
+      default: 720
       options:
       - name: HD
-        value: 768
-        height: 768
+        value: 720
       - name: Ultra HD
         value: 1024
       - name: SD
@@ -216,22 +215,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -242,7 +241,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1
@@ -286,3 +285,13 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: guidance_scale
+      label: Guidance Scale
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1.0
+      min: 0.0
+      max: 10.0
+      step: 0.1

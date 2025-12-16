@@ -27,7 +27,7 @@ from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
-
+from loguru import logger
 
 def _persist_run_config(
     manifest_path: str,
@@ -49,6 +49,10 @@ def _persist_run_config(
     try:
         project_root = Path(__file__).parent.parent.parent
         base_runs_dir = run_root or (project_root / "runs")
+
+        # logger.info(f"\n\nBase runs directory: {base_runs_dir}\n\n")
+        # logger.info(f"\n\nproject_root: {project_root}\n\n")
+        # logger.info(f"\n\nrun_root: {run_root}\n\n")
 
         manifest_stem = Path(manifest_path).stem
         run_dir = base_runs_dir / manifest_stem
@@ -1789,7 +1793,7 @@ def run_engine_from_manifest(
             if model_type.lower() != "ovi"
             else render_on_step_callback_ovi
         )
-        # _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),

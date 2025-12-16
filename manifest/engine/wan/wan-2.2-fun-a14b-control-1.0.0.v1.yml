@@ -62,7 +62,7 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     label: High Noise Transformer
-    name: transformer
+    name: high_noise_transformer
     base: wan.fun
     model_path:
     - path: alibaba-pai/Wan2.2-Fun-A14B-Control/high_noise_model
@@ -76,7 +76,7 @@ spec:
       qk_norm: rms_norm_across_heads
   - type: transformer
     label: Low Noise Transformer
-    name: transformer_2
+    name: low_noise_transformer
     base: wan.fun
     model_path:
     - path: alibaba-pai/Wan2.2-Fun-A14B-Control/low_noise_model
