@@ -1558,7 +1558,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # Heuristic headroom for activations, KV cache, temporary buffers, etc.
         # This replaces the older percent-of-VRAM rule which was too coarse.
-        activation_overhead_gb = 8.0
+        if component.get("type") == "text_encoder":
+            activation_overhead_gb = os.environ.get("TEXT_ENCODER_ACTIVATION_OVERHEAD_GB", 4.0)
+        elif component.get("type") == "transformer":
+            activation_overhead_gb = os.environ.get("TRANSFORMER_ACTIVATION_OVERHEAD_GB", 8.0)
+        elif component.get("type") == "vae":
+            activation_overhead_gb = os.environ.get("VAE_ACTIVATION_OVERHEAD_GB", 6.0)
+        else:
+            activation_overhead_gb = os.environ.get("ACTIVATION_OVERHEAD_GB", 8.0)
+            
         required_gpu_gb = total_size_gb + activation_overhead_gb
 
         if gpu_available_gb is not None:

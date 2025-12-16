@@ -11,7 +11,7 @@ metadata:
   - flux
   - kontext
   - dev
-  author: Apex AI
+  author: Black Forest Labs
   license: Apache-2.0
   demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
   categories:
@@ -85,23 +85,23 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 23803075754
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q2_K.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
       resource_requirements:
         min_vram_gb: 4
         recommended_vram_gb: 6
-      file_size: 4318499552
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_K_S.gguf
+      file_size: 4023690528
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
       resource_requirements:
         min_vram_gb: 6
         recommended_vram_gb: 8
-      file_size: 7284772512
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_1.gguf
+      file_size: 6797337888
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q4_1.gguf
       variant: GGUF_Q4_1
       precision: q4_1
       type: gguf
@@ -109,7 +109,7 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 10
       file_size: 7536977184
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q6_K.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
@@ -117,7 +117,7 @@ spec:
         min_vram_gb: 10
         recommended_vram_gb: 12
       file_size: 9848349984
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q8_0.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
@@ -125,7 +125,6 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 14
       file_size: 12714452256
-    config_path: black-forest-labs/FLUX.1-Kontext-dev/transformer/config.json
   defaults:
     run:
       num_inference_steps: 40
@@ -195,9 +194,9 @@ spec:
       description: The input image to condition on.
       type: image
       panel: input
-      map_h: "height"
-      map_w: "width"
-      scale_by: "resolution"
+      map_h: height
+      map_w: width
+      scale_by: resolution
       required: true
     - id: prompt
       label: Prompt
@@ -233,22 +232,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: '1:1'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

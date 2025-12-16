@@ -32,18 +32,11 @@ spec:
   - sage
   fps: 16
   loras:
-    - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
-      scale: 1.0
-      name: lightx2v_lora
-      label: Lightx2v LoRA
-      component: transformer
-      verified: true
-    - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Phantom_Wan_14B_FusionX_LoRA.safetensors
-      scale: 0.0
-      name: fusionx_lora
-      label: FusionX LoRA
-      component: transformer
-      verified: true
+  - scale: 1.0
+    name: Wan Lightning
+    label: Wan Lightning
+    verified: true
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/29569a7b82c9afc9ced4638d666fd2128f2d84ee106a17dd879db733fe9143b9_wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
   components:
   - type: scheduler
     label: Scheduler
@@ -61,7 +54,7 @@ spec:
     label: Wan VAE
     base: wan
     model_path:
-    - path:  Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
+    - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
       variant: default
       precision: fp16
       type: safetensors
@@ -96,6 +89,7 @@ spec:
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 17578334838
     - path: QuantStack/Wan2.1_14B_VACE-GGUF/Wan2.1_14B_VACE-BF16.gguf
       variant: GGUF_BF16
       precision: bf16
@@ -355,9 +349,3 @@ spec:
       min: 0.0
       max: 15.0
       step: 0.1
-  loras:
-  - scale: 1.0
-    name: Wan Lightning
-    label: Wan Lightning
-    verified: true
-    source: /home/tosin_coverquick_co/apex-diffusion/loras/29569a7b82c9afc9ced4638d666fd2128f2d84ee106a17dd879db733fe9143b9_wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors

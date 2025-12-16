@@ -1,39 +1,31 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: nunchaku-qwenimage-t2i-lightning-8steps
-  model: qwenimage
-  name: Nunchaku QwenImage Text-to-Image Lightning 8 Steps
+  id: zimage-turbo-control
+  model: zimage
+  name: ZImage Turbo Control
   version: 1.0.0
-  description: Nunchaku QwenImage Lightning v1.1 8-step is a 20B parameter model for
-    fast, higher-quality text-to-image generation.
+  description: ZImage Turbo Control is a 6B parameter model for text-to-image generation
+    with controlnet.
   tags:
-  - svdquant
-  - fp4
-  - nf4
-  - int4
-  - qwenimage
-  - t2i
-  - nunchaku
-  - lightning
-  - 8steps
-  author: Nunchaku Tech
+  - zimage
+  - turbo
+  - zimage-turbo
+  - control
+  author: Tongy-MAI
   license: Apache-2.0
-  demo_path: https://alizila.oss-us-west-1.aliyuncs.com/uploads/2025/08/Qwen-Image-cover.jpg
+  demo_path: https://i.ytimg.com/vi/dNeA5mJ36hA/maxresdefault.jpg
   categories:
-  - text-to-image
+  - control
 spec:
-  engine: qwenimage
-  model_type: t2i
+  engine: zimage
+  model_type: control
   engine_type: torch
-  denoise_type: base
   compute_requirements:
-    min_cuda_compute_capability: 7.5
+    min_cuda_compute_capability: 7.0
     supported_compute_types:
     - cuda
     - cpu
-    excluded_cuda_architectures:
-    - sm_90
   attention_types:
   - sdpa
   components:
@@ -43,100 +35,78 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
-        T2I model.
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the ZImage
+        Turbo model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: Qwen/Qwen-Image/scheduler/scheduler_config.json
-    - name: EulerDiscreteScheduler
-      label: Euler Discrete Scheduler
-      description: The Euler Discrete Scheduler is a scheduler for the QwenImage T2I
-        model.
-      base: diffusers.EulerDiscreteScheduler
-    - name: DPMSolverMultistepScheduler
-      label: DPMSolver Multistep Scheduler
-      description: The DPMSolver Multistep Scheduler is a scheduler for the QwenImage
-        T2I model.
-      base: diffusers.DPMSolverMultistepScheduler
+      config_path: Tongyi-MAI/Z-Image-Turbo/scheduler/scheduler_config.json
   - type: vae
-    label: QwenImage VAE
-    base: qwenimage
+    label: ZImage Turbo VAE
+    base: auto
     model_path:
-    - path: Qwen/Qwen-Image/vae
+    - path: Tongyi-MAI/Z-Image-Turbo/vae
       variant: default
       precision: fp16
       type: safetensors
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 16
-      file_size: 253807696
+      file_size: 167667707
   - type: text_encoder
-    label: Qwen2.5 VL Text Encoder
-    base: Qwen2_5_VLForConditionalGeneration
+    label: ZImage Turbo Text Encoder
+    base: Qwen3ForCausalLM
+    name: text_encoder
     model_path:
-    - path: Qwen/Qwen-Image/text_encoder
+    - path: Tongyi-MAI/Z-Image-Turbo/text_encoder
       variant: default
       precision: fp16
       type: safetensors
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 24
-      file_size: 16584475660
-    - path: mradermacher/CLOVER-Qwen2.5-VL-GGUF/CLOVER-Qwen2.5-VL.Q8_0.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 8098524096
-    - path: mradermacher/CLOVER-Qwen2.5-VL-GGUF/CLOVER-Qwen2.5-VL.Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 6254197696
+      file_size: 8045015784
     tokenizer_class: Qwen2Tokenizer
-    tokenizer_name: Qwen/Qwen-Image
+    tokenizer_name: Tongyi-MAI/Z-Image-Turbo
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: transformer
-    label: QwenImage Transformer
-    base: qwenimage.nunchaku
-    extra_kwargs:
-      torch_dtype: null
+    label: ZImage Turbo Control Transformer
+    base: zimage.control
     model_path:
-    - path: nunchaku-tech/nunchaku-qwen-image/svdq-int4_r32-qwen-image-lightningv1.1-8steps.safetensors
-      variant: int4_r32_lightning_v1_1_8steps
-      precision: int4
+    - path: Tongyi-MAI/Z-Image-Turbo/transformer
+      variant: default
+      precision: fp16
       type: safetensors
-      file_size: 11521979944
-    - path: nunchaku-tech/nunchaku-qwen-image/svdq-int4_r128-qwen-image.safetensors
-      variant: int4_r128_lightning_v1_1_8steps
-      precision: int4
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 32
+      file_size: 24619740330
+    extra_model_paths:
+    - path: alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.0/Z-Image-Turbo-Fun-Controlnet-Union-2.0.safetensors
+      variant: default
+      precision: fp16
       type: safetensors
-      file_size: 12654443144
-    - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r32-qwen-image-lightningv1.1-8steps.safetensors
-      variant: nf4_r32_lightning_v1_1_8steps
-      precision: fp4
-      type: safetensors
-      file_size: 11948923656
-    - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r128-qwen-image-lightningv1.1-8steps.safetensors
-      variant: nf4_r128_lightning_v1_1_8steps
-      precision: fp4
-      type: safetensors
-      file_size: 13081386856
+      resource_requirements:
+        min_vram_gb: 24
+        recommended_vram_gb: 32
   defaults:
     run:
-      num_inference_steps: 8
+      num_inference_steps: 9
+      guidance_scale: 0.0
+      height: 1728
+      width: 992
       return_latents: false
-      text_encoder_kwargs:
-        add_special_tokens: false
-        clean_text: false
       attention_kwargs: {}
   ui:
     panels:
+    - name: control
+      label: Control
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - control_image
+          - control_context_scale
     - name: prompting
       label: Prompting
       collapsible: true
@@ -171,10 +141,25 @@ spec:
       layout:
         flow: column
         rows:
-        - - true_cfg_scale
-        - - guidance_scale
         - - seed
     inputs:
+    - id: control_image
+      label: Control Image
+      description: The control image to use for the generation.
+      type: image
+      panel: control
+      required: true
+      map_h: height
+      map_w: width
+    - id: control_context_scale
+      label: Control Context Scale
+      description: The scale of the control context.
+      type: number
+      panel: control
+      default: 0.75
+      min: 0.0
+      max: 1.0
+      step: 0.01
     - id: prompt
       label: Prompt
       description: The prompt for text-to-image generation.
@@ -189,18 +174,20 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: ' '
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 2048
       options:
-      - name: HD
-        value: 720
+      - name: 2K Ultra HD
+        value: 2048
+        height: 2048
       - name: Ultra HD
         value: 1024
+      - name: HD
+        value: 720
       - name: SD
         value: 480
       - name: Custom
@@ -210,7 +197,7 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: '16:9'
+      default: '1:1'
       options:
       - name: Wide
         value: '16:9'
@@ -236,7 +223,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -246,7 +233,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -260,23 +247,3 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: true_cfg_scale
-      label: True CFG Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 4.0
-      min: 1.0
-      max: 15.0
-      step: 0.5
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 1.0
-      min: 0.0
-      max: 10.0
-      step: 0.1

@@ -5,7 +5,8 @@ metadata:
   model: wan
   name: Wan 2.2 A14B Text to Image 4 Steps
   version: 1.0.0
-  description: Wan 2.2 A14B is a 14B parameter model for text-to-image generation with 4 steps.
+  description: Wan 2.2 A14B is a 14B parameter model for text-to-image generation
+    with 4 steps.
   tags:
   - wan
   - t2i
@@ -24,13 +25,13 @@ spec:
   attention_types:
   - sdpa
   loras:
-  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
+  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
     scale: 0.125
     name: Wan Lightning High Noise
     label: Wan Lightning High Noise
     verified: true
     component: high_noise_transformer
-  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
+  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
     scale: 0.125
     name: Wan Lightning Low Noise
     label: Wan Lightning Low Noise
@@ -69,6 +70,7 @@ spec:
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 6731333792
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     label: High Noise Transformer
@@ -84,38 +86,47 @@ spec:
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
+      file_size: 5299319296
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q3_K_S.gguf
       variant: GGUF_Q3_K_S
       precision: q3_k_s
       type: gguf
+      file_size: 6513373696
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf
       variant: GGUF_Q3_K_M
       precision: q3_k_m
       type: gguf
+      file_size: 7174468096
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
+      file_size: 8746512896
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf
       variant: GGUF_Q4_K_M
       precision: q4_k_m
       type: gguf
+      file_size: 9650090496
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q5_K_S.gguf
       variant: GGUF_Q5_K_S
       precision: q5_k_s
       type: gguf
+      file_size: 10135876096
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q5_K_M.gguf
       variant: GGUF_Q5_K_M
       precision: q5_k_m
       type: gguf
+      file_size: 10790416896
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
+      file_size: 12002013696
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
+      file_size: 15404970496
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer/config.json
   - type: transformer
     label: Low Noise Transformer
@@ -131,50 +142,60 @@ spec:
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
+      file_size: 5299319296
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf
       variant: GGUF_Q3_K_S
       precision: q3_k_s
       type: gguf
+      file_size: 6513373696
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf
       variant: GGUF_Q3_K_M
       precision: q3_k_m
       type: gguf
+      file_size: 7174468096
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
+      file_size: 8746512896
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf
       variant: GGUF_Q4_K_M
       precision: q4_k_m
       type: gguf
+      file_size: 9650090496
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_S.gguf
       variant: GGUF_Q5_K_S
       precision: q5_k_s
       type: gguf
+      file_size: 10135876096
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_M.gguf
       variant: GGUF_Q5_K_M
       precision: q5_k_m
       type: gguf
+      file_size: 10790416896
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
+      file_size: 12002013696
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
+      file_size: 15404970496
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer_2/config.json
   defaults:
     run:
       num_inference_steps: 4
-      guidance_scale: [1,1]
+      guidance_scale:
+      - 1
+      - 1
       return_latents: false
       timesteps_as_indices: true
       boundary_ratio: 0.875
       expand_timesteps: false
       text_encoder_kwargs: {}
       attention_kwargs: {}
-      
   ui:
     panels:
     - name: prompting
@@ -257,22 +278,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "1:1"
+      default: '1:1'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

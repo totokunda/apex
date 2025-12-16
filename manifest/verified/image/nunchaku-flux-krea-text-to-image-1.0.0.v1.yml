@@ -15,7 +15,7 @@ metadata:
   - fp4
   - nf4
   - int4
-  author: Apex AI
+  author: Nunchaku Tech
   license: Apache-2.0
   demo_path: https://i.redd.it/flux-krea-is-quite-good-for-photographic-gens-relative-to-v0-ipkhisrye9gf1.png?width=1040&format=png&auto=webp&s=8382540768722e585b43195ea2ba868967a87f3d
   categories:
@@ -33,7 +33,7 @@ spec:
     - cuda
     - cpu
     excluded_cuda_architectures:
-    - sm_90  # Nunchaku does not support H100 (Hopper)
+    - sm_90
   attention_types:
   - sdpa
   components:
@@ -80,20 +80,16 @@ spec:
     label: Flux Transformer
     base: flux.nunchaku
     model_path:
-    # INT4 (SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-krea-dev
     - path: nunchaku-tech/nunchaku-flux.1-krea-dev/svdq-int4_r32-flux.1-krea-dev.safetensors
       variant: int4_r32
       precision: int4
       type: safetensors
-      file_size: 6760960000
-    # NF4 (FP4 SVDQuant) variant from nunchaku-tech/nunchaku-flux.1-krea-dev
+      file_size: 6768309832
     - path: nunchaku-tech/nunchaku-flux.1-krea-dev/svdq-fp4_r32-flux.1-krea-dev.safetensors
       variant: nf4_r32
       precision: nf4
       type: safetensors
-      file_size: 7048192000
-    
-
+      file_size: 7038706888
   defaults:
     run:
       num_inference_steps: 40
@@ -170,7 +166,7 @@ spec:
       options:
       - name: HD
         value: 720
-      - name: Ultra HD  
+      - name: Ultra HD
         value: 1024
       - name: SD
         value: 480
@@ -181,22 +177,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

@@ -12,7 +12,7 @@ metadata:
   - edit
   - multi-image
   - '2509'
-  author: Apex AI
+  author: Qwen
   license: Apache-2.0
   demo_path: https://qianwen-res.oss-accelerate-overseas.aliyuncs.com/Qwen-Image/edit2509/edit2509_top.jpg
   categories:
@@ -34,7 +34,7 @@ spec:
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
         Edit model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/scheduler/scheduler_config.json
+      config_path: Qwen/Qwen-Image-Edit-2509/scheduler/scheduler_config.json
   - type: vae
     label: QwenImage VAE
     base: qwenimage
@@ -59,7 +59,7 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 16584475660
-    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q8_0.gguf
+    - path: mradermacher/CLOVER-Qwen2.5-VL-GGUF/CLOVER-Qwen2.5-VL.Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
@@ -67,7 +67,7 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 12
       file_size: 8098524096
-    - path: https://huggingface.co/mradermacher/CLOVER-Qwen2.5-VL-GGUF/resolve/main/CLOVER-Qwen2.5-VL.Q6_K.gguf
+    - path: mradermacher/CLOVER-Qwen2.5-VL-GGUF/CLOVER-Qwen2.5-VL.Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
@@ -82,7 +82,7 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.base
-    config_path: https://huggingface.co/Qwen/Qwen-Image-Edit-2509/resolve/main/transformer/config.json
+    config_path: Qwen/Qwen-Image-Edit-2509/transformer/config.json
     model_path:
     - path: Qwen/Qwen-Image-Edit-2509/transformer
       variant: default
@@ -92,38 +92,38 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227514
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q2_K.gguf
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
       resource_requirements:
         min_vram_gb: 6
         recommended_vram_gb: 10
-      file_size: 7683715616
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q4_K_S.gguf
+      file_size: 7147452960
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 18
-      file_size: 13107200000
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q6_K.gguf
+      file_size: 12204309024
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
       resource_requirements:
         min_vram_gb: 16
         recommended_vram_gb: 24
-      file_size: 18015297536
-    - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-2509-GGUF/resolve/main/Qwen-Image-Edit-2509-Q8_0.gguf
+      file_size: 16824990240
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
       resource_requirements:
         min_vram_gb: 20
         recommended_vram_gb: 30
-      file_size: 23426031616
+      file_size: 21761817120
   - type: helper
     name: image.processor
     label: Image Processor

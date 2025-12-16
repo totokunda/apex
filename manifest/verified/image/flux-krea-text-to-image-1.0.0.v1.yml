@@ -10,7 +10,7 @@ metadata:
   - flux
   - krea
   - t2i
-  author: Apex AI
+  author: Black Forest Labs
   license: Apache-2.0
   demo_path: https://i.redd.it/flux-krea-is-quite-good-for-photographic-gens-relative-to-v0-ipkhisrye9gf1.png?width=1040&format=png&auto=webp&s=8382540768722e585b43195ea2ba868967a87f3d
   categories:
@@ -28,7 +28,7 @@ spec:
   attention_types:
   - sdpa
   loras:
-  - source: https://huggingface.co/gokaygokay/Flux-Krea-Realism-LoRA/blob/main/Flux_Krea_Real.safetensors
+  - source: gokaygokay/Flux-Krea-Realism-LoRA/Flux_Krea_Real.safetensors
     scale: 1.0
     name: Flux Krea Realism LoRA
     label: Flux Krea Realism LoRA
@@ -80,7 +80,7 @@ spec:
     - path: black-forest-labs/FLUX.1-Krea-dev/transformer
       variant: default
       file_size: 23803075696
-    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q4_1.gguf
+    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q4_1.gguf
       variant: GGUF_Q4_1
       precision: q4_1
       type: gguf
@@ -88,7 +88,7 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 10
       file_size: 7536977184
-    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q6_K.gguf
+    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
@@ -96,7 +96,7 @@ spec:
         min_vram_gb: 10
         recommended_vram_gb: 12
       file_size: 9848349984
-    - path: https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/resolve/main/flux1-krea-dev-Q8_0.gguf
+    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
