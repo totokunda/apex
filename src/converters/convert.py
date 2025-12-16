@@ -15,7 +15,7 @@ from src.converters.transformer_converters import (
     WanVaceTransformerConverter,
     WanMultiTalkTransformerConverter,
     CogVideoXTransformerConverter,
-    HunyuanTransformerConverter,
+    HunyuanVideoTransformerConverter,
     MochiTransformerConverter,
     LTXTransformerConverter,
     StepVideoTransformerConverter,
@@ -26,6 +26,7 @@ from src.converters.transformer_converters import (
     WanAnimateTransformerConverter,
     NoOpTransformerConverter,
     LoraTransformerConverter,
+    HunyuanVideo15TransformerConverter,
 )
 
 from src.converters.utils import (
@@ -69,7 +70,9 @@ def get_transformer_converter(model_base: str):
     elif model_base == "cogvideox.base":
         return CogVideoXTransformerConverter()
     elif model_base == "hunyuanvideo.base":
-        return HunyuanTransformerConverter()
+        return HunyuanVideoTransformerConverter()
+    elif model_base == "hunyuanvideo15.base":
+        return HunyuanVideo15TransformerConverter()
     elif model_base == "hunyuanvideo.avatar":
         return HunyuanAvatarTransformerConverter()
     elif model_base == "mochi.base":
@@ -101,8 +104,10 @@ def get_transformer_converter_by_model_name(model_name: str):
         return CogVideoXTransformerConverter()
     elif "HunyuanAvatar" in model_name:
         return HunyuanAvatarTransformerConverter()
-    elif "Hunyuan" in model_name:
-        return HunyuanTransformerConverter()
+    elif "HunyuanVideo_1_5" in model_name:
+        return HunyuanVideo15TransformerConverter() 
+    elif "HunyuanVideo" in model_name:
+        return HunyuanVideoTransformerConverter()
     elif "Mochi" in model_name:
         return MochiTransformerConverter()
     elif "LTX" in model_name:

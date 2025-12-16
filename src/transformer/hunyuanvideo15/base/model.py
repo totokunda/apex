@@ -22,6 +22,7 @@ from einops import rearrange
 from loguru import logger
 
 from diffusers.models import ModelMixin
+from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 
 from .modules.activation_layers import get_activation_layer
@@ -433,7 +434,7 @@ class MMSingleStreamBlock(nn.Module):
         return x + apply_gate(output, gate=mod_gate)
 
 
-class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
+class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):
     """
     HunyuanVideo Transformer backbone.
 
@@ -681,7 +682,6 @@ class HunyuanVideo_1_5_DiffusionTransformer(ModelMixin, ConfigMixin):
 
         if use_cond_type_embedding:
             self.cond_type_embedding = nn.Embedding(3, self.hidden_size)
-            self.cond_type_embedding.weight.data.fill_(0)
             assert (
                 self.glyph_byT5_v2
             ), "text type embedding is only used when glyph_byT5_v2 is True"

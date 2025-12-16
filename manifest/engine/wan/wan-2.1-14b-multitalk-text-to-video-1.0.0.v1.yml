@@ -19,6 +19,13 @@ spec:
   model_type: multitalk
   denoise_type: base
   engine_type: torch
+  loras:
+  - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
+    scale: 1.0
+    name: lightx2v_lora
+    label: Lightx2v LoRA
+    component: transformer
+    verified: true
   components:
   - type: scheduler
     label: Scheduler

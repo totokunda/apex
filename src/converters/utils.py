@@ -192,6 +192,8 @@ def strip_common_prefix(
                 "lora_down",
                 "lora_A",
                 "lora_B",
+                "lora_embedding_A",
+                "lora_embedding_B",
                 "alpha",
                 "rank",
                 "rank_num",

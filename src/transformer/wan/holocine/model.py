@@ -11,6 +11,7 @@ from einops import rearrange
 from typing import List, Sequence, Optional
 from src.attention import attention_register
 from diffusers import ModelMixin, ConfigMixin
+from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
 from diffusers.configuration_utils import register_to_config
 
 
@@ -525,7 +526,7 @@ class Head(nn.Module):
         return x
 
 
-class WanModel(ModelMixin, ConfigMixin):
+class WanModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):
     config_name = "config.json"
     _supports_gradient_checkpointing = True
 

@@ -846,3 +846,67 @@ def patch_fpscaled_model(
 
             if child is not None and len(child._modules) > 0:
                 stack.append((qname + ".", child))
+
+
+def _infer_fpscaled_module_names_from_state_dict(state_dict: dict) -> set[str]:
+    """
+    Infer which module qualified names should be patched to FPScaled* layers
+    based on checkpoint keys / dtypes.
+
+    We patch a module `foo.bar` when the state_dict contains:
+      - `foo.bar.scale_weight`, or
+      - `foo.bar.weight` with an FP8/FP4 physical dtype.
+    """
+    names: set[str] = set()
+    for k, v in state_dict.items():
+        if not isinstance(k, str):
+            continue
+
+        if k.endswith(".scale_weight"):
+            names.add(k[: -len(".scale_weight")])
+            continue
+
+        if k.endswith(".weight"):
+            # Some checkpoints may provide FPScaledTensor/Parameter wrappers;
+            # prefer the physical dtype if present.
+            dtype = getattr(v, "physical_dtype", None) or getattr(v, "dtype", None)
+            if dtype in (
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float4_e2m1fn_x2,
+                torch.uint8,
+            ):
+                names.add(k[: -len(".weight")])
+                continue
+
+    return names
+
+
+def make_fpscaled_name_filter_from_state_dict(
+    state_dict: dict,
+) -> Callable[[str], bool]:
+    """
+    Create a name_filter for `patch_fpscaled_model()` that patches only modules
+    that appear to be FP-scaled in the incoming checkpoint.
+    """
+    names = _infer_fpscaled_module_names_from_state_dict(state_dict)
+    return lambda qname: qname in names
+
+
+def patch_fpscaled_model_from_state_dict(
+    model: nn.Module,
+    state_dict: dict,
+    *,
+    default_compute_dtype: Optional[torch.dtype] = None,
+) -> None:
+    """
+    Patch only the subset of modules that are FP-scaled in `state_dict`.
+
+    This is the recommended entry point when you have the checkpoint available
+    at patch time (e.g. in LoaderMixin).
+    """
+    patch_fpscaled_model(
+        model,
+        name_filter=make_fpscaled_name_filter_from_state_dict(state_dict),
+        default_compute_dtype=default_compute_dtype,
+    )

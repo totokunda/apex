@@ -13,6 +13,7 @@ import traceback
 
 class DownloadMixin:
     logger: Logger = logger
+    
 
     @staticmethod
     def _stable_url_key(url: str) -> str:

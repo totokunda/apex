@@ -76,12 +76,29 @@ class TransformerConverter:
         state_dict.pop(key, None)
 
     def _sort_rename_dict(self):
-        """Sort rename_dict by value length from longest to shortest to ensure proper replacement order."""
-        self.rename_dict = dict(
-            sorted(
-                self.rename_dict.items(), key=lambda item: len(item[0]), reverse=True
-            )
-        )
+        """
+        Sort `rename_dict` to ensure proper replacement order.
+
+        Default strategy:
+        - Keep the WAN norm swap hack keys first (in their original insertion order),
+          because they are intended to operate on *source* keys only. If we allow
+          length-based sorting to move them later, they can accidentally rewrite
+          *target* keys introduced by other renames (e.g. `img_emb.proj.4` -> `...norm2`).
+        - For all remaining keys, sort by source-key length (longest to shortest)
+          to avoid partial-substring collisions (e.g. `cross_attn.k_img` vs `cross_attn.k`).
+        """
+        priority_keys = ("norm2", "norm3", "norm__placeholder")
+        priority_set = set(priority_keys)
+
+        priority_items = []
+        for k in priority_keys:
+            if k in self.rename_dict:
+                priority_items.append((k, self.rename_dict[k]))
+
+        other_items = [(k, v) for k, v in self.rename_dict.items() if k not in priority_set]
+        other_items.sort(key=lambda item: len(item[0]), reverse=True)
+
+        self.rename_dict = dict(priority_items + other_items)
 
     def convert(self, state_dict: Dict[str, Any]):
         self._sort_rename_dict()
@@ -659,7 +676,7 @@ class StepVideoTransformerConverter(TransformerConverter):
         return state_dict
 
 
-class HunyuanTransformerConverter(TransformerConverter):
+class HunyuanVideoTransformerConverter(TransformerConverter):
     def __init__(self):
         self.rename_dict = {
             "img_in": "x_embedder",
@@ -804,7 +821,7 @@ class HunyuanTransformerConverter(TransformerConverter):
             state_dict[new_key] = state_dict.pop(key)
 
 
-class HunyuanAvatarTransformerConverter(HunyuanTransformerConverter):
+class HunyuanAvatarTransformerConverter(HunyuanVideoTransformerConverter):
     def __init__(self):
         super().__init__()
 
@@ -821,6 +838,122 @@ class HunyuanAvatarTransformerConverter(HunyuanTransformerConverter):
                 "before_proj": "ref_latents_proj",
             }
         )
+
+
+class HunyuanVideo15TransformerConverter(TransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            "t_embedder.in_layer": "t_embedder.mlp.0",
+            "t_embedder.out_layer": "t_embedder.mlp.2",
+            "c_embedder.in_layer": "c_embedder.linear_1",
+            "c_embedder.out_layer": "c_embedder.linear_2",
+            "self_attn.proj": "self_attn_proj",
+            "self_attn.qkv": "self_attn_qkv",
+            "txt_in.individual_token_refiner.blocks.0.mlp.0": "txt_in.individual_token_refiner.blocks.0.mlp.fc1",
+            "txt_in.individual_token_refiner.blocks.0.mlp.2": "txt_in.individual_token_refiner.blocks.0.mlp.fc2",
+            "txt_in.individual_token_refiner.blocks.1.mlp.0": "txt_in.individual_token_refiner.blocks.1.mlp.fc1",
+            "txt_in.individual_token_refiner.blocks.1.mlp.2": "txt_in.individual_token_refiner.blocks.1.mlp.fc2",
+            "time_in.in_layer": "time_in.mlp.0",
+            "time_in.out_layer": "time_in.mlp.2",
+        }
+        
+        self.special_keys_map = {
+            "double_blocks": self.remap_double_blocks_,
+        }
+        
+    @staticmethod
+    def get_chunk_dim(weight: torch.Tensor):
+        if weight.ndim == 1:
+            return 0
+        elif weight.ndim == 2:
+            shape_1, shape_2 = weight.shape
+            if shape_1 > shape_2:
+                return 0
+            else:
+                return 1
+        else:
+            return 0
+
+    def remap_double_blocks_(self, key, state_dict):
+        def _is_lora_down(k: str) -> bool:
+            # diffusers-style: ".lora_down.weight", PEFT-style: ".lora_A.weight"
+            return (".lora_down" in k) or (".lora_A" in k) or k.endswith(".alpha")
+
+        def _write_qkv(prefix_src: str, prefix_q: str, prefix_k: str, prefix_v: str, w: torch.Tensor) -> None:
+            """
+            Map a fused QKV tensor into separate Q/K/V tensors.
+
+            - For fused *base* weights and LoRA "up" matrices, we split the fused dimension into 3.
+            - For LoRA "down" matrices (rank x in_dim), we *do not* split: the same down matrix is shared
+              by Q/K/V and only the corresponding LoRA "up" is partitioned.
+            """
+            if _is_lora_down(key):
+                state_dict[key.replace(prefix_src, prefix_q)] = w
+                state_dict[key.replace(prefix_src, prefix_k)] = w
+                state_dict[key.replace(prefix_src, prefix_v)] = w
+                return
+
+            chunk_dim = self.get_chunk_dim(w)
+            if w.shape[chunk_dim] % 3 != 0:
+                raise ValueError(
+                    f"Expected QKV fused dim divisible by 3 for key='{key}', shape={tuple(w.shape)}, chunk_dim={chunk_dim}"
+                )
+            to_q, to_k, to_v = ggml_chunk(w, 3, dim=chunk_dim)
+            state_dict[key.replace(prefix_src, prefix_q)] = to_q
+            state_dict[key.replace(prefix_src, prefix_k)] = to_k
+            state_dict[key.replace(prefix_src, prefix_v)] = to_v
+
+        if "img_attn_qkv" in key:
+            weight = state_dict.pop(key)
+            _write_qkv("img_attn_qkv", "img_attn_q", "img_attn_k", "img_attn_v", weight)
+            
+            
+        if "img_attn.qkv" in key:
+            weight = state_dict.pop(key)
+            _write_qkv("img_attn.qkv", "img_attn_q", "img_attn_k", "img_attn_v", weight)
+        
+        if "txt_attn_qkv" in key:
+            weight = state_dict.pop(key)
+            _write_qkv("txt_attn_qkv", "txt_attn_q", "txt_attn_k", "txt_attn_v", weight)
+        
+        if "txt_attn.qkv" in key:
+            weight = state_dict.pop(key)
+            _write_qkv("txt_attn.qkv", "txt_attn_q", "txt_attn_k", "txt_attn_v", weight)
+            
+        if "img_attn.proj" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("img_attn.proj", "img_attn_proj")] = weight
+            
+        if "txt_attn.proj" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("txt_attn.proj", "txt_attn_proj")] = weight
+        
+        if "img_mod.lin." in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("img_mod.lin.", "img_mod.linear.")] = weight
+        
+        if "txt_mod.lin." in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("txt_mod.lin.", "txt_mod.linear.")] = weight
+            
+        if "img_mlp.0" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("img_mlp.0", "img_mlp.fc1")] = weight
+        
+        if "img_mlp.2" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("img_mlp.2", "img_mlp.fc2")] = weight
+            
+        if "txt_mlp.0" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("txt_mlp.0", "txt_mlp.fc1")] = weight
+        if "txt_mlp.2" in key:
+            weight = state_dict.pop(key)
+            state_dict[key.replace("txt_mlp.2", "txt_mlp.fc2")] = weight
+    
+            
+
 
 
 class MochiTransformerConverter(TransformerConverter):

@@ -647,7 +647,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         self,
         prompt: Union[str, List[str]],
         aspect_ratio: str = "16:9",
-        duration: str | int = 81,
+        duration: str | int = 121,
         fps: int = 24,
         num_inference_steps: int = 50,
         height: Optional[int] = None,
@@ -658,7 +658,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         num_videos: int = 1,
         resolution: str = "720p",  # or 480p or #1080p
         sparse_attn: bool = False,
-        enable_cache: bool = True,
+        enable_cache: bool = False,
         cache_start_step: int = 11,
         cache_end_step: int = 45,
         total_steps: int = 50,

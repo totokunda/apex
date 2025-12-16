@@ -21,6 +21,11 @@ spec:
   model_type: t2v
   engine_type: torch
   denoise_type: moe
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
   loras:
   - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors
     scale: 0.125

@@ -195,6 +195,9 @@ class UniversalEngine:
         default_kwargs = self.engine._get_default_kwargs("run")
         merged_kwargs = {**default_kwargs, **kwargs}
         return self.engine.run(*args, **merged_kwargs)
+    
+    def offload_engine(self):
+        self.engine.offload_engine()
 
     def __getattr__(self, name):
         """Delegate any missing attributes to the underlying engine"""

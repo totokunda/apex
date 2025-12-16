@@ -67,6 +67,8 @@ class CLIP(BaseHelper):
             Image.Image, List[Image.Image], List[str], str, np.ndarray, torch.Tensor
         ],
         hidden_states_layer: int = -1,
+        device: torch.device = None,
+        dtype: torch.dtype = None,
         **kwargs,
     ):
         if isinstance(image, list):
@@ -74,8 +76,10 @@ class CLIP(BaseHelper):
         else:
             images = [self._load_image(image)]
 
-        device = self.model.device
-        dtype = self.model.dtype
+        if device is None:
+            device = self.model.device
+        if dtype is None:
+            dtype = self.model.dtype
 
         processed_images = self.processor(images, return_tensors="pt", **kwargs).to(
             device=device, dtype=dtype

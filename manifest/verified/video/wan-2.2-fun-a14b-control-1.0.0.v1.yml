@@ -22,6 +22,11 @@ spec:
   model_type: control
   engine_type: torch
   denoise_type: moe
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
   loras:
   - source: lightx2v/Wan2.2-Distill-Loras/wan2.2_i2v_A14b_high_noise_lora_rank64_lightx2v_4step_1022.safetensors
     scale: 1.0

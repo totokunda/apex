@@ -12,7 +12,7 @@ from enum import Enum
 from collections import OrderedDict
 import numpy as np
 import json
-
+from loguru import logger
 
 class BaseOutput(OrderedDict):
     """
@@ -116,4 +116,5 @@ class BaseHelper(LoaderMixin, ToMixin, nn.Module):
         **kwargs,
     ):
         super().__init__()
+        self.logger = logger
         self.kwargs = kwargs
