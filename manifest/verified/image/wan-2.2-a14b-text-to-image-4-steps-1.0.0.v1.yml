@@ -24,13 +24,13 @@ spec:
   attention_types:
   - sdpa
   loras:
-  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
+  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
     scale: 0.125
     name: Wan Lightning High Noise
     label: Wan Lightning High Noise
     verified: true
     component: high_noise_transformer
-  - source: https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
+  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
     scale: 0.125
     name: Wan Lightning Low Noise
     label: Wan Lightning Low Noise

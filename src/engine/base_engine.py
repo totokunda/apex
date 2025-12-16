@@ -1563,7 +1563,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         elif component.get("type") == "transformer":
             activation_overhead_gb = os.environ.get("TRANSFORMER_ACTIVATION_OVERHEAD_GB", 8.0)
         elif component.get("type") == "vae":
-            activation_overhead_gb = os.environ.get("VAE_ACTIVATION_OVERHEAD_GB", 8.0)
+            activation_overhead_gb = os.environ.get("VAE_ACTIVATION_OVERHEAD_GB", 6.0)
         else:
             activation_overhead_gb = os.environ.get("ACTIVATION_OVERHEAD_GB", 8.0)
             

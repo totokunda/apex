@@ -1,25 +1,25 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: chroma-hd-text-to-image
-  model: chroma
-  name: Chroma HD Text to Image
+  id: zimage-turbo-control
+  model: zimage
+  name: ZImage Turbo Control  
   version: 1.0.0
-  description: Chroma HD is a 8.9B parameter model for text-to-image generation.
+  description: ZImage Turbo Control is a 6B parameter model for text-to-image generation with controlnet.
   tags:
-  - chroma
-  - hd
-  - t2i
-  author: Apex AI
+  - zimage
+  - turbo
+  - zimage-turbo
+  - control
+  author: Tongy-MAI
   license: Apache-2.0
-  demo_path: https://i.redd.it/pushing-the-limits-of-chroma1-hd-v0-rhokmhle7zkf1.png?width=1536&format=png&auto=webp&s=b9001441ff09f38150458fda1c9765302479f9ba
+  demo_path: https://i.ytimg.com/vi/dNeA5mJ36hA/maxresdefault.jpg
   categories:
-  - text-to-image
+  - control
 spec:
-  engine: chroma
-  model_type: t2i
+  engine: zimage
+  model_type: control
   engine_type: torch
-  denoise_type: base
   compute_requirements:
     min_cuda_compute_capability: 7.0
     supported_compute_types:
@@ -34,64 +34,79 @@ spec:
     scheduler_options:
     - name: FlowMatchEulerDiscreteScheduler
       label: FlowMatch Euler Discrete Scheduler
-      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the Chroma
-        HD Text to Image model.
+      description: The FlowMatch Euler Discrete Scheduler is a scheduler for the ZImage Turbo
+        model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: lodestones/Chroma1-HD/scheduler/scheduler_config.json
+      config_path: Tongyi-MAI/Z-Image-Turbo/scheduler/scheduler_config.json
   - type: vae
-    label: Chroma VAE
+    label: ZImage Turbo VAE
     base: auto
     model_path:
-    - path: lodestones/Chroma1-HD/vae
+    - path: Tongyi-MAI/Z-Image-Turbo/vae
       variant: default
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 16
   - type: text_encoder
-    label: T5 Text Encoder
-    base: T5EncoderModel
+    label: ZImage Turbo Text Encoder
+    base: Qwen3ForCausalLM
+    name: text_encoder
     model_path:
-    - path: lodestones/Chroma1-HD/text_encoder
+    - path: Tongyi-MAI/Z-Image-Turbo/text_encoder
       variant: default
-    tokenizer_class: T5Tokenizer
-    tokenizer_name: lodestones/Chroma1-HD
+      precision: fp16
+      type: safetensors
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 24
+    tokenizer_class: Qwen2Tokenizer
+    tokenizer_name: Tongyi-MAI/Z-Image-Turbo
     tokenizer_kwargs:
       subfolder: tokenizer
   - type: transformer
-    label: Chroma Transformer
-    base: chroma.base
+    label: ZImage Turbo Control Transformer
+    base: zimage.control
     model_path:
-    - path: lodestones/Chroma1-HD/transformer
+    - path: Tongyi-MAI/Z-Image-Turbo/transformer
       variant: default
-    - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q4_0.gguf
-      variant: GGUF_Q4_0
-      precision: q4_0
-      type: gguf
+      precision: fp16
+      type: safetensors
       resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-    - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q8_0.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
+        min_vram_gb: 24
+        recommended_vram_gb: 32
+    extra_model_paths: 
+    - path: alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.0/Z-Image-Turbo-Fun-Controlnet-Union-2.0.safetensors
+      variant: default
+      precision: fp16
+      type: safetensors
       resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 16
+        min_vram_gb: 24
+        recommended_vram_gb: 32
   defaults:
     run:
-      num_inference_steps: 50
-      guidance_scale: 5.0
-      true_cfg_scale: 4.0
+      num_inference_steps: 9
+      guidance_scale: 0.0
+      height: 1728
+      width: 992
       return_latents: false
-      text_encoder_kwargs:
-        add_special_tokens: true
-        clean_text: false
-        pad_with_zero: false
-        max_sequence_length: 512
-        arrange_attention_mask: true
       attention_kwargs: {}
   ui:
     panels:
+    - name: control
+      label: Control
+      collapsible: true
+      default_open: true
+      layout:
+        flow: column
+        rows:
+        - - control_image
+          - control_context_scale
     - name: prompting
       label: Prompting
       collapsible: true
+      default_open: true
       layout:
         flow: column
         rows:
@@ -107,6 +122,7 @@ spec:
     - name: size
       label: Size
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
@@ -117,18 +133,33 @@ spec:
     - name: sampling
       label: Sampling
       collapsible: true
+      default_open: false
       layout:
         flow: column
         rows:
-        - - num_inference_steps
-        - - guidance_scale
-        - - true_cfg_scale
         - - seed
     inputs:
+    - id: control_image
+      label: Control Image
+      description: The control image to use for the generation.
+      type: image
+      panel: control
+      required: true
+      map_h: height
+      map_w: width
+    - id: control_context_scale
+      label: Control Context Scale
+      description: The scale of the control context.
+      type: number
+      panel: control
+      default: 0.75
+      min: 0.0
+      max: 1.0
+      step: 0.01
     - id: prompt
       label: Prompt
-      description: Describe the image you want to generate.
-      placeholder: A beautiful landscape at golden hour.
+      description: The prompt for text-to-image generation.
+      placeholder: A serene lake surrounded by pine trees at sunrise, ultra realistic.
       type: text
       panel: prompting
       required: true
@@ -139,18 +170,20 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: blurry, low quality, distorted, artifacts
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 2048
       options:
-      - name: HD
-        value: 720
+      - name: 2K Ultra HD
+        value: 2048
+        height: 2048
       - name: Ultra HD
         value: 1024
+      - name: HD
+        value: 720
       - name: SD
         value: 480
       - name: Custom
@@ -160,7 +193,7 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: "1:1"
       options:
       - name: Wide
         value: "16:9"
@@ -179,24 +212,14 @@ spec:
         ratio_w: 4
         ratio_h: 3
       - name: Custom
-        value: custom 
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 50
-      min: 1
-      max: 100
-      step: 1
+        value: custom
     - id: height
       label: Height
       description: Explicit height override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -206,7 +229,7 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 2048
       min: 256
       max: 8192
       step: 64
@@ -220,23 +243,3 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-    - id: true_cfg_scale
-      label: True CFG Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 4.0
-      min: 1.0
-      max: 15.0
-      step: 0.5
-    - id: guidance_scale
-      label: Guidance Scale
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 5.0
-      min: 1.0
-      max: 15.0
-      step: 0.5

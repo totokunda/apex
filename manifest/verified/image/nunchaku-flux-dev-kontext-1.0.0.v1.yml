@@ -16,7 +16,7 @@ metadata:
   - fp4
   - nf4
   - int4
-  author: Apex AI
+  author: Nunchaku Tech
   license: Apache-2.0
   demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
   categories:
@@ -36,7 +36,7 @@ spec:
   attention_types:
   - sdpa
   loras: 
-  - source: https://huggingface.co/strangerzonehf/Flux-Kontext-Ultimate-LoRA/resolve/main/Kontext-Top-Down-View.safetensors
+  - source: strangerzonehf/Flux-Kontext-Ultimate-LoRA/Kontext-Top-Down-View.safetensors
     scale: 1.0
     name: Top Down
     label: Top Down

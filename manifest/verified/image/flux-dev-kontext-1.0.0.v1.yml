@@ -11,7 +11,7 @@ metadata:
   - flux
   - kontext
   - dev
-  author: Apex AI
+  author: Black Forest Labs
   license: Apache-2.0
   demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
   categories:
@@ -85,7 +85,7 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 23803075754
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q2_K.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
@@ -93,7 +93,7 @@ spec:
         min_vram_gb: 4
         recommended_vram_gb: 6
       file_size: 4318499552
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_K_S.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
@@ -101,7 +101,7 @@ spec:
         min_vram_gb: 6
         recommended_vram_gb: 8
       file_size: 7284772512
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q4_1.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q4_1.gguf
       variant: GGUF_Q4_1
       precision: q4_1
       type: gguf
@@ -109,7 +109,7 @@ spec:
         min_vram_gb: 8
         recommended_vram_gb: 10
       file_size: 7536977184
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q6_K.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
@@ -117,7 +117,7 @@ spec:
         min_vram_gb: 10
         recommended_vram_gb: 12
       file_size: 9848349984
-    - path: https://huggingface.co/QuantStack/FLUX.1-Kontext-dev-GGUF/resolve/main/flux1-kontext-dev-Q8_0.gguf
+    - path: QuantStack/FLUX.1-Kontext-dev-GGUF/flux1-kontext-dev-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
