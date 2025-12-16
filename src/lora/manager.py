@@ -2,7 +2,7 @@ import os
 import re
 import hashlib
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from src.converters.convert import (
     get_transformer_converter_by_model_name,
     strip_common_prefix,
@@ -20,56 +20,7 @@ from safetensors.torch import safe_open
 
 # Ensure PEFT is patched to handle GGML / FP8-scaled linears with a custom LoRA wrapper.
 from src.lora.quantized_lora import patch_peft_for_quantized_lora
-
-def build_lora_names(key, lora_down_key, lora_up_key, is_native_weight):
-    base = "diffusion_model." if is_native_weight else ""
-    lora_down = base + key.replace(".weight", lora_down_key)
-    lora_up = base + key.replace(".weight", lora_up_key)
-    lora_alpha = base + key.replace(".weight", ".alpha")
-    return lora_down, lora_up, lora_alpha
-
-def load_and_merge_lora_weight(
-    model: nn.Module,
-    lora_state_dict: dict,
-    lora_down_key: str=".lora_A.weight",
-    lora_up_key: str=".lora_B.weight"):
-
-    is_native_weight = any("diffusion_model." in key for key in lora_state_dict)
-    for key, value in model.named_parameters():
-        lora_down_name, lora_up_name, lora_alpha_name = build_lora_names(
-            key, lora_down_key, lora_up_key, is_native_weight
-        )
-        if lora_down_name in lora_state_dict:
-            lora_down = lora_state_dict[lora_down_name]
-            lora_up = lora_state_dict[lora_up_name]
-            lora_alpha = float(lora_state_dict[lora_alpha_name])
-            rank = lora_down.shape[0]
-            scaling_factor = lora_alpha / rank
-            assert lora_up.dtype == torch.float32
-            assert lora_down.dtype == torch.float32
-            delta_W = scaling_factor * torch.matmul(lora_up, lora_down)
-            value.data = (value.data + delta_W).to(value.dtype)
-
-    return model
-
-def load_and_merge_lora_weight_from_safetensors(
-    model: nn.Module,
-    lora_weight_path:str,
-    lora_down_key:str=".lora_A.weight",
-    lora_up_key:str=".lora_B.weight"):
-    lora_state_dict = {}
-    with safe_open(lora_weight_path, framework="pt", device="cpu") as f:
-        for key in f.keys():
-            lora_state_dict[key] = f.get_tensor(key)
-    
-    converter = get_transformer_converter_by_model_name(model.__class__.__name__)
-    lora_converter = LoraConverter()
-    if converter is not None:
-        converter.convert(lora_state_dict)
-    lora_converter.convert(lora_state_dict)
-    
-    model = load_and_merge_lora_weight(model, lora_state_dict, lora_down_key, lora_up_key)
-    return model
+from src.lora.key_remap import remap_embedding_lora_keys
 
 patch_peft_for_quantized_lora()
 
@@ -250,6 +201,59 @@ class LoraManager(DownloadMixin):
             
         return prefix
         
+    @staticmethod
+    def _build_lora_config_metadata_from_state_dict(
+        state_dict: Dict[str, torch.Tensor]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Diffusers' PEFT loader infers LoRA rank from keys containing "lora_B".
+        That misses embedding LoRA keys ("lora_embedding_*"), which can have a much
+        smaller effective rank (e.g. num_embeddings=3 => max rank=3).
+
+        We build an explicit LoraConfig kwargs dict (metadata) including `rank_pattern`
+        so modules with non-default rank (like embeddings) are injected with the
+        correct rank and can load without shape mismatches.
+        """
+        import collections
+
+        per_module_rank: Dict[str, int] = {}
+
+        for k, v in state_dict.items():
+            if not isinstance(v, torch.Tensor) or v.ndim < 2:
+                continue
+
+            if k.endswith(".lora_B.weight"):
+                module = k[: -len(".lora_B.weight")]
+                per_module_rank[module] = int(v.shape[1])
+            elif k.endswith(".lora_embedding_B"):
+                # Expected (embed_dim, r)
+                module = k[: -len(".lora_embedding_B")]
+                per_module_rank[module] = int(v.shape[1])
+            elif k.endswith(".lora_embedding_A"):
+                # Expected (r, num_embeddings) – only use if we don't already have rank for this module
+                module = k[: -len(".lora_embedding_A")]
+                per_module_rank.setdefault(module, int(v.shape[0]))
+
+        if not per_module_rank:
+            return None
+
+        r = collections.Counter(per_module_rank.values()).most_common(1)[0][0]
+        rank_pattern = {m: rr for m, rr in per_module_rank.items() if rr != r}
+
+        target_modules = sorted({name.split(".lora")[0] for name in state_dict.keys() if ".lora" in name})
+        use_dora = any("lora_magnitude_vector" in k for k in state_dict.keys())
+        lora_bias = any(("lora_B" in k and k.endswith(".bias")) for k in state_dict.keys())
+
+        return {
+            "r": int(r),
+            "lora_alpha": int(r),
+            "rank_pattern": rank_pattern,
+            "alpha_pattern": {},
+            "target_modules": target_modules,
+            "use_dora": use_dora,
+            "lora_bias": lora_bias,
+        }
+
 
     def load_into(
         self,
@@ -316,8 +320,7 @@ class LoraManager(DownloadMixin):
 
                 for local_path in item.local_paths:
                     class_name = getattr(model.config, "_class_name", "lora")
-                    #model = load_and_merge_lora_weight_from_safetensors(model, local_path)
-                    #continue
+
 
                     local_path_state_dict = self.maybe_convert_state_dict(
                         local_path, class_name
@@ -335,6 +338,10 @@ class LoraManager(DownloadMixin):
                         local_path_state_dict
                     )
 
+                    # Embedding LoRA uses lora_embedding_* keys (no ".weight") and swaps A/B roles.
+                    local_path_state_dict = remap_embedding_lora_keys(
+                        local_path_state_dict, model  # type: ignore[arg-type]
+                    )
 
                     keys = list(local_path_state_dict.keys())
                     prefix = self._get_prefix_key(keys)
@@ -344,10 +351,17 @@ class LoraManager(DownloadMixin):
                     model_dtype = next(model.parameters()).dtype
                     local_path_state_dict = {k: v.to(model_dtype) for k, v in local_path_state_dict.items()}
                     
-                    model.load_lora_adapter(
-                        local_path_state_dict, adapter_name=adapter_name, prefix=prefix
-                    )
+                    metadata = self._build_lora_config_metadata_from_state_dict(local_path_state_dict)
+                    if metadata is not None and prefix is not None:
+                        # diffusers filters metadata keys by prefix and strips it, so prefix these keys to keep them.
+                        metadata = {f"{prefix}.{k}": v for k, v in metadata.items()}
 
+                    model.load_lora_adapter(
+                        local_path_state_dict,
+                        adapter_name=adapter_name,
+                        prefix=prefix,
+                        metadata=metadata,
+                    )
                     logger.info(f"Loaded LoRA {adapter_name} from {local_path}")
 
             # Activate all adapters with their weights in one call

@@ -8,6 +8,7 @@ engine = create_engine("wan", "manifest/wan/wan_infinitetalk_14b.yml", "multital
 
 prompt= "A man is talking.",
 negative_prompt="bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+
 video = "assets/video/man_talking.mp4"
 
 video = engine.run(

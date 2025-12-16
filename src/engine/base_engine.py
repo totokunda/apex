@@ -621,13 +621,16 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             helper_class = find_class_recursive(importlib.import_module(module), base)
         if helper_class is None:
             raise ValueError(f"Helper class {base} not found")
+        
+        
+
 
         # create an instance of the helper class
         if hasattr(helper_class, "from_pretrained") and "model_path" in config:
             helper = helper_class.from_pretrained(config["model_path"])
         else:
             # check for config_path
-            if "config_path" in config:
+            if "config_path" in config and config.get("module", None) is not None:
                 config_path = config.pop("config_path")
                 # try download the config file
                 try:
@@ -635,6 +638,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 except Exception:
                     pass
                 config = self._load_config_file(config_path)
+                
             helper = helper_class(**config)
 
         # Store helper with multiple keys for easier access
@@ -2396,10 +2400,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             f"(expected method '{method_name}' or a class-defined 'denoise')"
         )
 
-    def offload_engine(self, engine: "BaseEngine"):
+    def offload_engine(self, engine: "BaseEngine" = None):
+        if engine is None:
+            engine = self
         components = engine.config.get("components", [])
         self.logger.info(
-            f"Offloading engine: {engine.config.get('metadata', {}).get('name')}"
+            f"Offloading engine: {engine.config.get('metadata', {}).get('name', 'BaseEngine')}"
         )
         for component in components:
             name = component.get("name")

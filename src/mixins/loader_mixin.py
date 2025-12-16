@@ -26,10 +26,12 @@ import cv2
 import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
-from src.quantize.ggml_layer import patch_model as patch_model_ggml
+from src.quantize.ggml_layer import patch_model_from_state_dict as patch_model_ggml_from_state_dict
+from src.quantize.ggml_tensor import GGMLTensor
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
+from tqdm import tqdm
 # Import pretrained config from transformers
 from transformers.configuration_utils import PretrainedConfig
 from src.utils.safetensors import is_safetensors_file, load_safetensors
@@ -66,7 +68,7 @@ VIDEO_EXTS = [
 
 class LoaderMixin(DownloadMixin):
     logger: Logger = logger
-
+    
     def fetch_config(
         self,
         config_path: str,
@@ -89,9 +91,10 @@ class LoaderMixin(DownloadMixin):
         key_map: Dict[str, str] | None = None,
         extra_kwargs: Dict[str, Any] | None = None,
     ) -> ModelMixin:
-
-
-
+        
+        if not self.logger:
+            self.logger = logger
+    
         if extra_kwargs is None:
             extra_kwargs = {}
 
@@ -294,168 +297,165 @@ class LoaderMixin(DownloadMixin):
 
         if no_weights:
             return model
-
-        if (
-            model_path.endswith(".gguf")
-            and hasattr(self, "engine_type")
-            and self.engine_type == "mlx"
-        ):
-            self.logger.info(f"Loading GGUF model from {model_path}")
-            # Can load gguf directly into mlx model no need to convert
-            gguf_weights = mx.load(model_path)
-            check_mlx_convolutional_weights(gguf_weights, model)
-            model.load_weights(gguf_weights)
-
-        elif model_path.endswith(".gguf"):
-            logger.info(f"Loading GGUF model from {model_path}")
-            gguf_kwargs = component.get("gguf_kwargs", {})
-
-            state_dict, _ = load_gguf(
-                model_path, type=component.get("type"), dequant_dtype=load_dtype, **gguf_kwargs
-            )
-            converter.convert(state_dict)
-            # Load GGMLTensors without replacing nn.Parameters by copying data
-            patch_model_ggml(model, default_dequant_dtype=load_dtype)
-            for key, value in state_dict.items():
-                if load_dtype:
-                    if getattr(value, "tensor_type", None) in {gguf.GGMLQuantizationType.F32, gguf.GGMLQuantizationType.F16}:
-                        state_dict[key] = value.to(load_dtype)
-            
-            model.load_state_dict(state_dict, assign=True, strict=False)
-
-        else:
-            if os.path.isdir(model_path):
-                extensions = component.get(
-                    "extensions", ["safetensors", "bin", "pt", "ckpt"]
-                )
-                self.logger.info(f"Loading model from {model_path}")
-                files_to_load = []
-                for ext in extensions:
-                    files_to_load.extend(glob(os.path.join(model_path, f"*.{ext}")))
-                if not files_to_load:
-                    self.logger.warning(f"No model files found in {model_path}")
-            else:
-                if not os.path.exists(model_path):
-                    raise FileNotFoundError(f"Model file not found at {model_path}")
-                files_to_load = [model_path]
-
-            extra_model_paths = component.get("extra_model_paths", [])
-            if isinstance(extra_model_paths, str):
-                extra_model_paths = [extra_model_paths]
-
-            if extra_kwargs.get("load_extra_model_paths", True):
-                files_to_load.extend(extra_model_paths)
-
-            # Track whether we've already patched this model for FP-scaled weights
-            patched_for_fpscaled = False
-
-            for file_path in files_to_load:
-                self.logger.info(f"Loading weights from {file_path}")
-                is_safetensors = is_safetensors_file(file_path)
-                if is_safetensors:
-                    state_dict = load_safetensors(
-                        file_path,
-                        dtype=load_dtype,
-                        framework=(
-                            "np"
-                            if hasattr(self, "engine_type")
-                            and self.engine_type == "mlx"
-                            else "pt"
-                        ),
-                    )
-                else:
-                    state_dict = torch.load(
-                        file_path, map_location="cpu", weights_only=True, mmap=True
-                    )
-
-                
-                if load_dtype and not is_safetensors:
-                    for k, v in state_dict.items():
-                        state_dict[k] = v.to(load_dtype)
-                # remap keys if key_map is provided replace part of existing key with new key
-                if key_map:
-                    new_state_dict = {}
-                    for k, v in key_map.items():
-                        for k2, v2 in state_dict.items():
-                            if k in k2:
-                                new_state_dict[k2.replace(k, v)] = v2
-                            else:
-                                new_state_dict[k2] = v2
-
-                    state_dict = new_state_dict
-
-
-                converter.convert(state_dict)
-
-                # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
-                # and patch the model with FPScaled* layers *before* loading
-                # the state dict. We only do this once per model.
-
-                if hasattr(self, "engine_type") and self.engine_type == "mlx":
-                    check_mlx_convolutional_weights(state_dict, model)
-
-                if (
-                    not patched_for_fpscaled
-                    and getattr(self, "engine_type", "torch") == "torch"
-                    and isinstance(state_dict, dict)
-                    and (
-                        any(k.endswith("scale_weight") for k in state_dict.keys())
-                        or any(
-                            (
-                                v.dtype == torch.float8_e4m3fn
-                                or v.dtype == torch.float8_e5m2
-                            )
-                            for v in state_dict.values()
-                        )
-                    )
-                ):
-                    from src.quantize import (
-                        patch_fpscaled_model,
-                        restore_fpscaled_parameters,
-                    )
-
-                    # Prefer the explicit load_dtype (if it's a torch dtype)
-                    # as the compute dtype for FP dequantization; otherwise
-                    # let the scaled layers infer it from their inputs.
-                    default_compute_dtype = (
-                        load_dtype if isinstance(load_dtype, torch.dtype) else None
-                    )
-
-                    self.logger.info(
-                        "Detected FP-scaled checkpoint (found '*.scale_weight' "
-                        "keys). Patching model with FPScaled layers."
-                    )
-
-                    patch_fpscaled_model(
-                        model,
-                        default_compute_dtype=default_compute_dtype,
-                    )
-
-                    # Mark the model so we can treat leftover meta scale_weight
-                    # parameters more leniently in the post-load meta check, and
-                    # stash the default compute dtype so we can restore FP
-                    # parameter subclasses after loading.
-                    setattr(model, "_patched_for_fpscaled", True)
-                    setattr(
-                        model,
-                        "_fpscaled_default_compute_dtype",
-                        default_compute_dtype,
-                    )
-                    patched_for_fpscaled = True
-
-                if hasattr(model, "load_state_dict"):
-                    model.load_state_dict(
-                        state_dict, strict=False, assign=True
-                    )  # must be false as we are iteratively loading the state dict
-
-                elif hasattr(model, "load_weights"):
-                    model.load_weights(state_dict, strict=False)
-                else:
-                    raise ValueError(
-                        f"Model {model} does not have a load_state_dict or load_weights method"
-                    )
-                    
+        
   
+        files_to_load = []
+        if os.path.isdir(model_path):
+            extensions = component.get(
+                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf"]
+            )
+            if "gguf" not in extensions:
+                extensions = list(extensions) + ["gguf"]
+            self.logger.info(f"Loading model from {model_path}")
+            for ext in extensions:
+                files_to_load.extend(glob(os.path.join(model_path, f"*.{ext}")))
+        else:
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model file not found at {model_path}")
+            extensions = component.get(
+                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf"]
+            )
+            if "gguf" not in extensions:
+                extensions = list(extensions) + ["gguf"]
+            # ensure model_path ends with one of the extensions
+            if any(model_path.endswith(ext) for ext in extensions):
+                files_to_load = [model_path]
+        extra_model_paths = component.get("extra_model_paths", [])
+        if isinstance(extra_model_paths, str):
+            extra_model_paths = [extra_model_paths]
+        if extra_kwargs.get("load_extra_model_paths", True):
+            files_to_load.extend(extra_model_paths)
+        # Track whether we've already patched this model for FP-scaled weights
+
+        patched_for_fpscaled = False
+        gguf_kwargs = component.get("gguf_kwargs", {})
+        for file_path in tqdm(files_to_load, desc="Loading weights", total=len(files_to_load)):
+            if str(file_path).endswith(".gguf"):
+                # GGUF follows the same "files_to_load" pathway as other weight files.
+                if hasattr(self, "engine_type") and self.engine_type == "mlx":
+                    # Can load gguf directly into mlx model; no need to convert.
+                    gguf_weights = mx.load(file_path)
+                    check_mlx_convolutional_weights(gguf_weights, model)
+                    model.load_weights(gguf_weights)
+                    continue
+
+                logger.info(f"Loading GGUF model from {file_path}")
+                state_dict, _ = load_gguf(
+                    file_path,
+                    type=component.get("type"),
+                    dequant_dtype=load_dtype,
+                    **gguf_kwargs,
+                )
+                converter.convert(state_dict)
+                # Load GGMLTensors without replacing nn.Parameters by copying data
+                patch_model_ggml_from_state_dict(
+                    model,
+                    state_dict,
+                    default_dequant_dtype=load_dtype,
+                )
+                
+                for key, value in state_dict.items():
+                    if load_dtype:
+                        if getattr(value, "tensor_type", None) in {
+                            gguf.GGMLQuantizationType.F32,
+                            gguf.GGMLQuantizationType.F16,
+                        }:
+                            state_dict[key] = value.to(load_dtype)
+
+                model.load_state_dict(state_dict, assign=True, strict=False)
+                continue
+
+            is_safetensors = is_safetensors_file(file_path)
+            if is_safetensors:
+                state_dict = load_safetensors(
+                    file_path,
+                    dtype=load_dtype,
+                    framework=(
+                        "np"
+                        if hasattr(self, "engine_type")
+                        and self.engine_type == "mlx"
+                        else "pt"
+                    ),
+                )
+            else:
+                state_dict = torch.load(
+                    file_path, map_location="cpu", weights_only=True, mmap=True
+                )
+            if load_dtype and not is_safetensors:
+                for k, v in state_dict.items():
+                    state_dict[k] = v.to(load_dtype)
+            # remap keys if key_map is provided replace part of existing key with new key
+            if key_map:
+                new_state_dict = {}
+                for k, v in key_map.items():
+                    for k2, v2 in state_dict.items():
+                        if k in k2:
+                            new_state_dict[k2.replace(k, v)] = v2
+                        else:
+                            new_state_dict[k2] = v2
+                state_dict = new_state_dict
+            converter.convert(state_dict)
+            # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
+            # and patch the model with FPScaled* layers *before* loading
+            # the state dict. We only do this once per model.
+            if hasattr(self, "engine_type") and self.engine_type == "mlx":
+                check_mlx_convolutional_weights(state_dict, model)
+            if (
+                not patched_for_fpscaled
+                and getattr(self, "engine_type", "torch") == "torch"
+                and isinstance(state_dict, dict)
+                and (
+                    any(k.endswith("scale_weight") for k in state_dict.keys())
+                    or any(
+                        (
+                            v.dtype == torch.float8_e4m3fn
+                            or v.dtype == torch.float8_e5m2
+                        )
+                        for v in state_dict.values()
+                    )
+                )
+            ):
+                from src.quantize.scaled_layer import (
+                    patch_fpscaled_model_from_state_dict,
+                )
+                # Prefer the explicit load_dtype (if it's a torch dtype)
+                # as the compute dtype for FP dequantization; otherwise
+                # let the scaled layers infer it from their inputs.
+                default_compute_dtype = (
+                    load_dtype if isinstance(load_dtype, torch.dtype) else None
+                )
+                self.logger.info(
+                    "Detected FP-scaled checkpoint (found '*.scale_weight' "
+                    "keys). Patching model with FPScaled layers."
+                )
+                patch_fpscaled_model_from_state_dict(
+                    model,
+                    state_dict,
+                    default_compute_dtype=default_compute_dtype,
+                )
+                # Mark the model so we can treat leftover meta scale_weight
+                # parameters more leniently in the post-load meta check, and
+                # stash the default compute dtype so we can restore FP
+                # parameter subclasses after loading.
+                setattr(model, "_patched_for_fpscaled", True)
+                setattr(
+                    model,
+                    "_fpscaled_default_compute_dtype",
+                    default_compute_dtype,
+                )
+                patched_for_fpscaled = True
+            if hasattr(model, "load_state_dict"):
+                model.load_state_dict(
+                    state_dict, strict=False, assign=True
+                )  # must be false as we are iteratively loading the state dict
+            elif hasattr(model, "load_weights"):
+                model.load_weights(state_dict, strict=False)
+            else:
+                raise ValueError(
+                    f"Model {model} does not have a load_state_dict or load_weights method"
+                )
+                    
+        
         if getattr(self, "engine_type", "torch") == "torch":
             has_meta_params = False
             patched_for_fpscaled = getattr(model, "_patched_for_fpscaled", False)
@@ -464,7 +464,7 @@ class LoaderMixin(DownloadMixin):
             # FPScaledParameter after loading, since some load_state_dict
             # code paths may strip custom Parameter subclasses.
             if patched_for_fpscaled:
-                from src.quantize import restore_fpscaled_parameters
+                from src.quantize.scaled_layer import restore_fpscaled_parameters
 
                 default_compute_dtype = getattr(
                     model, "_fpscaled_default_compute_dtype", None
@@ -526,8 +526,8 @@ class LoaderMixin(DownloadMixin):
             maybe_compile = getattr(self, "_maybe_compile_module", None)
             if callable(maybe_compile):
                 model = maybe_compile(model, component)
-
-
+                
+        
         return model
 
     def _load_config_file(self, file_path: str | Path):

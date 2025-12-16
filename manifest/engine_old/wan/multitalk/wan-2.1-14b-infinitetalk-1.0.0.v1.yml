@@ -39,7 +39,8 @@ spec:
     base: wan.multitalk
     model_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer
     extra_model_paths:
-    - https://huggingface.co/MeiGen-AI/InfiniteTalk/resolve/main/single/infinitetalk.safetensors
+    
+    - path: MeiGen-AI/InfiniteTalk/multi/infinitetalk.safetensors
   - type: helper
     base: wan.multitalk
     model_path: TencentGameMate/chinese-wav2vec2-base

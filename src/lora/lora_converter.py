@@ -29,7 +29,13 @@ class LoraConverter(TransformerConverter):
     creation of a full secondary state dict of the same size.
     """
     def __init__(self):
+        
         super().__init__()
+        self.special_keys_map = {
+            ".diff_b": self.remove_keys_inplace,
+            ".diff": self.remove_keys_inplace,
+            "scaled_fp8": self.remove_keys_inplace,
+        }
         
     def _get_state_dict_type(self, state_dict:Dict[str, Any]) -> StateDictType:
         """

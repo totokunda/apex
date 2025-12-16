@@ -32,10 +32,9 @@ class WanMultitalkEngine(WanShared):
         num_videos: int = 1,
         seed: int | None = None,
         motion_frames: int = 25,
-        fps: int = 25,
+        fps: int = 16,
         guidance_scale: float = 5.0,
         audio_guidance_scale: float = 4.0,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
@@ -72,12 +71,12 @@ class WanMultitalkEngine(WanShared):
             fps: Frames per second
             guidance_scale: Text guidance scale
             audio_guidance_scale: Audio guidance scale
-            use_cfg_guidance: Whether to use classifier-free guidance
             bbox: Bounding boxes for multiple people
             shift: Timestep transform shift parameter
         """
 
         num_frames = self._parse_num_frames(duration, fps)
+        use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         assert (
             image is not None or video is not None
@@ -264,13 +263,14 @@ class WanMultitalkEngine(WanShared):
 
             # get clip embedding
             clip_processor = self.helpers["clip"]
+            self.to_device(clip_processor)
 
-            image_embeds = clip_processor(loaded_image, hidden_states_layer=-2).to(
+            image_embeds = clip_processor(loaded_image, hidden_states_layer=-2, device=self.device, dtype=torch.float32).to(
                 transformer_dtype
             )
 
             if offload:
-                self._offload(clip_processor)
+                self._offload(clip_processor, delete_from_cpu=False)
 
             # zero padding and vae encode
             # InfiniteTalk: always condition on the current source video frame when a video is provided;
@@ -374,16 +374,16 @@ class WanMultitalkEngine(WanShared):
                 C, T_m, H, W = add_latent.shape
                 latents[:, :C, :T_m, :H, :W] = add_latent
 
-            total_steps = len(timesteps) if timesteps is not None else 0
+            total_steps = len(input_timesteps) if input_timesteps is not None else 0
             #!TODO: This is incorrect.
             denoise_progress_callback = make_mapped_progress(
                 progress_callback, 0.0, 1.0
             )
             audio_embeds = audio_embs.to(transformer_dtype).to(self.device)
 
-            with self._progress_bar(len(timesteps), desc=f"Sampling MULTITALK") as pbar:
-                total_steps = len(timesteps)
-                for i, t in enumerate(timesteps):
+            with self._progress_bar(len(input_timesteps), desc=f"Sampling MULTITALK") as pbar:
+                total_steps = len(input_timesteps)
+                for i, t in enumerate(input_timesteps):
                     if using_video_input:
                         latents[:, :, :cur_motion_frames_latent_num] = (
                             latent_motion_frames.unsqueeze(0)
@@ -471,11 +471,12 @@ class WanMultitalkEngine(WanShared):
                         motion_add_noise = torch.randn_like(
                             latent_motion_frames
                         ).contiguous()
+                        noise_timestep = input_timesteps[i + 1].expand(latents.shape[0]) if i < len(input_timesteps) - 1 else torch.zeros_like(input_timesteps[-1]).expand(latents.shape[0])
                         add_latent = scheduler.add_noise(
-                            latent_motion_frames, motion_add_noise, timesteps[i + 1]
+                            latent_motion_frames, motion_add_noise, noise_timestep
                         )
                         _, T_m, _, _ = add_latent.shape
-                        latents[:, :T_m] = add_latent
+                        latents[:, :, :T_m] = add_latent
 
                     if using_video_input:
                         latents[:, :, :cur_motion_frames_latent_num] = (
@@ -486,7 +487,7 @@ class WanMultitalkEngine(WanShared):
                         render_on_step
                         and render_on_step_callback
                         and ((i + 1) % render_on_step_interval == 0 or i == 0)
-                        and i != len(timesteps) - 1
+                        and i != len(input_timesteps) - 1
                     ):
                         self._render_step(latents, render_on_step_callback)
                     pbar.update(1)
@@ -544,6 +545,8 @@ class WanMultitalkEngine(WanShared):
             audio_start_idx += num_frames - cur_motion_frames_num
             audio_end_idx = audio_start_idx + clip_length
             miss_lengths = []
+            
+
 
             if audio_end_idx >= min(max_num_frames, len(full_audio_embs[0])):
                 arrive_last_frame = True
@@ -568,6 +571,7 @@ class WanMultitalkEngine(WanShared):
 
             if max_num_frames <= num_frames:
                 break
+            
 
         if offload:
             self._offload(self.transformer)

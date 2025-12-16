@@ -5,6 +5,7 @@ import gguf
 from typing import Optional, Tuple
 from src.quantize.dequant import is_quantized, dequantize_tensor
 from src.quantize.ggml_tensor import GGMLTensor
+from typing import Callable
 
 def cast_to(
     t: Optional[torch.Tensor],
@@ -130,9 +131,8 @@ class GGMLLayer(nn.Module):
         weight = state_dict.get(f"{prefix}weight", None)
         bias = state_dict.get(f"{prefix}bias", None)
         
-        should_route = self.is_ggml_quantized(weight=weight, bias=bias) or isinstance(
-            self, nn.Linear
-        )
+
+        should_route = self.is_ggml_quantized(weight=weight, bias=bias)
         if (
             not should_route
             and isinstance(self, nn.Embedding)
@@ -215,7 +215,6 @@ class GGMLLayer(nn.Module):
 
 
 # -------------------- Patched layers --------------------
-
 
 class GGMLLinear(GGMLLayer, nn.Linear):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -308,3 +307,48 @@ def patch_model(
                     child.dequant_dtype = default_dequant_dtype
             if child is not None and len(child._modules) > 0:
                 stack.append((qname + ".", child))
+
+
+def _infer_ggml_module_names_from_state_dict(state_dict: dict) -> set[str]:
+    """
+    Infer which module qualified names should be patched to GGML* layers based
+    on whether their incoming weights/biases are GGML-quantized.
+
+    We patch a module `foo.bar` when the state_dict contains:
+      - `foo.bar.weight` that is quantized (per `is_quantized`), or
+      - `foo.bar.bias` that is quantized.
+    """
+    names: set[str] = set()
+    for k, v in state_dict.items():
+        if not isinstance(k, str):
+            continue
+        if k.endswith(".weight") and is_quantized(v):
+            names.add(k[: -len(".weight")])
+        elif k.endswith(".bias") and is_quantized(v):
+            names.add(k[: -len(".bias")])
+    return names
+
+
+def make_ggml_name_filter_from_state_dict(state_dict: dict) -> Callable[[str], bool]:
+    """
+    Create a name_filter for `patch_model()` that patches only modules that
+    receive quantized GGML weights/biases from `state_dict`.
+    """
+    names = _infer_ggml_module_names_from_state_dict(state_dict)
+    return lambda qname: qname in names
+
+
+def patch_model_from_state_dict(
+    model: nn.Module,
+    state_dict: dict,
+    *,
+    default_dequant_dtype: Optional[torch.dtype] = None,
+):
+    """
+    Patch only the subset of modules that are GGML-quantized in `state_dict`.
+    """
+    patch_model(
+        model,
+        name_filter=make_ggml_name_filter_from_state_dict(state_dict),
+        default_dequant_dtype=default_dequant_dtype,
+    )

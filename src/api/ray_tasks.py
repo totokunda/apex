@@ -1801,6 +1801,8 @@ def run_engine_from_manifest(
             render_on_step=True,
             render_on_step_callback=render_func,
         )
+        
+        engine.offload_engine()
 
         # OVI models return a tuple of (video_tensor, audio_numpy). Use a dedicated
         # saver so we correctly embed the generated audio into the MP4 output.
