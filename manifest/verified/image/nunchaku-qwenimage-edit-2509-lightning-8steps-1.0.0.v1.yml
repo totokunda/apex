@@ -5,7 +5,8 @@ metadata:
   model: qwenimage
   name: Nunchaku QwenImage Edit 2509 Lightning 8 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage Edit 2509 Lightning v1.0 8-step is a 20B parameter model for fast, higher-quality image editing.
+  description: Nunchaku QwenImage Edit 2509 Lightning v1.0 8-step is a 20B parameter
+    model for fast, higher-quality image editing.
   tags:
   - qwenimage
   - edit
@@ -32,7 +33,7 @@ spec:
     - cuda
     - cpu
     excluded_cuda_architectures:
-    - sm_90  # Nunchaku does not support H100 (Hopper)
+    - sm_90
   attention_types:
   - sdpa
   components:
@@ -107,24 +108,26 @@ spec:
     label: QwenImage Transformer
     base: qwenimage.nunchaku
     model_path:
-    # INT4 (SVDQuant) lightning v1.0 8-step variants
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r32-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
       variant: int4_r32_lightning_v2_0_8steps
       precision: int4
       type: safetensors
+      file_size: 11521979944
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
       variant: int4_r128_lightning_v2_0_8steps
       precision: int4
       type: safetensors
-    # NF4 (FP4 SVDQuant) lightning v1.0 8-step variants
+      file_size: 12654443144
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r32-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
       variant: nf4_r32_lightning_v2_0_8steps
       precision: nf4
       type: safetensors
+      file_size: 11948923656
     - path: nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-fp4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
       variant: nf4_r128_lightning_v2_0_8steps
       precision: nf4
       type: safetensors
+      file_size: 13081386856
   - type: helper
     name: image.processor
     label: Image Processor
@@ -230,22 +233,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

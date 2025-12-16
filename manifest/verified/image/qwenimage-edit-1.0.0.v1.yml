@@ -113,7 +113,7 @@ spec:
       resource_requirements:
         min_vram_gb: 14
         recommended_vram_gb: 20
-      file_size: 12105441280
+      file_size: 12140608032
     - path: https://huggingface.co/QuantStack/Qwen-Image-Edit-GGUF/resolve/main/Qwen_Image_Edit-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k

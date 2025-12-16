@@ -61,7 +61,7 @@ spec:
     label: WAN VAE
     name: wan/vae
     base: wan
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
       variant: default
       precision: fp16
@@ -95,11 +95,12 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 28654175562
+      file_size: 28579237670
     - path: Kijai/WanVideo_comfy_fp8_scaled/Fun/Wan2_2-Fun-Control-A14B-HIGH_fp8_e5m2_scaled_KJ_fixed.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 14530492906
     - path: QuantStack/Wan2.2-Fun-A14B-Control-GGUF/HighNoise/Wan2.2-Fun-A14B-Control_HighNoise-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -180,11 +181,12 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 28654175562
+      file_size: 28579237670
     - path: Kijai/WanVideo_comfy_fp8_scaled/Fun/Wan2_2-Fun-Control-A14B-LOW_fp8_e5m2_scaled_KJ_fixed.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 14530492906
     - path: QuantStack/Wan2.2-Fun-A14B-Control-GGUF/LowNoise/Wan2.2-Fun-A14B-Control_LowNoise-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -424,22 +426,22 @@ spec:
       description: Select the aspect ratio of the output video
       panel: size
       type: select
-      default: "1:1"
+      default: '1:1'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

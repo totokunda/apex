@@ -35,7 +35,7 @@ spec:
     - sm_90
   attention_types:
   - sdpa
-  loras: 
+  loras:
   - source: strangerzonehf/Flux-Kontext-Ultimate-LoRA/Kontext-Top-Down-View.safetensors
     scale: 1.0
     name: Top Down
@@ -96,10 +96,12 @@ spec:
       variant: int4_r32
       precision: int4
       type: safetensors
+      file_size: 6768310048
     - path: nunchaku-tech/nunchaku-flux.1-kontext-dev/svdq-fp4_r32-flux.1-kontext-dev.safetensors
       variant: nf4_r32
       precision: nf4
       type: safetensors
+      file_size: 7038707104
   defaults:
     run:
       num_inference_steps: 40

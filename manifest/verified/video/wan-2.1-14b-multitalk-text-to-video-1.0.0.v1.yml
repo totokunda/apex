@@ -39,7 +39,8 @@ spec:
     scheduler_options:
     - name: FlowMatchScheduler
       label: FlowMatch Scheduler
-      description: The FlowMatch Scheduler is used for WAN 2.1 14B MultiTalk Text to Video.
+      description: The FlowMatch Scheduler is used for WAN 2.1 14B MultiTalk Text
+        to Video.
       base: src.scheduler.FlowMatchScheduler
     config:
       shift: 7.0
@@ -51,7 +52,7 @@ spec:
   - type: vae
     name: wan/vae
     base: wan
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
       variant: default
       precision: fp16
@@ -63,7 +64,7 @@ spec:
     label: Wan VAE
     base: wan
     model_path:
-    - path:  Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
+    - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
       variant: default
       precision: fp16
       type: safetensors
@@ -87,43 +88,52 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     base: wan.multitalk
-    model_path: 
+    model_path:
     - path: Kijai/WanVideo_comfy_fp8_scaled/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 16643349018
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
+      file_size: 18144640384
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
+      file_size: 14233779584
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q5_K_M.gguf
       variant: GGUF_Q5_K_M
       precision: q5_k_m
       type: gguf
+      file_size: 12743654784
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q5_K_S.gguf
       variant: GGUF_Q5_K_S
       precision: q5_k_s
       type: gguf
+      file_size: 12089113984
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q4_K_M.gguf
       variant: GGUF_Q4_K_M
       precision: q4_k_m
       type: gguf
+      file_size: 11341184384
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
+      file_size: 10437606784
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q3_K_M.gguf
       variant: GGUF_Q3_K_M
       precision: q3_k_m
       type: gguf
+      file_size: 8587033984
     - path: city96/Wan2.1-I2V-14B-480P-gguf/wan2.1-i2v-14b-480p-Q3_K_S.gguf
       variant: GGUF_Q3_K_S
       precision: q3_k_s
       type: gguf
+      file_size: 7925939584
     extra_model_paths:
     - path: MeiGen-AI/MeiGen-MultiTalk/multitalk.safetensors
       variant: default
@@ -132,12 +142,13 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer/config.json
   - type: helper
     base: wan.multitalk
-    model_path: 
+    model_path:
     - path: TencentGameMate/chinese-wav2vec2-base
+      file_size: 1520899445
   - type: helper
     base: clip
     name: wan/clip
-    model_path: 
+    model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
       variant: default
       precision: fp16

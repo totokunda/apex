@@ -44,12 +44,14 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/vae
       variant: default
+      file_size: 167667721
   - type: text_encoder
     label: T5 Text Encoder
     base: T5EncoderModel
     model_path:
     - path: lodestones/Chroma1-HD/text_encoder
       variant: default
+      file_size: 9524669246
     tokenizer_class: T5Tokenizer
     tokenizer_name: lodestones/Chroma1-HD
     tokenizer_kwargs:
@@ -60,6 +62,7 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/transformer
       variant: default
+      file_size: 17800194937
     - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q4_0.gguf
       variant: GGUF_Q4_0
       precision: q4_0
@@ -67,6 +70,7 @@ spec:
       resource_requirements:
         min_vram_gb: 8
         recommended_vram_gb: 12
+      file_size: 5432053920
     - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -74,6 +78,7 @@ spec:
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 16
+      file_size: 9735409824
   defaults:
     run:
       num_inference_steps: 50
@@ -160,26 +165,26 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
-        value: custom 
+        value: custom
     - id: num_inference_steps
       label: Inference Steps
       description: Number of denoising steps

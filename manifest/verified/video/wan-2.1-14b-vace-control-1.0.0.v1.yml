@@ -28,18 +28,18 @@ spec:
   - sage
   fps: 16
   loras:
-    - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
-      scale: 1.0
-      name: lightx2v_lora
-      label: Lightx2v LoRA
-      component: transformer
-      verified: true
-    - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Phantom_Wan_14B_FusionX_LoRA.safetensors
-      scale: 0.0
-      name: fusionx_lora
-      label: FusionX LoRA
-      component: transformer
-      verified: true
+  - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
+    scale: 1.0
+    name: lightx2v_lora
+    label: Lightx2v LoRA
+    component: transformer
+    verified: true
+  - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Phantom_Wan_14B_FusionX_LoRA.safetensors
+    scale: 0.0
+    name: fusionx_lora
+    label: FusionX LoRA
+    component: transformer
+    verified: true
   components:
   - type: scheduler
     label: Scheduler
@@ -57,7 +57,7 @@ spec:
     label: Wan VAE
     base: wan
     model_path:
-    - path:  Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
+    - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
       variant: default
       precision: fp16
       type: safetensors
@@ -92,6 +92,7 @@ spec:
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 17578334838
     - path: QuantStack/Wan2.1_14B_VACE-GGUF/Wan2.1_14B_VACE-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -132,14 +133,12 @@ spec:
       precision: q4_k_s
       type: gguf
       file_size: 10552539040
-      file_size: 10327095200
     - path: QuantStack/Wan2.1_14B_VACE-GGUF/Wan2.1_14B_VACE-Q3_K_S.gguf
       variant: GGUF_Q3_K_S
       precision: q3_k_s
       type: gguf
       file_size: 7844059040
     config_path: Wan-AI/Wan2.1-VACE-14B-diffusers/transformer/config.json
-
   defaults:
     run:
       num_inference_steps: 30
@@ -246,22 +245,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom

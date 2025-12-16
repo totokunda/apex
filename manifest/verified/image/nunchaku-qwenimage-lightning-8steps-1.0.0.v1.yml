@@ -5,7 +5,8 @@ metadata:
   model: qwenimage
   name: Nunchaku QwenImage Text-to-Image Lightning 8 Steps
   version: 1.0.0
-  description: Nunchaku QwenImage Lightning v1.1 8-step is a 20B parameter model for fast, higher-quality text-to-image generation.
+  description: Nunchaku QwenImage Lightning v1.1 8-step is a 20B parameter model for
+    fast, higher-quality text-to-image generation.
   tags:
   - svdquant
   - fp4
@@ -32,7 +33,7 @@ spec:
     - cuda
     - cpu
     excluded_cuda_architectures:
-    - sm_90  # Nunchaku does not support H100 (Hopper)
+    - sm_90
   attention_types:
   - sdpa
   components:
@@ -110,18 +111,22 @@ spec:
       variant: int4_r32_lightning_v1_1_8steps
       precision: int4
       type: safetensors
+      file_size: 11521979944
     - path: nunchaku-tech/nunchaku-qwen-image/svdq-int4_r128-qwen-image.safetensors
       variant: int4_r128_lightning_v1_1_8steps
       precision: int4
       type: safetensors
+      file_size: 12654443144
     - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r32-qwen-image-lightningv1.1-8steps.safetensors
       variant: nf4_r32_lightning_v1_1_8steps
       precision: fp4
       type: safetensors
+      file_size: 11948923656
     - path: nunchaku-tech/nunchaku-qwen-image/svdq-fp4_r128-qwen-image-lightningv1.1-8steps.safetensors
       variant: nf4_r128_lightning_v1_1_8steps
       precision: fp4
       type: safetensors
+      file_size: 13081386856
   defaults:
     run:
       num_inference_steps: 8
@@ -205,22 +210,22 @@ spec:
       description: Select the aspect ratio of the output image
       panel: size
       type: select
-      default: "16:9"
+      default: '16:9'
       options:
       - name: Wide
-        value: "16:9"
+        value: '16:9'
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: "9:16"
+        value: '9:16'
         ratio_w: 9
         ratio_h: 16
       - name: Square
-        value: "1:1"
+        value: '1:1'
         ratio_w: 1
         ratio_h: 1
       - name: Classic
-        value: "4:3"
+        value: '4:3'
         ratio_w: 4
         ratio_h: 3
       - name: Custom
