@@ -37,6 +37,8 @@ class LynxEngine(WanShared):
             or cfg.get("adapter_dir")
             or override
         )
+        
+    
 
     # ------------------------------- Main entry ------------------------------- #
     def run(
@@ -57,6 +59,7 @@ class LynxEngine(WanShared):
         ref_scale: float = 1.0,
         adapter_path: str | None = None,
         face_embeds: Optional[np.ndarray | torch.Tensor] = None,
+        face_token_embeds: Optional[torch.FloatTensor] = None,
         landmarks: Optional[np.ndarray | torch.Tensor] = None,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -86,7 +89,7 @@ class LynxEngine(WanShared):
             subject_image,
             face_embeds,
             landmarks,
-            device=self.device or "cuda",
+            device=self.device,
             load_image_fn=self._load_image,
         )
 
@@ -102,6 +105,9 @@ class LynxEngine(WanShared):
             text_encoder_kwargs=text_encoder_kwargs,
             offload=False,
         )
+        
+        
+        
 
         batch_size = prompt_embeds.shape[0]
 
@@ -168,9 +174,21 @@ class LynxEngine(WanShared):
             self.preloaded_loras.keys()
         )
         if lora_items:
-            self.apply_loras(lora_items, adapter_names=adapter_names)
+            self.logger.info(f"Applying {len(lora_items)} loras to Lynx transformer")
+            preloaded_loras = [
+                (lora.source, lora.scale, lora.name)
+                for lora in self.preloaded_loras.values()
+                if lora.component is None or lora.component == "transformer"
+            ]
+            self.apply_loras(
+                [(lora[0], lora[1]) for lora in preloaded_loras],
+                adapter_names=[lora[2] for lora in preloaded_loras],
+                model=self.transformer,
+            )
             # Group offloading for transformers must be enabled after LoRA/adapters.
+            
             self._apply_pending_group_offloading(self.transformer)
+            
 
         ip_states, ip_states_uncond = helper.build_ip_states(
             embeds, device=self.device, dtype=transformer_dtype
@@ -230,6 +248,23 @@ class LynxEngine(WanShared):
             merged_attention_kwargs_uncond.update(
                 {"ref_buffer": ref_buffer_uncond, "ref_scale": ref_scale}
             )
+            
+        if face_token_embeds is None:
+            transformer_dtype = self.component_dtypes["transformer"]
+            # 3.1 Encoder input face embedding
+            face_token_embeds = helper.encode_face_embedding(
+                embeds, use_cfg_guidance, device=self.device, dtype=transformer_dtype
+            )
+        else:
+            face_token_embeds = torch.cat([torch.zeros_like(face_token_embeds), face_token_embeds], dim=0)
+
+        face_token_embeds = face_token_embeds.to(device=self.device, dtype=transformer_dtype)
+        
+        merged_attention_kwargs.update({"image_embed": face_token_embeds})
+        merged_attention_kwargs_uncond.update({"image_embed": face_token_embeds})
+        
+        if offload:
+            self._offload(helper)
 
         do_cfg = use_cfg_guidance and negative_prompt_embeds is not None
         self._preview_height = height

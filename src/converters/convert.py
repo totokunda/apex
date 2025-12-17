@@ -58,7 +58,9 @@ def get_transformer_converter(model_base: str):
         model_base == "wan.base"
         or model_base == "wan.causal"
         or model_base == "wan.fun"
-        or model_base == "wan.recam"
+        or model_base == "wan.recam" 
+        or model_base == "wan.lynx" 
+        or model_base == "wan.lynx_lite"
     ):
         return WanTransformerConverter()
     elif model_base == "wan.vace":

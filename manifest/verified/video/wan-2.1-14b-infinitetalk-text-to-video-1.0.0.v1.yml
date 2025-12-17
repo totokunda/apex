@@ -20,6 +20,14 @@ spec:
   model_type: multitalk
   denoise_type: base
   engine_type: torch
+  default_duration_secs: 5.0
+  min_duration_secs: 1.0
+  fps: 25
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   - flash
@@ -135,12 +143,22 @@ spec:
       precision: q3_k_s
       type: gguf
       file_size: 7925939584
-    extra_model_paths:
+    config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer/config.json
+  - type: extra_model_path
+    label: InfiniteTalk MultiTalk
+    component: transformer
+    model_paths:
     - path: MeiGen-AI/InfiniteTalk/multi/infinitetalk.safetensors
       variant: default
       precision: fp16
       type: safetensors
-    config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer/config.json
+    - path: Kijai/WanVideo_comfy_fp8_scaled/InfiniteTalk/Wan2_1-InfiniteTalk-Multi_fp8_e4m3fn_scaled_KJ.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
+
+    
+    
   - type: helper
     base: wan.multitalk
     model_path:

@@ -84,6 +84,9 @@ MANIFEST_SCHEMA_V1: dict = {
                                     "text_encoder",
                                     "transformer",
                                     "helper",
+                                    # Pseudo-component used to attach downloadable auxiliary
+                                    # model paths onto a real component (handled in BaseEngine).
+                                    "extra_model_path",
                                 ],
                             },
                             "name": {"type": "string"},

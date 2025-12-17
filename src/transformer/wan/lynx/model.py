@@ -433,6 +433,7 @@ class WanTransformer3DModel(
         encoder_hidden_states_image: Optional[List[torch.Tensor]] = None,
         return_dict: bool = True,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> Union[torch.Tensor, Dict[str, torch.Tensor]]:
 
         if not isinstance(hidden_states, list):

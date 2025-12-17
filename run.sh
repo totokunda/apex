@@ -25,7 +25,7 @@ export APEX_FAKE_RAM_GB="${APEX_FAKE_RAM_GB:-32}"
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 PY="/home/tosin_coverquick_co/miniconda3/envs/apex/bin/python3"
-ARGS=(-m verify.hunyuan_video_15)
+ARGS=(-m verify.wan_2_1_lynx)
 
 # Enforce a real 32GB RAM limit when possible (Linux + systemd).
 # This is a hard cap: if the process tries to exceed it, it will OOM/abort accordingly.
