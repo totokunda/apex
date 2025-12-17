@@ -20,6 +20,14 @@ spec:
   engine: hunyuanvideo15
   model_type: ti2v
   engine_type: torch
+  default_duration_secs: 5.0
+  min_duration_secs: 1.0
+  fps: 24
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   - flash
@@ -270,7 +278,7 @@ spec:
     tokenizer_class: ByT5Tokenizer
     tokenizer_name: google/byt5-small
     model_path:
-    - path: google/byt5-small
+    - path: multimodalart/glyph-sdxl-v2-byt5-small/model.safetensors
       variant: default
       precision: fp16
       type: safetensors
@@ -278,11 +286,6 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 24
       file_size: 3596097946
-    extra_model_paths:
-    - path: multimodalart/glyph-sdxl-v2-byt5-small/pytorch_model.bin
-      variant: default
-      precision: fp16
-      type: bin
   defaults:
     run:
       num_inference_steps: 50

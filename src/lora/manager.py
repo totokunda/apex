@@ -307,6 +307,7 @@ class LoraManager(DownloadMixin):
                     composed_lora.append((local_path, item.scale))
             composed_lora = compose_lora(composed_lora)
             model.update_lora_params(composed_lora)
+        
         else:
             for i, item in enumerate(resolved):
                 adapter_name = (

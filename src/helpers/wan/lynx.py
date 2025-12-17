@@ -11,8 +11,10 @@ from diffusers.models.attention_processor import Attention
 from einops.layers.torch import Rearrange
 from safetensors.torch import load_file
 from skimage import transform as trans
-
+from accelerate import init_empty_weights
 from src.helpers.base import BaseHelper
+from diffusers.models.normalization import RMSNorm
+from src.attention import attention_register
 
 try:
     from flash_attn_interface import flash_attn_varlen_func  # flash attn 3
@@ -474,6 +476,135 @@ class WanIPAttnProcessor(nn.Module):
         return hidden_states
 
 
+
+
+
+class WanIPAttnProcessorLight(torch.nn.Module):
+    def __init__(
+        self, 
+        hidden_size, 
+        cross_attention_dim=None, 
+        scale=1.0, 
+        bias=False,
+    ):
+        super().__init__()
+
+        self.hidden_size = hidden_size
+        self.cross_attention_dim = cross_attention_dim
+        self.scale = scale
+
+        self.to_k_ip = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=bias)
+        self.to_v_ip = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=bias)
+
+        torch.nn.init.zeros_(self.to_k_ip.weight)
+        torch.nn.init.zeros_(self.to_v_ip.weight)
+        if bias:
+            torch.nn.init.zeros_(self.to_k_ip.bias)
+            torch.nn.init.zeros_(self.to_v_ip.bias)
+
+        self.norm_rms_k = RMSNorm(hidden_size, eps=1e-5, elementwise_affine=False)
+
+
+    def __call__(
+        self,
+        attn,
+        hidden_states: torch.Tensor,
+        image_embed: torch.Tensor = None,
+        ip_scale: float = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        rotary_emb: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        encoder_hidden_states_img = None
+        if attn.add_k_proj is not None:
+            encoder_hidden_states_img = encoder_hidden_states[:, :257]
+            encoder_hidden_states = encoder_hidden_states[:, 257:]
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+
+        query = attn.to_q(hidden_states)
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+
+        # =============================================================
+        batch_size = image_embed.size(0)
+
+        ip_hidden_states = image_embed
+        ip_query = query # attn.to_q(hidden_states.clone())
+        ip_key = self.to_k_ip(ip_hidden_states)
+        ip_value = self.to_v_ip(ip_hidden_states)
+
+        if attn.norm_q is not None:
+            ip_query = attn.norm_q(ip_query)
+        ip_key = self.norm_rms_k(ip_key)
+
+        ip_inner_dim = ip_key.shape[-1]
+        ip_head_dim = ip_inner_dim // attn.heads
+
+        ip_query = ip_query.view(batch_size, -1, attn.heads, ip_head_dim).transpose(1, 2)
+        ip_key = ip_key.view(batch_size, -1, attn.heads, ip_head_dim).transpose(1, 2)
+        ip_value = ip_value.view(batch_size, -1, attn.heads, ip_head_dim).transpose(1, 2)
+
+        ip_hidden_states = attention_register.call(
+            ip_query, ip_key, ip_value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+
+        ip_hidden_states = ip_hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * ip_head_dim)
+        ip_hidden_states = ip_hidden_states.to(ip_query.dtype)
+        # ===========================================================================
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+
+        query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+
+        if rotary_emb is not None:
+
+            def apply_rotary_emb_inner(hidden_states: torch.Tensor, freqs: torch.Tensor):
+                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+                x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
+                return x_out.type_as(hidden_states)
+
+            query = apply_rotary_emb_inner(query, rotary_emb)
+            key = apply_rotary_emb_inner(key, rotary_emb)
+
+        # I2V task
+        hidden_states_img = None
+        if encoder_hidden_states_img is not None:
+            key_img = attn.add_k_proj(encoder_hidden_states_img)
+            key_img = attn.norm_added_k(key_img)
+            value_img = attn.add_v_proj(encoder_hidden_states_img)
+
+            key_img = key_img.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+            value_img = value_img.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+
+            hidden_states_img = attention_register.call(
+                query, key_img, value_img, attn_mask=None, dropout_p=0.0, is_causal=False
+            )
+            hidden_states_img = hidden_states_img.transpose(1, 2).flatten(2, 3)
+            hidden_states_img = hidden_states_img.type_as(query)
+        hidden_states = attention_register.call(
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+        hidden_states = hidden_states.type_as(query)
+
+        if hidden_states_img is not None:
+            hidden_states = hidden_states + hidden_states_img
+
+        # Add IPA residual
+        ip_scale = ip_scale or self.scale
+        hidden_states = hidden_states + ip_scale * ip_hidden_states
+
+        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)
+
+        return hidden_states
+
 class WanRefAttnProcessor(nn.Module):
     def __init__(self, dim: int, bias: bool):
         super().__init__()
@@ -584,12 +715,13 @@ class WanRefAttnProcessor(nn.Module):
         return hidden_states
 
 
-def register_ip_adapter(
+def register_ip_adapter_full(
     model,
     cross_attention_dim=None,
     n_registers=0,
     init_method="zero",
     dtype=torch.float32,
+    layers=None,
 ):
     attn_procs = {}
     transformer_sd = model.state_dict()
@@ -623,6 +755,53 @@ def register_ip_adapter(
     ip_layers.to(device=model.device, dtype=dtype)
     return model, ip_layers
 
+
+def register_ip_adapter_light(
+    model,
+    hidden_size=5120,
+    cross_attention_dim=2048,
+    dtype=torch.float32,
+    init_method="zero",
+    layers=None,
+    **kwargs,
+):
+    attn_procs = {}
+    transformer_sd = model.state_dict()
+
+    if layers is None:
+        layers = list(range(0, len(model.blocks)))
+    elif isinstance(layers, int): # Only interval provided
+        layers = list(range(0, len(model.blocks), layers))
+
+    for i, block in enumerate(model.blocks):
+        if i not in layers:
+            continue
+
+        name = f"blocks.{i}.attn2.processor"
+        attn_procs[name] = WanIPAttnProcessorLight(
+            hidden_size=hidden_size,
+            cross_attention_dim=cross_attention_dim
+        )
+
+        if init_method == "zero":
+            torch.nn.init.zeros_(attn_procs[name].to_k_ip.weight)
+            torch.nn.init.zeros_(attn_procs[name].to_v_ip.weight)
+        elif init_method == "clone":
+            layer_name = name.split(".processor")[0]
+            weights = {
+                "to_k_ip.weight": transformer_sd[layer_name + ".to_k.weight"],
+                "to_v_ip.weight": transformer_sd[layer_name + ".to_v.weight"],
+            }
+            attn_procs[name].load_state_dict(weights)
+        else:
+            raise ValueError(f"{init_method} is not supported.")
+
+        block.attn2.processor = attn_procs[name]
+
+    ip_layers = torch.nn.ModuleList(attn_procs.values())
+    ip_layers.to(model.device, dtype=dtype)
+
+    return model, ip_layers
 
 def register_ref_adapter(model, init_method="zero", dtype=torch.float32):
     attn_procs = {}
@@ -734,21 +913,24 @@ class WanLynxHelper(BaseHelper):
                 raise FileNotFoundError(
                     f"Missing resampler weights at {resampler_path}"
                 )
-
-            resampler = Resampler(
-                depth=4,
-                dim=1280,
-                dim_head=64,
-                embedding_dim=512,
-                ff_mult=4,
-                heads=20,
-                num_queries=16,
-                output_dim=5120,
+                
+            state_dicts = load_file(resampler_path, device="cpu")
+            out_dim = state_dicts["norm_out.weight"].shape[0]
+            with init_empty_weights():
+                resampler = Resampler(
+                    depth=4,
+                    dim=1280,
+                    dim_head=64,
+                    embedding_dim=512,
+                    ff_mult=4,
+                    heads=20,
+                    num_queries=16,
+                    output_dim=out_dim,
             )
+            
+            resampler.load_state_dict(state_dicts, assign=True)
             resampler.to(device=device, dtype=dtype)
             resampler.eval()
-            state_dicts = load_file(resampler_path, device="cpu")
-            resampler.load_state_dict(state_dicts)
             self.resampler = resampler
 
         if not self.ip_loaded:
@@ -759,10 +941,12 @@ class WanLynxHelper(BaseHelper):
                 n_registers = (
                     ip_sd["0.registers"].shape[1] if "0.registers" in ip_sd else 0
                 )
-                transformer, ip_layers = register_ip_adapter(
+                register_fn = register_ip_adapter_full if cross_attention_dim == 5120 else register_ip_adapter_light
+                transformer, ip_layers = register_fn(
                     transformer,
                     cross_attention_dim=cross_attention_dim,
                     n_registers=n_registers,
+                    layers=2 if cross_attention_dim != 5120 else None,
                     dtype=dtype,
                 )
                 ip_layers.load_state_dict(ip_sd)
@@ -854,3 +1038,29 @@ class WanLynxHelper(BaseHelper):
         return align_face(
             face_image, face_landmarks, extend_face_crop=True, face_size=face_size
         )
+    
+    def encode_face_embedding(self, face_embeds, do_classifier_free_guidance, device, dtype):
+        num_images_per_prompt = 1
+
+        if isinstance(face_embeds, torch.Tensor):
+            face_embeds = face_embeds.clone().detach()
+        else:
+            face_embeds = torch.from_numpy(face_embeds)
+
+   
+        face_embeds = face_embeds.reshape([1, -1, 512])
+
+        if do_classifier_free_guidance:
+            face_embeds = torch.cat([torch.zeros_like(face_embeds), face_embeds], dim=0)
+        else:
+            face_embeds = torch.cat([face_embeds], dim=0)
+
+        face_embeds = face_embeds.to(device=device, dtype=dtype)
+        face_embeds = self.resampler(face_embeds)
+
+        bs_embed, seq_len, _ = face_embeds.shape
+        face_embeds = face_embeds.repeat(1, num_images_per_prompt, 1)
+        face_embeds = face_embeds.view(bs_embed * num_images_per_prompt, seq_len, -1)
+
+        return face_embeds.to(device=device, dtype=dtype)
+    

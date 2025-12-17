@@ -296,6 +296,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         
                         self.load_component_by_name("high_noise_transformer")
                         self.to_device(self.high_noise_transformer)
+                        self.high_noise_transformer.current_steps = i
+                        self.high_noise_transformer.num_inference_steps = total_steps
 
                         safe_emit_progress(
                             denoise_progress_callback,
@@ -330,13 +332,13 @@ class WanShared(BaseEngine, WanMLXDenoise):
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Alternate transformer ready",
                         )
-
+                    self.low_noise_transformer.current_steps = i
+                    self.low_noise_transformer.num_inference_steps = total_steps
                     transformer = self.low_noise_transformer
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[1]
                     # Standard denoising
                     
-                
 
                 noise_pred = transformer(
                     hidden_states=latent_model_input,

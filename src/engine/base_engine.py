@@ -1549,7 +1549,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         total_size_gb = float(total_size_bytes) / 1e9
         
 
-
+ 
         # No GPU or model doesn't fit? Need offloading
         needs_offload = False
         if gpu_total_gb is None or gpu_total_gb == 0:
@@ -2052,7 +2052,137 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             postprocessors_path = get_postprocessor_path()
 
         os.makedirs(save_path, exist_ok=True)
-        for i, component in enumerate(self.config.get("components", [])):
+
+        components_cfg = self.config.get("components", [])
+        if not isinstance(components_cfg, list):
+            return
+
+        # -------------------------------------------------------------
+        # Pre-pass: resolve `type: extra_model_path` pseudo-components.
+        #
+        # Manifest schema (example):
+        # - type: extra_model_path
+        #   label: MeiGen MultiTalk
+        #   component: transformer   # references by component `name` OR `type`
+        #   model_paths:
+        #     - path: org/repo/file.safetensors
+        #       variant: default
+        #
+        # Behavior:
+        # - Download the selected entry from `model_paths`
+        # - Attach the *downloaded local path* to the referenced component's
+        #   `extra_model_paths` list.
+        # -------------------------------------------------------------
+        for pseudo in components_cfg:
+            if not isinstance(pseudo, dict):
+                continue
+            if pseudo.get("type") != "extra_model_path":
+                continue
+
+            target_ref = pseudo.get("component")
+            if not isinstance(target_ref, str) or not target_ref.strip():
+                continue
+
+            raw_model_paths = pseudo.get("model_paths", pseudo.get("model_path"))
+            selected_source: str | None = None
+            selected_label = pseudo.get("name") or pseudo.get("label")
+
+            if isinstance(raw_model_paths, str):
+                selected_source = raw_model_paths
+            elif isinstance(raw_model_paths, list) and raw_model_paths:
+                # Choose variant using selected_components keyed by label/name, then fallback.
+                selected_item = None
+                if selected_label:
+                    selected_item = self.selected_components.get(selected_label)
+                if not isinstance(selected_item, dict):
+                    selected_item = raw_model_paths[0] if isinstance(raw_model_paths[0], dict) else None
+
+                if isinstance(selected_item, dict):
+                    desired_variant = selected_item.get("variant")
+                    # Find matching variant entry; fallback to first dict entry with a path.
+                    for item in raw_model_paths:
+                        if not isinstance(item, dict):
+                            continue
+                        if desired_variant is None or item.get("variant") == desired_variant:
+                            selected_source = selected_item.get("path", item.get("path"))
+                            break
+                    if selected_source is None:
+                        for item in raw_model_paths:
+                            if isinstance(item, dict) and item.get("path"):
+                                selected_source = str(item.get("path"))
+                                break
+            elif isinstance(raw_model_paths, dict):
+                p = raw_model_paths.get("path")
+                if isinstance(p, str):
+                    selected_source = p
+
+            if not selected_source:
+                continue
+
+            # Download or resolve local path.
+            local_path = self.is_downloaded(selected_source, components_path)
+            if local_path is None:
+                local_path = self._download(selected_source, components_path)
+            if not local_path:
+                continue
+
+            # Find target component: prefer by `name`, fallback to `type`.
+            targets: list[dict] = []
+            for comp in components_cfg:
+                if not isinstance(comp, dict):
+                    continue
+                if comp is pseudo:
+                    continue
+                if comp.get("name") == target_ref:
+                    targets.append(comp)
+            if not targets:
+                for comp in components_cfg:
+                    if not isinstance(comp, dict):
+                        continue
+                    if comp is pseudo:
+                        continue
+                    if comp.get("type") == target_ref:
+                        targets.append(comp)
+
+            if not targets:
+                continue
+
+            # If multiple matches (e.g. multiple transformers), attach only to the first.
+            target_component = targets[0]
+            existing = target_component.get("extra_model_paths", [])
+            if isinstance(existing, str):
+                existing_list: list = [existing]
+            elif isinstance(existing, list):
+                existing_list = existing
+            else:
+                existing_list = []
+
+            # De-dupe against existing strings and dict entries.
+            already_present = False
+            for entry in existing_list:
+                if entry == local_path:
+                    already_present = True
+                    break
+                if isinstance(entry, dict) and entry.get("path") == local_path:
+                    already_present = True
+                    break
+
+            if not already_present:
+                existing_list.append(local_path)
+                target_component["extra_model_paths"] = existing_list
+
+        # -------------------------------------------------------------
+        # Main pass: download configs/models for real components and drop
+        # `extra_model_path` pseudo-components from final config.
+        # -------------------------------------------------------------
+        new_components_cfg: list[dict] = []
+        for component in components_cfg:
+            if not isinstance(component, dict):
+                continue
+            if component.get("type") == "extra_model_path":
+                # Pseudo component: already handled in pre-pass.
+                continue
+
             if config_path := component.get("config_path"):
                 downloaded_config_path = self.fetch_config(
                     config_path, return_path=True, config_save_path=components_path
@@ -2066,6 +2196,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             if component_type == "scheduler":
                 scheduler_options = component.get("scheduler_options")
                 if not scheduler_options:
+                    new_components_cfg.append(component)
                     continue
                 selected_scheduler_option = self.selected_components.get(
                     component_name, self.selected_components.get(component_type, None)
@@ -2152,7 +2283,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                             m_index
                         ] = downloaded_extra_model_path
 
-            self.config["components"][i] = component
+            new_components_cfg.append(component)
+
+        self.config["components"] = new_components_cfg
 
     def _get_latents(
         self,

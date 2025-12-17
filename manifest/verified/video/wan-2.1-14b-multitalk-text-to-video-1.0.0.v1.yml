@@ -19,6 +19,14 @@ spec:
   model_type: multitalk
   denoise_type: base
   engine_type: torch
+  default_duration_secs: 5.0
+  min_duration_secs: 1.0
+  fps: 25
+  compute_requirements:
+    min_cuda_compute_capability: 7.5
+    supported_compute_types:
+    - cuda
+    - cpu
   attention_types:
   - sdpa
   - flash
@@ -134,11 +142,15 @@ spec:
       precision: q3_k_s
       type: gguf
       file_size: 7925939584
-    extra_model_paths:
+  - type: extra_model_path
+    label: MeiGen MultiTalk
+    component: transformer
+    model_paths:
     - path: MeiGen-AI/MeiGen-MultiTalk/multitalk.safetensors
       variant: default
       precision: fp16
       type: safetensors
+    
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer/config.json
   - type: helper
     base: wan.multitalk

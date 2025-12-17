@@ -79,20 +79,6 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             self.load_component_by_name("byt5_encoder")
             if getattr(self, "byt5_encoder", None) is not None:
                 self.to_device(self.byt5_encoder)
-        else:
-            return self.byt5_encoder
-        byt5_component = self.get_component_by_name("byt5_encoder")
-        byT5_ckpt_path = byt5_component.get("extra_model_paths", [])[0]
-        byt5_state_dict = torch.load(byT5_ckpt_path, map_location=self.device)
-        if "state_dict" in byt5_state_dict:
-            sd = byt5_state_dict["state_dict"]
-            newsd = {}
-            for k, v in sd.items():
-                if k.startswith("module.text_tower.encoder."):
-                    newsd[k[len("module.text_tower.encoder.") :]] = v
-            byt5_state_dict = newsd
-        self.byt5_encoder.load_state_dict(byt5_state_dict)
-        self.byt5_encoder.requires_grad_(False)
         return self.byt5_encoder
 
     def _extract_glyph_texts(self, prompt: str) -> List[str]:

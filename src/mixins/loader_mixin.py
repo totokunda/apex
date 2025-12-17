@@ -394,6 +394,8 @@ class LoaderMixin(DownloadMixin):
                         else:
                             new_state_dict[k2] = v2
                 state_dict = new_state_dict
+            
+
             converter.convert(state_dict)
             # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
             # and patch the model with FPScaled* layers *before* loading
