@@ -12,7 +12,7 @@ metadata:
   - t2i
   author: Black Forest Labs
   license: Apache-2.0
-  demo_path: https://i.redd.it/flux-krea-is-quite-good-for-photographic-gens-relative-to-v0-ipkhisrye9gf1.png?width=1040&format=png&auto=webp&s=8382540768722e585b43195ea2ba868967a87f3d
+  demo_path: models/flux-krea.png
   categories:
   - text-to-image
 spec:
@@ -80,22 +80,6 @@ spec:
     - path: black-forest-labs/FLUX.1-Krea-dev/transformer
       variant: default
       file_size: 23803075696
-    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q4_1.gguf
-      variant: GGUF_Q4_1
-      precision: q4_1
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 10
-      file_size: 7536977184
-    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 10
-        recommended_vram_gb: 12
-      file_size: 9848349984
     - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -104,6 +88,24 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 14
       file_size: 12714452256
+    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 10
+        recommended_vram_gb: 12
+      file_size: 9848349984
+    - path: QuantStack/FLUX.1-Krea-dev-GGUF/flux1-krea-dev-Q4_1.gguf
+      variant: GGUF_Q4_1
+      precision: q4_1
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 10
+      file_size: 7536977184
+    
+    
     config_path: black-forest-labs/FLUX.1-Krea-dev/transformer/config.json
   defaults:
     run:

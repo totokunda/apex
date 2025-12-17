@@ -285,7 +285,7 @@ spec:
       resource_requirements:
         min_vram_gb: 12
         recommended_vram_gb: 24
-      file_size: 3596097946
+      file_size: 877272248
   defaults:
     run:
       num_inference_steps: 50

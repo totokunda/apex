@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-lynx-14b
+  id: wan-lynx-14b-lite
   model: wan
-  name: Wan Lynx 14B
+  name: Wan Lynx 14B Lite
   version: 1.0.0
-  description: Wan Lynx 14B is a 14B parameter model for text-to-image generation.
+  description: Wan Lynx 14B Lite is a 14B parameter model for text-to-video generation.
   tags:
   - wan
   - lynx
@@ -97,6 +97,7 @@ spec:
       variant: FP8
       precision: fp8
       type: safetensors
+      file_size: 14526876890
     - path: city96/Wan2.1-T2V-14B-gguf/wan2.1-t2v-14b-BF16.gguf
       variant: GGUF_BF16
       precision: bf16
@@ -172,11 +173,12 @@ spec:
     label: Wan Lynx 14B
     component: transformer
     name: lynx
-    model_paths:
+    model_path:
     - path: ByteDance/lynx/lynx_lite
       variant: lite
       precision: fp16
       type: safetensors
+      file_size: 2005644520
   defaults:
     run:
       num_inference_steps: 30

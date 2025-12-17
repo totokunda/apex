@@ -17,7 +17,7 @@ metadata:
   - int4
   author: Nunchaku Tech
   license: Apache-2.0
-  demo_path: https://www.mlexpert.io/_next/image?url=%2Fimages%2Fblog%2Fflux-1-dev%2Fwoman.png&w=2048&q=75
+  demo_path: models/nunchaku-flux-dev.png
   categories:
   - text-to-image
 spec:

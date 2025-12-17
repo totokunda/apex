@@ -107,7 +107,6 @@ class LynxEngine(WanShared):
         )
         
         
-        
 
         batch_size = prompt_embeds.shape[0]
 
@@ -275,6 +274,8 @@ class LynxEngine(WanShared):
             progress_callback, 0.50, 0.90
         )
         safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+        
+        print(use_cfg_guidance)
 
         total_steps = len(timesteps)
         with self._progress_bar(total=total_steps, desc="Denoising steps") as pbar:

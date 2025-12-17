@@ -1,12 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-2-a14b-text-to-image-4-steps
+  id: wan-2-2-a14b-text-to-image
   model: wan
-  name: Wan 2.2 A14B Text to Image 4 Steps
+  name: Wan 2.2 A14B Text to Image
   version: 1.0.0
   description: Wan 2.2 A14B is a 14B parameter model for text-to-image generation
-    with 4 steps.
   tags:
   - wan
   - t2i
@@ -14,7 +13,7 @@ metadata:
   - '2.2'
   author: Wan-AI
   license: Apache-2.0
-  demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
+  demo_path: models/wan-22-text-to-image.jpg
   categories:
   - text-to-image
 spec:
@@ -248,7 +247,7 @@ spec:
     - id: negative_prompt
       label: Negative Prompt
       description: Describe what to avoid in the generation.
-      placeholder: blurry, low quality, distorted, artifacts
+      placeholder: blurry, low quaity, distorted, artifacts
       type: text
       panel: advanced_prompting
       required: false
@@ -307,7 +306,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
@@ -317,7 +316,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -339,3 +338,13 @@ spec:
       min: 0.0
       max: 1.0
       step: 0.01
+    - id: num_inference_steps
+      label: Number of Inference Steps
+      description: Number of denoising steps
+      type: number+slider
+      value_type: integer
+      panel: sampling
+      default: 4
+      min: 1
+      max: 100
+      step: 1

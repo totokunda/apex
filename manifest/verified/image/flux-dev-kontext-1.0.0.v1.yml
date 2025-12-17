@@ -13,7 +13,7 @@ metadata:
   - dev
   author: Black Forest Labs
   license: Apache-2.0
-  demo_path: https://www.segmind.com/_next/image?url=https%3A%2F%2Fsegmind-resources.s3.amazonaws.com%2Foutput%2F60185595-bec1-461c-b111-afa377f02f47-kontext-max.png&w=2048&q=75
+  demo_path: models/flux-dev-kontext.png
   categories:
   - image-edit
 spec:
