@@ -340,7 +340,7 @@ spec:
       default: 20
       min: 1
       max: 100
-      step: 64
+      step: 1
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output image

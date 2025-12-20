@@ -34,12 +34,21 @@
         "attention_type": "sdpa"
     },
     "inputs": {
+<<<<<<< Updated upstream
         "prompt": "A dramatic storm scene where lightning tears through dark clouds. Traditional nunchaku stand upright in the foreground as electric bolts strike around them, illuminating the scene. The words Nunchaku Qwen Image appear formed from pure lightning in the sky above. High contrast, intense energy, cinematic realism.",
         "resolution": 1024,
         "aspect_ratio": "16:9",
         "height": 1024,
         "width": 1792,
         "seed": 3699948443,
+=======
+        "prompt": "A full-body shot of a beautifully animated woman standing in a lush, enchanted forest, looking directly at the camera with a calm, confident expression. She has expressive eyes and softly stylized facial features, with long flowing hair gently moving in the forest breeze. Her outfit is elegant and fantasy-inspired, with natural fabrics and subtle ornamental details. She stands on a moss-covered forest floor surrounded by towering trees, glowing foliage, wildflowers, and floating light particles. Sunbeams filter through the canopy, creating soft rim lighting around her silhouette. Painterly, high-quality animated style, cinematic composition, vibrant greens and warm highlights, shallow depth of field, magical and serene atmosphere, ultra-detailed, aesthetic, full body visible, centered composition, 4k.",
+        "resolution": 2048,
+        "aspect_ratio": "1:1",
+        "height": 2048,
+        "width": 2048,
+        "seed": 4028650439,
+>>>>>>> Stashed changes
         "duration": "5s"
     }
 }

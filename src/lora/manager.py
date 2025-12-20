@@ -370,6 +370,9 @@ class LoraManager(DownloadMixin):
                 model.set_adapters(final_names, weights=final_scales)
                 loaded_resolved.append(resolved[i])
             except Exception as e:
+                # print the full stack trace
+                import traceback
+                traceback.print_exc()
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
