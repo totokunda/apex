@@ -13,7 +13,7 @@ metadata:
   - t2i
   author: Tongy-MAI
   license: Apache-2.0
-  demo_path: https://i.ytimg.com/vi/dNeA5mJ36hA/maxresdefault.jpg
+  demo_path: models/zimage-turbo.png
   categories:
   - text-to-image
 spec:
@@ -79,22 +79,14 @@ spec:
         min_vram_gb: 24
         recommended_vram_gb: 32
       file_size: 24619740330
-    - path: jayn7/Z-Image-Turbo-GGUF/z_image_turbo-Q4_K_S.gguf
-      variant: GGUF_Q4_K_S
-      precision: q4_k_s
-      type: gguf
+    - path: T5B/Z-Image-Turbo-FP8/z-image-turbo-fp8-e4m3fn.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
       resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 4658972736
-    - path: jayn7/Z-Image-Turbo-GGUF/z_image_turbo-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 5910505536
+        min_vram_gb: 10
+        recommended_vram_gb: 14
+      file_size: 6154974440
     - path: jayn7/Z-Image-Turbo-GGUF/z_image_turbo-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -103,6 +95,22 @@ spec:
         min_vram_gb: 10
         recommended_vram_gb: 14
       file_size: 7224707136
+    - path: jayn7/Z-Image-Turbo-GGUF/z_image_turbo-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 5910505536
+    - path: jayn7/Z-Image-Turbo-GGUF/z_image_turbo-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 4658972736
   defaults:
     run:
       num_inference_steps: 9
@@ -166,7 +174,7 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 2048
+      default: 1024
       options:
       - name: 2K Ultra HD
         value: 2048

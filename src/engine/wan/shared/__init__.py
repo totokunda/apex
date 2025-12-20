@@ -13,7 +13,7 @@ from src.utils.progress import safe_emit_progress
 from src.utils.cache import empty_cache
 from .mlx import WanMLXDenoise
 from torch import Tensor
-
+import os
 
 class WanShared(BaseEngine, WanMLXDenoise):
     """Base class for WAN engine implementations containing common functionality"""
@@ -157,9 +157,10 @@ class WanShared(BaseEngine, WanMLXDenoise):
     def _render_step(self, latents: torch.Tensor, render_on_step_callback: Callable):
         self.logger.info(f"Rendering step for model type: {self.model_type}")
         if self.model_type == "t2i":
-            tensor_image = self.vae_decode(latents)[:, :, 0]
-            image = self._tensor_to_frame(tensor_image)
-            render_on_step_callback(image[0])
+            if os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "true":
+                tensor_image = self.vae_decode(latents)[:, :, 0]
+                image = self._tensor_to_frame(tensor_image)
+                render_on_step_callback(image[0])
         else:
             super()._render_step(latents, render_on_step_callback)
 

@@ -1,31 +1,31 @@
 {
     "engine_kwargs": {
         "engine_type": "zimage",
-        "yaml_path": "/home/divineade/apex/manifest/engine/zimage/zimage-turbo-1.0.0.v1.yml",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/image/zimage-turbo-1.0.0.v1.yml",
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
                 "name": "scheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
+                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
                 "type": "scheduler",
                 "label": "Scheduler",
                 "default": "FlowMatchEulerDiscreteScheduler"
             },
             "vae": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/vae",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/text_encoder",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/transformer",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/transformer",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
@@ -34,12 +34,12 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "Pixel art style: A young dancer performs energetic hip-hop moves in the middle of a busy street in Shibuya, Tokyo. Neon signs glow overhead, crowds flow around the dancer, blurred motion from passing pedestrians and traffic. Vibrant night lights reflect off wet pavement. Dynamic camera movement: smooth tracking shots, slight handheld realism. High-contrast cinematic lighting, rich colors, detailed urban textures. Atmosphere feels lively, modern, and electric, capturing the iconic Shibuya nightlife energy.",
+        "prompt": "A dramatic storm scene where lightning tears through dark clouds. Traditional nunchaku stand upright in the foreground as electric bolts strike around them, illuminating the scene. The words Nunchaku Qwen Image appear formed from pure lightning in the sky above. High contrast, intense energy, cinematic realism.",
         "resolution": 1024,
-        "aspect_ratio": "custom",
+        "aspect_ratio": "16:9",
         "height": 1024,
-        "width": 1856,
-        "seed": 3173437038,
+        "width": 1792,
+        "seed": 3699948443,
         "duration": "5s"
     }
 }

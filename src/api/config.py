@@ -322,16 +322,15 @@ def set_postprocessor_path_api(request: PostprocessorPathRequest):
         )
 
 
-@router.get("/enable-image-render-step", response_model=RenderStepEnabledResponse)
-def get_enable_image_render_step():
+@router.get("/enable-image-render-steps", response_model=RenderStepEnabledResponse)
+def get_enable_image_render_steps():
     """Get whether per-step image rendering is enabled during inference."""
     return RenderStepEnabledResponse(
         enabled=_get_env_bool("ENABLE_IMAGE_RENDER_STEP", default=True)
     )
 
-
-@router.post("/enable-image-render-step", response_model=RenderStepEnabledResponse)
-def set_enable_image_render_step(request: RenderStepEnabledRequest):
+@router.post("/enable-image-render-steps", response_model=RenderStepEnabledResponse)
+def set_enable_image_render_steps(request: RenderStepEnabledRequest):
     """Enable/disable per-step image rendering during inference."""
     try:
         value = "true" if bool(request.enabled) else "false"
@@ -345,16 +344,15 @@ def set_enable_image_render_step(request: RenderStepEnabledRequest):
         )
 
 
-@router.get("/enable-video-render-step", response_model=RenderStepEnabledResponse)
-def get_enable_video_render_step():
+@router.get("/enable-video-render-steps", response_model=RenderStepEnabledResponse)
+def get_enable_video_render_steps():
     """Get whether per-step video rendering is enabled during inference."""
     return RenderStepEnabledResponse(
         enabled=_get_env_bool("ENABLE_VIDEO_RENDER_STEP", default=True)
     )
 
-
-@router.post("/enable-video-render-step", response_model=RenderStepEnabledResponse)
-def set_enable_video_render_step(request: RenderStepEnabledRequest):
+@router.post("/enable-video-render-steps", response_model=RenderStepEnabledResponse)
+def set_enable_video_render_steps(request: RenderStepEnabledRequest):
     """Enable/disable per-step video rendering during inference."""
     try:
         value = "true" if bool(request.enabled) else "false"
@@ -455,6 +453,8 @@ def set_mask_model(request: MaskModelRequest):
             status_code=400, detail=f"Failed to set mask model: {str(e)}"
         )
 
+
+    
 
 def _update_persisted_config(**updates: str) -> None:
     """

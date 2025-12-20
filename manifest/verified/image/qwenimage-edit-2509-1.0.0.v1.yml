@@ -14,7 +14,7 @@ metadata:
   - '2509'
   author: Qwen
   license: Apache-2.0
-  demo_path: https://qianwen-res.oss-accelerate-overseas.aliyuncs.com/Qwen-Image/edit2509/edit2509_top.jpg
+  demo_path: models/qwenimage-edit-2509.png
   categories:
   - image-edit
 spec:

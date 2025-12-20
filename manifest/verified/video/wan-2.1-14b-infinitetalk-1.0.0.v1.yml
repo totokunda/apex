@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-1-14b-infinitetalk-text-to-video
+  id: wan-2-1-14b-infinitetalk
   model: wan
-  name: Wan 2.1 14B InfiniteTalk Text to Video
+  name: Wan 2.1 14B Infinite Talk
   version: 1.0.0
-  description: Wan 2.1 14B InfiniteTalk is a 14B parameter model for text-to-video
+  description: Wan 2.1 14B InfiniteTalk is a 14B parameter model for infinite talk
     generation.
   tags:
   - wan
@@ -33,7 +33,6 @@ spec:
   - flash
   - flash3
   - sage
-  fps: 25
   loras:
   - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors
     scale: 1.0
@@ -147,18 +146,17 @@ spec:
   - type: extra_model_path
     label: InfiniteTalk MultiTalk
     component: transformer
-    model_paths:
+    model_path:
     - path: MeiGen-AI/InfiniteTalk/multi/infinitetalk.safetensors
       variant: default
       precision: fp16
       type: safetensors
+      file_size: 9947889040
     - path: Kijai/WanVideo_comfy_fp8_scaled/InfiniteTalk/Wan2_1-InfiniteTalk-Multi_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
-
-    
-    
+      file_size: 2712729090
   - type: helper
     base: wan.multitalk
     model_path:

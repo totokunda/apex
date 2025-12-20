@@ -7,7 +7,7 @@ from diffusers.image_processor import VaeImageProcessor
 from src.engine.base_engine import BaseEngine
 from src.utils.progress import safe_emit_progress
 from loguru import logger
-
+import os
 
 class FluxShared(TextualInversionLoaderMixin, BaseEngine):
     """Shared functionality for Flux engine implementations"""
@@ -452,6 +452,8 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
 
         Falls back to base implementation if preview dimensions are unavailable.
         """
+        if os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "false":
+            return
         try:
             preview_height = getattr(self, "_preview_height", None)
             preview_width = getattr(self, "_preview_width", None)

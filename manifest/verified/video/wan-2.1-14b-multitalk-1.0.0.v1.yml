@@ -1,11 +1,11 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: wan-2-1-14b-multitalk-text-to-video
+  id: wan-2-1-14b-multitalk
   model: wan
-  name: Wan 2.1 14B MultiTalk Text to Video
+  name: Wan 2.1 14B MultiTalk
   version: 1.0.0
-  description: Wan 2.1 14B MultiTalk is a 14B parameter model for text-to-video generation.
+  description: Wan 2.1 14B MultiTalk is a 14B parameter model for multi talk generation.
   tags:
   - wan
   - multitalk
@@ -32,7 +32,6 @@ spec:
   - flash
   - flash3
   - sage
-  fps: 25
   loras:
   - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Wan2.1_I2V_14B_FusionX_LoRA.safetensors
     scale: 1.0
@@ -145,12 +144,12 @@ spec:
   - type: extra_model_path
     label: MeiGen MultiTalk
     component: transformer
-    model_paths:
+    model_path:
     - path: MeiGen-AI/MeiGen-MultiTalk/multitalk.safetensors
       variant: default
       precision: fp16
       type: safetensors
-    
+      file_size: 9947889040
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer/config.json
   - type: helper
     base: wan.multitalk

@@ -28,6 +28,9 @@ from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 from loguru import logger
+import gc
+import ctypes
+import ctypes.util
 
 def _persist_run_config(
     manifest_path: str,
@@ -193,6 +196,43 @@ def _save_manifest_yaml(yaml_path: Path, doc: Dict[str, Any]) -> None:
         yaml_path.write_text(yaml_text, encoding="utf-8")
     except Exception as e:
         logger.error(f"Failed to write updated manifest YAML {yaml_path}: {e}")
+
+
+def _aggressive_ram_cleanup() -> None:
+    """
+    Best-effort cleanup to reduce *resident* CPU memory in long-lived Ray workers.
+
+    Notes:
+    - `gc.collect()` drops Python object graphs.
+    - `empty_cache()` clears torch CUDA/MPS caches.
+    - On Linux/glibc, `malloc_trim(0)` can return freed heap pages back to the OS.
+      This is best-effort and safe to ignore if unavailable.
+    """
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        empty_cache()
+    except Exception:
+        pass
+    # Extra CUDA cleanup (beyond empty_cache) when available
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+    # Best-effort: return heap pages to OS (Linux/glibc)
+    try:
+        libc_path = ctypes.util.find_library("c")
+        if libc_path:
+            libc = ctypes.CDLL(libc_path)
+            mt = getattr(libc, "malloc_trim", None)
+            if mt is not None:
+                mt(0)
+    except Exception:
+        pass
 
 
 def _remove_lora_from_manifest(
@@ -1239,7 +1279,7 @@ def run_preprocessor(
     )
 
 
-@ray.remote
+@ray.remote(max_calls=1)
 def run_engine_from_manifest(
     manifest_path: str,
     job_id: str,
@@ -1267,6 +1307,7 @@ def run_engine_from_manifest(
     config = None
     prepared_inputs: Dict[str, Any] = {}
     preprocessor_jobs: List[Dict[str, Any]] = []
+    output = None
 
     try:
         from src.utils.yaml import load_yaml as load_manifest_yaml
@@ -1334,6 +1375,26 @@ def run_engine_from_manifest(
             input_kwargs["attention_type"] = attention_type
 
         engine = UniversalEngine(**input_kwargs)
+
+        # Compute FPS once so we don't capture the full engine/config inside callbacks.
+        fps_for_video: int = 16
+        try:
+            fps_candidate = config.get("fps", None)
+            if fps_candidate:
+                fps_for_video = int(fps_candidate)
+            else:
+                impl = getattr(engine.engine, "implementation_engine", None)
+                if impl is not None:
+                    sig = inspect.signature(impl.run)
+                    param = sig.parameters.get("fps")
+                    if (
+                        param is not None
+                        and param.default is not inspect._empty
+                        and param.default is not None
+                    ):
+                        fps_for_video = int(param.default)
+        except Exception:
+            fps_for_video = 16
 
         def _coerce_media_input(value: Any) -> tuple[Optional[str], Optional[bool]]:
             if isinstance(value, dict):
@@ -1483,22 +1544,7 @@ def run_engine_from_manifest(
                     media_type = "image"
                 # Sequence of frames
                 elif isinstance(output_obj, list) and len(output_obj) > 0:
-                    fps = config.get("fps", None)
-                    if not fps:
-                        try:
-                            impl = getattr(engine.engine, "implementation_engine", None)
-                            if impl is not None:
-                                sig = inspect.signature(impl.run)
-                                param = sig.parameters.get("fps")
-                                if (
-                                    param is not None
-                                    and param.default is not inspect._empty
-                                ):
-                                    fps = param.default
-                        except Exception:
-                            pass
-                    fps = fps or 16
-                    logger.info(f"Saving video to {result_path} with fps {fps}")
+                    fps = fps_for_video or 16
                     result_path = str(job_dir / f"{filename_prefix}.mp4")
                     export_to_video(
                         output_obj,
@@ -1801,8 +1847,18 @@ def run_engine_from_manifest(
             render_on_step=True,
             render_on_step_callback=render_func,
         )
-        
-        engine.offload_engine()
+        # Avoid logging giant tensors/lists (can be very large and can amplify RSS).
+        try:
+            if isinstance(output, tuple):
+                logger.info(
+                    "Engine output: tuple("
+                    + ", ".join(type(x).__name__ for x in output)
+                    + ")"
+                )
+            else:
+                logger.info(f"Engine output type: {type(output).__name__}")
+        except Exception:
+            pass
 
         # OVI models return a tuple of (video_tensor, audio_numpy). Use a dedicated
         # saver so we correctly embed the generated audio into the MP4 output.
@@ -1817,6 +1873,18 @@ def run_engine_from_manifest(
                 is_result=True,
                 audio_inputs=audio_input_paths or None,
             )
+        try:
+            logger.info(f"Result path: {result_path}")
+        except Exception:
+            pass
+
+        # Offload and aggressively drop references after saving output.
+        try:
+            engine.offload_engine()
+        except Exception as e:
+            logger.warning(f"Failed to offload engine: {e}")
+
+        _aggressive_ram_cleanup()
         send_progress(1.0, "Complete", {"status": "complete"})
         return {"status": "complete", "result_path": result_path, "type": media_type}
 
@@ -1831,14 +1899,20 @@ def run_engine_from_manifest(
     finally:
         # Ensure we aggressively release references and clear CUDA/MPS caches
         try:
+            try:
+                if engine is not None:
+                    engine.offload_engine()
+            except Exception:
+                pass
             engine = None
             raw = None
             config = None
             prepared_inputs = {}
             preprocessor_jobs = []
+            output = None
         except Exception as cleanup_err:
             logger.warning(f"run_engine_from_manifest cleanup failed: {cleanup_err}")
-        empty_cache()
+        _aggressive_ram_cleanup()
 
 
 @ray.remote

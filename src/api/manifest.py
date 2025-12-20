@@ -19,7 +19,7 @@ import traceback
 router = APIRouter(prefix="/manifest", tags=["manifest"])
 
 # Base path to manifest directory
-MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "engine"
+MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "verified"
 
 # Cache the system's compute capability (it doesn't change during runtime)
 _SYSTEM_COMPUTE_CAPABILITY: Optional[ComputeCapability] = None

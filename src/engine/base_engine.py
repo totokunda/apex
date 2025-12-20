@@ -318,7 +318,35 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         """
         init_kwargs = getattr(self, "_init_kwargs", {}) or {}
         memory_spec = init_kwargs.get("memory_management", None)
-        self._memory_management_map = self._normalize_memory_management(memory_spec)
+
+        # If `selected_components` includes explicit group-offload parameters for any
+        # component, synthesize `memory_management` entries from those values.
+        # When explicit group-offload values are provided, we do NOT auto-infer
+        # memory configs (auto inference is only used when none are provided).
+        explicit_from_selected: Dict[str, Dict[str, Any]] = {}
+        selected = getattr(self, "selected_components", None) or {}
+        logger.info(f"Selected components: {selected}")
+        if isinstance(selected, dict):
+            for key, value in selected.items():
+                if isinstance(value, dict) and self._has_memory_management_parameters(value):
+                    cfg = {k: value.get(k) for k in self._MEMORY_CONFIG_KEYS if k in value}
+                    if cfg:
+                        explicit_from_selected[str(key)] = cfg
+
+        allow_auto = True
+        if explicit_from_selected:
+            allow_auto = False
+            # Merge: caller-provided memory_management wins for overlapping keys.
+            if memory_spec is None:
+                memory_spec = dict(explicit_from_selected)
+            elif isinstance(memory_spec, dict):
+                for k, v in explicit_from_selected.items():
+                    memory_spec.setdefault(k, v)
+
+        logger.info(f"Memory management map: {memory_spec}")
+        self._memory_management_map = self._normalize_memory_management(
+            memory_spec, allow_auto=allow_auto
+        )
 
     def _init_logger(self):
         self.logger = logger
@@ -1740,36 +1768,53 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
     # -------------------------
     # Memory management helpers
     # -------------------------
+    _MEMORY_CONFIG_KEYS = (
+        "group_offload_type",
+        "group_offload_num_blocks_per_group",
+        "group_offload_use_stream",
+        "group_offload_record_stream",
+        "group_offload_non_blocking",
+        "group_offload_low_cpu_mem_usage",
+        "group_offload_offload_device",
+        "group_offload_disk_path",
+    )
+
     def _has_memory_management_parameters(self, value: Dict[str, Any]) -> bool:
         # if a dict has any of the keys: group_offload_type, group_offload_num_blocks_per_group, group_offload_use_stream, group_offload_record_stream, group_offload_non_blocking, group_offload_low_cpu_mem_usage, group_offload_offload_device, group_offload_disk_path
+        if not isinstance(value, dict):
+            return False
         return any(
             key in value
-            for key in [
-                "group_offload_type",
-                "group_offload_num_blocks_per_group",
-                "group_offload_use_stream",
-                "group_offload_record_stream",
-                "group_offload_non_blocking",
-                "group_offload_low_cpu_mem_usage",
-                "group_offload_offload_device",
-                "group_offload_disk_path",
-            ]
+            for key in self._MEMORY_CONFIG_KEYS
         )
 
     def _normalize_memory_management(
-        self, spec: Optional[Dict[str, Union[str, MemoryConfig, Dict[str, Any]]]]
+        self,
+        spec: Optional[Dict[str, Union[str, MemoryConfig, Dict[str, Any]]]],
+        *,
+        allow_auto: bool = True,
     ) -> Optional[Dict[str, MemoryConfig]]:
         # Start with any explicit mapping provided by the caller.
         normalized: Dict[str, MemoryConfig] = {}
 
         if spec:
 
-            def to_config(v: Union[str, MemoryConfig]) -> MemoryConfig:
+            def to_config(v: Union[str, MemoryConfig, Dict[str, Any]]) -> MemoryConfig:
                 if isinstance(v, MemoryConfig):
                     return v
-                if self._has_memory_management_parameters(v):
-                    return MemoryConfig(**v)
-                return MemoryConfig.for_block_level()
+                if isinstance(v, dict):
+                    if self._has_memory_management_parameters(v):
+                        # `selected_components` (and some callers) may pass extra keys
+                        # (like ids/labels). Only keep the MemoryConfig fields.
+                        cfg = {k: v.get(k) for k in self._MEMORY_CONFIG_KEYS if k in v}
+                        return MemoryConfig(**cfg)
+                    # If a dict is provided but doesn't specify any memory keys,
+                    # interpret it as "use a sane default" for that component.
+                    return MemoryConfig.for_block_level()
+                if isinstance(v, str):
+                    # Backwards-compatible: treat any string as "block level offload".
+                    return MemoryConfig.for_block_level()
+                raise TypeError(f"Unsupported memory_management entry type: {type(v)}")
 
             for key, value in spec.items():
                 try:
@@ -1781,12 +1826,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # If nothing explicit was provided (or everything failed to parse),
         # attempt to infer a sensible default mapping from the configured components.
-        auto_map = self._auto_memory_management_from_components()
-        if auto_map:
-            # Do not overwrite any explicit entries; only fill in missing keys.
-            for key, cfg in auto_map.items():
-                if key not in normalized:
-                    normalized[key] = cfg
+        if allow_auto:
+            auto_map = self._auto_memory_management_from_components()
+            if auto_map:
+                # Do not overwrite any explicit entries; only fill in missing keys.
+                for key, cfg in auto_map.items():
+                    if key not in normalized:
+                        normalized[key] = cfg
 
         
         return normalized if normalized else None
@@ -2395,7 +2441,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             if os.environ.get("ENABLE_VIDEO_RENDER_STEP", "true") == "true":
                 video = self.vae_decode(latents, timestep=timestep)
                 rendered_video = self._tensor_to_frames(video)
-                render_on_step_callback(rendered_video)
+                render_on_step_callback(rendered_video[0])
 
     def _tensor_to_frames(self, video: torch.Tensor, output_type: str = "pil"):
         postprocessed_video = self.video_processor.postprocess_video(
@@ -2551,14 +2597,36 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         for component in components:
             name = component.get("name")
             type_ = component.get("type")
-            comp = getattr(engine, name, getattr(engine, type_, None))
-            if comp is not None:
-                try:
-                    self._offload(comp)
-                except Exception:
-                    pass
-                del comp
-                empty_cache()
+            # Prefer the named attribute, otherwise fall back to component type.
+            attr_name = None
+            try:
+                if isinstance(name, str) and hasattr(engine, name):
+                    attr_name = name
+                elif isinstance(type_, str) and hasattr(engine, type_):
+                    attr_name = type_
+            except Exception:
+                attr_name = None
+
+            if not attr_name:
+                continue
+
+            comp = getattr(engine, attr_name, None)
+            if comp is None:
+                continue
+            try:
+                # Best-effort tensor offload (works for nn.Module / MLX Module).
+                # Some components may not be modules; we still detach them below.
+                self._offload(comp)
+            except Exception:
+                pass
+            try:
+                # CRITICAL: break the strong reference from the engine instance so
+                # the component object can be garbage-collected after the task ends.
+                setattr(engine, attr_name, None)
+            except Exception:
+                pass
+            del comp
+            empty_cache()
 
     @staticmethod
     def calculate_shift(

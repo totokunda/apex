@@ -2,7 +2,7 @@ from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
 import torch
 from typing import Union, List, Optional, Callable, Dict, Any
-
+import os
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 import numpy as np
 from diffusers.utils.torch_utils import randn_tensor
@@ -445,6 +445,8 @@ class OvisT2IEngine(BaseEngine):
         return images
 
     def _render_step(self, latents, render_on_step_callback):
+        if os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "false":
+            return
         latents = self._unpack_latents(
             latents, self._preview_height, self._preview_width, self.vae_scale_factor
         )
