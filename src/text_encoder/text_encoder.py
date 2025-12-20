@@ -92,6 +92,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             no_weights=no_weights,
             key_map=self.config.get("key_map", {}),
             extra_kwargs=self.config.get("extra_kwargs", {}),
+            load_device=self.device,
         )
         if override_kwargs is not None:
             input_kwargs.update(override_kwargs)
@@ -176,7 +177,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         num_videos_per_prompt: int = 1,
         dtype: torch.dtype | str | None = None,
         device: torch.device | None = None,
-        add_special_tokens: bool = True,
+        add_special_tokens: bool | None = True,
         return_attention_mask: bool = False,
         use_attention_mask: bool = False,
         use_position_ids: bool = False,
@@ -250,15 +251,23 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         if not self.model_loaded:
             self.model = self.load_model(no_weights=False)
             self.model_loaded = True
+        
 
-        text_inputs = self.tokenizer(
-            text,
+        dict_kwargs = dict(
             padding="max_length" if pad_to_max_length else "longest",
             max_length=max_sequence_length,
             truncation=True,
             add_special_tokens=add_special_tokens,
             return_tensors="pt",
-            return_attention_mask=True,
+            return_attention_mask=True
+        )
+        
+        if add_special_tokens is None:
+            dict_kwargs.pop("add_special_tokens")
+
+        text_inputs = self.tokenizer(
+            text,
+            **dict_kwargs,
         )
         if process_inputs_func is not None:
             text_inputs = process_inputs_func(text_inputs)
@@ -301,7 +310,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 or output_type == "hidden_states_all"
             ),
         )
-
+        
         if output_type == "hidden_states_all" and hasattr(result, "hidden_states"):
             prompt_embeds = result.hidden_states
             prompt_embeds = torch.stack(prompt_embeds, dim=0)

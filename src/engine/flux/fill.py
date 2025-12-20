@@ -81,10 +81,10 @@ class FluxFillEngine(FluxShared):
             text_encoder_kwargs,
             text_encoder_2_kwargs,
         )
-        q
+        
         if offload:
-            self._offload(self.text_encoder)
-            self._offload(self.text_encoder_2)
+            self._offload("text_encoder")
+            self._offload("text_encoder_2")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 

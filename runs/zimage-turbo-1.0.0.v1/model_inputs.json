@@ -34,12 +34,12 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "A dramatic storm scene where lightning tears through dark clouds. Traditional nunchaku stand upright in the foreground as electric bolts strike around them, illuminating the scene. The words Nunchaku Qwen Image appear formed from pure lightning in the sky above. High contrast, intense energy, cinematic realism.",
+        "prompt": "A cinematic, high-resolution collage illustrating the power of imagination and artificial intelligence, composed of multiple distinct scenes arranged in a clean grid layout with no gaps between the images. Top left: a colorful, animated ancient Chinese street scene with friendly cartoon characters, traditional architecture, soft daylight, and a warm, storybook style. Top center: a hyper-realistic portrait of a Joker-like figure with green hair, white face paint, and a wide unsettling smile, painted in expressive brushstrokes with dramatic lighting and shallow depth of field. Top right: a serene classical Chinese portrait of an elegant woman in ornate Qing-dynasty attire, delicate embroidery, pale skin, refined makeup, and a calm, dignified expression against a neutral parchment background.\n\nMiddle left: a modern caf\u00e9 storefront with a glowing neon sign reading \u201cQwen,\u201d cozy interior lighting, and a welcoming, contemporary tech-startup atmosphere. Middle center: an extreme close-up of a human eye, ultra-detailed iris and eyelashes, splashed with vibrant neon paint in cyan, magenta, yellow, and orange, symbolizing creativity and perception. Middle right: a traditional Chinese study room with wooden furniture, calligraphy scrolls on the wall, porcelain vases, warm ambient lighting, and a sense of quiet wisdom.\n\nBottom left: a group of four realistic dogs sitting closely together on a wooden table, looking curiously at a small action camera placed in front of them, soft studio lighting, playful and wholesome mood. Bottom center: a man in a suit standing indoors at night, reading a handwritten letter by a window with a bright full moon outside, accompanied by a cat, cinematic lighting, reflective and emotional tone. Bottom right: a futuristic desktop computer scene with a glowing monitor bursting into colorful abstract shapes, galaxies, and light trails, text reading \u201cImagination Unleashed,\u201d representing boundless creativity and AI-powered innovation.\n\nUltra-sharp detail, professional composition, balanced color grading, mix of illustration, realism, and digital art styles, cinematic lighting, inspirational and imaginative atmosphere, 8K quality. ",
         "resolution": 1024,
         "aspect_ratio": "16:9",
         "height": 1024,
         "width": 1792,
-        "seed": 3699948443,
+        "seed": 3900984530,
         "duration": "5s"
     }
 }

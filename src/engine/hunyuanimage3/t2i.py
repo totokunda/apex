@@ -180,7 +180,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
             latents = latents.repeat(cfg_factor, 1, 1, 1)
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         return t, latents
 
@@ -212,7 +212,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
             image = image.squeeze(2)
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         return image
 
@@ -976,7 +976,7 @@ class HunyuanImage3T2IEngine(BaseEngine):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         image = self.vae_decode(latents, generator=generator, offload=offload)

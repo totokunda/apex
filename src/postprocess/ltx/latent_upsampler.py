@@ -226,7 +226,7 @@ class LatentUpsamplerPostprocessor(BasePostprocessor):
         video = self.engine._tensor_to_frames(decoded_video, output_type=output_type)
 
         if offload:
-            self.engine._offload(vae)
+            self.engine._offload("vae")
 
         return video
 

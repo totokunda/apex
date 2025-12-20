@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, Optional
 
 from diffusers.utils.state_dict_utils import (
@@ -12,6 +13,57 @@ BASE_TO_PEFT = {
 }
 
 from enum import Enum
+
+
+# Kohya "single_file" format flattens module path dots into underscores (keeping the
+# last two dots, e.g. `.lora_down.weight`). Many models (Flux/Hunyuan/etc) have
+# legitimate underscores in module names (`diffusion_model`, `double_blocks`, ...),
+# so a naive `prefix.replace("_", ".")` corrupts keys (e.g. `double_blocks` -> `double.blocks`).
+_KOHYA_UNFLATTEN_PROTECTED_TOKENS = (
+    # Common diffusion/transformer component names with *real* underscores
+    "diffusion_model",
+    "double_blocks",
+    "single_blocks",
+    "transformer_blocks",
+    "img_attn",
+    "txt_attn",
+    "img_mod",
+    "txt_mod",
+    "img_mlp",
+    "txt_mlp",
+    "query_norm",
+    "key_norm",
+    "time_embed",
+    "time_embedding",
+    "pos_embed",
+    "proj_in",
+    "proj_out",
+)
+
+
+def _restore_kohya_flattened_prefix(prefix: str) -> str:
+    """
+    Best-effort restore of dots flattened into underscores by Kohya, while trying
+    to preserve underscores that belong to actual module names.
+    """
+    # Use a placeholder that should never naturally occur in a PyTorch state_dict key.
+    placeholder = "\u0001"
+
+    # Protect known underscore-containing tokens.
+    for token in sorted(_KOHYA_UNFLATTEN_PROTECTED_TOKENS, key=len, reverse=True):
+        if "_" in token and token in prefix:
+            prefix = prefix.replace(token, token.replace("_", placeholder))
+
+    # Protect common "word_digit" tokens like `linear_1` / `conv_2` / `norm_3`.
+    prefix = re.sub(r"linear_(\d+)", lambda m: f"linear{placeholder}{m.group(1)}", prefix)
+    prefix = re.sub(r"conv_(\d+)", lambda m: f"conv{placeholder}{m.group(1)}", prefix)
+    prefix = re.sub(r"norm_(\d+)", lambda m: f"norm{placeholder}{m.group(1)}", prefix)
+
+    # Convert remaining underscores (which are more likely to be flattened dots) into dots.
+    prefix = prefix.replace("_", ".")
+
+    # Restore protected underscores.
+    return prefix.replace(placeholder, "_")
 
 class StateDictType(Enum):
     DIFFUSERS = "diffusers"
@@ -141,7 +193,7 @@ def convert_kohya_to_peft_state_dict(
                 prefix = k[:second_last_dot]
                 tail = k[second_last_dot:]  # includes the dot
 
-                prefix = prefix.replace("_", ".")
+                prefix = _restore_kohya_flattened_prefix(prefix)
                 k = prefix + tail
 
         # Undo lora_down / lora_up mapping.
@@ -152,7 +204,7 @@ def convert_kohya_to_peft_state_dict(
         if adapter_name and (k.endswith(".weight") or k.endswith(".bias")):
             base, suffix = k.rsplit(".", 1)
             k = f"{base}.{adapter_name}.{suffix}"
-
+            
         kohya_state_dict[k] = value
 
     return kohya_state_dict

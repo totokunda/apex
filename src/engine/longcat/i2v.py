@@ -99,7 +99,7 @@ class LongCatI2VEngine(LongCatShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -204,7 +204,7 @@ class LongCatI2VEngine(LongCatShared):
         self._current_timestep = None
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

@@ -554,6 +554,7 @@ class QwenImageTransformer2DModel(
                 )
 
             else:
+
                 encoder_hidden_states, hidden_states = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,

@@ -191,8 +191,8 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
                     dtype=dtype,
                 )
         # Offload text encoders before heavy steps
-        self._offload(self.text_encoder)
-        self._offload(self.text_encoder_2)
+        self._offload("text_encoder")
+        self._offload("text_encoder_2")
 
         if getattr(self, "scheduler", None) is None:
             self.load_component_by_type("scheduler")
@@ -326,7 +326,7 @@ class Kandinsky5I2VEngine(Kandinsky5Shared):
 
         latents = latents[:, :, :, :, :num_channels_latents]
         # Offload transformer after denoising
-        self._offload(self.transformer)
+        self._offload("transformer")
 
         if return_latents:
             return latents

@@ -285,7 +285,7 @@ class SkyReelsDFEngine(BaseEngine):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         output_video = None
         prefix_latent = None
@@ -629,7 +629,7 @@ class SkyReelsDFEngine(BaseEngine):
                     pbar.update(1)
 
             if offload:
-                self._offload(self.transformer)
+                self._offload("transformer")
 
             if output_video is not None:
                 postprocessed_video = self._tensor_to_frames(output_video)

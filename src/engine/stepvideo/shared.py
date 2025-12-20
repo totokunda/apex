@@ -243,7 +243,7 @@ class StepVideoShared(BaseEngine):
             return_dict=False,
         )[0]
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
         return video.to(dtype=dtype)
 
     def resize_to_desired_aspect_ratio(self, video, aspect_size):

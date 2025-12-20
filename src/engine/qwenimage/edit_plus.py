@@ -279,7 +279,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
             
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 

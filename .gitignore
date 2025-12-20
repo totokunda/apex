@@ -120,6 +120,7 @@ parts/
 *.bz2
 *.o
 *.pt
+*.safetensors
 **/.vscode/*
 scripts/zip_branch.sh
 scripts/zip_branches.sh

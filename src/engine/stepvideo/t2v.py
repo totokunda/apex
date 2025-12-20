@@ -58,7 +58,7 @@ class StepVideoT2VEngine(StepVideoShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         llm_preprocessor = self.helpers["stepvideo.text_encoder"]
         self.to_device(llm_preprocessor)
@@ -80,7 +80,7 @@ class StepVideoT2VEngine(StepVideoShared):
             )
 
         if offload:
-            self._offload(llm_preprocessor)
+            self._offload("stepvideo.text_encoder")
 
         transformer_dtype = self.component_dtypes["transformer"]
 
@@ -173,7 +173,7 @@ class StepVideoT2VEngine(StepVideoShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

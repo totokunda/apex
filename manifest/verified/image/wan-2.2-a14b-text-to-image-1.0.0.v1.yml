@@ -25,13 +25,13 @@ spec:
   - sdpa
   loras:
   - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
-    scale: 0.125
+    scale: 0.0
     name: Wan Lightning High Noise
     label: Wan Lightning High Noise
     verified: true
     component: high_noise_transformer
   - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
-    scale: 0.125
+    scale: 0.0
     name: Wan Lightning Low Noise
     label: Wan Lightning Low Noise
     verified: true
@@ -48,7 +48,7 @@ spec:
       config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/scheduler/scheduler_config.json
   - type: vae
     label: WAN VAE
-    name: wan/vae_2.2
+    name: vae
     base: wan
     model_path:
     - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/vae
@@ -59,28 +59,28 @@ spec:
   - type: text_encoder
     label: WAN Text Encoder
     base: UMT5EncoderModel
+    offloading_module: encoder
     model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
+    - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 22723695074
+      file_size: 11361874539
     - path: Kijai/WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors
       variant: FP8
       precision: fp8
       type: safetensors
       file_size: 6731333792
-    config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
+    config_path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder/config.json
   - type: transformer
     label: High Noise Transformer
     name: high_noise_transformer
     base: wan.base
     model_path:
-    - path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer
+    - path: lopho/Wan2.2-T2V-A14B-Diffusers_bf16_transformer
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 57154175562
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
@@ -132,11 +132,10 @@ spec:
     name: low_noise_transformer
     base: wan.base
     model_path:
-    - path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer_2
+    - path: lopho/Wan2.2-T2V-A14B-Diffusers_bf16_transformer_2
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 57154175562
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
@@ -262,7 +261,7 @@ spec:
       description: Select the resolution of the output image
       panel: size
       type: select
-      default: 720
+      default: 1024
       options:
       - name: Ultra HD
         value: 1024
@@ -348,3 +347,23 @@ spec:
       min: 1
       max: 100
       step: 1
+    - id: high_noise_guidance_scale
+      label: High Noise Guidance Scale
+      description: The guidance scale for the high noise transformer
+      type: number+slider
+      value_type: float
+      panel: sampling
+      default: 1
+      min: 0
+      max: 100
+      step: 0.01
+    - id: low_noise_guidance_scale
+      label: Low Noise Guidance Scale
+      description: The guidance scale for the low noise transformer
+      type: number+slider
+      value_type: float
+      panel: sampling
+      default: 1
+      min: 0
+      max: 100
+      step: 0.01

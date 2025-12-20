@@ -327,7 +327,7 @@ class OviEngine(WanShared):
         text_embeddings_audio_neg = text_embeddings[2]
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.22, "Text encoder offloaded")
 
@@ -363,7 +363,7 @@ class OviEngine(WanShared):
             )
 
             if offload:
-                self._offload(self.vae)
+                self._offload("vae")
             safe_emit_progress(
                 progress_callback, 0.32, "Encoded first frame into video latents"
             )
@@ -549,7 +549,7 @@ class OviEngine(WanShared):
                 )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(
             progress_callback, 0.92, "Transformer offloaded after denoising"
         )
@@ -588,8 +588,8 @@ class OviEngine(WanShared):
         generated_video = generated_video_tensor.squeeze(0).cpu().float().numpy()
 
         if offload:
-            self._offload(self.vae)
-            self._offload(self.audio_vae)
+            self._offload("vae")
+            self._offload("audio_vae")
 
         safe_emit_progress(
             progress_callback, 1.0, "Completed Ovi video+audio generation"
@@ -631,5 +631,5 @@ class OviEngine(WanShared):
 
         render_on_step_callback((generated_video, generated_audio))
 
-        self._offload(self.transformer_vae, delete_from_cpu=False)
-        self._offload(self.audio_vae, delete_from_cpu=False)
+        self._offload("transformer_vae", offload_type="cpu")
+        self._offload("audio_vae", offload_type="cpu")

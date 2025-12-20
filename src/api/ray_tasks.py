@@ -31,6 +31,7 @@ from loguru import logger
 import gc
 import ctypes
 import ctypes.util
+import time
 
 def _persist_run_config(
     manifest_path: str,
@@ -536,6 +537,7 @@ def _mark_lora_verified_in_manifests(
                 yaml_path=str(manifest_path),
                 should_download=False,
                 auto_apply_loras=False,
+                auto_memory_management=False,
             ).engine
         except Exception as e:
             logger.warning(
@@ -1368,6 +1370,7 @@ def run_engine_from_manifest(
             "yaml_path": manifest_path,
             "model_type": model_type,
             "selected_components": selected_components,
+            "auto_memory_management": os.environ.get("AUTO_MEMORY_MANAGEMENT", False),
             **(config.get("engine_kwargs", {}) or {}),
         }
 
@@ -1378,10 +1381,12 @@ def run_engine_from_manifest(
 
         # Compute FPS once so we don't capture the full engine/config inside callbacks.
         fps_for_video: int = 16
+        has_fps = False
         try:
             fps_candidate = config.get("fps", None)
             if fps_candidate:
                 fps_for_video = int(fps_candidate)
+                has_fps = True
             else:
                 impl = getattr(engine.engine, "implementation_engine", None)
                 if impl is not None:
@@ -1565,7 +1570,6 @@ def run_engine_from_manifest(
                                 "Audio muxing failed; returning video-only output. "
                                 f"Error: {mux_err}"
                             )
-
                 else:
                     # Fallback best-effort serialization
                     try:
@@ -1714,7 +1718,7 @@ def run_engine_from_manifest(
                     result.get("error")
                     or f"Preprocessor {job['preprocessor_name']} failed"
                 )
-            print(f"\n\n\n {result} \n\n\n")
+            
             prepared_inputs[job["input_id"]] = result.get("result_path")
 
         # Resolve concrete file paths for any audio inputs that should be saved with the final video
@@ -1840,11 +1844,17 @@ def run_engine_from_manifest(
             else render_on_step_callback_ovi
         )
         _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
-
+        
+        # get if the model is video or image
+        if has_fps:
+            render_on_step = os.environ.get("ENABLE_VIDEO_RENDER_STEP", "true") == "true"
+        else:
+            render_on_step = os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "true"
+        
         output = engine.run(
             **(prepared_inputs or {}),
             progress_callback=progress_callback,
-            render_on_step=True,
+            
             render_on_step_callback=render_func,
         )
         # Avoid logging giant tensors/lists (can be very large and can amplify RSS).

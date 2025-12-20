@@ -67,7 +67,7 @@ class WanPhantomEngine(WanShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -171,7 +171,7 @@ class WanPhantomEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

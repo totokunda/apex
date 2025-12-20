@@ -82,6 +82,7 @@ def load_text_encoder_gguf(
     path: str,
     key_map: Literal["t5", "llama", "step"] = "t5",
     dequant_dtype: torch.dtype | str = torch.float16,
+    device: str = "cpu",
     **kwargs,
 ):
     
@@ -93,6 +94,7 @@ def load_text_encoder_gguf(
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
+    dev = torch.device(device)
     
     for tensor in tqdm(reader.tensors):
         name = remap_key(tensor.name, key_map)
@@ -103,6 +105,14 @@ def load_text_encoder_gguf(
             )
             # Map quantized GGUF buffers to int8 to avoid downstream frameworks casting activations to uint8
             torch_tensor = torch.from_numpy(tensor.data)
+            if dev.type != "cpu" and torch_tensor.device.type == "cpu":
+                if dev.type == "cuda":
+                    try:
+                        torch_tensor = torch_tensor.pin_memory().to(dev, non_blocking=True)
+                    except Exception:
+                        torch_tensor = torch_tensor.to(dev)
+                else:
+                    torch_tensor = torch_tensor.to(dev)
 
             ggml_tensor = GGMLTensor(
                 (
@@ -112,7 +122,7 @@ def load_text_encoder_gguf(
                 ),
                 tensor_type=tensor.tensor_type,
                 tensor_shape=shape,
-                dequant_dtype=dequant_dtype,
+                dequant_dtype=dequant_dtype
             )
 
         state_dict[name] = ggml_tensor
@@ -154,10 +164,12 @@ def get_orig_shape(reader, tensor_name):
 def load_transformer_gguf(
     path: str,
     dequant_dtype: torch.dtype | str = torch.float16,
+    device: str = "cpu",
 ):
     if isinstance(dequant_dtype, str):
         dequant_dtype = convert_str_dtype(dequant_dtype)
 
+    dev = torch.device(device)
     reader = gguf.GGUFReader(path)
     state_dict: Dict[str, GGMLTensor] = {}
     qtype_dict: Dict[str, int] = {}
@@ -182,6 +194,20 @@ def load_transformer_gguf(
             }:
                 base = base.view(*shape)
 
+            # Move the *raw storage* tensor before wrapping as GGMLTensor.
+            # Calling `.to(device)` on GGMLTensor is unsafe for quantized tensors because
+            # GGMLTensor overrides `.dtype` to report `dequant_dtype`, which can trigger
+            # an unwanted cast and corrupt packed quantized bytes.
+            if dev.type != "cpu" and base.device.type == "cpu":
+                if dev.type == "cuda":
+                    # Best-effort pinned H2D copy for speed; falls back to regular copy.
+                    try:
+                        base = base.pin_memory().to(dev, non_blocking=True)
+                    except Exception:
+                        base = base.to(dev)
+                else:
+                    base = base.to(dev)
+
             ggml_tensor = GGMLTensor(
                 base,
                 tensor_type=tensor.tensor_type,
@@ -202,12 +228,16 @@ def load_gguf(
     path: str,
     type: Literal["text_encoder", "transformer"],
     key_map: Literal["t5", "llama", "step"] | None = None,
+    device: str = "cpu",
     **kwargs,
 ):
     if type == "text_encoder":
-        print(key_map)
-        return load_text_encoder_gguf(path, key_map, **kwargs)
+        if key_map is None:
+            key_map = "t5"
+        # NOTE: text encoder loader currently doesn't accept `device`; it materializes
+        # tensors on CPU and the model code moves/dequantizes as needed.
+        return load_text_encoder_gguf(path, key_map=key_map, **kwargs)
     elif type == "transformer":
-        return load_transformer_gguf(path, **kwargs)
+        return load_transformer_gguf(path, device=device, **kwargs)
     else:
         raise ValueError(f"Invalid type: {type}")

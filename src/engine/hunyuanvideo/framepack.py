@@ -141,9 +141,9 @@ class HunyuanFramepackEngine(HunyuanVideoShared):
             image_embeds = (image_embeds + last_image_embeds) / 2
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
             if self.llama_text_encoder is not None:
-                self._offload(self.llama_text_encoder)
+                self._offload("llama_text_encoder")
 
         # 4. Load transformer
         if not self.transformer:
@@ -478,7 +478,7 @@ class HunyuanFramepackEngine(HunyuanVideoShared):
                 pbar.update(1)
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return history_video

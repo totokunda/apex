@@ -416,7 +416,7 @@ class HuMoEngine(WanShared):
         latents_ref = [latent_ref for latent_ref in latents_ref]
 
         if offload and self.vae is not None:
-            self._offload(self.vae)
+            self._offload("vae")
 
         audio_processor = None
 
@@ -436,7 +436,7 @@ class HuMoEngine(WanShared):
             audio_length = frame_num
 
         if offload and audio_processor is not None:
-            self._offload(audio_processor)
+            self._offload("audio_processor")
 
         if frame_num > 129 and width * height < 720 * 1280:
             frame_num = 129
@@ -716,7 +716,7 @@ class HuMoEngine(WanShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

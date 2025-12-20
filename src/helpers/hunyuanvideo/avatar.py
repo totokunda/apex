@@ -89,8 +89,8 @@ class HunyuanAvatar(nn.Module, LoaderMixin, OffloadMixin):
         ]
         audio_prompts = torch.cat(audio_prompts, dim=0).to(device=device, dtype=dtype)
 
-        self._offload(self.wav2vec_model)
-        self._offload(self.align_image)
+        self._offload("wav2vec_model")
+        self._offload("align_image")
 
         uncond_audio_prompts = torch.zeros_like(audio_prompts)
         motion_exp = motion_bucket_id_exps.to(device=device, dtype=dtype)

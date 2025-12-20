@@ -3,6 +3,7 @@ from diffusers.image_processor import VaeImageProcessor
 from typing import Union, List, Optional, Dict, Any, TYPE_CHECKING, Callable
 import torch
 from diffusers.utils.torch_utils import randn_tensor
+from src.utils.progress import safe_emit_progress
 
 
 class ZImageShared(BaseEngine):
@@ -33,14 +34,18 @@ class ZImageShared(BaseEngine):
         prompt_embeds: Optional[List[torch.FloatTensor]] = None,
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
         max_sequence_length: int = 512,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ):
+        safe_emit_progress(progress_callback, 0.05, "Preparing prompt encoding")
         prompt = [prompt] if isinstance(prompt, str) else prompt
         prompt_embeds = self._encode_prompt(
             prompt=prompt,
             device=device,
             prompt_embeds=prompt_embeds,
             max_sequence_length=max_sequence_length,
+            progress_callback=progress_callback,
         )
+        safe_emit_progress(progress_callback, 0.70, "Prompt encoded")
 
         if do_classifier_free_guidance:
             if negative_prompt is None:
@@ -52,14 +57,18 @@ class ZImageShared(BaseEngine):
                     else negative_prompt
                 )
             assert len(prompt) == len(negative_prompt)
+            safe_emit_progress(progress_callback, 0.75, "Preparing negative prompt encoding")
             negative_prompt_embeds = self._encode_prompt(
                 prompt=negative_prompt,
                 device=device,
                 prompt_embeds=negative_prompt_embeds,
                 max_sequence_length=max_sequence_length,
+                progress_callback=progress_callback,
             )
+            safe_emit_progress(progress_callback, 0.95, "Negative prompt encoded")
         else:
             negative_prompt_embeds = []
+        safe_emit_progress(progress_callback, 1.0, "Prompt encoding complete")
         return prompt_embeds, negative_prompt_embeds
 
     def _encode_prompt(
@@ -68,19 +77,26 @@ class ZImageShared(BaseEngine):
         device: Optional[torch.device] = None,
         prompt_embeds: Optional[List[torch.FloatTensor]] = None,
         max_sequence_length: int = 512,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> List[torch.FloatTensor]:
         device = device or self.device
         dtype = self.component_dtypes["text_encoder"]
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.10, "Loading text encoder")
             self.load_component_by_type("text_encoder")
+            safe_emit_progress(progress_callback, 0.20, "Text encoder loaded")
+            safe_emit_progress(progress_callback, 0.25, "Moving text encoder to device")
             self.to_device(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.30, "Text encoder on device")
 
         if prompt_embeds is not None:
+            safe_emit_progress(progress_callback, 0.35, "Using provided prompt embeddings")
             return prompt_embeds
 
         if isinstance(prompt, str):
             prompt = [prompt]
 
+        safe_emit_progress(progress_callback, 0.40, "Tokenizing prompt(s)")
         for i, prompt_item in enumerate(prompt):
             messages = [
                 {"role": "user", "content": prompt_item},
@@ -93,6 +109,7 @@ class ZImageShared(BaseEngine):
             )
             prompt[i] = prompt_item
 
+        safe_emit_progress(progress_callback, 0.65, "Encoding prompt embeddings")
         prompt_embeds, prompt_masks = self.text_encoder.encode(
             prompt,
             max_sequence_length=max_sequence_length,

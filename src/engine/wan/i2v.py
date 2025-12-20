@@ -90,7 +90,7 @@ class WanI2VEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
@@ -127,7 +127,7 @@ class WanI2VEngine(WanShared):
             )
 
         if offload and boundary_ratio is None and not expand_timesteps:
-            self._offload(self.helpers["clip"])
+            self._offload("clip")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -289,7 +289,7 @@ class WanI2VEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:

@@ -200,7 +200,7 @@ class HunyuanVideo15TI2VSRengine(HunyuanVideo15TI2VEngine):
             data_type="video",
         )
         if kwargs.get("offload", True):
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         extra_kwargs = self._prepare_byt5_embeddings(prompt, device)
         if guidance_scale > 1.0:
@@ -362,9 +362,9 @@ class HunyuanVideo15TI2VSRengine(HunyuanVideo15TI2VEngine):
 
         # Offload heavy sr modules
 
-        self._offload(self.sr_transformer)
+        self._offload("sr_transformer")
         if hasattr(self, "upsampler"):
-            self._offload(self.upsampler)
+            self._offload("upsampler")
 
         latents_to_decode = latents if latents.ndim == 5 else latents.unsqueeze(2)
 

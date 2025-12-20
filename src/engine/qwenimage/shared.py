@@ -4,6 +4,7 @@ from typing import Union, List, Optional, Dict, Any, Callable
 from src.engine.base_engine import BaseEngine
 from diffusers.image_processor import VaeImageProcessor
 from loguru import logger
+from src.utils.progress import safe_emit_progress
 
 class QwenImageShared(BaseEngine):
     """Base class for QwenImage engine implementations containing common functionality"""
@@ -118,8 +119,10 @@ class QwenImageShared(BaseEngine):
         max_sequence_length: int = 1024,
         num_images_per_prompt: int = 1,
         text_encoder_kwargs: Optional[Dict[str, Any]] = {},
+        progress_callback: Callable | None = None,
     ):
 
+        safe_emit_progress(progress_callback, 0.02, "Preparing prompt inputs")
         prompt = [prompt] if isinstance(prompt, str) else prompt
         base_img_prompt = ""
         if image is None:
@@ -153,21 +156,28 @@ class QwenImageShared(BaseEngine):
 
         cached = None
         if self.text_encoder.enable_cache:
+            safe_emit_progress(progress_callback, 0.06, "Checking prompt cache")
             cached = self.text_encoder.load_cached(prompt_hash)
 
         if cached is not None:
+            safe_emit_progress(progress_callback, 0.10, "Loaded cached prompt embeddings")
             prompt_embeds, prompt_embeds_mask = cached
         else:
+            safe_emit_progress(progress_callback, 0.12, "Encoding prompt embeddings")
             if image is None:
                 input_kwargs = {
                     "text": txt,
                     "max_sequence_length": self.tokenizer_max_length + drop_idx,
                     "use_attention_mask": True,
+                    "pad_to_max_length": False,
                     "return_attention_mask": True,
                     "output_type": "raw",
+                    "add_special_tokens": None,
+                    "clean_text": False,
                     **text_encoder_kwargs,
                 }
             else:
+                safe_emit_progress(progress_callback, 0.14, "Preparing vision-language inputs")
                 processor = self.helpers["image.processor"]
                 model_inputs = processor(
                     text=txt,
@@ -184,19 +194,22 @@ class QwenImageShared(BaseEngine):
                     "output_hidden_states": True,
                 }
             if image is None:
+                safe_emit_progress(progress_callback, 0.22, "Running text encoder")
                 encoder_outputs, attention_mask = self.text_encoder.encode(
                     **input_kwargs,
                 )
             else:
                 if not self.text_encoder.model_loaded:
-                    # self.text_encoder.model = self.text_encoder.load_model(override_kwargs={"load_dtype": None})
+                    safe_emit_progress(progress_callback, 0.18, "Loading text encoder model")
                     self.text_encoder.model = self.text_encoder.load_model(no_weights=False)
                     self.text_encoder.model = self.text_encoder.model.to(dtype)
                     self.text_encoder.model_loaded = True
 
+                safe_emit_progress(progress_callback, 0.22, "Running text+vision encoder")
                 encoder_outputs = self.text_encoder.model(**input_kwargs)
                 attention_mask = model_inputs.attention_mask
 
+            safe_emit_progress(progress_callback, 0.55, "Post-processing embeddings")
             hidden_states = encoder_outputs.hidden_states[-1]
             split_hidden_states = self._extract_masked_hidden(
                 hidden_states, attention_mask
@@ -250,12 +263,14 @@ class QwenImageShared(BaseEngine):
                 )
 
             if self.text_encoder.enable_cache:
+                safe_emit_progress(progress_callback, 0.92, "Caching prompt embeddings")
                 self.text_encoder.cache(
                     prompt_hash,
                     prompt_embeds,
                     prompt_embeds_mask,
                 )
 
+        safe_emit_progress(progress_callback, 1.0, "Prompt encoding complete")
         return prompt_embeds, prompt_embeds_mask
 
     def _extract_masked_hidden(self, hidden_states: torch.Tensor, mask: torch.Tensor):
@@ -347,6 +362,12 @@ class QwenImageShared(BaseEngine):
                 denoise_progress_callback(0.0, "Starting denoise")
             except Exception:
                 pass
+        
+        try:
+            self.scheduler.set_begin_index(0)
+        except Exception:
+            pass
+        
 
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):

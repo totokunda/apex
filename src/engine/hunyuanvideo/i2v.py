@@ -101,9 +101,9 @@ class HunyuanI2VEngine(HunyuanVideoShared):
             )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
             if self.llama_text_encoder is not None:
-                self._offload(self.llama_text_encoder)
+                self._offload("llama_text_encoder")
 
         # 3. Load transformer
         if not self.transformer:
@@ -255,7 +255,7 @@ class HunyuanI2VEngine(HunyuanVideoShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             if image_condition_type == "latent_concat":

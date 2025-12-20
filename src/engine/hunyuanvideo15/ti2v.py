@@ -778,9 +778,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
             if getattr(self, "text_encoder_2", None) is not None:
-                self._offload(self.text_encoder_2)
+                self._offload("text_encoder_2")
 
         extra_kwargs = self._prepare_byt5_embeddings(prompt, device)
 
@@ -969,7 +969,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                         progress_bar.update()
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents
@@ -999,7 +999,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             out = super().vae_decode(latents, offload=offload)
             self.vae.disable_tiling()
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
         return out
 
     def vae_encode(
@@ -1023,5 +1023,5 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             )
             self.vae.disable_tiling()
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
         return out

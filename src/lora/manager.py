@@ -261,7 +261,6 @@ class LoraManager(DownloadMixin):
         loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
         adapter_names: Optional[List[str]] = None,
         scales: Optional[List[float]] = None,
-        replace_keys: bool = True,
     ) -> List[LoraItem]:
         """
         Load multiple LoRAs into a PEFT-enabled model. Supports per-adapter scaling.
@@ -300,7 +299,7 @@ class LoraManager(DownloadMixin):
             item.scale = float(scale)
             resolved.append(item)
 
-        if hasattr(model, "update_lora_params") and compose_lora is not None:
+        if False:
             composed_lora = []
             for i, item in enumerate(resolved):
                 for local_path in item.local_paths:

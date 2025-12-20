@@ -196,7 +196,7 @@ class WanMultitalkEngine(WanShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -270,7 +270,7 @@ class WanMultitalkEngine(WanShared):
             )
 
             if offload:
-                self._offload(clip_processor, delete_from_cpu=False)
+                self._offload("clip", offload_type="cpu")
 
             # zero padding and vae encode
             # InfiniteTalk: always condition on the current source video frame when a video is provided;
@@ -574,7 +574,7 @@ class WanMultitalkEngine(WanShared):
             
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             latents = torch.cat(gen_latents_list, dim=2).cpu()

@@ -63,7 +63,7 @@ class MagiT2VEngine(MagiShared):
         safe_emit_progress(progress_callback, 0.10, "Encoded prompt")
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
@@ -172,10 +172,10 @@ class MagiT2VEngine(MagiShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 

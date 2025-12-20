@@ -93,7 +93,7 @@ class Flux2Shared(BaseEngine):
         self.to_device(self.vae)
         image_latents = self.vae.normalize_latents(image_latents)
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
         return image_latents
 
     @staticmethod

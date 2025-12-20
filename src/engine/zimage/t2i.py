@@ -28,6 +28,10 @@ class ZImageT2IEngine(ZImageShared):
     @property
     def interrupt(self):
         return self._interrupt
+    
+    @property
+    def progress_callback(self):
+        return self._progress_callback
 
     def run(
         self,
@@ -68,15 +72,9 @@ class ZImageT2IEngine(ZImageShared):
 
         vae_scale = self.vae_scale_factor * 2
         if height % vae_scale != 0:
-            raise ValueError(
-                f"Height must be divisible by {vae_scale} (got {height}). "
-                f"Please adjust the height to a multiple of {vae_scale}."
-            )
+            height = height - (height % vae_scale)
         if width % vae_scale != 0:
-            raise ValueError(
-                f"Width must be divisible by {vae_scale} (got {width}). "
-                f"Please adjust the width to a multiple of {vae_scale}."
-            )
+            width = width - (width % vae_scale)
 
         device = self.device
 
@@ -85,6 +83,7 @@ class ZImageT2IEngine(ZImageShared):
         self._interrupt = False
         self._cfg_normalization = cfg_normalization
         self._cfg_truncation = cfg_truncation
+        self._progress_callback = progress_callback
         # 2. Define call parameters
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
@@ -101,6 +100,7 @@ class ZImageT2IEngine(ZImageShared):
                     "`negative_prompt_embeds` must also be provided for classifier-free guidance."
                 )
         else:
+            encode_progress_callback = make_mapped_progress(progress_callback, 0.02, 0.18)
             (
                 prompt_embeds,
                 negative_prompt_embeds,
@@ -112,17 +112,22 @@ class ZImageT2IEngine(ZImageShared):
                 negative_prompt_embeds=negative_prompt_embeds,
                 device=device,
                 max_sequence_length=max_sequence_length,
+                progress_callback=encode_progress_callback,
             )
-            safe_emit_progress(progress_callback, 0.15, "Encoded prompt")
-            
+            safe_emit_progress(progress_callback, 0.18, "Prompts ready")
+              
         if offload:
-            del self.text_encoder
+            self._offload("text_encoder")
             safe_emit_progress(progress_callback, 0.20, "Text encoder offloaded")
             
         
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.21, "Loading transformer")
             self.load_component_by_type("transformer")
+            safe_emit_progress(progress_callback, 0.23, "Transformer loaded")
+            safe_emit_progress(progress_callback, 0.24, "Moving transformer to device")
             self.to_device(self.transformer)
+            safe_emit_progress(progress_callback, 0.25, "Transformer on device")
         
         safe_emit_progress(progress_callback, 0.25, "Transformer ready")
 
@@ -289,7 +294,7 @@ class ZImageT2IEngine(ZImageShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
             safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

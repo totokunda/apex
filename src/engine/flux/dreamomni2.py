@@ -123,7 +123,7 @@ class DreamOmni2Engine(FluxShared):
         )
 
         if offload:
-            self._offload(self.text_encoder_2)
+            self._offload("text_encoder_2")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 
@@ -469,7 +469,7 @@ class DreamOmni2Engine(FluxShared):
 
         if offload:
             safe_emit_progress(progress_callback, 0.08, "Offloading LLM")
-            self._offload(llm)
+            self._offload("llm")
 
         return output_text[0]
 

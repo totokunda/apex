@@ -237,7 +237,7 @@ class WanATIEngine(WanShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         loaded_image = self._load_image(image)
 
@@ -279,7 +279,7 @@ class WanATIEngine(WanShared):
             )
 
         if offload and boundary_ratio is None and not expand_timesteps:
-            self._offload(self.helpers["clip"])
+            self._offload("clip")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -439,7 +439,7 @@ class WanATIEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

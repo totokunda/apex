@@ -1,56 +1,56 @@
 {
     "engine_kwargs": {
         "engine_type": "wan",
-        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan-2.2-a14b-text-to-image-1.0.0.v1.yml",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/image/wan-2.2-a14b-text-to-image-1.0.0.v1.yml",
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
-                "name": "scheduler",
+                "name": "UniPCMultistepScheduler",
                 "base": "diffusers.UniPCMultistepScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/9bcf6ca67780d1db310af5d300a504eb1cac05165ed5d990ba83537160b57eb6_scheduler_config.json",
+                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/9bcf6ca67780d1db310af5d300a504eb1cac05165ed5d990ba83537160b57eb6_scheduler_config.json",
                 "type": "scheduler",
-                "label": "Scheduler",
-                "default": "UniPCMultistepScheduler"
+                "label": "UniPC Multistep Scheduler",
+                "default": "UniPCMultistepScheduler",
+                "description": "The UniPC Multistep Scheduler is used for WAN 2.2 A14B T2V."
             },
             "wan/vae_2.2": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "high_noise_transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/d7bc3a77364b57cbdf51b2d26ed84368d85339bff907dbb97068f53ab534d694_Wan2.2-T2V-A14B-HighNoise-Q3_K_S.gguf",
-                "variant": "GGUF_Q3_K_S",
-                "precision": "q3_k_s",
-                "type": "gguf"
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             },
             "low_noise_transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/7be2d844c9e4e313619edbd22c794bfdc46bcaf755d7e4dff1863a760f611be2_Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf",
-                "variant": "GGUF_Q3_K_S",
-                "precision": "q3_k_s",
-                "type": "gguf"
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             }
         },
+        "auto_memory_management": false,
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "A cinematic nighttime street scene in Tokyo\u2019s Shibuya district during light rain, neon signs glowing and reflecting off wet asphalt as crowds flow naturally in slow motion, a stylish young adult wearing a dark trench coat and headphones walking confidently through the crosswalk, subtle steam rising from nearby vents, soft mist catching the colored lights, ultra-realistic facial features and natural body motion, cloth simulation visible in the coat fabric, shallow depth of field with realistic bokeh, dynamic camera movement starting with a wide establishing shot then smoothly dollying forward into a medium shot, handheld micro-motion for realism, volumetric lighting, global illumination, physically accurate reflections, high dynamic range, cinematic color grading with teal and magenta accents, film-like contrast, natural motion blur, no jitter, no artifacts, highly coherent temporal consistency, professional film look, 24fps, 4\u20136 seconds duration, realistic scale, immersive atmosphere, emotionally calm yet energetic mood, modern urban cinematic aesthetic.",
+        "prompt": "A wide, cinematic establishing shot at twilight inside a vast, ruined stone courtyard. Fractured arches and collapsed columns frame the scene as cold moonlight pours through drifting fog. At the center stands a regal princess, motionless and unafraid, her silhouette perfectly balanced against the ruins. She wears an elegant, time-worn gown, the fabric heavy and textured, embroidered with faint threads of tarnished gold that catch the light. A delicate crown rests slightly askew upon her head as her hair streams in the wind. Her posture is calm and resolute, chin lifted, eyes locked forward with quiet authority. Behind her, emerging from shadow and mist, towers a colossal ancient monster—immense beyond scale, its form sculpted from cracked stone, living sinew, and darkness itself. Its glowing eyes burn softly, watchful rather than hostile, hinting at an ancient pact binding creature and crown. Moonbeams slice through the broken architecture, casting long, dramatic shadows across cracked marble floors and moss-covered ruins. Embers drift slowly through the air, mixing with rolling fog, as if the battlefield still breathes. Epic fantasy film still, dramatic wide-angle composition, strong foreground-to-background depth, volumetric moon rays, high-contrast cinematic lighting, rich atmospheric haze, ultra-detailed textures, realistic materials, painterly realism, 8K quality, emotional tension, mythic scale.",
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
-        "resolution": 720,
+        "resolution": 1024,
         "aspect_ratio": "1:1",
+        "height": 1024,
+        "width": 1024,
+        "seed": 42,
+        "boundary_ratio": 0.875,
         "num_inference_steps": 50,
-        "height": 704,
-        "width": 704,
-        "seed": 116587078,
         "high_noise_guidance_scale": 4,
         "low_noise_guidance_scale": 3,
-        "boundary_ratio": 0.875,
         "duration": "5s"
     }
 }

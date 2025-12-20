@@ -48,7 +48,7 @@ class LynxEngine(WanShared):
         negative_prompt: List[str] | str = None,
         height: int = 480,
         width: int = 832,
-        num_frames: int = 81,
+        duration: int | str = 81,
         fps: int = 16,
         num_inference_steps: int = 50,
         num_videos: int = 1,
@@ -77,14 +77,17 @@ class LynxEngine(WanShared):
         **kwargs,
     ):
         safe_emit_progress(progress_callback, 0.0, "Starting Lynx pipeline")
+        num_frames = self._parse_num_frames(duration, fps)
 
         use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
         helper = self._lynx_helper
+        safe_emit_progress(progress_callback, 0.02, "Resolving Lynx adapter path")
         adapter_root = helper.resolve_adapter_path(
             config=getattr(self, "config", {}),
             override=adapter_path or self._adapter_path,
         )
+        safe_emit_progress(progress_callback, 0.04, "Preparing face data")
         embeds, face_landmarks, face_image = helper.prepare_face_data(
             subject_image,
             face_embeds,
@@ -95,6 +98,7 @@ class LynxEngine(WanShared):
 
         safe_emit_progress(progress_callback, 0.08, "Prepared face embeddings")
 
+        safe_emit_progress(progress_callback, 0.08, "Encoding prompts")
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             negative_prompt=negative_prompt,
@@ -105,24 +109,32 @@ class LynxEngine(WanShared):
             text_encoder_kwargs=text_encoder_kwargs,
             offload=False,
         )
+        safe_emit_progress(progress_callback, 0.18, "Prompts ready")
         
         
 
         batch_size = prompt_embeds.shape[0]
 
         if offload:
-            self._offload(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.19, "Offloading text encoder")
+            self._offload("text_encoder")
         safe_emit_progress(progress_callback, 0.20, "Text encoder ready")
 
         if self.scheduler is None:
+            safe_emit_progress(progress_callback, 0.21, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.22, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.23, "Moving scheduler to device")
         self.to_device(self.scheduler)
+        safe_emit_progress(progress_callback, 0.24, "Scheduler on device")
         scheduler = self.scheduler
 
+        safe_emit_progress(progress_callback, 0.25, "Configuring scheduler timesteps")
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
 
+        safe_emit_progress(progress_callback, 0.26, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -132,15 +144,19 @@ class LynxEngine(WanShared):
         safe_emit_progress(progress_callback, 0.26, "Scheduler prepared")
 
         transformer_dtype = self.component_dtypes["transformer"]
+        safe_emit_progress(progress_callback, 0.28, "Moving prompt embeddings to device")
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
+        safe_emit_progress(progress_callback, 0.30, "Prompt embeddings ready")
 
         if generator is None and seed is not None:
+            safe_emit_progress(progress_callback, 0.31, "Seeding RNG")
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
+        safe_emit_progress(progress_callback, 0.32, "Initializing latent noise")
         latents = self._get_latents(
             height,
             width,
@@ -156,13 +172,19 @@ class LynxEngine(WanShared):
         safe_emit_progress(progress_callback, 0.34, "Latent noise initialized")
 
         if self.transformer is None:
+            safe_emit_progress(progress_callback, 0.35, "Loading transformer")
             self.load_component_by_type("transformer")
+            safe_emit_progress(progress_callback, 0.36, "Transformer loaded")
+        safe_emit_progress(progress_callback, 0.37, "Moving transformer to device")
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.38, "Transformer on device")
         # Preserve any deferred group offloading config across adapter wrapping.
         pending_offload = getattr(self.transformer, "_apex_pending_group_offloading", None)
+        safe_emit_progress(progress_callback, 0.39, "Loading Lynx adapters")
         self.transformer = helper.load_adapters(
             self.transformer, adapter_root, device=self.device, dtype=transformer_dtype
         )
+        safe_emit_progress(progress_callback, 0.40, "Lynx adapters loaded")
         if (
             pending_offload is not None
             and getattr(self.transformer, "_apex_pending_group_offloading", None) is None
@@ -173,6 +195,7 @@ class LynxEngine(WanShared):
             self.preloaded_loras.keys()
         )
         if lora_items:
+            safe_emit_progress(progress_callback, 0.41, f"Applying {len(lora_items)} LoRAs")
             self.logger.info(f"Applying {len(lora_items)} loras to Lynx transformer")
             preloaded_loras = [
                 (lora.source, lora.scale, lora.name)
@@ -187,23 +210,20 @@ class LynxEngine(WanShared):
             # Group offloading for transformers must be enabled after LoRA/adapters.
             
             self._apply_pending_group_offloading(self.transformer)
+            safe_emit_progress(progress_callback, 0.42, "LoRAs applied")
             
-
+        safe_emit_progress(progress_callback, 0.43, "Building IP states")
         ip_states, ip_states_uncond = helper.build_ip_states(
             embeds, device=self.device, dtype=transformer_dtype
         )
+        safe_emit_progress(progress_callback, 0.44, "IP states ready")
 
         ref_buffer = ref_buffer_uncond = None
         if helper.ref_loaded and ref_scale is not None:
-            if self.vae is None:
-                self.load_component_by_type("vae")
-            if self.text_encoder is None:
-                self.load_component_by_type("text_encoder")
-            self.to_device(self.vae)
-            self.to_device(self.text_encoder)
-            self.to_device(self.transformer)
+            safe_emit_progress(progress_callback, 0.45, "Preparing reference buffer")
 
             aligned_face = helper.align_face(face_image, face_landmarks, face_size=256)
+            safe_emit_progress(progress_callback, 0.48, "Encoding reference buffer (cond/uncond)")
             ref_gen = (
                 torch.Generator(device=self.device).manual_seed(seed + 1)
                 if seed is not None
@@ -229,6 +249,7 @@ class LynxEngine(WanShared):
                 drop=True,
                 generator=ref_gen,
             )
+            safe_emit_progress(progress_callback, 0.49, "Reference buffer ready")
 
         merged_attention_kwargs = {
             **attention_kwargs,
@@ -251,9 +272,11 @@ class LynxEngine(WanShared):
         if face_token_embeds is None:
             transformer_dtype = self.component_dtypes["transformer"]
             # 3.1 Encoder input face embedding
+            safe_emit_progress(progress_callback, 0.49, "Encoding face embedding")
             face_token_embeds = helper.encode_face_embedding(
                 embeds, use_cfg_guidance, device=self.device, dtype=transformer_dtype
             )
+            safe_emit_progress(progress_callback, 0.50, "Face embedding ready")
         else:
             face_token_embeds = torch.cat([torch.zeros_like(face_token_embeds), face_token_embeds], dim=0)
 
@@ -263,7 +286,8 @@ class LynxEngine(WanShared):
         merged_attention_kwargs_uncond.update({"image_embed": face_token_embeds})
         
         if offload:
-            self._offload(helper)
+            safe_emit_progress(progress_callback, 0.50, "Offloading Lynx helper")
+            self._offload("helper")
 
         do_cfg = use_cfg_guidance and negative_prompt_embeds is not None
         self._preview_height = height
@@ -273,9 +297,11 @@ class LynxEngine(WanShared):
         denoise_progress_callback = denoise_progress_callback or make_mapped_progress(
             progress_callback, 0.50, 0.90
         )
-        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
-        
-        print(use_cfg_guidance)
+        safe_emit_progress(
+            progress_callback,
+            0.50,
+            f"Starting denoise phase (CFG: {'on' if do_cfg else 'off'})",
+        )
 
         total_steps = len(timesteps)
         with self._progress_bar(total=total_steps, desc="Denoising steps") as pbar:
@@ -335,14 +361,19 @@ class LynxEngine(WanShared):
                 )
                 pbar.update(1)
 
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         if offload:
-            self._offload(self.transformer)
+            safe_emit_progress(progress_callback, 0.93, "Offloading transformer")
+            self._offload("transformer")
+            safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.95, "Decoding latents")
         video = self.vae_decode(latents, offload=offload)
+        safe_emit_progress(progress_callback, 0.98, "Formatting output frames")
         frames = self._tensor_to_frames(video, output_type=output_type)
         safe_emit_progress(progress_callback, 1.0, "Lynx generation complete")
         return frames

@@ -9,7 +9,39 @@ import hashlib
 from typing import Dict, Any
 import tempfile
 import traceback
+from typing import Tuple
+ProgressCb = Callable[[int, Optional[int], Optional[str]], None]
+from tqdm import tqdm
 
+def _progress_tqdm(desc: str) -> Tuple[tqdm, ProgressCb]:
+    """
+    Create a tqdm bar and a progress callback matching DownloadMixin signature:
+      cb(downloaded_so_far, total_or_none, filename_or_none)
+    """
+    bar = tqdm(
+        desc=desc,
+        total=None,
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+        dynamic_ncols=True,
+    )
+    state = {"last_n": 0, "total": None}
+
+    def cb(n: int, total: Optional[int], _label: Optional[str] = None) -> None:
+        try:
+            if total is not None and state["total"] != total:
+                bar.total = int(total)
+                state["total"] = int(total)
+            n_int = int(n or 0)
+            delta = n_int - int(state["last_n"])
+            if delta > 0:
+                bar.update(delta)
+            state["last_n"] = n_int
+        except Exception:
+            pass
+
+    return bar, cb
 
 class DownloadMixin:
     logger: Logger = logger
@@ -1071,21 +1103,33 @@ class DownloadMixin:
                     return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
 
-            # Progress aggregation across threads
+            # Per-file progress callback factory.
+            # If caller did not supply a callback, default to a tqdm-based callback.
             def make_cb(rel_path: str, size_hint: Optional[int]):
-                def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
-                    if progress_callback:
-                        try:
-                            # Report per-file progress with per-file total
-                            progress_callback(
-                                int(n),
-                                _total if _total is not None else size_hint,
-                                _label or os.path.basename(rel_path),
-                            )
-                        except Exception:
-                            pass
+                label = os.path.basename(rel_path)
 
-                return _cb
+                # If no callback provided, use a per-file tqdm bar
+                if progress_callback is None:
+                    bar, cb = _progress_tqdm(label)
+
+                    def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
+                        # Drive tqdm and let it infer/receive totals when available
+                        cb(int(n), _total if _total is not None else size_hint, _label)
+
+                    return bar, _cb
+
+                # Otherwise, wrap the provided callback to ensure consistent signature
+                def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
+                    try:
+                        progress_callback(
+                            int(n),
+                            _total if _total is not None else size_hint,
+                            _label or label,
+                        )
+                    except Exception:
+                        pass
+
+                return None, _cb
 
             # Download in parallel to temp (staging dir), then move the entire directory into dest_path atomically
             with tempfile.TemporaryDirectory() as tmp_root:
@@ -1132,54 +1176,62 @@ class DownloadMixin:
                             dest_file = os.path.join(final_dir, filename)
 
                             max_retries = 3
-                            for attempt in range(max_retries):
-                                try:
-                                    self._download_from_url(
-                                        url=signed_url,
-                                        save_path=tmp_dir,
-                                        progress_callback=make_cb(
-                                            rel_path, expected_size
-                                        ),
-                                        session=session,
-                                        filename=filename,
-                                        dest_path=dest_file,
-                                    )
-
-                                    # Verification
-                                    if not os.path.exists(dest_file):
-                                        raise ValueError(
-                                            f"File {dest_file} not found after download"
+                            bar, cb = make_cb(rel_path, expected_size)
+                            try:
+                                for attempt in range(max_retries):
+                                    try:
+                                        self._download_from_url(
+                                            url=signed_url,
+                                            save_path=tmp_dir,
+                                            progress_callback=cb,
+                                            session=session,
+                                            filename=filename,
+                                            dest_path=dest_file,
                                         )
 
-                                    actual_size = os.path.getsize(dest_file)
-                                    if actual_size == 0:
-                                        raise ValueError(f"File {dest_file} is empty")
-
-                                    if (
-                                        expected_size is not None
-                                        and actual_size != expected_size
-                                    ):
-                                        raise ValueError(
-                                            f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}"
-                                        )
-
-                                    return dest_file
-
-                                except Exception as e:
-                                    if attempt < max_retries - 1:
-                                        if hasattr(self, "logger"):
-                                            self.logger.warning(
-                                                f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}"
+                                        # Verification
+                                        if not os.path.exists(dest_file):
+                                            raise ValueError(
+                                                f"File {dest_file} not found after download"
                                             )
 
-                                    if os.path.exists(dest_file):
-                                        try:
-                                            os.remove(dest_file)
-                                        except Exception:
-                                            pass
+                                        actual_size = os.path.getsize(dest_file)
+                                        if actual_size == 0:
+                                            raise ValueError(
+                                                f"File {dest_file} is empty"
+                                            )
 
-                                    if attempt == max_retries - 1:
-                                        raise e
+                                        if (
+                                            expected_size is not None
+                                            and actual_size != expected_size
+                                        ):
+                                            raise ValueError(
+                                                f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}"
+                                            )
+
+                                        return dest_file
+
+                                    except Exception as e:
+                                        if attempt < max_retries - 1:
+                                            if hasattr(self, "logger"):
+                                                self.logger.warning(
+                                                    f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}"
+                                                )
+
+                                        if os.path.exists(dest_file):
+                                            try:
+                                                os.remove(dest_file)
+                                            except Exception:
+                                                pass
+
+                                        if attempt == max_retries - 1:
+                                            raise e
+                            finally:
+                                try:
+                                    if bar is not None:
+                                        bar.close()
+                                except Exception:
+                                    pass
 
                         futures.append(ex.submit(task))
                     # ensure completion
@@ -1430,6 +1482,42 @@ class DownloadMixin:
         part_path = f"{file_path}.part"
         # Name to use in logs/progress
         log_name = os.path.basename(file_path)
+
+        # Optional Rust fast-path (if the extension module is installed).
+        # NOTE: This project uses Hatch for packaging, so the Rust module is built/installed separately.
+        # See `rust/apex_download_rs/pyproject.toml` for the maturin project.
+        try:
+            from apex_download_rs import download_from_url as _rs_download_from_url  # type: ignore
+        except Exception:
+            _rs_download_from_url = None
+
+        def _bool_env(name: str, default: bool = True) -> bool:
+            try:
+                v = os.environ.get(name)
+                if v is None:
+                    return default
+                return str(v).strip().lower() not in ("0", "false", "no", "off")
+            except Exception:
+                return default
+
+        def _cookie_header_from_session(sess) -> Optional[str]:
+            try:
+                if sess is None:
+                    return None
+                cookies = getattr(sess, "cookies", None)
+                if not cookies:
+                    return None
+                # requests' cookiejar supports iterating Cookie objects
+                parts = []
+                for c in cookies:
+                    try:
+                        parts.append(f"{c.name}={c.value}")
+                    except Exception:
+                        continue
+                return "; ".join(parts) if parts else None
+            except Exception:
+                return None
+
         try:
             # If the file already exists, do not re-download
             if os.path.exists(file_path):
@@ -1438,6 +1526,83 @@ class DownloadMixin:
 
             # Prepare directory
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # Prefer Rust implementation when available (can significantly reduce Python overhead).
+            # Can be disabled via APEX_USE_RUST_DOWNLOAD=0
+            if _rs_download_from_url is not None and _bool_env(
+                "APEX_USE_RUST_DOWNLOAD", True
+            ):
+                # Merge base headers with session headers/cookies (best-effort).
+                headers_for_rust = dict(base_headers)
+                try:
+                    if session is not None and hasattr(session, "headers"):
+                        headers_for_rust.update(dict(getattr(session, "headers") or {}))
+                except Exception:
+                    pass
+                cookie_header = _cookie_header_from_session(session)
+                if cookie_header:
+                    headers_for_rust["Cookie"] = cookie_header
+                # Prefer identity encoding so byte counts match file writes (and avoid decompression overhead).
+                headers_for_rust.setdefault("Accept-Encoding", "identity")
+
+                # Throttle callbacks to avoid Python-call overhead becoming the bottleneck.
+                callback_interval = float(
+                    os.environ.get("APEX_DOWNLOAD_PROGRESS_INTERVAL", "0.2")
+                )
+                callback_min_bytes = int(
+                    os.environ.get("APEX_DOWNLOAD_PROGRESS_MIN_BYTES", str(1024 * 1024))
+                )
+                
+                
+                # If caller didn't supply a progress callback, default to a tqdm-based callback
+                # (can be disabled via APEX_RUST_TQDM=0).
+                rust_bar = None
+                effective_progress_callback = progress_callback
+                if effective_progress_callback is None and _bool_env("APEX_RUST_TQDM", True):
+                    rust_bar, effective_progress_callback = _progress_tqdm(os.path.basename(file_path))
+
+                try:
+                    _rs_download_from_url(
+                        url=url,
+                        file_path=file_path,
+                        part_path=part_path,
+                        headers=headers_for_rust,
+                        verify_tls=self._requests_verify(),
+                        progress_callback=effective_progress_callback,
+                        adaptive=adaptive,
+                        chunk_size=int(chunk_size),
+                        initial_chunk_size=int(initial_chunk_size),
+                        target_chunk_seconds=float(target_chunk_seconds),
+                        min_chunk_size=int(min_chunk_size),
+                        max_chunk_size=int(max_chunk_size),
+                        callback_min_interval_secs=float(callback_interval),
+                        callback_min_bytes=int(callback_min_bytes),
+                    )
+                    self.logger.info(
+                        f"Successfully downloaded {log_name} to {file_path} (rust)"
+                    )
+                    return file_path
+                except Exception as e:
+                    # Best-effort Rust fast-path: if it fails for any reason, fall back
+                    # to the Python downloader (which also supports resuming from .part).
+                    #
+                    # Do not delete part_path here; keeping it enables the Python path
+                    # to resume if Rust wrote any partial bytes.
+                    if os.path.exists(file_path):
+                        self.logger.info(
+                            f"Rust downloader errored but {file_path} exists; using existing file."
+                        )
+                        return file_path
+                    self.logger.warning(
+                        f"Rust downloader failed for {log_name} from: {url}; falling back to Python downloader. Error: {e}",
+                        exc_info=True,
+                    )
+                finally:
+                    try:
+                        if rust_bar is not None:
+                            rust_bar.close()
+                    except Exception:
+                        pass
 
             # Determine resume offset if a partial file exists
             resume_size = 0
@@ -1674,8 +1839,8 @@ class DownloadMixin:
         except Exception as e:
             traceback.print_exc()
             self.logger.error(f"Failed to download from URL: {url}. Error: {e}")
-        finally:
-            return file_path
+            raise
+        return file_path
 
     def download_from_url(
         self,

@@ -76,22 +76,6 @@ spec:
     - path: black-forest-labs/FLUX.1-dev/transformer
       variant: default
       file_size: 23803075680
-    - path: city96/FLUX.1-dev-gguf/flux1-dev-Q4_1.gguf
-      variant: GGUF_Q4_1
-      precision: q4_1
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 10
-      file_size: 7530806432
-    - path: city96/FLUX.1-dev-gguf/flux1-dev-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 10
-        recommended_vram_gb: 12
-      file_size: 9857000736
     - path: city96/FLUX.1-dev-gguf/flux1-dev-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -100,6 +84,23 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 14
       file_size: 12708281504
+    - path: city96/FLUX.1-dev-gguf/flux1-dev-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 10
+        recommended_vram_gb: 12
+      file_size: 9857000736
+    - path: city96/FLUX.1-dev-gguf/flux1-dev-Q4_1.gguf
+      variant: GGUF_Q4_1
+      precision: q4_1
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 10
+      file_size: 7530806432
+
     config_path: black-forest-labs/FLUX.1-dev/transformer/config.json
   defaults:
     run:

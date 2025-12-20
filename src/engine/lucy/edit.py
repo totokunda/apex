@@ -139,7 +139,7 @@ class LucyEditEngine(WanShared):
 
         condition_latents = torch.cat(condition_latents_list, dim=0).to(torch.float32)
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         # 5. Boundary timestep
         if boundary_ratio is not None:
@@ -188,9 +188,9 @@ class LucyEditEngine(WanShared):
         # 7. Decode
         if offload:
             if getattr(self, "transformer", None):
-                self._offload(self.transformer)
+                self._offload("transformer")
             if getattr(self, "transformer_2", None):
-                self._offload(self.transformer_2)
+                self._offload("transformer_2")
 
         safe_emit_progress(progress_callback, 0.96, "Transformers offloaded")
 
@@ -233,7 +233,7 @@ class LucyEditEngine(WanShared):
                     if hasattr(self, "transformer_2") and getattr(
                         self, "transformer_2", None
                     ):
-                        self._offload(self.transformer_2)
+                        self._offload("transformer_2")
                         empty_cache()
 
                     if not getattr(self, "transformer", None):
@@ -249,7 +249,7 @@ class LucyEditEngine(WanShared):
                 else:
                     # Low noise stage
                     if getattr(self, "transformer", None):
-                        self._offload(self.transformer)
+                        self._offload("transformer")
                         empty_cache()
 
                     if not getattr(self, "transformer_2", None):

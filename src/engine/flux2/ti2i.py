@@ -87,7 +87,7 @@ class Flux2T2IEngine(Flux2Shared):
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
         safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
 
         # 4. process images
@@ -252,7 +252,7 @@ class Flux2T2IEngine(Flux2Shared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")

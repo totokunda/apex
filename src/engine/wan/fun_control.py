@@ -122,7 +122,7 @@ class WanFunControlEngine(WanShared):
             )
             
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         return prompt_embeds, negative_prompt_embeds
     

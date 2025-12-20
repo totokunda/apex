@@ -94,7 +94,7 @@ class WanFFLFEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
@@ -134,7 +134,7 @@ class WanFFLFEngine(WanShared):
             )
 
         if offload and boundary_ratio is None:
-            self._offload(self.helpers["clip"])
+            self._offload("clip")
             
         self.to_device(self.transformer)
 

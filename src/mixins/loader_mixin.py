@@ -27,7 +27,7 @@ import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model_from_state_dict as patch_model_ggml_from_state_dict
-from src.quantize.ggml_tensor import GGMLTensor
+from transformers import Qwen2_5_VLForConditionalGeneration
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
@@ -87,6 +87,7 @@ class LoaderMixin(DownloadMixin):
         getter_fn: Callable | None = None,
         module_name: str = "diffusers",
         load_dtype: torch.dtype | mx.Dtype | None = None,
+        load_device: str = "cpu",
         no_weights: bool = False,
         key_map: Dict[str, str] | None = None,
         extra_kwargs: Dict[str, Any] | None = None,
@@ -114,7 +115,13 @@ class LoaderMixin(DownloadMixin):
 
         model_base = component.get("base")
         model_path = component.get("model_path")
-
+        
+        if mm_config is not None:
+            # Should be cpu often times since the model is loaded on the cpu
+            load_device = "cpu"
+        
+        if no_weights:
+            load_device = "cpu"
 
         if getter_fn:
             model_class = getter_fn(model_base)
@@ -126,8 +133,10 @@ class LoaderMixin(DownloadMixin):
             raise ValueError(f"Model class for base '{model_base}' not found")
         config_path = component.get("config_path")
         config = {}
-
-
+        
+        if "nunchaku" in model_base:
+            return model_class.from_pretrained(model_path, torch_dtype=load_dtype)
+            
 
         if config_path:
             config.update(self.fetch_config(config_path))
@@ -152,110 +161,14 @@ class LoaderMixin(DownloadMixin):
             converter = get_text_encoder_converter(model_base)
         else:
             converter = NoOpConverter()
-    
- 
-        # Only take the diffusers `from_pretrained` fast-path when we *don't*
-        # need to run any custom conversion logic. If a converter is required,
-        # we fall through to the manual loading path below where we explicitly
-        # load checkpoints and call `converter.convert(state_dict)` before
-        # assigning weights.
-        
-        requires_conversion = extra_kwargs.get("require_conversion", False)
+            
 
-        if (
-            not requires_conversion
-            and (
-                not config
-                or (
-                    os.path.isdir(model_path)
-                    and os.path.exists(os.path.join(model_path, "config.json"))
-                )
-            )
-        ) and (
-            not component.get("extra_model_paths")
-        ) and not extra_kwargs.get("load_from_config"):
-
-            if (
-                (
-                    hasattr(self, "engine_type")
-                    and self.engine_type == "mlx"
-                    and component.get("type") == "transformer"
-                )
-                and load_dtype is not None
-                and "dtype" not in extra_kwargs
-            ):
-                extra_kwargs["dtype"] = load_dtype
-            elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
-                extra_kwargs["torch_dtype"] = load_dtype
-
-            self.logger.info(f"Loading {model_class} from {model_path}")
-            context = init_empty_weights() if no_weights else nullcontext()
-
-            with context:
-                # remove all kwargs that are null
-                extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
-
-                # Filter out any kwargs that `from_pretrained` cannot accept.
-                # If the method accepts **kwargs we keep everything.
-                try:
-                    sig = inspect.signature(model_class.from_pretrained)
-                    params = sig.parameters
-                    accepts_var_kw = any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-                    )
-                    if not accepts_var_kw:
-                        filtered_kwargs = {}
-                        for k, v in extra_kwargs.items():
-                            if k in params:
-                                filtered_kwargs[k] = v
-                            else:
-                                # Drop unsupported kwargs rather than failing hard.
-                                if hasattr(self, "logger"):
-                                    self.logger.debug(
-                                        f"Dropping unsupported kwarg '{k}' for "
-                                        f"{model_class.__name__}.from_pretrained"
-                                    )
-                        extra_kwargs = filtered_kwargs
-                except (TypeError, ValueError):
-                    # If inspection fails for any reason, fall back to passing all kwargs.
-                    pass
-
-                model = model_class.from_pretrained(model_path, **extra_kwargs)
-
-            if mm_config is not None and not no_weights and component.get("type") != "transformer":
-                apply_group_offloading = getattr(self, "_apply_group_offloading", None)
-                if callable(apply_group_offloading):
-                    label = (
-                        component.get("name")
-                        or component.get("type")
-                        or type(model).__name__
-                    )
-                    offloading_module = component.get("offloading_module", None)
-                    if offloading_module:
-                        model_to_offload = model.get_submodule(offloading_module)
-                    else:
-                        model_to_offload = model
-                    try:
-                        apply_group_offloading(
-                            model_to_offload, mm_config, module_label=label
-                        )
-                    except Exception as e:
-                        if hasattr(self, "logger"):
-                            self.logger.warning(
-                                f"Failed to enable group offloading for '{label}': {e}"
-                            )
-
-            # Optionally compile the fully initialized module according to config.
-            if not no_weights:
-                maybe_compile = getattr(self, "_maybe_compile_module", None)
-                if callable(maybe_compile):
-                    model = maybe_compile(model, component)
-
-            return model
-
-        self.logger.info(
-            f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}"
-        )
+        if os.path.isdir(model_path):
+            # look for a config.json file
+            config_path = os.path.join(model_path, "config.json")
+            if os.path.exists(config_path):
+                config.update(self._load_json(config_path))
+                
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects
@@ -298,6 +211,7 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
         
+
   
         files_to_load = []
         if os.path.isdir(model_path):
@@ -326,7 +240,7 @@ class LoaderMixin(DownloadMixin):
         if extra_kwargs.get("load_extra_model_paths", True):
             files_to_load.extend(extra_model_paths)
         # Track whether we've already patched this model for FP-scaled weights
-
+ 
         patched_for_fpscaled = False
         gguf_kwargs = component.get("gguf_kwargs", {})
         for file_path in tqdm(files_to_load, desc="Loading weights", total=len(files_to_load)):
@@ -344,6 +258,7 @@ class LoaderMixin(DownloadMixin):
                     file_path,
                     type=component.get("type"),
                     dequant_dtype=load_dtype,
+                    device=load_device,
                     **gguf_kwargs,
                 )
                 converter.convert(state_dict)
@@ -369,6 +284,7 @@ class LoaderMixin(DownloadMixin):
             if is_safetensors:
                 state_dict = load_safetensors(
                     file_path,
+                    device=load_device,
                     dtype=load_dtype,
                     framework=(
                         "np"
@@ -379,7 +295,7 @@ class LoaderMixin(DownloadMixin):
                 )
             else:
                 state_dict = torch.load(
-                    file_path, map_location="cpu", weights_only=True, mmap=True
+                    file_path, map_location=load_device, weights_only=True, mmap=True
                 )
             if load_dtype and not is_safetensors:
                 for k, v in state_dict.items():
@@ -395,7 +311,6 @@ class LoaderMixin(DownloadMixin):
                             new_state_dict[k2] = v2
                 state_dict = new_state_dict
             
-
             converter.convert(state_dict)
             # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
             # and patch the model with FPScaled* layers *before* loading
@@ -622,6 +537,7 @@ class LoaderMixin(DownloadMixin):
 
         config_path = component.get("config_path")
         config = component.get("config")
+
         if config_path and config:
             fetched_config = self.fetch_config(config_path)
             config = {**fetched_config, **config}
@@ -655,6 +571,8 @@ class LoaderMixin(DownloadMixin):
             config_to_register = {
                 k: v for k, v in (config or {}).items() if k not in init_param_names
             }
+            
+        
 
         component = component_class(**init_kwargs)
 
