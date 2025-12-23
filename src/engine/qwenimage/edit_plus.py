@@ -4,13 +4,107 @@ from .shared import QwenImageShared
 import numpy as np
 from src.utils.progress import safe_emit_progress, make_mapped_progress
 from src.types.media import InputImage
-
+import math
 CONDITION_IMAGE_SIZE = 384 * 384
 VAE_IMAGE_SIZE = 1024 * 1024
 
 
 class QwenImageEditPlusEngine(QwenImageShared):
     """QwenImage Edit Plus Engine Implementation"""
+    
+    @staticmethod
+    def calculate_dimensions(target_area, ratio):
+        width = math.sqrt(target_area * ratio)
+        height = width / ratio
+
+        width = round(width / 32) * 32
+        height = round(height / 32) * 32
+
+        return width, height
+    
+    def _prepare_image_latents(
+        self,
+        images,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        seed,
+        generator=None,
+        latents=None,
+        offload=True,
+    ):
+        # VAE applies 8x compression on images but we must also account for packing which requires
+        # latent height and width to be divisible by 2.
+        orig_height = height
+        orig_width = width
+        height = 2 * (int(orig_height) // (self.vae_scale_factor * 2))
+        width = 2 * (int(orig_width) // (self.vae_scale_factor * 2))
+
+        if seed is not None:
+            generator = torch.Generator(device=device).manual_seed(seed)
+
+        image_latents = None
+        if images is not None:
+            if not isinstance(images, list):
+                images = [images]
+            all_image_latents = []
+            for image in images:
+                image = image.to(device=device, dtype=dtype)
+                if image.shape[1] != self.num_channels_latents:
+                    image_latents = self.vae_encode(
+                        image, sample_mode="mode", offload=offload
+                    )
+                else:
+                    image_latents = image
+                if (
+                    batch_size > image_latents.shape[0]
+                    and batch_size % image_latents.shape[0] == 0
+                ):
+                    # expand init_latents for batch_size
+                    additional_image_per_prompt = batch_size // image_latents.shape[0]
+                    image_latents = torch.cat(
+                        [image_latents] * additional_image_per_prompt, dim=0
+                    )
+                elif (
+                    batch_size > image_latents.shape[0]
+                    and batch_size % image_latents.shape[0] != 0
+                ):
+                    raise ValueError(
+                        f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts."
+                    )
+                else:
+                    image_latents = torch.cat([image_latents], dim=0)
+
+                image_latent_height, image_latent_width = image_latents.shape[3:]
+                image_latents = self._pack_latents(
+                    image_latents,
+                    batch_size,
+                    num_channels_latents,
+                    image_latent_height,
+                    image_latent_width,
+                )
+                all_image_latents.append(image_latents)
+            image_latents = torch.cat(all_image_latents, dim=1)
+
+        if latents is None:
+            latents = self._get_latents(
+                batch_size=batch_size,
+                num_channels_latents=num_channels_latents,
+                height=orig_height,
+                width=orig_width,
+                dtype=dtype,
+                device=device,
+                generator=generator,
+                seed=seed,
+            )
+        else:
+            latents = latents.to(device=device, dtype=dtype)
+
+        return latents, image_latents
+
 
     def run(
         self,
@@ -24,7 +118,6 @@ class QwenImageEditPlusEngine(QwenImageShared):
         seed: int | None = None,
         guidance_scale: float | None = None,
         true_cfg_scale: float = 4.0,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         render_on_step_callback: Callable = None,
@@ -45,6 +138,8 @@ class QwenImageEditPlusEngine(QwenImageShared):
 
         # reverse the images
         images.reverse()
+        
+        use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
 
         if len(images) == 0:
             raise ValueError("At least one image is required")
@@ -69,27 +164,22 @@ class QwenImageEditPlusEngine(QwenImageShared):
         self.to_device(self.text_encoder)
 
         batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
+        safe_emit_progress(progress_callback, 0.07, "Resizing and preprocessing images")
         condition_image_sizes = []
         condition_images = []
         vae_image_sizes = []
         vae_images = []
-        safe_emit_progress(progress_callback, 0.07, "Resizing and preprocessing images")
         for img in images:
+            img = self._load_image(img)
             image_width, image_height = img.size
-            _, condition_width, condition_height = self._aspect_ratio_resize(
-                img.copy(), max_area=CONDITION_IMAGE_SIZE, mod_value=32
+            condition_width, condition_height = self.calculate_dimensions(
+                CONDITION_IMAGE_SIZE, image_width / image_height
             )
-            _, vae_width, vae_height = self._aspect_ratio_resize(
-                img.copy(), max_area=VAE_IMAGE_SIZE, mod_value=32
-            )
+            vae_width, vae_height = self.calculate_dimensions(VAE_IMAGE_SIZE, image_width / image_height)
             condition_image_sizes.append((condition_width, condition_height))
             vae_image_sizes.append((vae_width, vae_height))
-            condition_images.append(
-                self.image_processor.resize(img, condition_height, condition_width)
-            )
-            vae_images.append(
-                self.image_processor.preprocess(img, vae_height, vae_width).unsqueeze(2)
-            )
+            condition_images.append(self.image_processor.resize(img, condition_height, condition_width))
+            vae_images.append(self.image_processor.preprocess(img, vae_height, vae_width).unsqueeze(2))
 
         safe_emit_progress(progress_callback, 0.10, "Images loaded and resized")
 
@@ -321,85 +411,4 @@ class QwenImageEditPlusEngine(QwenImageShared):
         safe_emit_progress(progress_callback, 1.0, "Completed edit pipeline")
         return image
 
-    def _prepare_image_latents(
-        self,
-        images,
-        batch_size,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        seed,
-        generator=None,
-        latents=None,
-        offload=True,
-    ):
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        orig_height = height
-        orig_width = width
-        height = 2 * (int(orig_height) // (self.vae_scale_factor * 2))
-        width = 2 * (int(orig_width) // (self.vae_scale_factor * 2))
-
-        if seed is not None:
-            generator = torch.Generator(device=device).manual_seed(seed)
-
-        image_latents = None
-        if images is not None:
-            if not isinstance(images, list):
-                images = [images]
-            all_image_latents = []
-            for image in images:
-                image = image.to(device=device, dtype=dtype)
-                if image.shape[1] != self.num_channels_latents:
-                    image_latents = self.vae_encode(
-                        image, sample_mode="mode", offload=offload
-                    )
-                else:
-                    image_latents = image
-                if (
-                    batch_size > image_latents.shape[0]
-                    and batch_size % image_latents.shape[0] == 0
-                ):
-                    # expand init_latents for batch_size
-                    additional_image_per_prompt = batch_size // image_latents.shape[0]
-                    image_latents = torch.cat(
-                        [image_latents] * additional_image_per_prompt, dim=0
-                    )
-                elif (
-                    batch_size > image_latents.shape[0]
-                    and batch_size % image_latents.shape[0] != 0
-                ):
-                    raise ValueError(
-                        f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts."
-                    )
-                else:
-                    image_latents = torch.cat([image_latents], dim=0)
-
-                image_latent_height, image_latent_width = image_latents.shape[3:]
-                image_latents = self._pack_latents(
-                    image_latents,
-                    batch_size,
-                    num_channels_latents,
-                    image_latent_height,
-                    image_latent_width,
-                )
-                all_image_latents.append(image_latents)
-            image_latents = torch.cat(all_image_latents, dim=1)
-
-        if latents is None:
-            latents = self._get_latents(
-                batch_size=batch_size,
-                num_channels_latents=num_channels_latents,
-                height=orig_height,
-                width=orig_width,
-                dtype=dtype,
-                device=device,
-                generator=generator,
-                seed=seed,
-            )
-        else:
-            latents = latents.to(device=device, dtype=dtype)
-
-        return latents, image_latents
+    

@@ -97,11 +97,6 @@ spec:
       precision: bf16
       type: gguf
       file_size: 40872114720
-    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-F16.gguf
-      variant: GGUF_F16
-      precision: f16
-      type: gguf
-      file_size: 40872114720
     - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -178,7 +173,7 @@ spec:
     module: transformers.models.qwen2_vl.processing_qwen2_vl
     base: Qwen2VLProcessor
     model_path:
-    - path: Qwen/Qwen-Image-Edit-2509/processor
+    - path: Qwen/Qwen-Image-Edit-2511/processor
       variant: default
       precision: fp16
       type: safetensors
@@ -353,7 +348,7 @@ spec:
       max: 15.0
       step: 0.5
   loras:
-  - scale: 1.0
+  - scale: 0.0
     name: qwen_image_lightning
     label: Qwen Image Lightning 4 Steps
     verified: true

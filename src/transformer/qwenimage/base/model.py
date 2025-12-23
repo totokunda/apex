@@ -449,23 +449,21 @@ class QwenDoubleStreamAttnProcessor2_0:
 
         # Concatenate for joint attention
         # Order: [text, image]
-        joint_query = torch.cat([txt_query, img_query], dim=1)
-        joint_key = torch.cat([txt_key, img_key], dim=1)
-        joint_value = torch.cat([txt_value, img_value], dim=1)
+        joint_query = torch.cat([txt_query, img_query], dim=1).permute(0, 2, 1, 3)
+        joint_key = torch.cat([txt_key, img_key], dim=1).permute(0, 2, 1, 3)
+        joint_value = torch.cat([txt_value, img_value], dim=1).permute(0, 2, 1, 3)
 
         # Compute joint attention
         joint_hidden_states = attention_register.call(
-            joint_query.transpose(1, 2),
-            joint_key.transpose(1, 2),
-            joint_value.transpose(1, 2),
+            joint_query,
+            joint_key,
+            joint_value,
             attn_mask=attention_mask,
             dropout_p=0.0,
             is_causal=False
         )
-        joint_hidden_states = joint_hidden_states.transpose(1, 2)
-
         # Reshape back
-        joint_hidden_states = joint_hidden_states.flatten(2, 3)
+        joint_hidden_states = joint_hidden_states.permute(0, 2, 1, 3).flatten(2, 3)
         joint_hidden_states = joint_hidden_states.to(joint_query.dtype)
 
         # Split attention outputs back
