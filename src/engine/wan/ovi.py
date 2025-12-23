@@ -216,6 +216,9 @@ class OviEngine(WanShared):
         render_on_step_callback: Optional[Callable] = None,
         render_on_step_interval: int = 5,
         progress_callback: Optional[Callable] = None,
+        easy_cache_thresh: float = 0.00,
+        easy_cache_ret_steps: int = 10,
+        easy_cache_cutoff_steps: int | None = None,
         **kwargs,
     ):
         safe_emit_progress(
@@ -253,15 +256,7 @@ class OviEngine(WanShared):
         device = self.device
         target_dtype = torch.bfloat16  # Ovi uses bfloat16 by default
 
-        if not self.vae:
-            self.load_component_by_name("transformer_vae")
-        self.to_device(self.transformer_vae)
-
         safe_emit_progress(progress_callback, 0.05, "VAE components ready")
-
-        # Audio VAE
-        if not hasattr(self, "audio_vae") or self.audio_vae is None:
-            self.load_component_by_name("audio_vae")
 
         safe_emit_progress(progress_callback, 0.08, "Audio VAE ready")
 
@@ -439,7 +434,8 @@ class OviEngine(WanShared):
         if not self.transformer:
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
-
+        
+        
         safe_emit_progress(progress_callback, 0.45, "Transformer ready")
 
         _patch_size_h, _patch_size_w = (
@@ -453,6 +449,10 @@ class OviEngine(WanShared):
             // (_patch_size_h * _patch_size_w)
         )
         num_steps = len(timesteps_video)
+        
+        if easy_cache_thresh > 0.0:
+            self.logger.info(f"Enabling fusion easy cache with threshold {easy_cache_thresh}, ret steps {easy_cache_ret_steps}, cutoff steps {easy_cache_cutoff_steps}")
+            self.transformer.enable_fusion_easy_cache(num_steps, easy_cache_thresh, easy_cache_ret_steps, easy_cache_cutoff_steps)
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         safe_emit_progress(
@@ -559,12 +559,12 @@ class OviEngine(WanShared):
 
         # 6. Decoding
         # Video VAE
-        if not self.vae:
+        if not getattr(self, "transformer_vae", None):
             self.load_component_by_name("transformer_vae")
         self.to_device(self.transformer_vae)
 
         # Audio VAE
-        if not hasattr(self, "audio_vae") or self.audio_vae is None:
+        if not getattr(self, "audio_vae", None):
             self.load_component_by_name("audio_vae")
 
         self.audio_vae.tod.remove_weight_norm()
@@ -577,6 +577,7 @@ class OviEngine(WanShared):
         generated_audio = self.vae_decode(
             audio_latents_for_vae, component_name="audio_vae"
         )
+    
         generated_audio = generated_audio.squeeze().cpu().float().numpy()
 
         # Decode Video

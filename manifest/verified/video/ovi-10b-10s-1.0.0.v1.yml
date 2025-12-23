@@ -85,16 +85,21 @@ spec:
       precision: fp16
       type: safetensors
   - type: text_encoder
-    name: wan/text_encoder
+    label: WAN Text Encoder
     base: UMT5EncoderModel
-    label: UMT5 Text Encoder
+    offloading_module: encoder
     model_path:
-    - path: Wan-AI/Wan2.2-I2V-14B-480P-Diffusers/text_encoder
+    - path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder
       variant: default
       precision: fp16
       type: safetensors
-      file_size: 22723695074
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/text_encoder/config.json
+      file_size: 11361874539
+    - path: Kijai/WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
+      file_size: 6731333792
+    config_path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder/config.json
   - type: transformer
     base: wan.ovi
     label: Ovi Transformer
@@ -103,6 +108,10 @@ spec:
     - path: chetwinlow1/Ovi/model_960x960_10s.safetensors
       variant: default
       precision: fp16
+      type: safetensors
+    - path: Kijai/WanVideo_comfy_fp8_scaled/TI2V/Ovi/Wan2_2-5B-Ovi_960x960_fp8_e4m3fn_scaled_KJ.safetensors
+      variant: FP8
+      precision: fp8
       type: safetensors
     config:
       video:
@@ -142,6 +151,7 @@ spec:
       video_guidance_scale: 4.0
       audio_guidance_scale: 3.0
       easy_cache_thresh: 0.05
+      easy_cache_ret_steps: 10
       return_latents: false
       timesteps_as_indices: true
       expand_timesteps: false
@@ -216,7 +226,7 @@ spec:
     - id: prompt
       label: Prompt
       description: Describe the video you want to generate using the <S> and <E> tags for start and end of the text.
-      placeholder: A man in the video grumbles angrily and says <S>I love open source. I can goon to whatever I want.<E> in a deep low voice.
+      placeholder: A man in the video grumbles angrily and says <S>I love open source. I can create anything I want.<E> in a deep low voice.
       type: text
       panel: prompting
       required: true

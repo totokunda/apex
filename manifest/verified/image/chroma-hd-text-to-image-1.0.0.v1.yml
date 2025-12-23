@@ -43,6 +43,8 @@ spec:
     base: auto
     model_path:
     - path: lodestones/Chroma1-HD/vae
+      precision: fp16
+      type: safetensors
       variant: default
       file_size: 167667721
   - type: text_encoder
@@ -51,6 +53,8 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/text_encoder
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 9524669246
     tokenizer_class: T5Tokenizer
     tokenizer_name: lodestones/Chroma1-HD
@@ -62,6 +66,8 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/transformer
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 17800194937
     - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q8_0.gguf
       variant: GGUF_Q8_0

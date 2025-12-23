@@ -297,9 +297,7 @@ class LoaderMixin(DownloadMixin):
                 state_dict = torch.load(
                     file_path, map_location=load_device, weights_only=True, mmap=True
                 )
-            if load_dtype and not is_safetensors:
-                for k, v in state_dict.items():
-                    state_dict[k] = v.to(load_dtype)
+            
             # remap keys if key_map is provided replace part of existing key with new key
             if key_map:
                 new_state_dict = {}
@@ -312,6 +310,10 @@ class LoaderMixin(DownloadMixin):
                 state_dict = new_state_dict
             
             converter.convert(state_dict)
+            
+            if load_dtype and not is_safetensors:
+                for k, v in state_dict.items():
+                    state_dict[k] = v.to(load_dtype)
             # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
             # and patch the model with FPScaled* layers *before* loading
             # the state dict. We only do this once per model.

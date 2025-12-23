@@ -38,13 +38,7 @@ spec:
   - flash
   - flash3
   - sage
-  loras:
-  - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors
-    scale: 1.0
-    name: lightx2v_lora
-    label: Lightx2v LoRA
-    component: transformer
-    verified: true
+  loras: []
   components:
   - type: scheduler
     label: Scheduler
@@ -55,17 +49,6 @@ spec:
       description: The UniPC Multistep Scheduler is used for WAN 2.1 14B I2V.
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/scheduler/scheduler_config.json
-  - type: vae
-    name: wan/vae
-    label: Wan VAE
-    base: wan
-    model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 507592616
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
   - type: vae
     label: WAN VAE
     name: wan/vae_2.2

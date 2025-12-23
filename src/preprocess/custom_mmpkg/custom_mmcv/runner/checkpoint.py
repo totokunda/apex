@@ -21,7 +21,6 @@ from ..fileio import load as load_file
 from ..parallel import is_module_wrapper
 from ..utils import mkdir_or_exist
 from .dist_utils import get_dist_info
-from logger import logger
 
 ENV_MMCV_HOME = "MMCV_HOME"
 ENV_XDG_CACHE_HOME = "XDG_CACHE_HOME"

@@ -135,6 +135,8 @@ spec:
     base: Qwen2VLProcessor
     model_path:
     - path: Qwen/Qwen-Image-Edit/processor
+      variant: default
+      precision: fp16
       type: safetensors
       file_size: 15879236
   defaults:

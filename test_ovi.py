@@ -75,26 +75,24 @@ def save_video(
 
     return output_path
 
-yaml_path = "/home/tosin_coverquick_co/apex/manifest/engine/wan/ovi-10b-5s-1.0.0.v1.yml"
+yaml_path = "/home/tosin_coverquick_co/apex/manifest/verified/video/ovi-10b-5s-1.0.0.v1.yml"
 engine = UniversalEngine(yaml_path=yaml_path, attention_type="flash")
-prompt = "A man in the video grumbles angrily and says <S>I hate black people. They are so ugly and stupid.<E> in a deep low voice."
-image = "/home/tosin_coverquick_co/apex/images/output3_fibo.png"
+prompt = f"A medium shot shows a woman and a man, both adorned with Christmas hats, standing indoors with festive decorations in the background. The woman, on the left, has dark hair styled in waves, wears a pearl necklace, and a small red Santa hat perched atop her head. She looks towards the man beside her. The man, on the right, wears a white cable-knit sweater and a long red Santa hat with small gold bells, looking slightly towards the woman with a subtle, knowing smirk. Behind them, soft, warm-toned Christmas lights are strung along a surface, and a large, dark painting is visible on the wall. The woman begins to speak, first looking at the man, then directly at the camera, saying <S>We will not be erased.<E> The man, still gazing towards the woman with his smirk, makes a low, affirming sound, and says <S>Hope beats circuits every time.<E> The scene then abruptly cuts off with a loud, high-pitched electronic screech.. <AUDCAP>Clear female voice, low male mumble, sudden loud high-pitched electronic screech.<ENDAUDCAP>"
+image = "/home/tosin_coverquick_co/apex/images/apex_woman_image.png"
 negative_prompt = "jitter, bad hands, blur, distortion"
 out_video, out_audio = engine.run(
-    image=image,
     prompt=prompt,
-    height=960,
-    width=960,
+    height=720,
+    width=1280,
     num_inference_steps=50,
     video_guidance_scale=4.0,
     audio_guidance_scale=3.0,
     negative_prompt=negative_prompt,
     audio_negative_prompt="robotic, muffled, echo, distorted",
     output_type="np",
-    seed=666
-    
+    duration=121,
+    seed=69,
+    easy_cache_thresh=0.1,
 )
 
-generated_video = out_video.squeeze(0).cpu().float().numpy()
-
-save_video("ovi_test_2.mp4", generated_video, out_audio, fps=24, sample_rate=16000)
+save_video("ovi_test_christmas.mp4", out_video, out_audio, fps=24, sample_rate=16000)

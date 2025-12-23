@@ -92,30 +92,6 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227514
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
-      variant: GGUF_Q2_K
-      precision: q2_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 7147452960
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
-      variant: GGUF_Q4_K_S
-      precision: q4_k_s
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 18
-      file_size: 12204309024
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 16
-        recommended_vram_gb: 24
-      file_size: 16824990240
     - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -124,6 +100,33 @@ spec:
         min_vram_gb: 20
         recommended_vram_gb: 30
       file_size: 21761817120
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 16824990240
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 18
+      file_size: 12204309024
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 7147452960
+    
+    
+    
   - type: helper
     name: image.processor
     label: Image Processor
@@ -131,6 +134,8 @@ spec:
     base: Qwen2VLProcessor
     model_path:
     - path: Qwen/Qwen-Image-Edit-2509/processor
+      variant: default
+      precision: fp16
       type: safetensors
       file_size: 15879236
   defaults:

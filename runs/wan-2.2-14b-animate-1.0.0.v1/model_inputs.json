@@ -49,18 +49,18 @@
     },
     "inputs": {
         "mode": "animate",
-        "image": "assets/e328031d-2d06-447b-a1f8-b490fc9f4849-7827f567-7326-4824-acb8-a5b7babd7a9a_image_0_6.png",
+        "image": "assets/e683856bbd100e4e40f45fe50fe1ebfd43309caa6c7d04051e9f6962ecab1cac.png",
         "pose_video": "assets/result.mp4",
         "face_video": "assets/result.mp4",
         "prompt": "The man does the actions in the video.",
         "negative_prompt": "",
-        "resolution": "custom",
+        "resolution": 480,
         "num_inference_steps": 4,
         "aspect_ratio": "custom",
-        "height": 720,
-        "width": 720,
-        "seed": 332985006,
+        "height": 896,
+        "width": 448,
+        "seed": 384832194,
         "guidance_scale": 1,
-        "duration": "5s"
+        "duration": "3.5s"
     }
 }

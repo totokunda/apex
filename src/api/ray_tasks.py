@@ -386,6 +386,7 @@ def _ensure_lora_registered_in_manifests(
         for entry in loras:
             if isinstance(entry, dict) and (
                 entry.get("source") == source or entry.get("remote_source") == source
+                or entry.get("name") == lora_name
             ):
                 already_present = True
                 break
@@ -501,7 +502,7 @@ def _is_transformer_downloaded_for_manifest(
 
 
 def _mark_lora_verified_in_manifests(
-    source: str, manifest_id: Optional[str] = None
+    source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None
 ) -> Optional[bool]:
     """
     Update manifest entries for `source` with a `verified` flag.
@@ -524,6 +525,12 @@ def _mark_lora_verified_in_manifests(
         loras = spec.get("loras") or []
         if not isinstance(loras, list):
             return None
+        
+        if lora_name:
+            for entry in loras:
+                if isinstance(entry, dict) and entry.get("name") == lora_name and entry.get("verified"):
+                    return True
+        
         # Only attempt verification if the manifest's transformer is present locally
         transformer_component = _is_transformer_downloaded_for_manifest(doc)
         logger.info(
@@ -734,6 +741,7 @@ def download_unified(
                     "message": "Preprocessor downloaded and initialized",
                 }
             except Exception as maybe_not_preproc:
+                logger.error(traceback.format_exc())
                 # Not a registered preprocessor id; fall through to generic downloader
                 logger.info(
                     f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}"
@@ -874,7 +882,7 @@ def download_unified(
                 except Exception:
                     pass
 
-                verified = _mark_lora_verified_in_manifests(source, manifest_id)
+                verified = _mark_lora_verified_in_manifests(source, manifest_id, lora_name)
 
                 # If verification explicitly failed, surface an error and remove the LoRA
                 if verified is False:
