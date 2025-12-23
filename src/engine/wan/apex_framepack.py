@@ -138,6 +138,7 @@ class WanApexFramepackEngine(WanShared):
                     timesteps_as_indices=timesteps_as_indices,
                     num_inference_steps=num_inference_steps,
                 )
+                
 
                 denoised_latents = self.denoise(
                     timesteps=timesteps_input,

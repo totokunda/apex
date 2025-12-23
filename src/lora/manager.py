@@ -188,15 +188,15 @@ class LoraManager(DownloadMixin):
     
     def _get_prefix_key(self, keys:List[str]):
         prefix = None
-        if keys[0].startswith("transformer") and keys[-1].startswith(
-            "transformer"
+        if keys[0].startswith("transformer.") and keys[-1].startswith(
+            "transformer."
         ):
             prefix = "transformer"
-        elif keys[0].startswith("diffusion_model") and keys[-1].startswith(
-            "diffusion_model"
+        elif keys[0].startswith("diffusion_model.") and keys[-1].startswith(
+            "diffusion_model."
         ):
             prefix = "diffusion_model"
-        elif keys[0].startswith("model") and keys[-1].startswith("model"):
+        elif keys[0].startswith("model.") and keys[-1].startswith("model."):
             prefix = "model"
             
         return prefix
@@ -367,11 +367,13 @@ class LoraManager(DownloadMixin):
             # Activate all adapters with their weights in one call
             try:
                 model.set_adapters(final_names, weights=final_scales)
-                loaded_resolved.append(resolved[i])
+                loaded_resolved.extend(resolved)
             except Exception as e:
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
+                import traceback
+                traceback.print_exc()
         
         return loaded_resolved
 

@@ -15,6 +15,8 @@ metadata:
   author: Meigen AI
   license: Apache-2.0
   demo_path: https://packaged-media.redd.it/lj2vzpt13qbf1/pb/m2-res_720p.mp4?m=DASHPlaylist.mpd&v=1&e=1763694000&s=dea93f505fea01fd79a15be07526942a6a24a37e
+  categories:
+   - audio-to-video
 spec:
   engine: wan
   model_type: multitalk
@@ -96,7 +98,14 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     base: wan.multitalk
+    label: Wan 2.1 14B InfiniteTalk Transformer
+    name: infinitetalk_transformer
     model_path:
+    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer
+      variant: default
+      precision: fp16
+      type: safetensors
+      file_size: 57154175562
     - path: Kijai/WanVideo_comfy_fp8_scaled/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
@@ -159,12 +168,14 @@ spec:
       file_size: 2712729090
   - type: helper
     base: wan.multitalk
+    label: Chinese Wav2Vec2 Base
     model_path:
     - path: TencentGameMate/chinese-wav2vec2-base
       file_size: 1520899445
   - type: helper
     base: clip
     name: wan/clip
+    label: Wan CLIP
     model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
       variant: default

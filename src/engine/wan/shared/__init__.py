@@ -506,7 +506,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     )
 
                 if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                    (i + 1) > num_warmup_steps and (i + 1) % getattr(self.scheduler, "order", 1) == 0
                 ):
                     pbar.update(1)
 

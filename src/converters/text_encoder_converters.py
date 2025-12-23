@@ -1,5 +1,5 @@
 from typing import Dict, Any
-
+from transformers import Qwen3ForCausalLM
 from src.converters.transformer_converters import TransformerConverter
 
 

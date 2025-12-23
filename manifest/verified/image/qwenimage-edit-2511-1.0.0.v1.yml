@@ -1,17 +1,17 @@
 api_version: apex/v1
 kind: Model
 metadata:
-  id: qwenimage-edit-2509
+  id: qwenimage-edit-2511
   model: qwenimage
-  name: QwenImage Edit 2509
+  name: QwenImage Edit 2511
   version: 1.0.0
-  description: QwenImage Edit 2509 is a 20B parameter model for image editing with
+  description: QwenImage Edit 2511 is a 20B parameter model for image editing with
     up to three input images.
   tags:
   - qwenimage
   - edit
   - multi-image
-  - '2509'
+  - '2511'
   author: Qwen
   license: Apache-2.0
   demo_path: models/qwenimage-edit-2509.png
@@ -34,7 +34,7 @@ spec:
       description: The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage
         Edit model.
       base: diffusers.FlowMatchEulerDiscreteScheduler
-      config_path: Qwen/Qwen-Image-Edit-2509/scheduler/scheduler_config.json
+      config_path: Qwen/Qwen-Image-Edit-2511/scheduler/scheduler_config.json
   - type: vae
     label: QwenImage VAE
     base: qwenimage
@@ -82,9 +82,9 @@ spec:
   - type: transformer
     label: QwenImage Transformer
     base: qwenimage.base
-    config_path: Qwen/Qwen-Image-Edit-2509/transformer/config.json
+    config_path: Qwen/Qwen-Image-Edit-2511/transformer/config.json
     model_path:
-    - path: Qwen/Qwen-Image-Edit-2509/transformer
+    - path: Qwen/Qwen-Image-Edit-2511/transformer
       variant: default
       precision: fp16
       type: safetensors
@@ -92,41 +92,86 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227514
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q8_0.gguf
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-BF16.gguf
+      variant: GGUF_BF16
+      precision: bf16
+      type: gguf
+      file_size: 40872114720
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-F16.gguf
+      variant: GGUF_F16
+      precision: f16
+      type: gguf
+      file_size: 40872114720
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
-      resource_requirements:
-        min_vram_gb: 20
-        recommended_vram_gb: 30
       file_size: 21761817120
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q6_K.gguf
       variant: GGUF_Q6_K
       precision: q6_k
       type: gguf
-      resource_requirements:
-        min_vram_gb: 16
-        recommended_vram_gb: 24
       file_size: 16824990240
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q5_K_M.gguf
+      variant: GGUF_Q5_K_M
+      precision: q5_k_m
+      type: gguf
+      file_size: 15000074784
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q5_1.gguf
+      variant: GGUF_Q5_1
+      precision: q5_1
+      type: gguf
+      file_size: 15391717920
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q5_0.gguf
+      variant: GGUF_Q5_0
+      precision: q5_0
+      type: gguf
+      file_size: 14400813600
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q5_K_S.gguf
+      variant: GGUF_Q5_K_S
+      precision: q5_k_s
+      type: gguf
+      file_size: 14298184224
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q4_K_M.gguf
+      variant: GGUF_Q4_K_M
+      precision: q4_k_m
+      type: gguf
+      file_size: 13127088672
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q4_1.gguf
+      variant: GGUF_Q4_1
+      precision: q4_1
+      type: gguf
+      file_size: 12843678240
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q4_0.gguf
+      variant: GGUF_Q4_0
+      precision: q4_0
+      type: gguf
+      file_size: 11852773920
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q4_K_S.gguf
       variant: GGUF_Q4_K_S
       precision: q4_k_s
       type: gguf
-      resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 18
-      file_size: 12204309024
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
+      file_size: 12268010016
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q3_K_L.gguf
+      variant: GGUF_Q3_K_L
+      precision: q3_k_l
+      type: gguf
+      file_size: 10428938784
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q3_K_M.gguf
+      variant: GGUF_Q3_K_M
+      precision: q3_k_m
+      type: gguf
+      file_size: 9744742944
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q3_K_S.gguf
+      variant: GGUF_Q3_K_S
+      precision: q3_k_s
+      type: gguf
+      file_size: 9042852384
+    - path: unsloth/Qwen-Image-Edit-2511-GGUF/qwen-image-edit-2511-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
-      resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 7147452960
-    
-    
-    
+      file_size: 7217936928
   - type: helper
     name: image.processor
     label: Image Processor
@@ -310,6 +355,6 @@ spec:
   loras:
   - scale: 1.0
     name: qwen_image_lightning
-    label: Qwen Image Lightning 8 Steps
+    label: Qwen Image Lightning 4 Steps
     verified: true
-    source: lightx2v/Qwen-Image-Lightning/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors
+    source: lightx2v/Qwen-Image-Edit-2511-Lightning/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors

@@ -49,6 +49,8 @@ class QwenImageEditPlusEngine(QwenImageShared):
         if len(images) == 0:
             raise ValueError("At least one image is required")
 
+        safe_emit_progress(progress_callback, 0.0, "Starting edit plus pipeline")
+        safe_emit_progress(progress_callback, 0.02, "Loading images")
         for idx, image in enumerate(images):
             images[idx] = self._load_image(image)
 
@@ -58,12 +60,12 @@ class QwenImageEditPlusEngine(QwenImageShared):
         height = height or calculated_height
         width = width or calculated_width
 
-        safe_emit_progress(progress_callback, 0.0, "Starting edit plus pipeline")
-        safe_emit_progress(progress_callback, 0.05, "Loading images and resizing")
+        safe_emit_progress(progress_callback, 0.05, "Loading text encoder")
 
         if not self.text_encoder:
             self.load_component_by_type("text_encoder")
 
+        safe_emit_progress(progress_callback, 0.06, "Moving text encoder to device")
         self.to_device(self.text_encoder)
 
         batch_size = (len(prompt) if isinstance(prompt, list) else 1) * num_images
@@ -71,6 +73,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         condition_images = []
         vae_image_sizes = []
         vae_images = []
+        safe_emit_progress(progress_callback, 0.07, "Resizing and preprocessing images")
         for img in images:
             image_width, image_height = img.size
             _, condition_width, condition_height = self._aspect_ratio_resize(
@@ -98,6 +101,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
 
         # get dtype
         dtype = self.component_dtypes["text_encoder"]
+        safe_emit_progress(progress_callback, 0.16, "Encoding prompt")
         prompt_embeds, prompt_embeds_mask = self.encode_prompt(
             prompt,
             image=condition_images,
@@ -110,6 +114,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.205, "Encoding negative prompt")
             negative_prompt_embeds, negative_prompt_embeds_mask = self.encode_prompt(
                 negative_prompt,
                 image=condition_images,
@@ -132,22 +137,27 @@ class QwenImageEditPlusEngine(QwenImageShared):
         )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.235, "Offloading text encoder")
             del self.text_encoder
         safe_emit_progress(progress_callback, 0.25, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
+        safe_emit_progress(progress_callback, 0.26, "Moving embeddings to device")
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         prompt_embeds_mask = prompt_embeds_mask.to(self.device)
 
         if negative_prompt_embeds is not None:
+            safe_emit_progress(progress_callback, 0.27, "Preparing negative embeddings for transformer")
             negative_prompt_embeds = negative_prompt_embeds.to(
                 self.device, dtype=transformer_dtype
             )
             negative_prompt_embeds_mask = negative_prompt_embeds_mask.to(self.device)
 
+        safe_emit_progress(progress_callback, 0.275, "Loading transformer config")
         transformer_config = self.load_config_by_type("transformer")
 
         num_channels_latents = transformer_config.in_channels // 4
+        safe_emit_progress(progress_callback, 0.28, "Preparing latent noise and image latents")
         latents, image_latents = self._prepare_image_latents(
             vae_images,
             batch_size * num_images,
@@ -167,7 +177,9 @@ class QwenImageEditPlusEngine(QwenImageShared):
         )
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.31, "Loading transformer")
             self.load_component_by_type("transformer")
+        safe_emit_progress(progress_callback, 0.32, "Moving transformer to device")
         self.to_device(self.transformer)
 
         safe_emit_progress(progress_callback, 0.325, "Transformer ready")
@@ -195,7 +207,10 @@ class QwenImageEditPlusEngine(QwenImageShared):
         image_seq_len = latents.shape[1]
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.41, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.42, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.43, "Moving scheduler to device")
         self.to_device(self.scheduler)
 
         mu = self.calculate_shift(
@@ -207,6 +222,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         )
         safe_emit_progress(progress_callback, 0.45, "Scheduler prepared")
 
+        safe_emit_progress(progress_callback, 0.47, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -224,13 +240,18 @@ class QwenImageEditPlusEngine(QwenImageShared):
 
         # handle guidance
         if self.transformer.config.guidance_embeds and guidance_scale is not None:
+            safe_emit_progress(progress_callback, 0.475, "Preparing guidance embeddings")
             guidance = torch.full(
                 [1], guidance_scale, device=self.device, dtype=torch.float32
             )
             guidance = guidance.expand(latents.shape[0])
-            safe_emit_progress(progress_callback, 0.475, "Guidance embeddings prepared")
         else:
             guidance = None
+        safe_emit_progress(
+            progress_callback,
+            0.49,
+            f"Guidance embeddings prepared (CFG: {'on' if (negative_prompt is not None and use_cfg_guidance) else 'off'})",
+        )
 
         txt_seq_lens = (
             prompt_embeds_mask.sum(dim=1).tolist()
@@ -254,6 +275,11 @@ class QwenImageEditPlusEngine(QwenImageShared):
         self._preview_width = width
         self._preview_offload = offload
 
+        safe_emit_progress(
+            progress_callback,
+            0.50,
+            f"Starting denoising (CFG: {'on' if (negative_prompt is not None and use_cfg_guidance) else 'off'})",
+        )
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
@@ -279,6 +305,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
+            safe_emit_progress(progress_callback, 0.93, "Offloading transformer")
             self._offload("transformer")
             
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
@@ -287,6 +314,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.96, "Decoding latents")
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
         tensor_image = self.vae_decode(latents, offload=offload)[:, :, 0]
         image = self._tensor_to_frame(tensor_image)

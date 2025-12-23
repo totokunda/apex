@@ -674,9 +674,9 @@ def download_unified(
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
             if progress is not None:
-                logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+                logger.debug(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
             else:
-                logger.info(f"[{job_id}] {message}")
+                logger.debug(f"[{job_id}] {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
 
@@ -1274,7 +1274,7 @@ def run_preprocessor(
         """Local send_progress that uses the passed ws_bridge"""
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
-            logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+            logger.debug(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
 

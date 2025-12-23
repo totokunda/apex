@@ -379,6 +379,113 @@ class LoaderMixin(DownloadMixin):
             has_meta_params = False
             patched_for_fpscaled = getattr(model, "_patched_for_fpscaled", False)
 
+            # Some HF causal LMs may legally omit `lm_head.*` from checkpoints when
+            # weights are tied to input embeddings. When we build the module under
+            # `init_empty_weights()`, those params start on the meta device and will
+            # remain meta if the state dict didn't contain them. Before treating
+            # meta params as a hard error, attempt to materialize/tie lm_head.
+            if isinstance(model, PreTrainedModel):
+                try:
+                    out_emb = (
+                        model.get_output_embeddings()
+                        if hasattr(model, "get_output_embeddings")
+                        else None
+                    )
+                    needs_out_emb_fix = (
+                        out_emb is not None
+                        and hasattr(out_emb, "weight")
+                        and getattr(out_emb.weight, "device", None) is not None
+                        and out_emb.weight.device.type == "meta"
+                    )
+                    if needs_out_emb_fix:
+                        # First try HF's standard tying logic.
+                        if hasattr(model, "tie_weights") and callable(
+                            getattr(model, "tie_weights")
+                        ):
+                            try:
+                                model.tie_weights()
+                            except Exception:
+                                pass
+
+                        # Re-fetch after tie attempt.
+                        out_emb = (
+                            model.get_output_embeddings()
+                            if hasattr(model, "get_output_embeddings")
+                            else out_emb
+                        )
+                        still_meta = (
+                            out_emb is not None
+                            and hasattr(out_emb, "weight")
+                            and getattr(out_emb.weight, "device", None) is not None
+                            and out_emb.weight.device.type == "meta"
+                        )
+
+                        if still_meta:
+                            in_emb = (
+                                model.get_input_embeddings()
+                                if hasattr(model, "get_input_embeddings")
+                                else None
+                            )
+                            # If input embeddings are real, tie output weight to them.
+                            if (
+                                in_emb is not None
+                                and hasattr(in_emb, "weight")
+                                and getattr(in_emb.weight, "device", None) is not None
+                                and in_emb.weight.device.type != "meta"
+                            ):
+                                try:
+                                    out_emb.weight = in_emb.weight
+                                except Exception:
+                                    pass
+
+                        # If it is *still* meta, allocate parameters so downstream
+                        # code can run (e.g., some checkpoints truly omit lm_head).
+                        out_emb = (
+                            model.get_output_embeddings()
+                            if hasattr(model, "get_output_embeddings")
+                            else out_emb
+                        )
+                        if (
+                            out_emb is not None
+                            and hasattr(out_emb, "weight")
+                            and getattr(out_emb.weight, "device", None) is not None
+                            and out_emb.weight.device.type == "meta"
+                        ):
+                            import torch.nn as nn
+
+                            init_range = getattr(
+                                getattr(model, "config", None), "initializer_range", 0.02
+                            )
+                            param_dtype = (
+                                load_dtype if isinstance(load_dtype, torch.dtype) else torch.float32
+                            )
+                            w = torch.empty(
+                                tuple(out_emb.weight.shape),
+                                device=load_device,
+                                dtype=param_dtype,
+                            )
+                            # Match HF Linear default init: normal_(0, initializer_range)
+                            nn.init.normal_(w, mean=0.0, std=float(init_range))
+                            out_emb.weight = nn.Parameter(w, requires_grad=False)
+
+                            # Bias is uncommon for lm_head, but handle it if present.
+                            if hasattr(out_emb, "bias") and out_emb.bias is not None:
+                                b = out_emb.bias
+                                if getattr(b, "device", None) is not None and b.device.type == "meta":
+                                    out_emb.bias = nn.Parameter(
+                                        torch.zeros(
+                                            tuple(b.shape),
+                                            device=load_device,
+                                            dtype=param_dtype,
+                                        ),
+                                        requires_grad=False,
+                                    )
+                except Exception as e:
+                    # Never fail loading solely due to this best-effort fix; the
+                    # meta-param check below will still catch real issues.
+                    if hasattr(self, "logger"):
+                        self.logger.debug(f"lm_head meta fix skipped: {e}")
+
             # If this is an FP-scaled model, re-wrap any FP weights as
             # FPScaledParameter after loading, since some load_state_dict
             # code paths may strip custom Parameter subclasses.
@@ -393,7 +500,7 @@ class LoaderMixin(DownloadMixin):
                 )
 
             for name, param in model.named_parameters():
-                if param.device.type == "meta":
+                if param.device.type == "meta" and component.get("type") != "text_encoder":
                     # If this is an FP-scaled model and the offending parameter
                     # is a residual `scale_weight` that never got real weights
                     # loaded, we can safely drop it instead of erroring out.
