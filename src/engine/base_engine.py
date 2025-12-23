@@ -495,6 +495,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         component_dtypes: Dict[str, str] | None,
     ):
         self.logger.info(f"Loading model {config['name']}")
+
         ideal_dtypes = select_ideal_dtypes()
         self.component_load_dtypes = component_load_dtypes
 

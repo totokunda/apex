@@ -27,7 +27,6 @@ from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 from src.lora.manager import LoraManager
 from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
-from loguru import logger
 import gc
 import ctypes
 import ctypes.util
@@ -102,6 +101,10 @@ def _persist_run_config(
 
         persisted_inputs: Dict[str, Any] = {}
 
+        from random import randint
+
+
+
         for key, value in inputs.items():
             media_path, field_key = _extract_media_candidate(value)
             new_value = value
@@ -110,10 +113,17 @@ def _persist_run_config(
                 try:
                     src_path = Path(media_path)
                     if src_path.is_file():
-                        dest_path = assets_dir / src_path.name
+                        if src_path.name == "result.mp4":
+                            dest_path = assets_dir / f"_{randint(1, 100000000)}_{src_path.name}"
+                        else:
+                            dest_path = assets_dir / src_path.name
                         if src_path.resolve() != dest_path.resolve():
                             shutil.copy2(src_path, dest_path)
-                        rel_path = f"assets/{dest_path.name}"
+                        rel_path = f"assets/{dest_path.name}" 
+
+
+
+
 
                         if isinstance(value, dict) and field_key:
                             updated = dict(value)
@@ -145,7 +155,6 @@ def _persist_run_config(
     except Exception as e:
         logger.warning(f"Failed to persist run configuration: {e}")
         return None
-
 
 def _derive_lora_name_from_source(source: str) -> str:
     """
@@ -1546,6 +1555,7 @@ def run_engine_from_manifest(
                 elif isinstance(output_obj, list) and len(output_obj) > 0:
                     fps = fps_for_video or 16
                     result_path = str(job_dir / f"{filename_prefix}.mp4")
+
                     export_to_video(
                         output_obj,
                         result_path,
@@ -1839,7 +1849,7 @@ def run_engine_from_manifest(
             if model_type.lower() != "ovi"
             else render_on_step_callback_ovi
         )
-        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+        # _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),

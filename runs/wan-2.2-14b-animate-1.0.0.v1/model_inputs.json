@@ -1,0 +1,63 @@
+{
+    "engine_kwargs": {
+        "engine_type": "wan",
+        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan-2.2-14b-animate-1.0.0.v1.yml",
+        "model_type": "animate",
+        "selected_components": {
+            "scheduler": {
+                "name": "scheduler",
+                "base": "diffusers.UniPCMultistepScheduler",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/1816b6f499bd08f3cdfb53052321791af7dd4c2c1e47b03bf061bb894912e7bc_scheduler_config.json",
+                "type": "scheduler",
+                "label": "Scheduler",
+                "default": "UniPCMultistepScheduler"
+            },
+            "wan/vae": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "wan/text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/transformer",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "image_processor": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_processor",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "image_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            }
+        },
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "mode": "animate",
+        "image": "assets/23af2230-8df3-41c1-82db-5666e63c4edc-801de940-9135-431f-a3fb-00bc34b0416b_image_0_20.png",
+        "pose_video": "assets/faae5bf7-bfc5-493d-abf6-434b20de9e4c-801de940-9135-431f-a3fb-00bc34b0416b_pose_video_0_120_20.mp4",
+        "face_video": "assets/d621afb9-fda7-4362-8729-a40ec62d28ec-801de940-9135-431f-a3fb-00bc34b0416b_face_video_0_120_20.mp4",
+        "prompt": "A animated woman with brown hair dancing in a forrest",
+        "resolution": 720,
+        "num_inference_steps": 4,
+        "aspect_ratio": "custom",
+        "height": 704,
+        "width": 704,
+        "seed": 4198724950,
+        "guidance_scale": 1,
+        "duration": "5s"
+    }
+}

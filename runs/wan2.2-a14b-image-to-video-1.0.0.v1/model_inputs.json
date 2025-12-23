@@ -1,0 +1,57 @@
+{
+    "engine_kwargs": {
+        "engine_type": "wan",
+        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan2.2-a14b-image-to-video-1.0.0.v1.yml",
+        "model_type": "i2v",
+        "selected_components": {
+            "scheduler": {
+                "name": "scheduler",
+                "base": "diffusers.UniPCMultistepScheduler",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/f37b560385e415fa0c95f9e6d76ce9e5df8c4376d663fbaa7cc4103f2c9fc4d4_scheduler_config.json",
+                "type": "scheduler",
+                "label": "Scheduler",
+                "default": "UniPCMultistepScheduler"
+            },
+            "wan/vae_2.2": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "high_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/27eee447189e43ce5d88b7e9814dcf98c435e7f11b0dac0e86fcbf67f0cd76bb_Wan2.2-I2V-A14B-HighNoise-Q2_K.gguf",
+                "variant": "GGUF_Q2_K",
+                "precision": "q2_k",
+                "type": "gguf"
+            },
+            "low_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/cd845d45b5eaced2f2674a9c6e1459be125140fac3d562670d7414fe18b6827c_Wan2.2-I2V-A14B-LowNoise-Q2_K.gguf",
+                "variant": "GGUF_Q2_K",
+                "precision": "q2_k",
+                "type": "gguf"
+            }
+        },
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "image": "assets/90999b4a-54b0-46bc-85a0-605acd5ca5cf-b56da992-d43a-4747-86d6-f254cf12fe3f_image_0_13.png",
+        "prompt": "A dog smiling and jumping",
+        "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
+        "resolution": 480,
+        "aspect_ratio": "custom",
+        "num_inference_steps": 20,
+        "height": 512,
+        "width": 704,
+        "seed": 1118569223,
+        "high_noise_guidance_scale": 4,
+        "low_noise_guidance_scale": 3,
+        "boundary_ratio": 0.875,
+        "duration": "5s"
+    }
+}

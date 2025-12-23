@@ -622,6 +622,7 @@ class LoaderMixin(DownloadMixin):
 
         config_path = component.get("config_path")
         config = component.get("config")
+        
         if config_path and config:
             fetched_config = self.fetch_config(config_path)
             config = {**fetched_config, **config}

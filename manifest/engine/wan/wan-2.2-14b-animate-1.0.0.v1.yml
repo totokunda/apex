@@ -21,6 +21,24 @@ spec:
   model_type: animate
   engine_type: torch
   denoise_type: base
+  attention_types:
+  - sdpa
+  - flash
+  - flash3
+  - sage
+  loras:
+  - source: Wan-AI/Wan2.2-Animate-14B/relighting_lora/adapter_model.safetensors
+    scale: 1.0
+    name: relighting_lora
+    label: Relighting LoRA
+    component: transformer
+    verified: true
+  - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors
+    scale: 1.0
+    name: lightx2v_lora
+    label: Lightx2v LoRA
+    component: transformer
+    verified: true
   components:
   - type: scheduler
     label: Scheduler
@@ -57,6 +75,7 @@ spec:
   - type: transformer
     base: wan.animate
     label: Wan Transformer
+    config_path: Wan-AI/Wan2.2-Animate-14B-Diffusers/transformer/config.json
     model_path:
     - path: Wan-AI/Wan2.2-Animate-14B-Diffusers/transformer
       variant: default
