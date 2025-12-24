@@ -2,8 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pathlib import Path
 from typing import Optional
-import os
 import mimetypes
+import hashlib
 
 from src.utils.defaults import get_cache_path, get_components_path
 
@@ -48,6 +48,27 @@ def _safe_join(base: Path, rel: str) -> Path:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path")
     return target
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _is_valid_sha256_hex(s: str) -> bool:
+    if len(s) != 64:
+        return False
+    try:
+        int(s, 16)
+        return True
+    except Exception:
+        return False
 
 
 @router.get("")
@@ -112,6 +133,43 @@ def get_file(request: Request, scope: str, path: str):
             "Accept-Ranges": "bytes",
         },
     )
+
+
+@router.get("/match")
+def match_file(scope: str, path: str, sha256: str, size: Optional[int] = None):
+    """
+    Returns whether the remote file exists and whether its SHA-256 matches the provided hash.
+    Useful for deduping uploads when the destination path is deterministic.
+    """
+    sha256_norm = (sha256 or "").strip().lower()
+    if not _is_valid_sha256_hex(sha256_norm):
+        raise HTTPException(status_code=400, detail="Invalid sha256; expected 64 hex chars")
+
+    base = _base_for_scope(scope)
+    target = _safe_join(base, path)
+    if not target.is_file():
+        return {"exists": False, "matches": False}
+
+    st = target.stat()
+    if size is not None and size != st.st_size:
+        return {
+            "exists": True,
+            "matches": False,
+            "size": st.st_size,
+            "reason": "size_mismatch",
+        }
+
+    try:
+        computed = _sha256_file(target)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to hash file")
+
+    return {
+        "exists": True,
+        "matches": computed == sha256_norm,
+        "sha256": computed,
+        "size": st.st_size,
+    }
 
 
 @router.post("/ingest")

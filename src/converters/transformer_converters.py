@@ -11,6 +11,37 @@ class TransformerConverter:
         self.pre_special_keys_map = {}
 
     @staticmethod
+    def _looks_like_regex(pattern: str) -> bool:
+        """
+        Heuristic: treat `pattern` as a regex only when it contains explicit regex
+        constructs (anchors, groups, character classes, escapes, quantifiers).
+
+        We intentionally do NOT treat '.' as a regex indicator because most rename
+        keys are literal dotted paths and should remain substring replacements.
+        """
+        if not pattern:
+            return False
+        # Fast-path: most keys are plain substrings.
+        # Any of these characters strongly suggests an intentional regex.
+        return any(ch in pattern for ch in ("^", "$", "(", ")", "[", "]", "{", "}", "|", "?", "+", "*", "\\"))
+
+    def _apply_rename_dict(self, key: str) -> str:
+        """
+        Apply `rename_dict` to a key using substring replacements by default, with
+        opt-in support for regex patterns (see `_looks_like_regex`).
+        """
+        new_key = key
+        for src, tgt in self.rename_dict.items():
+            if self._looks_like_regex(src):
+                try:
+                    new_key = re.sub(src, tgt, new_key)
+                except re.error as e:
+                    raise ValueError(f"Invalid regex rename pattern: {src!r}") from e
+            else:
+                new_key = new_key.replace(src, tgt)
+        return new_key
+
+    @staticmethod
     def _is_specific_marker(s: str) -> bool:
         """
         Return True if `s` is a "specific" key fragment that can be used as a reliable
@@ -57,7 +88,13 @@ class TransformerConverter:
                     return False
 
         # Build conservative marker sets from the rename map.
-        source_markers = [k for k in self.rename_dict.keys() if self._is_specific_marker(k)]
+        # NOTE: source-side markers must be literal fragments; regex patterns won't appear
+        # verbatim in real keys and would create false negatives/positives here.
+        source_markers = [
+            k
+            for k in self.rename_dict.keys()
+            if (not self._looks_like_regex(k)) and self._is_specific_marker(k)
+        ]
         target_markers = [v for v in self.rename_dict.values() if self._is_specific_marker(v)]
 
         # Without target markers we cannot safely assert the dict is already converted.
@@ -116,9 +153,7 @@ class TransformerConverter:
                     handler_fn_inplace(key, state_dict)
 
         for key in list(state_dict.keys()):
-            new_key = key
-            for replace_key, rename_key in self.rename_dict.items():
-                new_key = new_key.replace(replace_key, rename_key)
+            new_key = self._apply_rename_dict(key)
             update_state_dict_(state_dict, key, new_key)
 
         for key in list(state_dict.keys()):
@@ -263,10 +298,9 @@ class WanAnimateTransformerConverter(TransformerConverter):
 
         
     def convert(self, state_dict: Dict[str, Any]):
+        self._sort_rename_dict()
         for key in list(state_dict.keys()):
-            new_key = key[:]
-            for replace_key, rename_key in self.rename_dict.items():
-                new_key = new_key.replace(replace_key, rename_key)
+            new_key = self._apply_rename_dict(key)
             update_state_dict_(state_dict, key, new_key)
     
         for key in list(state_dict.keys()):
@@ -1063,10 +1097,9 @@ class MochiTransformerConverter(TransformerConverter):
                     break  # key popped; go to next key
 
         # ---------- simple rename pass ------------------------------------------
+        self._sort_rename_dict()
         for key in list(state_dict.keys()):
-            new_key = key
-            for src, tgt in self.rename_dict.items():
-                new_key = new_key.replace(src, tgt)
+            new_key = self._apply_rename_dict(key)
             update_state_dict_(state_dict, key, new_key)
 
 
@@ -1108,35 +1141,50 @@ class MagiTransformerConverter(TransformerConverter):
 class FluxTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
+        # General substring renames (works for both base weights and LoRA keys).
+        # Keep non-trivial transforms (QKV splits, grouped guidance, etc.) in handlers.
         self.rename_dict = {
-            "time_in.in_layer": "time_text_embed.timestep_embedder.linear_1",
-            "time_in.out_layer": "time_text_embed.timestep_embedder.linear_2",
-            "vector_in.in_layer": "time_text_embed.text_embedder.linear_1",
-            "vector_in.out_layer": "time_text_embed.text_embedder.linear_2",
-            "guidance_in.in_layer": "time_text_embed.guidance_embedder.linear_1",
-            "guidance_in.out_layer": "time_text_embed.guidance_embedder.linear_2",
-            "txt_in.weight": "context_embedder.weight",
-            "txt_in.bias": "context_embedder.bias",
-            "img_in.weight": "x_embedder.weight",
-            "img_in.bias": "x_embedder.bias",
-            "double_blocks": "transformer_blocks",
-            "img_mod.lin": "norm1.linear",
-            "txt_mod.lin": "norm1_context.linear",
+            # embeddings / conditioning (optional)
+            "time_in.in_layer.": "time_text_embed.timestep_embedder.linear_1.",
+            "time_in.out_layer.": "time_text_embed.timestep_embedder.linear_2.",
+            "vector_in.in_layer.": "time_text_embed.text_embedder.linear_1.",
+            "vector_in.out_layer.": "time_text_embed.text_embedder.linear_2.",
+            # NOTE: do NOT rename guidance_in.* here (it is all-or-nothing; handled in pre-special)
+            "txt_in.": "context_embedder.",
+            "img_in.": "x_embedder.",
+
+            # block roots
+            "double_blocks.": "transformer_blocks.",
+            "single_blocks.": "single_transformer_blocks.",
+
+            # double-block norms
+            ".img_mod.lin.": ".norm1.linear.",
+            ".txt_mod.lin.": ".norm1_context.linear.",
+
+            # attention norms (double blocks)
             "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
             "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
             "txt_attn.norm.query_norm.scale": "attn.norm_added_q.weight",
             "txt_attn.norm.key_norm.scale": "attn.norm_added_k.weight",
-            "img_mlp.0": "ff.net.0.proj",
-            "img_mlp.2": "ff.net.2",
-            "txt_mlp.0": "ff_context.net.0.proj",
-            "txt_mlp.2": "ff_context.net.2",
-            "img_attn.proj": "attn.to_out.0",
-            "txt_attn.proj": "attn.to_add_out",
-            "modulation.lin": "norm.linear",
-            "linear2": "proj_out",
-            "final_layer.linear": "proj_out",
+
+            # MLPs
+            ".img_mlp.0.": ".ff.net.0.proj.",
+            ".img_mlp.2.": ".ff.net.2.",
+            ".txt_mlp.0.": ".ff_context.net.0.proj.",
+            ".txt_mlp.2.": ".ff_context.net.2.",
+
+            # output projections
+            ".img_attn.proj.": ".attn.to_out.0.",
+            ".txt_attn.proj.": ".attn.to_add_out.",
+
+            # single-block pieces
+            ".modulation.lin.": ".norm.linear.",
+            ".linear2.": ".proj_out.",
+
+            # final layer (optional)
+            "final_layer.linear.": "proj_out.",
+            # NOTE: final_layer.adaLN_modulation.* handled in pre-special (swap_scale_shift)
         }
-        # Not used directly in convert but kept for API parity
         self.pre_special_keys_map = {}
         self.special_keys_map = {}
 
@@ -1243,478 +1291,233 @@ class FluxTransformerConverter(TransformerConverter):
         - If a mapping exists but the source key is missing, we skip it.
         - Any keys that are never touched/mapped are kept with their original names.
         """
+        if not state_dict:
+            return state_dict
 
-        def maybe_assign(
-            dst: Dict[str, Any],
-            dst_key: str,
-            src: Dict[str, Any],
-            src_key: str,
-            transform=None,
-        ):
-            """Pop src[src_key] if present and assign to dst[dst_key]."""
-            if src_key in src:
-                val = src.pop(src_key)
-                if transform is not None:
-                    val = transform(val)
-                dst[dst_key] = val
-
-        def all_keys_present(src: Dict[str, Any], keys):
-            return all(k in src for k in keys)
-
-        # Work on a copy so we can freely pop while building a fresh dict.
-        # IMPORTANT: Avoid unconditional .pop() to prevent KeyErrors on partial checkpoints.
-        original_state_dict = dict(state_dict)
-        converted_state_dict: Dict[str, Any] = {}
+        # Fast early-exit (avoid inferring hyperparams on already-converted checkpoints).
+        keys = list(state_dict.keys())
+        has_target_markers = any(
+            ("transformer_blocks." in k)
+            or ("single_transformer_blocks." in k)
+            or ("time_text_embed." in k)
+            for k in keys
+        )
+        has_source_markers = any(
+            ("double_blocks." in k)
+            or ("single_blocks." in k)
+            or ("time_in." in k)
+            or ("vector_in." in k)
+            or ("guidance_in." in k)
+            or ("txt_in." in k)
+            or ("img_in." in k)
+            or ("final_layer." in k)
+            for k in keys
+        )
+        if has_target_markers and not has_source_markers:
+            return state_dict
 
         num_layers, num_single_layers, inner_dim, mlp_ratio = (
-            self._infer_hyperparams_from_state_dict(original_state_dict)
+            self._infer_hyperparams_from_state_dict(state_dict)
         )
 
-        # ------------------------------------------------------------------
-        # time_text_embed.timestep_embedder <- time_in (optional)
-        # ------------------------------------------------------------------
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.timestep_embedder.linear_1.weight",
-            original_state_dict,
-            "time_in.in_layer.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.timestep_embedder.linear_1.bias",
-            original_state_dict,
-            "time_in.in_layer.bias",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.timestep_embedder.linear_2.weight",
-            original_state_dict,
-            "time_in.out_layer.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.timestep_embedder.linear_2.bias",
-            original_state_dict,
-            "time_in.out_layer.bias",
-        )
-
-        # time_text_embed.text_embedder <- vector_in (optional)
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.text_embedder.linear_1.weight",
-            original_state_dict,
-            "vector_in.in_layer.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.text_embedder.linear_1.bias",
-            original_state_dict,
-            "vector_in.in_layer.bias",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.text_embedder.linear_2.weight",
-            original_state_dict,
-            "vector_in.out_layer.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "time_text_embed.text_embedder.linear_2.bias",
-            original_state_dict,
-            "vector_in.out_layer.bias",
-        )
-
-        # ------------------------------------------------------------------
-        # guidance (optional)
-        # ------------------------------------------------------------------
-        guidance_keys = [
-            "guidance_in.in_layer.weight",
-            "guidance_in.in_layer.bias",
-            "guidance_in.out_layer.weight",
-            "guidance_in.out_layer.bias",
-        ]
-        if all_keys_present(original_state_dict, guidance_keys):
-            maybe_assign(
-                converted_state_dict,
-                "time_text_embed.guidance_embedder.linear_1.weight",
-                original_state_dict,
+        # ------------------------- pre-special handlers -------------------------
+        def _handle_guidance_group(_key: str, sd: Dict[str, Any]):
+            # Convert guidance keys only if the full set is present; otherwise leave untouched.
+            guidance_keys = (
                 "guidance_in.in_layer.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                "time_text_embed.guidance_embedder.linear_1.bias",
-                original_state_dict,
                 "guidance_in.in_layer.bias",
-            )
-            maybe_assign(
-                converted_state_dict,
-                "time_text_embed.guidance_embedder.linear_2.weight",
-                original_state_dict,
                 "guidance_in.out_layer.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                "time_text_embed.guidance_embedder.linear_2.bias",
-                original_state_dict,
                 "guidance_in.out_layer.bias",
             )
-
-        # ------------------------------------------------------------------
-        # context_embedder / x_embedder (optional)
-        # ------------------------------------------------------------------
-        maybe_assign(
-            converted_state_dict,
-            "context_embedder.weight",
-            original_state_dict,
-            "txt_in.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "context_embedder.bias",
-            original_state_dict,
-            "txt_in.bias",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "x_embedder.weight",
-            original_state_dict,
-            "img_in.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "x_embedder.bias",
-            original_state_dict,
-            "img_in.bias",
-        )
-
-        # ------------------------------------------------------------------
-        # double transformer blocks
-        # ------------------------------------------------------------------
-        for i in range(num_layers):
-            block_prefix = f"transformer_blocks.{i}."
-
-            # norms
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm1.linear.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_mod.lin.weight",
+            if not all(k in sd for k in guidance_keys):
+                return
+            sd["time_text_embed.guidance_embedder.linear_1.weight"] = sd.pop(
+                "guidance_in.in_layer.weight"
             )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm1.linear.bias",
-                original_state_dict,
-                f"double_blocks.{i}.img_mod.lin.bias",
+            sd["time_text_embed.guidance_embedder.linear_1.bias"] = sd.pop(
+                "guidance_in.in_layer.bias"
             )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm1_context.linear.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mod.lin.weight",
+            sd["time_text_embed.guidance_embedder.linear_2.weight"] = sd.pop(
+                "guidance_in.out_layer.weight"
             )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm1_context.linear.bias",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mod.lin.bias",
+            sd["time_text_embed.guidance_embedder.linear_2.bias"] = sd.pop(
+                "guidance_in.out_layer.bias"
             )
 
-            # QKV (sample)
-            img_qkv_w_key = f"double_blocks.{i}.img_attn.qkv.weight"
-            img_qkv_b_key = f"double_blocks.{i}.img_attn.qkv.bias"
-            if img_qkv_w_key in original_state_dict:
-                sample_q, sample_k, sample_v = ggml_chunk(
-                    original_state_dict.pop(img_qkv_w_key),
-                    3,
-                    dim=0,
-                )
-                converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat(
-                    [sample_q]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat(
-                    [sample_k]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat(
-                    [sample_v]
-                )
+        def _handle_final_layer_mod(key: str, sd: Dict[str, Any]):
+            # final_layer.adaLN_modulation.1.[weight|bias] -> norm_out.linear.[weight|bias]
+            if key not in sd:
+                return
+            is_weight = key.endswith(".weight")
+            tensor = sd.pop(key)
+            tensor = swap_scale_shift(tensor, dim=0)
+            suffix = "weight" if is_weight else "bias"
+            sd[f"norm_out.linear.{suffix}"] = tensor
 
-            if img_qkv_b_key in original_state_dict:
-                sample_q_bias, sample_k_bias, sample_v_bias = ggml_chunk(
-                    original_state_dict.pop(img_qkv_b_key),
-                    3,
-                    dim=0,
-                )
-                converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
-                    [sample_q_bias]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
-                    [sample_k_bias]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
-                    [sample_v_bias]
-                )
+        def _handle_double_img_qkv_weight(key: str, sd: Dict[str, Any]):
+            if not (key.startswith("double_blocks.") and key.endswith(".img_attn.qkv.weight")):
+                return
+            m = re.match(r"double_blocks\.(\d+)\.img_attn\.qkv\.weight$", key)
+            if not m:
+                return
+            i = int(m.group(1))
+            q, k, v = ggml_chunk(sd.pop(key), 3, dim=0)
+            blk = f"transformer_blocks.{i}.attn"
+            sd[f"{blk}.to_q.weight"] = ggml_cat([q])
+            sd[f"{blk}.to_k.weight"] = ggml_cat([k])
+            sd[f"{blk}.to_v.weight"] = ggml_cat([v])
 
-            # QKV (context)
-            txt_qkv_w_key = f"double_blocks.{i}.txt_attn.qkv.weight"
-            txt_qkv_b_key = f"double_blocks.{i}.txt_attn.qkv.bias"
-            if txt_qkv_w_key in original_state_dict:
-                context_q, context_k, context_v = ggml_chunk(
-                    original_state_dict.pop(txt_qkv_w_key),
-                    3,
-                    dim=0,
-                )
-                converted_state_dict[
-                    f"{block_prefix}attn.add_q_proj.weight"
-                ] = ggml_cat([context_q])
-                converted_state_dict[
-                    f"{block_prefix}attn.add_k_proj.weight"
-                ] = ggml_cat([context_k])
-                converted_state_dict[
-                    f"{block_prefix}attn.add_v_proj.weight"
-                ] = ggml_cat([context_v])
+        def _handle_double_img_qkv_bias(key: str, sd: Dict[str, Any]):
+            if not (key.startswith("double_blocks.") and key.endswith(".img_attn.qkv.bias")):
+                return
+            m = re.match(r"double_blocks\.(\d+)\.img_attn\.qkv\.bias$", key)
+            if not m:
+                return
+            i = int(m.group(1))
+            q, k, v = ggml_chunk(sd.pop(key), 3, dim=0)
+            blk = f"transformer_blocks.{i}.attn"
+            sd[f"{blk}.to_q.bias"] = ggml_cat([q])
+            sd[f"{blk}.to_k.bias"] = ggml_cat([k])
+            sd[f"{blk}.to_v.bias"] = ggml_cat([v])
 
-            if txt_qkv_b_key in original_state_dict:
-                context_q_bias, context_k_bias, context_v_bias = ggml_chunk(
-                    original_state_dict.pop(txt_qkv_b_key),
-                    3,
-                    dim=0,
-                )
-                converted_state_dict[
-                    f"{block_prefix}attn.add_q_proj.bias"
-                ] = ggml_cat([context_q_bias])
-                converted_state_dict[
-                    f"{block_prefix}attn.add_k_proj.bias"
-                ] = ggml_cat([context_k_bias])
-                converted_state_dict[
-                    f"{block_prefix}attn.add_v_proj.bias"
-                ] = ggml_cat([context_v_bias])
+        def _handle_double_txt_qkv_weight(key: str, sd: Dict[str, Any]):
+            if not (key.startswith("double_blocks.") and key.endswith(".txt_attn.qkv.weight")):
+                return
+            m = re.match(r"double_blocks\.(\d+)\.txt_attn\.qkv\.weight$", key)
+            if not m:
+                return
+            i = int(m.group(1))
+            q, k, v = ggml_chunk(sd.pop(key), 3, dim=0)
+            blk = f"transformer_blocks.{i}.attn"
+            sd[f"{blk}.add_q_proj.weight"] = ggml_cat([q])
+            sd[f"{blk}.add_k_proj.weight"] = ggml_cat([k])
+            sd[f"{blk}.add_v_proj.weight"] = ggml_cat([v])
 
-            # qk_norm
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_q.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_attn.norm.query_norm.scale",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_k.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_attn.norm.key_norm.scale",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_added_q.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_attn.norm.query_norm.scale",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_added_k.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_attn.norm.key_norm.scale",
-            )
+        def _handle_double_txt_qkv_bias(key: str, sd: Dict[str, Any]):
+            if not (key.startswith("double_blocks.") and key.endswith(".txt_attn.qkv.bias")):
+                return
+            m = re.match(r"double_blocks\.(\d+)\.txt_attn\.qkv\.bias$", key)
+            if not m:
+                return
+            i = int(m.group(1))
+            q, k, v = ggml_chunk(sd.pop(key), 3, dim=0)
+            blk = f"transformer_blocks.{i}.attn"
+            sd[f"{blk}.add_q_proj.bias"] = ggml_cat([q])
+            sd[f"{blk}.add_k_proj.bias"] = ggml_cat([k])
+            sd[f"{blk}.add_v_proj.bias"] = ggml_cat([v])
 
-            # ff img_mlp
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff.net.0.proj.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_mlp.0.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff.net.0.proj.bias",
-                original_state_dict,
-                f"double_blocks.{i}.img_mlp.0.bias",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff.net.2.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_mlp.2.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff.net.2.bias",
-                original_state_dict,
-                f"double_blocks.{i}.img_mlp.2.bias",
-            )
+        def _handle_double_qkv_lora(key: str, sd: Dict[str, Any]):
+            """
+            Handle LoRA on packed QKV projections:
 
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff_context.net.0.proj.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mlp.0.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff_context.net.0.proj.bias",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mlp.0.bias",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff_context.net.2.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mlp.2.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}ff_context.net.2.bias",
-                original_state_dict,
-                f"double_blocks.{i}.txt_mlp.2.bias",
-            )
+            - `*.qkv.lora_down.*` / `*.qkv.lora_A.*` are shared across q/k/v
+            - `*.qkv.lora_up.*` / `*.qkv.lora_B.*` are split into q/k/v along dim=0
+            """
+            if not key.startswith("double_blocks."):
+                return
 
-            # output projections
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.to_out.0.weight",
-                original_state_dict,
-                f"double_blocks.{i}.img_attn.proj.weight",
+            m = re.match(
+                r"double_blocks\.(\d+)\.(img_attn|txt_attn)\.qkv\.(lora_down|lora_up|lora_A|lora_B)\.(weight|bias)$",
+                key,
             )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.to_out.0.bias",
-                original_state_dict,
-                f"double_blocks.{i}.img_attn.proj.bias",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.to_add_out.weight",
-                original_state_dict,
-                f"double_blocks.{i}.txt_attn.proj.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.to_add_out.bias",
-                original_state_dict,
-                f"double_blocks.{i}.txt_attn.proj.bias",
-            )
+            if not m or key not in sd:
+                return
 
-        # ------------------------------------------------------------------
-        # single transformer blocks
-        # ------------------------------------------------------------------
-        for i in range(num_single_layers):
-            block_prefix = f"single_transformer_blocks.{i}."
+            i = int(m.group(1))
+            which_attn = m.group(2)  # img_attn | txt_attn
+            lora_kind = m.group(3)  # lora_down/up/A/B
+            suffix = m.group(4)  # weight | bias
 
-            # norm.linear <- single_blocks.i.modulation.lin
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm.linear.weight",
-                original_state_dict,
-                f"single_blocks.{i}.modulation.lin.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}norm.linear.bias",
-                original_state_dict,
-                f"single_blocks.{i}.modulation.lin.bias",
-            )
+            is_down = lora_kind in ("lora_down", "lora_A")
+            is_up = lora_kind in ("lora_up", "lora_B")
 
-            # Q, K, V, mlp from linear1 (only if both weight & bias exist)
-            lin1_w_key = f"single_blocks.{i}.linear1.weight"
-            lin1_b_key = f"single_blocks.{i}.linear1.bias"
-            if all_keys_present(original_state_dict, [lin1_w_key, lin1_b_key]):
+            blk = f"transformer_blocks.{i}.attn"
+            if which_attn == "img_attn":
+                q_key = f"{blk}.to_q.{lora_kind}.{suffix}"
+                k_key = f"{blk}.to_k.{lora_kind}.{suffix}"
+                v_key = f"{blk}.to_v.{lora_kind}.{suffix}"
+            else:
+                q_key = f"{blk}.add_q_proj.{lora_kind}.{suffix}"
+                k_key = f"{blk}.add_k_proj.{lora_kind}.{suffix}"
+                v_key = f"{blk}.add_v_proj.{lora_kind}.{suffix}"
+
+            t = sd.pop(key)
+            if is_down:
+                sd[q_key] = t
+                sd[k_key] = t
+                sd[v_key] = t
+                return
+
+            if is_up:
+                q, k, v = ggml_chunk(t, 3, dim=0)
+                sd[q_key] = ggml_cat([q])
+                sd[k_key] = ggml_cat([k])
+                sd[v_key] = ggml_cat([v])
+                return
+
+        def _handle_single_linear1(key: str, sd: Dict[str, Any]):
+            """
+            Split Q/K/V/MLP only if both weight and bias exist; otherwise preserve
+            the original `single_blocks.*.linear1.*` keys unchanged (do NOT rename).
+            """
+            m = re.match(r"single_blocks\.(\d+)\.linear1\.(weight|bias)$", key)
+            if not m:
+                return
+
+            i = int(m.group(1))
+            w_key = f"single_blocks.{i}.linear1.weight"
+            b_key = f"single_blocks.{i}.linear1.bias"
+
+            if (w_key in sd) and (b_key in sd):
+                # Only process once (on the weight key) to avoid double-work.
+                if not key.endswith(".weight"):
+                    return
                 mlp_hidden_dim = int(inner_dim * mlp_ratio)
                 split_size = (inner_dim, inner_dim, inner_dim, mlp_hidden_dim)
+                q, k, v, mlp = ggml_split(sd.pop(w_key), split_size, dim=0)
+                q_b, k_b, v_b, mlp_b = ggml_split(sd.pop(b_key), split_size, dim=0)
 
-                q, k, v, mlp = ggml_split(
-                    original_state_dict.pop(lin1_w_key),
-                    split_size,
-                    dim=0,
-                )
-                q_bias, k_bias, v_bias, mlp_bias = ggml_split(
-                    original_state_dict.pop(lin1_b_key),
-                    split_size,
-                    dim=0,
-                )
+                blk = f"single_transformer_blocks.{i}"
+                sd[f"{blk}.attn.to_q.weight"] = ggml_cat([q])
+                sd[f"{blk}.attn.to_q.bias"] = ggml_cat([q_b])
+                sd[f"{blk}.attn.to_k.weight"] = ggml_cat([k])
+                sd[f"{blk}.attn.to_k.bias"] = ggml_cat([k_b])
+                sd[f"{blk}.attn.to_v.weight"] = ggml_cat([v])
+                sd[f"{blk}.attn.to_v.bias"] = ggml_cat([v_b])
+                sd[f"{blk}.proj_mlp.weight"] = ggml_cat([mlp])
+                sd[f"{blk}.proj_mlp.bias"] = ggml_cat([mlp_b])
+                return
 
-                converted_state_dict[f"{block_prefix}attn.to_q.weight"] = ggml_cat([q])
-                converted_state_dict[f"{block_prefix}attn.to_q.bias"] = ggml_cat(
-                    [q_bias]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_k.weight"] = ggml_cat([k])
-                converted_state_dict[f"{block_prefix}attn.to_k.bias"] = ggml_cat(
-                    [k_bias]
-                )
-                converted_state_dict[f"{block_prefix}attn.to_v.weight"] = ggml_cat([v])
-                converted_state_dict[f"{block_prefix}attn.to_v.bias"] = ggml_cat(
-                    [v_bias]
-                )
-                converted_state_dict[f"{block_prefix}proj_mlp.weight"] = ggml_cat([mlp])
-                converted_state_dict[f"{block_prefix}proj_mlp.bias"] = ggml_cat(
-                    [mlp_bias]
-                )
+            # Partial presence: protect key(s) from substring rename pass.
+            # We temporarily rename `single_blocks.` -> `single_blocks__keep.` and
+            # then revert in `special_keys_map` after the rename pass.
+            for k in (w_key, b_key):
+                if k in sd:
+                    update_state_dict_(sd, k, k.replace("single_blocks.", "single_blocks__keep.", 1))
 
-            # qk norm
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_q.weight",
-                original_state_dict,
-                f"single_blocks.{i}.norm.query_norm.scale",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}attn.norm_k.weight",
-                original_state_dict,
-                f"single_blocks.{i}.norm.key_norm.scale",
-            )
+        def _unprotect_single_linear1_keys(key: str, sd: Dict[str, Any]):
+            if "single_blocks__keep." not in key:
+                return
+            update_state_dict_(sd, key, key.replace("single_blocks__keep.", "single_blocks.", 1))
 
-            # output projections
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}proj_out.weight",
-                original_state_dict,
-                f"single_blocks.{i}.linear2.weight",
-            )
-            maybe_assign(
-                converted_state_dict,
-                f"{block_prefix}proj_out.bias",
-                original_state_dict,
-                f"single_blocks.{i}.linear2.bias",
-            )
+        # Attach pre-special handlers (executed before the generic rename pass).
+        self.pre_special_keys_map = {
+            "guidance_in.": _handle_guidance_group,
+            "final_layer.adaLN_modulation.1.": _handle_final_layer_mod,
+            ".qkv.lora_": _handle_double_qkv_lora,
+            ".img_attn.qkv.weight": _handle_double_img_qkv_weight,
+            ".img_attn.qkv.bias": _handle_double_img_qkv_bias,
+            ".txt_attn.qkv.weight": _handle_double_txt_qkv_weight,
+            ".txt_attn.qkv.bias": _handle_double_txt_qkv_bias,
+            ".linear1.": _handle_single_linear1,
+        }
+        # Post-rename fixups (undo temporary placeholder used to keep partial keys untouched).
+        self.special_keys_map = {
+            "single_blocks__keep.": _unprotect_single_linear1_keys,
+        }
 
-        # ------------------------------------------------------------------
-        # final layer (optional)
-        # ------------------------------------------------------------------
-        maybe_assign(
-            converted_state_dict,
-            "proj_out.weight",
-            original_state_dict,
-            "final_layer.linear.weight",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "proj_out.bias",
-            original_state_dict,
-            "final_layer.linear.bias",
-        )
-        maybe_assign(
-            converted_state_dict,
-            "norm_out.linear.weight",
-            original_state_dict,
-            "final_layer.adaLN_modulation.1.weight",
-            transform=swap_scale_shift,
-        )
-        maybe_assign(
-            converted_state_dict,
-            "norm_out.linear.bias",
-            original_state_dict,
-            "final_layer.adaLN_modulation.1.bias",
-            transform=swap_scale_shift,
-        )
-
-        # ------------------------------------------------------------------
-        # Merge any remaining (unmapped) original keys, unchanged.
-        # These are keys we never popped/renamed above.
-        # ------------------------------------------------------------------
-        for k, v in original_state_dict.items():
-            converted_state_dict[k] = v
-
-        # Mutate input dict in-place to follow the converter API
-        state_dict.clear()
-        state_dict.update(converted_state_dict)
+        # Use the shared conversion pipeline (pre-special → rename → post-special).
+        return super().convert(state_dict)
 
 class NoOpTransformerConverter(TransformerConverter):
     def __init__(self):

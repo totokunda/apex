@@ -1,48 +1,54 @@
 {
     "engine_kwargs": {
         "engine_type": "qwenimage",
-        "yaml_path": "/home/divineade/apex/manifest/engine/qwenimage/qwenimage-1.0.0.v1.yml",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/image/qwenimage-1.0.0.v1.yml",
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
-                "name": "scheduler",
+                "name": "FlowMatchEulerDiscreteScheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/695d6b616f9a2047616e7b6d87023afd30204d8e51461c44622e0bae89836abd_scheduler_config.json",
+                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/c5359e7540481448d8f7f6c9d583f11d21954d1d706ee93269aa9ca92be1a50a_scheduler_config.json",
                 "type": "scheduler",
-                "label": "Scheduler",
-                "default": "FlowMatchEulerDiscreteScheduler"
+                "label": "FlowMatch Euler Discrete Scheduler",
+                "default": "FlowMatchEulerDiscreteScheduler",
+                "description": "The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage T2I model."
             },
             "vae": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Qwen_Qwen-Image/vae",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Qwen_Qwen-Image/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Qwen_Qwen-Image/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/3e3f96e0a60cbfabfe39903007af6fda9127d5f98a21fea315350c535d82288a_Qwen_Image-Q2_K.gguf",
-                "variant": "GGUF_Q2_K",
-                "precision": "q2_k",
-                "type": "gguf"
+                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Qwen_Qwen-Image/transformer",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors",
+                "group_offload_type": "block_level",
+                "group_offload_num_blocks_per_group": 1,
+                "group_offload_use_stream": true,
+                "group_offload_record_stream": true
             }
         },
+        "auto_memory_management": false,
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "A woman smiling",
+        "prompt": "A lone woman stands poised on a jagged obsidian outcrop above an erupting volcano, playing a violin with calm intensity. Rivers of molten lava glow beneath her, casting fiery orange and crimson light upward, while ash and embers drift through the air like burning snow. Her long dress billows dramatically in the volcanic wind, fabric catching both the warm lava glow and the cool blue light of the stormy sky above. The violin gleams subtly, reflecting firelight as her expression remains focused and serene, unshaken by the chaos below. Massive plumes of smoke and ash rise behind her, lit by bursts of lava and distant lightning. Epic scale, dramatic lighting, cinematic composition, volumetric smoke, high contrast, ultra-detailed textures, mythic atmosphere, fantasy film still, painterly realism.",
         "negative_prompt": " ",
         "resolution": 720,
         "aspect_ratio": "16:9",
-        "num_inference_steps": 4,
+        "num_inference_steps": 40,
         "height": 704,
-        "width": 704,
-        "seed": 2981824967,
-        "true_cfg_scale": 1,
+        "width": 1280,
+        "seed": 1464382533,
+        "true_cfg_scale": 4,
         "guidance_scale": 1,
         "duration": "5s"
     }

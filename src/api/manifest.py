@@ -1,6 +1,7 @@
 import os
-from functools import lru_cache
+from functools import lru_cache, partial
 from loguru import logger
+import anyio
 import yaml
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -23,6 +24,14 @@ MANIFEST_BASE_PATH = Path(__file__).parent.parent.parent / "manifest" / "verifie
 
 # Cache the system's compute capability (it doesn't change during runtime)
 _SYSTEM_COMPUTE_CAPABILITY: Optional[ComputeCapability] = None
+
+
+async def _run_blocking(func, *args, **kwargs):
+    """
+    Run blocking (sync) work in a worker thread so async request handlers don't
+    block the event loop.
+    """
+    return await anyio.to_thread.run_sync(partial(func, *args, **kwargs))
 
 
 def _get_system_compute_capability() -> ComputeCapability:
@@ -223,9 +232,7 @@ def _load_and_enrich_manifest(relative_path: str) -> Dict[Any, Any]:
             is_downloaded = DownloadMixin.is_downloaded(
                 config_path, get_components_path()
             )
-            if is_downloaded is None:
-                is_component_downloaded = False
-            else:
+            if is_downloaded:
                 component["config_path"] = is_downloaded
 
         if component.get("type") == "scheduler":
@@ -563,13 +570,8 @@ def _build_attention_options(
     return results
 
 
-@router.get("/types", response_model=List[ModelTypeInfo])
-def list_model_types() -> List[ModelTypeInfo]:
-    """List distinct metadata.categories values across manifests with label and description.
-
-    Scans all YAML files under ``MANIFEST_BASE_PATH`` and aggregates the unique
-    values found in ``metadata.categories`` (supports both string and list values).
-    """
+def _list_model_types_sync() -> List[ModelTypeInfo]:
+    """Blocking implementation for list_model_types()."""
     if not MANIFEST_BASE_PATH.exists():
         return []
 
@@ -650,33 +652,36 @@ def list_model_types() -> List[ModelTypeInfo]:
     return results
 
 
+@router.get("/types", response_model=List[ModelTypeInfo])
+async def list_model_types() -> List[ModelTypeInfo]:
+    """Async wrapper for list_model_types; runs blocking work off the event loop."""
+    return await _run_blocking(_list_model_types_sync)
+
+
 @router.get("/categories", response_model=List[ModelCategoryInfo])
-def list_model_categories() -> List[ModelCategoryInfo]:
+async def list_model_categories() -> List[ModelCategoryInfo]:
     """List distinct metadata.categories values across manifests with label and description."""
-    return list_model_types()
+    return await list_model_types()
 
 
-@router.get("/system/compute")
-def get_system_compute_info():
-    """Get information about the current system's compute capabilities."""
+def _get_system_compute_info_sync():
     capability = _get_system_compute_capability()
     return capability.to_dict()
 
 
-@router.get("/list")
-def list_all_manifests(include_incompatible: bool = False):
-    """List all available manifests.
+@router.get("/system/compute")
+async def get_system_compute_info():
+    """Get information about the current system's compute capabilities."""
+    return await _run_blocking(_get_system_compute_info_sync)
 
-    Args:
-        include_incompatible: If True, include manifests that are not compatible
-                            with the current system's compute capabilities.
-                            Default is False (only show compatible manifests).
-    """
+
+def _list_all_manifests_sync(include_incompatible: bool = False):
+    """Blocking implementation for list_all_manifests()."""
     try:
         if include_incompatible:
             # Load all manifests without filtering
             manifests: List[Dict[str, Any]] = []
-            for root, dirs, files in os.walk(MANIFEST_BASE_PATH):
+            for root, _dirs, files in os.walk(MANIFEST_BASE_PATH):
                 for file in files:
                     if file.endswith(".yml") and not file.startswith("shared"):
                         file_path = Path(root) / file
@@ -684,25 +689,22 @@ def list_all_manifests(include_incompatible: bool = False):
                         enriched = _load_and_enrich_manifest(str(relative_path))
                         manifests.append(enriched)
             return manifests
-        else:
-            # Use the normal filtered list
-            manifests = get_all_manifest_files()
-            return manifests
+        # Use the normal filtered list
+        return get_all_manifest_files()
     except Exception as e:
         logger.error(f"Error listing manifests: {e}")
         raise HTTPException(status_code=500, detail=f"Error listing manifests: {e}")
 
 
-@router.get("/list/model/{model}")
-def list_manifests_by_model(model: str, include_incompatible: bool = False):
-    """List all manifest names for a specific model.
+@router.get("/list")
+async def list_all_manifests(include_incompatible: bool = False):
+    """List all available manifests (async; runs blocking work off the event loop)."""
+    return await _run_blocking(_list_all_manifests_sync, include_incompatible)
 
-    Args:
-        model: The model name to filter by
-        include_incompatible: If True, include manifests not compatible with current system
-    """
+
+def _list_manifests_by_model_sync(model: str, include_incompatible: bool = False):
     if include_incompatible:
-        manifests = list_all_manifests(include_incompatible=True)
+        manifests = _list_all_manifests_sync(include_incompatible=True)
     else:
         manifests = get_all_manifest_files()
     filtered = [m for m in manifests if m.get("model") == model]
@@ -713,16 +715,15 @@ def list_manifests_by_model(model: str, include_incompatible: bool = False):
     return filtered
 
 
-@router.get("/list/type/{model_type}")
-def list_manifests_by_model_type(model_type: str, include_incompatible: bool = False):
-    """List all manifest names for a specific model type.
+@router.get("/list/model/{model}")
+async def list_manifests_by_model(model: str, include_incompatible: bool = False):
+    """List all manifest names for a specific model (async)."""
+    return await _run_blocking(_list_manifests_by_model_sync, model, include_incompatible)
 
-    Args:
-        model_type: The model type to filter by
-        include_incompatible: If True, include manifests not compatible with current system
-    """
+
+def _list_manifests_by_model_type_sync(model_type: str, include_incompatible: bool = False):
     if include_incompatible:
-        manifests = list_all_manifests(include_incompatible=True)
+        manifests = _list_all_manifests_sync(include_incompatible=True)
     else:
         manifests = get_all_manifest_files()
     filtered: List[Dict[str, Any]] = []
@@ -741,19 +742,19 @@ def list_manifests_by_model_type(model_type: str, include_incompatible: bool = F
     return filtered
 
 
-@router.get("/list/model/{model}/model_type/{model_type}")
-def list_manifests_by_model_and_type(
+@router.get("/list/type/{model_type}")
+async def list_manifests_by_model_type(model_type: str, include_incompatible: bool = False):
+    """List all manifest names for a specific model type (async)."""
+    return await _run_blocking(
+        _list_manifests_by_model_type_sync, model_type, include_incompatible
+    )
+
+
+def _list_manifests_by_model_and_type_sync(
     model: str, model_type: str, include_incompatible: bool = False
 ):
-    """List all manifest names for a specific model and model type combination.
-
-    Args:
-        model: The model name to filter by
-        model_type: The model type to filter by
-        include_incompatible: If True, include manifests not compatible with current system
-    """
     if include_incompatible:
-        manifests = list_all_manifests(include_incompatible=True)
+        manifests = _list_all_manifests_sync(include_incompatible=True)
     else:
         manifests = get_all_manifest_files()
     filtered: List[Dict[str, Any]] = []
@@ -774,13 +775,23 @@ def list_manifests_by_model_and_type(
     return filtered
 
 
+@router.get("/list/model/{model}/model_type/{model_type}")
+async def list_manifests_by_model_and_type(
+    model: str, model_type: str, include_incompatible: bool = False
+):
+    """List all manifest names for a specific model and model type combination (async)."""
+    return await _run_blocking(
+        _list_manifests_by_model_and_type_sync, model, model_type, include_incompatible
+    )
+
+
 @router.get("/{manifest_id}")
-def get_manifest_by_id(manifest_id: str) -> Dict[Any, Any]:
-    return get_manifest(manifest_id)
+async def get_manifest_by_id(manifest_id: str) -> Dict[Any, Any]:
+    return await _run_blocking(get_manifest, manifest_id)
 
 
 @router.get("/{manifest_id}/part")
-def get_manifest_part(manifest_id: str, path: Optional[str] = None):
+async def get_manifest_part(manifest_id: str, path: Optional[str] = None):
     """
     Return a specific part of the enriched manifest given a dot-separated path.
     Examples:
@@ -789,7 +800,7 @@ def get_manifest_part(manifest_id: str, path: Optional[str] = None):
       - path=spec.components.0.model_path
     Supports numeric tokens to index into lists.
     """
-    doc = get_manifest(manifest_id)
+    doc = await _run_blocking(get_manifest, manifest_id)
     if not path:
         return doc
     value: Any = doc
@@ -849,7 +860,11 @@ class UpdateLoraScaleRequest(BaseModel):
 
 
 @router.post("/lora/scale")
-def update_lora_scale(req: UpdateLoraScaleRequest) -> Dict[str, Any]:
+async def update_lora_scale(req: UpdateLoraScaleRequest) -> Dict[str, Any]:
+    return await _run_blocking(_update_lora_scale_sync, req)
+
+
+def _update_lora_scale_sync(req: UpdateLoraScaleRequest) -> Dict[str, Any]:
     """
     Update the `scale` value for a LoRA entry inside a manifest's YAML file.
 
@@ -953,7 +968,11 @@ class UpdateLoraNameRequest(BaseModel):
 
 
 @router.post("/lora/name")
-def update_lora_name(req: UpdateLoraNameRequest) -> Dict[str, Any]:
+async def update_lora_name(req: UpdateLoraNameRequest) -> Dict[str, Any]:
+    return await _run_blocking(_update_lora_name_sync, req)
+
+
+def _update_lora_name_sync(req: UpdateLoraNameRequest) -> Dict[str, Any]:
     """
     Update the `name` / `label` fields for a LoRA entry inside a manifest's YAML file.
 
@@ -1046,7 +1065,11 @@ class DeleteLoraRequest(BaseModel):
 
 
 @router.delete("/lora")
-def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
+async def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
+    return await _run_blocking(_delete_lora_sync, req)
+
+
+def _delete_lora_sync(req: DeleteLoraRequest) -> Dict[str, Any]:
     """
     Delete a LoRA entry from a manifest's YAML file.
 
@@ -1156,7 +1179,13 @@ def delete_lora(req: DeleteLoraRequest) -> Dict[str, Any]:
 
 
 @router.post("/custom-model-path")
-def validate_and_register_custom_model_path(
+async def validate_and_register_custom_model_path(
+    req: CustomModelPathRequest,
+) -> Dict[str, Any]:
+    return await _run_blocking(_validate_and_register_custom_model_path_sync, req)
+
+
+def _validate_and_register_custom_model_path_sync(
     req: CustomModelPathRequest,
 ) -> Dict[str, Any]:
     """
@@ -1344,7 +1373,11 @@ def validate_and_register_custom_model_path(
 
 
 @router.delete("/custom-model-path")
-def delete_custom_model_path(req: DeleteCustomModelPathRequest) -> Dict[str, Any]:
+async def delete_custom_model_path(req: DeleteCustomModelPathRequest) -> Dict[str, Any]:
+    return await _run_blocking(_delete_custom_model_path_sync, req)
+
+
+def _delete_custom_model_path_sync(req: DeleteCustomModelPathRequest) -> Dict[str, Any]:
     """
     Remove a *custom* model_path entry from a component in the manifest YAML,
     without deleting any underlying model files from disk.

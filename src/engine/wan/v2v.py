@@ -62,7 +62,7 @@ class WanV2VEngine(WanShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         loaded_video = self._load_video(video, fps=fps)
 
@@ -175,7 +175,7 @@ class WanV2VEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

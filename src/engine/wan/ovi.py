@@ -216,10 +216,13 @@ class OviEngine(WanShared):
         render_on_step_callback: Optional[Callable] = None,
         render_on_step_interval: int = 5,
         progress_callback: Optional[Callable] = None,
+        easy_cache_thresh: float = 0.00,
+        easy_cache_ret_steps: int = 10,
+        easy_cache_cutoff_steps: int | None = None,
         **kwargs,
     ):
         safe_emit_progress(
-            progress_callback, 0.0, "Starting Ovi Video+Audio Generation Pipeline"
+            progress_callback, 0.0, "Starting Ovi video+audio generation pipeline"
         )
 
         specs = self._get_model_specs()
@@ -238,6 +241,7 @@ class OviEngine(WanShared):
             target_area = specs["video_area"]
         text_formatter = specs["formatter"]
         if image is not None:
+            safe_emit_progress(progress_callback, 0.01, "Loading input image")
             image = self._load_image(image)
 
         logging.info(
@@ -245,7 +249,7 @@ class OviEngine(WanShared):
         )
         logging.info(f"Target area: {target_area}")
 
-        safe_emit_progress(progress_callback, 0.02, "Loaded Ovi Model Specs")
+        safe_emit_progress(progress_callback, 0.02, "Loaded Ovi model specs")
 
         if image is not None:
             image = self._load_image(image)
@@ -253,17 +257,7 @@ class OviEngine(WanShared):
         device = self.device
         target_dtype = torch.bfloat16  # Ovi uses bfloat16 by default
 
-        if not self.vae:
-            self.load_component_by_name("transformer_vae")
-        self.to_device(self.transformer_vae)
-
-        safe_emit_progress(progress_callback, 0.05, "VAE components ready")
-
-        # Audio VAE
-        if not hasattr(self, "audio_vae") or self.audio_vae is None:
-            self.load_component_by_name("audio_vae")
-
-        safe_emit_progress(progress_callback, 0.08, "Audio VAE ready")
+        safe_emit_progress(progress_callback, 0.04, "Preparing prompt")
 
         # Text formatting
         formatted_text_prompt = text_formatter(prompt)
@@ -271,14 +265,18 @@ class OviEngine(WanShared):
             logging.info(f"Formatted prompt: {formatted_text_prompt}")
             prompt = formatted_text_prompt
 
-        safe_emit_progress(progress_callback, 0.10, "Formatted Ovi prompt")
+        safe_emit_progress(progress_callback, 0.06, "Formatted Ovi prompt")
 
         # Encode Prompts
         # Ovi expects: [prompt, video_neg, audio_neg]
         prompts = [prompt, negative_prompt, audio_negative_prompt]
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.08, "Loading text encoder")
             self.load_component_by_type("text_encoder")
-        safe_emit_progress(progress_callback, 0.12, "Text encoder ready")
+            safe_emit_progress(progress_callback, 0.09, "Text encoder loaded")
+        safe_emit_progress(progress_callback, 0.10, "Moving text encoder to device")
+        self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.11, "Encoding prompts for Ovi")
         # Use .encode() from TextEncoder
         raw_output, attention_mask = self.text_encoder.encode(
             prompts,
@@ -327,7 +325,8 @@ class OviEngine(WanShared):
         text_embeddings_audio_neg = text_embeddings[2]
 
         if offload:
-            self._offload(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.21, "Offloading text encoder")
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.22, "Text encoder offloaded")
 
@@ -340,11 +339,14 @@ class OviEngine(WanShared):
 
         if self._is_i2v:
             if not self.vae:
+                safe_emit_progress(progress_callback, 0.23, "Loading VAE (video)")
                 self.load_component_by_type("vae")
+                safe_emit_progress(progress_callback, 0.24, "VAE loaded")
+            safe_emit_progress(progress_callback, 0.25, "Moving VAE to device")
             self.to_device(self.vae)
 
             safe_emit_progress(
-                progress_callback, 0.26, "VAE ready for image-to-video encoding"
+                progress_callback, 0.26, "Preprocessing first frame"
             )
 
             first_frame = self.preprocess_image_tensor(
@@ -353,6 +355,7 @@ class OviEngine(WanShared):
 
             # Add temporal dim: (1, 3, 1, H, W)
             input_tensor = first_frame.unsqueeze(2)
+            safe_emit_progress(progress_callback, 0.29, "Encoding first frame (VAE)")
             latents_images = self.vae_encode(input_tensor, dtype=target_dtype)
             latents_images = latents_images.squeeze(0)  # (C, T, H, W)
             self.latents_images = latents_images
@@ -363,7 +366,8 @@ class OviEngine(WanShared):
             )
 
             if offload:
-                self._offload(self.vae)
+                safe_emit_progress(progress_callback, 0.31, "Offloading VAE (video)")
+                self._offload("vae")
             safe_emit_progress(
                 progress_callback, 0.32, "Encoded first frame into video latents"
             )
@@ -379,22 +383,24 @@ class OviEngine(WanShared):
             )
 
         # 3. Schedulers
-        if (
-            not hasattr(self, "transformer_scheduler")
-            or self.transformer_scheduler is None
-        ):
+        if not getattr(self, "transformer_scheduler", None):
+            safe_emit_progress(progress_callback, 0.33, "Loading video scheduler")
             self.load_component_by_name("transformer_scheduler")
 
+        safe_emit_progress(progress_callback, 0.335, "Moving video scheduler to device")
         self.to_device(self.transformer_scheduler)
 
-        if not hasattr(self, "audio_scheduler") or self.audio_scheduler is None:
+        if not getattr(self, "audio_scheduler", None):
+            safe_emit_progress(progress_callback, 0.34, "Loading audio scheduler")
             self.load_component_by_name("audio_scheduler")
+        safe_emit_progress(progress_callback, 0.345, "Moving audio scheduler to device")
         self.to_device(self.audio_scheduler)
 
         safe_emit_progress(progress_callback, 0.34, "Schedulers ready")
 
         # Set timesteps
 
+        safe_emit_progress(progress_callback, 0.36, "Computing timesteps")
         timesteps_video, num_inference_steps_video = self._get_timesteps(
             self.transformer_scheduler, num_inference_steps, shift=shift
         )
@@ -411,6 +417,7 @@ class OviEngine(WanShared):
         video_latent_channel = transformer_config.get("video", {}).get("in_dim", 48)
         audio_latent_channel = transformer_config.get("audio", {}).get("in_dim", 20)
 
+        safe_emit_progress(progress_callback, 0.40, "Initializing video and audio noise latents")
         video_noise = randn_tensor(
             shape=(
                 video_latent_channel,
@@ -437,9 +444,13 @@ class OviEngine(WanShared):
 
         # 5. Transformer
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.43, "Loading transformer")
             self.load_component_by_type("transformer")
+            safe_emit_progress(progress_callback, 0.44, "Transformer loaded")
+        safe_emit_progress(progress_callback, 0.445, "Moving transformer to device")
         self.to_device(self.transformer)
-
+        
+        
         safe_emit_progress(progress_callback, 0.45, "Transformer ready")
 
         _patch_size_h, _patch_size_w = (
@@ -453,6 +464,10 @@ class OviEngine(WanShared):
             // (_patch_size_h * _patch_size_w)
         )
         num_steps = len(timesteps_video)
+        
+        if easy_cache_thresh > 0.0:
+            self.logger.info(f"Enabling fusion easy cache with threshold {easy_cache_thresh}, ret steps {easy_cache_ret_steps}, cutoff steps {easy_cache_cutoff_steps}")
+            self.transformer.enable_fusion_easy_cache(num_steps, easy_cache_thresh, easy_cache_ret_steps, easy_cache_cutoff_steps)
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
 
         safe_emit_progress(
@@ -549,7 +564,8 @@ class OviEngine(WanShared):
                 )
 
         if offload:
-            self._offload(self.transformer)
+            safe_emit_progress(progress_callback, 0.91, "Offloading transformer")
+            self._offload("transformer")
         safe_emit_progress(
             progress_callback, 0.92, "Transformer offloaded after denoising"
         )
@@ -559,28 +575,35 @@ class OviEngine(WanShared):
 
         # 6. Decoding
         # Video VAE
-        if not self.vae:
+        if not getattr(self, "transformer_vae", None):
+            safe_emit_progress(progress_callback, 0.93, "Loading video decoder (transformer_vae)")
             self.load_component_by_name("transformer_vae")
+        safe_emit_progress(progress_callback, 0.935, "Moving video decoder to device")
         self.to_device(self.transformer_vae)
 
         # Audio VAE
-        if not hasattr(self, "audio_vae") or self.audio_vae is None:
+        if not getattr(self, "audio_vae", None):
+            safe_emit_progress(progress_callback, 0.94, "Loading audio decoder (audio_vae)")
             self.load_component_by_name("audio_vae")
 
         self.audio_vae.tod.remove_weight_norm()
+        safe_emit_progress(progress_callback, 0.945, "Moving audio decoder to device")
         self.to_device(self.audio_vae)
 
-        safe_emit_progress(progress_callback, 0.94, "Decoding audio and video")
+        safe_emit_progress(progress_callback, 0.95, "Decoding audio and video")
 
         # Decode Audio
         audio_latents_for_vae = audio_noise.unsqueeze(0).transpose(1, 2)  # 1, c, l
+        safe_emit_progress(progress_callback, 0.955, "Decoding audio")
         generated_audio = self.vae_decode(
             audio_latents_for_vae, component_name="audio_vae"
         )
+    
         generated_audio = generated_audio.squeeze().cpu().float().numpy()
 
         # Decode Video
         video_latents_for_vae = video_noise.unsqueeze(0)  # 1, c, f, h, w
+        safe_emit_progress(progress_callback, 0.97, "Decoding video")
         generated_video_tensor = self.vae_decode(
             video_latents_for_vae, component_name="transformer_vae"
         )
@@ -588,8 +611,9 @@ class OviEngine(WanShared):
         generated_video = generated_video_tensor.squeeze(0).cpu().float().numpy()
 
         if offload:
-            self._offload(self.vae)
-            self._offload(self.audio_vae)
+            safe_emit_progress(progress_callback, 0.985, "Offloading decoders")
+            self._offload("vae")
+            self._offload("audio_vae")
 
         safe_emit_progress(
             progress_callback, 1.0, "Completed Ovi video+audio generation"
@@ -631,5 +655,5 @@ class OviEngine(WanShared):
 
         render_on_step_callback((generated_video, generated_audio))
 
-        self._offload(self.transformer_vae, delete_from_cpu=False)
-        self._offload(self.audio_vae, delete_from_cpu=False)
+        self._offload("transformer_vae", offload_type="cpu")
+        self._offload("audio_vae", offload_type="cpu")

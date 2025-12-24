@@ -29,6 +29,7 @@ class Wholebody:
         pose_model_path: Optional[str] = None,
         torchscript_device="cuda",
     ):
+        
         self.det_filename = det_model_path and os.path.basename(det_model_path)
         self.pose_filename = pose_model_path and os.path.basename(pose_model_path)
         self.det, self.pose = None, None
@@ -112,11 +113,10 @@ class Wholebody:
         if self.pose_filename is not None:
             self.pose_input_size, _ = guess_onnx_input_shape_dtype(self.pose_filename)
 
-    def __call__(self, oriImg) -> Optional[np.ndarray]:
+    def __call__(self, oriImg, return_keypoints_scores=False) -> Optional[np.ndarray]:
         # Sacrifice accurate time measurement for compatibility
 
         det_result = None
-
         if self.det is None:
             print(
                 "DWPose: No detector specified, using full image for pose estimation."
@@ -181,7 +181,11 @@ class Wholebody:
         openpose_idx = [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 17]
         new_keypoints_info[:, openpose_idx] = new_keypoints_info[:, mmpose_idx]
         keypoints_info = new_keypoints_info
-
+        
+        if return_keypoints_scores:
+            keypoints, scores = keypoints_info[..., :2], keypoints_info[..., 2]
+            return keypoints, scores, det_result
+        
         return keypoints_info
 
     @staticmethod

@@ -37,19 +37,19 @@
                 "type": "safetensors"
             }
         },
-        "attention_type": "sage"
+        "attention_type": "sdpa"
     },
     "inputs": {
-        "subject_image": "assets/747f8f04-3547-4bc2-901f-ae6b999369f6-174dbd78-3ef6-45ae-986e-2bbfcc50d20b_subject_image_0_4.png",
-        "prompt": "The man is standing in front of a castle and is smiling and waving frantically at the camera. ",
+        "subject_image": "assets/c283c1e8-d504-44d1-b255-a2df75c31510-148ed2c6-158d-4f5e-b5be-ccb172b720bc_subject_image_0_1.png",
+        "prompt": "A man strides down a futuristic fashion runway wearing extreme avant-garde couture that defies conventional design. His outfit is sculptural and surreal: exaggerated proportions, asymmetrical layers, floating fabric panels, and rigid geometric elements fused with flowing translucent materials. Iridescent textures shift between chrome, obsidian, and oil-slick colors as he moves. The clothing appears partially engineered rather than sewn, with gravity-defying shapes and sharp architectural lines. His expression is stoic and otherworldly, posture confident and deliberate.\n\nThe runway is minimalist and dark, illuminated by dramatic overhead spotlights and sharp rim lighting that carve out the silhouette of the outfit. Reflections ripple across a glossy black floor. The audience fades into abstract shadows, punctuated by flashes of light. Cinematic, editorial fashion photography, experimental haute couture, boundary-pushing design, ultra-detailed, high contrast, modern art-fashion aesthetic.",
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "resolution": 480,
-        "aspect_ratio": "16:9",
-        "num_inference_steps": 4,
+        "aspect_ratio": "custom",
+        "num_inference_steps": 8,
         "height": 480,
         "width": 848,
-        "seed": 2065406455,
+        "seed": 703410865,
         "guidance_scale": 1,
-        "duration": "5s"
+        "duration": "3s"
     }
 }

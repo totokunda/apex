@@ -66,7 +66,7 @@ class QwenImageControlNetEngine(QwenImageShared):
             negative_prompt_embeds_mask = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         transformer_dtype = self.component_dtypes["transformer"]
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
@@ -323,8 +323,8 @@ class QwenImageControlNetEngine(QwenImageShared):
                         pass
 
         if offload:
-            self._offload(self.transformer)
-            self._offload(self.controlnet)
+            self._offload("transformer")
+            self._offload("controlnet")
 
         if return_latents:
             return latents

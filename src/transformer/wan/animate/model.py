@@ -1182,6 +1182,7 @@ class WanAnimateTransformer3DModel(
         motion_encode_batch_size = (
             motion_encode_batch_size or self.config.motion_encoder_batch_size
         )
+        
         face_batches = torch.split(face_pixel_values, motion_encode_batch_size)
         motion_vec_batches = []
         for face_batch in face_batches:

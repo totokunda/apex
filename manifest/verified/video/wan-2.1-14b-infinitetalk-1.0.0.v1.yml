@@ -15,6 +15,8 @@ metadata:
   author: Meigen AI
   license: Apache-2.0
   demo_path: https://packaged-media.redd.it/lj2vzpt13qbf1/pb/m2-res_720p.mp4?m=DASHPlaylist.mpd&v=1&e=1763694000&s=dea93f505fea01fd79a15be07526942a6a24a37e
+  categories:
+   - audio-to-video
 spec:
   engine: wan
   model_type: multitalk
@@ -23,6 +25,9 @@ spec:
   default_duration_secs: 5.0
   min_duration_secs: 1.0
   fps: 25
+  audio_inputs_to_save:
+  - person_1_audio
+  - person_2_audio
   compute_requirements:
     min_cuda_compute_capability: 7.5
     supported_compute_types:
@@ -59,16 +64,6 @@ spec:
       reverse_sigmas: false
   - type: vae
     name: wan/vae
-    base: wan
-    model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 507592616
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
-  - type: vae
-    name: wan/vae
     label: Wan VAE
     base: wan
     model_path:
@@ -96,7 +91,14 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     base: wan.multitalk
+    label: Wan 2.1 14B InfiniteTalk Transformer
+    name: infinitetalk_transformer
     model_path:
+    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/transformer
+      variant: default
+      precision: fp16
+      type: safetensors
+      file_size: 57154175562
     - path: Kijai/WanVideo_comfy_fp8_scaled/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors
       variant: FP8
       precision: fp8
@@ -159,12 +161,14 @@ spec:
       file_size: 2712729090
   - type: helper
     base: wan.multitalk
+    label: Chinese Wav2Vec2 Base
     model_path:
     - path: TencentGameMate/chinese-wav2vec2-base
       file_size: 1520899445
   - type: helper
     base: clip
     name: wan/clip
+    label: Wan CLIP
     model_path:
     - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/image_encoder
       variant: default
@@ -185,29 +189,22 @@ spec:
       attention_kwargs: {}
   ui:
     panels:
-    - name: image_input
-      label: Image Input
+    - name: video_input 
+      label: Video Input
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
-        - - image
-    - name: audio_input_1
-      label: Audio 1
+        - - video
+    - name: audio_input
+      label: Audio
       collapsible: true
       default_open: true
       layout:
         flow: column
         rows:
         - - person_1_audio
-    - name: audio_input_2
-      label: Audio 2
-      collapsible: true
-      default_open: false
-      layout:
-        flow: column
-        rows:
         - - person_2_audio
     - name: prompting
       label: Prompting
@@ -247,25 +244,24 @@ spec:
         - - guidance_scale
         - - audio_guidance_scale
         - - seed
-        - - boundary_ratio
     inputs:
-    - id: image
-      label: Image
-      description: The image to use for the generation.
-      type: image
-      panel: image
+    - id: video
+      label: Video Input
+      description: The video to use for the generation.
+      type: video
+      panel: video_input
       required: true
     - id: person_1_audio
       label: Audio
       description: The audio to use for the generation.
       type: audio
-      panel: person_1_audio
+      panel: audio_input
       required: true
     - id: person_2_audio
       label: Audio
       description: The audio to use for the generation.
       type: audio
-      panel: person_2_audio
+      panel: audio_input
       required: false
     - id: prompt
       label: Prompt
@@ -294,8 +290,6 @@ spec:
       type: select
       default: 480
       options:
-      - name: Ultra HD
-        value: 1024
       - name: HD
         value: 720
       - name: SD
@@ -307,22 +301,22 @@ spec:
       description: Select the aspect ratio of the output video
       panel: size
       type: select
-      default: 61
+      default: 16:9
       options:
       - name: Square
-        value: 61
+        value: 1:1
         ratio_w: 1
         ratio_h: 1
       - name: Wide
-        value: 969
+        value: 16:9
         ratio_w: 16
         ratio_h: 9
       - name: Vertical
-        value: 556
+        value: 9:16
         ratio_w: 9
         ratio_h: 16
       - name: Classic
-        value: 184
+        value: 4:3
         ratio_w: 4
         ratio_h: 3
       - name: Custom
@@ -343,20 +337,20 @@ spec:
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 480
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
       type: number
       value_type: integer
       panel: size
-      default: 1024
+      default: 832
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -387,14 +381,3 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
-    - id: boundary_ratio
-      label: Boundary Ratio
-      description: The ratio of the boundary of the image
-      type: number+slider
-      value_type: float
-      panel: sampling
-      required: false
-      default: 0.875
-      min: 0.0
-      max: 1.0
-      step: 0.01

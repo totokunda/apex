@@ -13,7 +13,7 @@ from diffusers.utils import is_torch_version
 from .base_model import (WanAttentionBlock, WanTransformer3DModel,
                                 sinusoidal_embedding_1d, cfg_skip)
 
-VIDEOX_OFFLOAD_VACE_LATENTS = os.environ.get("VIDEOX_OFFLOAD_VACE_LATENTS", False)
+VIDEOX_OFFLOAD_VACE_LATENTS = os.environ.get("VIDEOX_OFFLOAD_VACE_LATENTS", True)
 
 class VaceWanAttentionBlock(WanAttentionBlock):
     def __init__(
@@ -157,6 +157,7 @@ class FunVACETransformer3DModel(WanTransformer3DModel):
         new_kwargs = dict(x=x)
         new_kwargs.update(kwargs)
         
+       
         for block in self.vace_blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 def create_custom_forward(module, **static_kwargs):
@@ -245,8 +246,7 @@ class FunVACETransformer3DModel(WanTransformer3DModel):
         # context
         context_lens = None
         context = self.text_embedding(context)
-
-
+       
         # arguments
         kwargs = dict(
             e=e0,

@@ -49,6 +49,7 @@ class WanFunVACEEngine(WanShared):
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
         offload: bool = True,
+        progress_callback: Callable | None = None,
     ):
         r"""
         Encodes the prompt into text encoder hidden states.
@@ -77,6 +78,7 @@ class WanFunVACEEngine(WanShared):
                 torch dtype
         """
         device = device or self._execution_device
+        safe_emit_progress(progress_callback, 0.05, "Preparing prompt encoding")
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
         if prompt is not None:
@@ -86,10 +88,15 @@ class WanFunVACEEngine(WanShared):
             
         
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.10, "Loading text encoder")
             self.load_component_by_type("text_encoder")
+            safe_emit_progress(progress_callback, 0.20, "Text encoder loaded")
+        safe_emit_progress(progress_callback, 0.25, "Moving text encoder to device")
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.30, "Text encoder on device")
 
         if prompt_embeds is None:
+            safe_emit_progress(progress_callback, 0.40, "Encoding prompt embeddings")
             prompt_embeds = self.text_encoder.encode(
                 text=prompt,
                 num_videos_per_prompt=num_videos_per_prompt,
@@ -98,6 +105,7 @@ class WanFunVACEEngine(WanShared):
                 device=device,
                 dtype=dtype,
             )
+            safe_emit_progress(progress_callback, 0.65, "Prompt embeddings ready")
 
         if do_classifier_free_guidance and negative_prompt_embeds is None:
             negative_prompt = negative_prompt or ""
@@ -115,6 +123,7 @@ class WanFunVACEEngine(WanShared):
                     " the batch size of `prompt`."
                 )
 
+            safe_emit_progress(progress_callback, 0.75, "Encoding negative prompt embeddings")
             negative_prompt_embeds = self.text_encoder.encode(
                 text=negative_prompt,
                 use_attention_mask=True,
@@ -122,9 +131,12 @@ class WanFunVACEEngine(WanShared):
                 max_sequence_length=max_sequence_length,
                 device=device,
             )
+            safe_emit_progress(progress_callback, 0.90, "Negative prompt embeddings ready")
             
         if offload:
-            self._offload(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.95, "Offloading text encoder")
+            self._offload("text_encoder")
+        safe_emit_progress(progress_callback, 1.0, "Prompt encoding complete")
 
         return prompt_embeds, negative_prompt_embeds
     
@@ -420,22 +432,27 @@ class WanFunVACEEngine(WanShared):
         offload: bool = True,
         **kwargs,
     ):
-
+        safe_emit_progress(progress_callback, 0.0, "Starting FunVACE pipeline")
+        safe_emit_progress(progress_callback, 0.02, "Preparing inputs")
         video_length = self._parse_num_frames(duration, fps)
         sample_size = [height, width]
         if subject_ref_images is not None:
+            safe_emit_progress(progress_callback, 0.03, "Loading subject reference images")
             subject_ref_images = [self.get_image_latent(_subject_ref_image, sample_size=sample_size, padding=True) for _subject_ref_image in subject_ref_images]
             subject_ref_images = torch.cat(subject_ref_images, dim=2)
             
         if video is not None:
             if mask_video is None:
                 raise ValueError("mask_video is required when video is provided")
+            safe_emit_progress(progress_callback, 0.05, "Loading input video + mask video")
             video, _, _, _ = self.get_video_to_video_latent(video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)
             mask_video, _, _, _ = self.get_video_to_video_latent(mask_video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)
             mask_video = mask_video[:, :1]
         else:
+            safe_emit_progress(progress_callback, 0.05, "Preparing start/end images to video latents")
             video, mask_video, clip_image = self.get_image_to_video_latent(start_image, end_image, video_length=video_length, sample_size=sample_size)
         
+        safe_emit_progress(progress_callback, 0.06, "Loading control video")
         control_video, _, _, _ = self.get_video_to_video_latent(control_video, video_length=video_length, sample_size=sample_size, fps=fps, ref_image=None)
 
         
@@ -467,6 +484,7 @@ class WanFunVACEEngine(WanShared):
             do_classifier_free_guidance = guidance_scale > 1.0
 
         # 3. Encode input prompt
+        encode_progress_callback = make_mapped_progress(progress_callback, 0.06, 0.18)
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             negative_prompt,
@@ -476,28 +494,37 @@ class WanFunVACEEngine(WanShared):
             negative_prompt_embeds=negative_prompt_embeds,
             max_sequence_length=max_sequence_length,
             device=device,
+            progress_callback=encode_progress_callback,
         )
+        safe_emit_progress(progress_callback, 0.18, "Prompts ready")
         
 
         # 4. Prepare timesteps
         if self.scheduler is None:
+            safe_emit_progress(progress_callback, 0.19, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.20, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.21, "Moving scheduler to device")
         self.to_device(self.scheduler)
+        safe_emit_progress(progress_callback, 0.22, "Scheduler on device")
         sigmas = (
             np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
             if sigmas is None
             else sigmas
         )
+        safe_emit_progress(progress_callback, 0.23, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
             sigmas=sigmas,
         )
+        safe_emit_progress(progress_callback, 0.24, "Timesteps ready")
         self._num_timesteps = len(timesteps)
         weight_dtype = self.component_dtypes["transformer"]
 
         # 5. Prepare latents.
         if mask_video is not None:
+            safe_emit_progress(progress_callback, 0.25, "Preprocessing mask video")
             bs, _, video_length, height, width = video.size()
             mask_condition = self.mask_processor.preprocess(rearrange(mask_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
             mask_condition = mask_condition.to(dtype=torch.float32)
@@ -506,6 +533,7 @@ class WanFunVACEEngine(WanShared):
         
         
         if control_video is not None:
+            safe_emit_progress(progress_callback, 0.27, "Preprocessing control video")
             video_length = control_video.shape[2]
             control_video = self.image_processor.preprocess(rearrange(control_video, "b c f h w -> (b f) c h w"), height=height, width=width) 
             control_video = control_video.to(dtype=torch.float32)
@@ -514,6 +542,7 @@ class WanFunVACEEngine(WanShared):
             input_video = input_video.to(dtype=weight_dtype, device=device)
 
         elif video is not None:
+            safe_emit_progress(progress_callback, 0.27, "Preprocessing input video")
             video_length = video.shape[2]
             init_video = self.image_processor.preprocess(rearrange(video, "b c f h w -> (b f) c h w"), height=height, width=width) 
             init_video = init_video.to(dtype=torch.float32)
@@ -523,6 +552,7 @@ class WanFunVACEEngine(WanShared):
             input_video = input_video.to(dtype=weight_dtype, device=device)
 
         if subject_ref_images is not None:
+            safe_emit_progress(progress_callback, 0.29, "Preprocessing subject reference images")
             video_length = subject_ref_images.shape[2]
             subject_ref_images = self.image_processor.preprocess(rearrange(subject_ref_images, "b c f h w -> (b f) c h w"), height=height, width=width) 
             subject_ref_images = subject_ref_images.to(dtype=torch.float32)
@@ -536,12 +566,15 @@ class WanFunVACEEngine(WanShared):
                 for j in range(f):
                     new_subject_ref_images[i].append(subject_ref_images[i, :, j:j+1])
             subject_ref_images = new_subject_ref_images
-        
+
+        safe_emit_progress(progress_callback, 0.31, "Encoding VACE context")
         vace_latents = self.vace_encode_frames(input_video, subject_ref_images, masks=mask_condition, vae=self.vae)
         mask_latents = self.vace_encode_masks(mask_condition, subject_ref_images)
         vace_context = self.vace_latent(vace_latents, mask_latents)
+        safe_emit_progress(progress_callback, 0.34, "VACE context ready")
 
         # 5. Prepare latents.
+        safe_emit_progress(progress_callback, 0.35, "Initializing latent noise")
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,
             self.num_channels_latents,
@@ -554,26 +587,32 @@ class WanFunVACEEngine(WanShared):
             latents,
             num_length_latents=vace_latents[0].size(1)
         )
+        safe_emit_progress(progress_callback, 0.38, "Latents ready")
 
+        safe_emit_progress(progress_callback, 0.39, "Loading transformer config")
         self.transformer_config = self.load_config_by_name("high_noise_transformer", "transformer")
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+        safe_emit_progress(progress_callback, 0.40, "Preparing scheduler step kwargs")
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         transformer_dtype = self.component_dtypes["transformer"]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
         
         if boundary_ratio is not None:
+            safe_emit_progress(progress_callback, 0.41, "Computing boundary timestep")
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
         else:
             boundary_timestep = None
             
+        safe_emit_progress(progress_callback, 0.42, "Computing denoise sequence length")
         transformer_config = self.load_config_by_name("high_noise_transformer", "transformer")
         target_shape = (self.num_channels_latents, vace_latents[0].size(1), vace_latents[0].size(2), vace_latents[0].size(3))
 
         seq_len = math.ceil((target_shape[2] * target_shape[3]) / (transformer_config["patch_size"][1] * transformer_config["patch_size"][2]) * target_shape[1]) 
+        safe_emit_progress(progress_callback, 0.45, "Starting denoise")
         # 7. Denoising loop
         transformer_dtype = self.component_dtypes["transformer"]
         latents = self.denoise(
@@ -602,6 +641,7 @@ class WanFunVACEEngine(WanShared):
         )
        
         if subject_ref_images is not None:
+            safe_emit_progress(progress_callback, 0.91, "Trimming subject reference frames")
             len_subject_ref_images = len(subject_ref_images[0])
             latents = latents[:, :, len_subject_ref_images:, :, :]
 

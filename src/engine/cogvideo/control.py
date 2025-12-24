@@ -107,7 +107,7 @@ class CogVideoControlEngine(CogVideoShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         transformer_dtype = self.component_dtypes["transformer"]
 
@@ -196,7 +196,7 @@ class CogVideoControlEngine(CogVideoShared):
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -233,7 +233,7 @@ class CogVideoControlEngine(CogVideoShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

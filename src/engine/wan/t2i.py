@@ -56,12 +56,17 @@ class WanT2IEngine(WanShared):
             and low_noise_guidance_scale is not None
         ):
             guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
+            safe_emit_progress(progress_callback, 0.01, "Using high/low-noise guidance scales")
 
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.02, "Loading text encoder")
             self.load_component_by_type("text_encoder")
+            safe_emit_progress(progress_callback, 0.03, "Text encoder loaded")
 
+        safe_emit_progress(progress_callback, 0.04, "Moving text encoder to device")
         self.to_device(self.text_encoder)
 
+        safe_emit_progress(progress_callback, 0.05, "Encoding prompt")
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
@@ -74,6 +79,7 @@ class WanT2IEngine(WanShared):
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.11, "Encoding negative prompt")
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
@@ -93,10 +99,12 @@ class WanT2IEngine(WanShared):
         )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.15, "Offloading text encoder")
             del self.text_encoder
         safe_emit_progress(progress_callback, 0.16, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
+        safe_emit_progress(progress_callback, 0.18, "Moving embeddings to device")
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -107,13 +115,18 @@ class WanT2IEngine(WanShared):
         )
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.21, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.22, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.23, "Moving scheduler to device")
         self.to_device(self.scheduler)
         scheduler = self.scheduler
 
+        safe_emit_progress(progress_callback, 0.24, "Configuring scheduler timesteps")
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
+        safe_emit_progress(progress_callback, 0.26, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -130,6 +143,7 @@ class WanT2IEngine(WanShared):
             vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
         )
 
+        safe_emit_progress(progress_callback, 0.30, "Initializing latent noise")
         latents = self._get_latents(
             height,
             width,
@@ -146,6 +160,7 @@ class WanT2IEngine(WanShared):
         safe_emit_progress(progress_callback, 0.36, "Initialized latent noise")
 
         if boundary_ratio is not None:
+            safe_emit_progress(progress_callback, 0.37, "Computing boundary timestep")
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
@@ -158,8 +173,14 @@ class WanT2IEngine(WanShared):
         self._preview_width = width
         self._preview_offload = offload
         # Reserve denoising progress range
-        denoise_progress_callback = make_mapped_progress(progress_callback, 0.40, 0.92)
-        safe_emit_progress(progress_callback, 0.40, "Starting denoising")
+        denoise_progress_callback = denoise_progress_callback or make_mapped_progress(
+            progress_callback, 0.40, 0.92
+        )
+        safe_emit_progress(
+            progress_callback,
+            0.40,
+            f"Starting denoising (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
 
         latents = self.denoise(
             expand_timesteps=expand_timesteps,
@@ -194,13 +215,15 @@ class WanT2IEngine(WanShared):
         safe_emit_progress(progress_callback, 0.94, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            safe_emit_progress(progress_callback, 0.95, "Offloading transformer")
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.96, "Transformer offloaded")
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
+            safe_emit_progress(progress_callback, 0.98, "Decoding latents")
             tensor_image = self.vae_decode(latents, offload=offload)
             image = self._tensor_to_frame(tensor_image)
             safe_emit_progress(progress_callback, 1.0, "Completed t2i pipeline")

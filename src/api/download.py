@@ -8,6 +8,7 @@ import os
 import shutil
 import ray
 from loguru import logger
+import traceback
 from pathlib import Path
 
 from .ws_manager import get_ray_ws_bridge
@@ -20,11 +21,10 @@ from .preprocessor_registry import check_preprocessor_downloaded
 
 router = APIRouter(prefix="/download", tags=["download"])
 
-# In-memory cache mapping request keys -> job_id
+# In-memory mapping of request keys -> most recently created job_id.
+# NOTE: This is *not* used to dedupe or reuse job ids; it only helps `/download/resolve`
+# return the last-seen job id for a given request signature.
 _request_key_to_job_id: Dict[str, str] = {}
-
-# Fixed namespace for deterministic job ids
-_NAMESPACE_UUID = uuid.UUID("8b0b145f-8f8b-4a7b-9c5a-9a6ca3e7a001")
 
 
 def _normalize_item_type(item_type: str) -> str:
@@ -59,12 +59,24 @@ def _request_key(
     }
     return json.dumps(canonical, sort_keys=True, separators=(",", ":"))
 
+def _new_unique_job_id(preferred: Optional[str] = None) -> str:
+    """
+    Return a fresh job_id that is not already present in the job store or websocket cache.
+    If `preferred` is provided and unused, it will be returned; otherwise a new UUID4 is used.
+    """
+    candidate = (preferred or "").strip() or str(uuid.uuid4())
+    while True:
+        seen_store = unified_job_store.get(candidate) is not None
+        seen_ws = False
+        try:
+            from .ws_manager import websocket_manager
 
-def _deterministic_job_id(
-    item_type: str, source: Union[str, List[str]], save_path: Optional[str]
-) -> str:
-    key = _request_key(item_type, source, save_path)
-    return str(uuid.uuid5(_NAMESPACE_UUID, key))
+            seen_ws = websocket_manager.get_latest_update(candidate) is not None
+        except Exception:
+            seen_ws = False
+        if not seen_store and not seen_ws:
+            return candidate
+        candidate = str(uuid.uuid4())
 
 
 def _already_downloaded(
@@ -180,50 +192,42 @@ def start_unified_download(request: UnifiedDownloadRequest):
     Cancel via:   /download/cancel/{job_id} (or /jobs/cancel/{job_id})
     """
     try:
-        # Determine deterministic job id and request key
-        job_id = request.job_id or _deterministic_job_id(
-            request.item_type, request.source, request.save_path
-        )
+        # Always create a fresh job id to avoid stale websocket/job-store state reuse.
+        job_id = _new_unique_job_id(request.job_id)
         req_key = _request_key(request.item_type, request.source, request.save_path)
-        # If a job with this request key was already started, return existing job id
-        existing_job_id = _request_key_to_job_id.get(req_key)
-        if existing_job_id and request.item_type != "lora":
-            status_info = unified_job_store.status(existing_job_id)
-            status = status_info.get("status", "unknown")
-            if status in {"running", "queued"}:
-                return JobResponse(
-                    job_id=existing_job_id,
-                    status=status,
-                    message="Existing job in progress",
-                )
-            # If completed and assets are present, reuse id
-            downloaded, _ = _already_downloaded(
-                request.item_type, request.source, request.save_path
-            )
-            if downloaded:
-                return JobResponse(
-                    job_id=existing_job_id,
-                    status="complete",
-                    message="Already downloaded",
-                )
-            # Otherwise start a new one below
 
         # If already downloaded and no need to start a job
         downloaded, _ = _already_downloaded(
             request.item_type, request.source, request.save_path
         )
         if downloaded and request.item_type != "lora":
-            # Cache the deterministic id mapping even when not starting a Ray job
+            # Record the latest job id for this request key even when not starting a Ray job.
             _request_key_to_job_id[req_key] = job_id
+            # Also seed websocket "latest" so polling `/download/status/{job_id}` is consistent.
+            try:
+                from .ws_manager import websocket_manager
+
+                websocket_manager.clear_latest(job_id)
+                websocket_manager.latest_updates[job_id] = {
+                    "progress": 1.0,
+                    "message": "Already downloaded",
+                    "status": "complete",
+                    "metadata": {
+                        "item_type": request.item_type,
+                        "source": request.source,
+                        "save_path": request.save_path,
+                    },
+                }
+            except Exception:
+                pass
             return JobResponse(
                 job_id=job_id, status="complete", message="Already downloaded"
             )
 
         # Start the Ray job
-        # Clear any cached/stale websocket state for this deterministic job_id to avoid replaying "complete"
+        # Clear any cached/stale websocket state for this job_id to avoid replaying stale state.
         try:
             from .ws_manager import websocket_manager
-
             websocket_manager.clear_latest(job_id)
         except Exception:
             pass
@@ -263,20 +267,19 @@ def start_unified_download(request: UnifiedDownloadRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to start unified download: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/resolve", response_model=ResolveResponse)
 def resolve_job_id(request: ResolveRequest):
     """
-    Resolve or compute the job_id for a given request (item_type + source [+ save_path]).
+    Resolve the most recently created job_id for a given request (item_type + source [+ save_path]).
     Returns whether a matching job exists, is running, and whether the assets are already downloaded.
     """
     try:
         req_key = _request_key(request.item_type, request.source, request.save_path)
-        job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(
-            request.item_type, request.source, request.save_path
-        )
+        # If we have seen this request before, return the last job_id; otherwise suggest a fresh id.
+        job_id = _request_key_to_job_id.get(req_key) or _new_unique_job_id()
         downloaded, base_dir = _already_downloaded(
             request.item_type, request.source, request.save_path
         )
@@ -285,9 +288,14 @@ def resolve_job_id(request: ResolveRequest):
         exists = False
         if job_id:
             info = unified_job_store.get(job_id)
-            exists = info is not None
-            if exists:
+            if info is not None:
+                exists = True
                 status = unified_job_store.status(job_id).get("status", "unknown")
+                running = status in {"running", "queued"}
+            else:
+                # Not registered in job store; it may still exist via websocket-latest fallback.
+                status = unified_job_store.status(job_id).get("status", "unknown")
+                exists = status not in {"unknown"}
                 running = status in {"running", "queued"}
 
         return ResolveResponse(
@@ -330,9 +338,7 @@ def resolve_job_ids_batch(request: BatchResolveRequest):
         results: List[ResolveResponse] = []
         for src in request.sources or []:
             req_key = _request_key(request.item_type, src, request.save_path)
-            job_id = _request_key_to_job_id.get(req_key) or _deterministic_job_id(
-                request.item_type, src, request.save_path
-            )
+            job_id = _request_key_to_job_id.get(req_key) or _new_unique_job_id()
             downloaded, base_dir = _already_downloaded(
                 request.item_type, src, request.save_path
             )
@@ -341,9 +347,13 @@ def resolve_job_ids_batch(request: BatchResolveRequest):
             exists = False
             if job_id:
                 info = unified_job_store.get(job_id)
-                exists = info is not None
-                if exists:
+                if info is not None:
+                    exists = True
                     status = unified_job_store.status(job_id).get("status", "unknown")
+                    running = status in {"running", "queued"}
+                else:
+                    status = unified_job_store.status(job_id).get("status", "unknown")
+                    exists = status not in {"unknown"}
                     running = status in {"running", "queued"}
 
             results.append(
@@ -369,7 +379,7 @@ def delete_downloaded_path(request: DeleteRequest):
     """
     Delete a downloaded file or directory from the filesystem.
     Safety checks ensure deletion is within known download roots unless explicitly scoped by item_type.
-    Also clears deterministic job-id mapping for the corresponding request and unmarks preprocessor downloads.
+    Also clears request-key -> last job_id mappings for the corresponding request and unmarks preprocessor downloads.
     """
     try:
         # Determine allowed base(s)
@@ -449,7 +459,7 @@ def delete_downloaded_path(request: DeleteRequest):
         removed_mapping = False
         unmarked = False
 
-        # Best-effort: clear deterministic request -> job_id mappings that match item_type+source (any save_path)
+        # Best-effort: clear request-key -> last job_id mappings that match item_type+source (any save_path)
         try:
             if request.item_type and request.source is not None:
                 norm_type = _normalize_item_type(request.item_type)

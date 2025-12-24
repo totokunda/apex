@@ -214,12 +214,18 @@ class ChromaT2IEngine(BaseEngine):
         offload: bool = True,
         num_images: int = 1,
         text_encoder_kwargs: Optional[Dict[str, Any]] = {},
+        progress_callback: Callable | None = None,
     ):
         if not hasattr(self, "text_encoder") or not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.10, "Loading text encoder")
             self.load_component_by_type("text_encoder")
+            safe_emit_progress(progress_callback, 0.20, "Text encoder loaded")
 
+        safe_emit_progress(progress_callback, 0.25, "Moving text encoder to device")
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.30, "Text encoder on device")
 
+        safe_emit_progress(progress_callback, 0.40, "Encoding prompt embeddings")
         prompt_embeds, prompt_embeds_mask = self.text_encoder.encode(
             prompt,
             device=self.device,
@@ -228,12 +234,14 @@ class ChromaT2IEngine(BaseEngine):
             output_type="hidden_states",
             **text_encoder_kwargs,
         )
+        safe_emit_progress(progress_callback, 0.60, "Prompt embeddings ready")
 
         text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(
             device=self.device, dtype=prompt_embeds.dtype
         )
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.70, "Encoding negative prompt embeddings")
             negative_prompt_embeds, negative_prompt_embeds_mask = (
                 self.text_encoder.encode(
                     negative_prompt,
@@ -244,6 +252,7 @@ class ChromaT2IEngine(BaseEngine):
                     **text_encoder_kwargs,
                 )
             )
+            safe_emit_progress(progress_callback, 0.85, "Negative prompt embeddings ready")
 
             negative_text_ids = torch.zeros(negative_prompt_embeds.shape[1], 3).to(
                 device=self.device, dtype=negative_prompt_embeds.dtype
@@ -254,7 +263,9 @@ class ChromaT2IEngine(BaseEngine):
             negative_text_ids = None
 
         if offload:
+            safe_emit_progress(progress_callback, 0.95, "Offloading text encoder")
             del self.text_encoder
+        safe_emit_progress(progress_callback, 1.0, "Prompt encoding complete")
             
         return prompt_embeds, prompt_embeds_mask, negative_prompt_embeds, negative_prompt_embeds_mask, text_ids, negative_text_ids
     
@@ -294,7 +305,7 @@ class ChromaT2IEngine(BaseEngine):
         num_inference_steps: int = 30,
         num_images: int = 1,
         seed: int | None = None,
-        guidance_scale: float = 1.0,
+        guidance_scale: float = 3.0,
         true_cfg_scale: float = 4.0,
         use_cfg_guidance: bool = True,
         return_latents: bool = False,
@@ -337,6 +348,7 @@ class ChromaT2IEngine(BaseEngine):
             text_encoder_kwargs=text_encoder_kwargs,
             use_cfg_guidance=use_cfg_guidance,
             offload=offload,
+            progress_callback=make_mapped_progress(progress_callback, 0.05, 0.20),
         )
         safe_emit_progress(progress_callback, 0.20, "Encoded prompt")
 
@@ -347,8 +359,11 @@ class ChromaT2IEngine(BaseEngine):
         prompt_embeds_mask = prompt_embeds_mask.to(self.device)
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.205, "Loading transformer")
             self.load_component_by_type("transformer")
+            safe_emit_progress(progress_callback, 0.215, "Transformer loaded")
 
+        safe_emit_progress(progress_callback, 0.218, "Moving transformer to device")
         self.to_device(self.transformer)
         safe_emit_progress(progress_callback, 0.22, "Transformer ready")
 
@@ -372,8 +387,11 @@ class ChromaT2IEngine(BaseEngine):
         safe_emit_progress(progress_callback, 0.30, "Initialized latent noise")
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.31, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.33, "Scheduler loaded")
 
+        safe_emit_progress(progress_callback, 0.34, "Moving scheduler to device")
         self.to_device(self.scheduler)
         safe_emit_progress(progress_callback, 0.35, "Scheduler ready")
 
@@ -415,17 +433,17 @@ class ChromaT2IEngine(BaseEngine):
             timesteps=timesteps,
             mu=mu,
         )
-        safe_emit_progress(
-            progress_callback, 0.50, "Timesteps computed; starting denoise"
-        )
+        safe_emit_progress(progress_callback, 0.48, "Timesteps computed")
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
 
         if not hasattr(self, "transformer") or not self.transformer:
+            safe_emit_progress(progress_callback, 0.485, "Loading transformer")
             self.load_component_by_type("transformer")
 
+        safe_emit_progress(progress_callback, 0.49, "Ensuring transformer on device")
         self.to_device(self.transformer)
 
         # Set preview context for per-step rendering on the main engine
@@ -455,6 +473,7 @@ class ChromaT2IEngine(BaseEngine):
         image_embeds = None
         negative_image_embeds = None
         if ip_adapter_image is not None or ip_adapter_image_embeds is not None:
+            safe_emit_progress(progress_callback, 0.495, "Preparing IP adapter embeddings")
             image_embeds = self.prepare_ip_adapter_image_embeds(
                 ip_adapter_image,
                 ip_adapter_image_embeds,
@@ -465,6 +484,7 @@ class ChromaT2IEngine(BaseEngine):
             negative_ip_adapter_image is not None
             or negative_ip_adapter_image_embeds is not None
         ):
+            safe_emit_progress(progress_callback, 0.498, "Preparing negative IP adapter embeddings")
             negative_image_embeds = self.prepare_ip_adapter_image_embeds(
                 negative_ip_adapter_image,
                 negative_ip_adapter_image_embeds,
@@ -562,7 +582,7 @@ class ChromaT2IEngine(BaseEngine):
 
         if offload:
             try:
-                self._offload(self.transformer)
+                self._offload("transformer")
             except Exception:
                 pass
         safe_emit_progress(
@@ -575,7 +595,9 @@ class ChromaT2IEngine(BaseEngine):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.95, "Unpacking latents")
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+        safe_emit_progress(progress_callback, 0.97, "Decoding latents")
         image = self.vae_decode(latents, offload=offload)
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed text-to-image pipeline")

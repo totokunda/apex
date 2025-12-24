@@ -300,7 +300,7 @@ class WanS2VEngine(WanShared):
             audio_embed_bucket = audio_embed_bucket.permute(0, 2, 3, 1)
 
         if offload:
-            self._offload(self.helpers["audio_encoder"])
+            self._offload("audio_encoder")
 
         return audio_embed_bucket, num_repeat
 
@@ -573,7 +573,7 @@ class WanS2VEngine(WanShared):
             break
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         video_chunks = torch.cat(video_chunks, dim=2)
         return self._tensor_to_frames(video_chunks)

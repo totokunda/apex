@@ -54,7 +54,7 @@ class CogVideoI2VEngine(CogVideoShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         transformer_config = self.load_config_by_type("transformer")
 
@@ -211,7 +211,7 @@ class CogVideoI2VEngine(CogVideoShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

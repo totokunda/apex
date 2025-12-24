@@ -5,7 +5,8 @@ metadata:
   model: wan
   name: Wan Lynx 14B Lite
   version: 1.0.0
-  description: Wan Lynx 14B Lite is a 14B parameter model for text-to-video generation.
+  description: Wan Lynx 14B Lite is a 14B parameter model for text to video generation
+    using a reference image, as a lite version of Wan Lynx 14B.
   tags:
   - wan
   - lynx
@@ -183,6 +184,7 @@ spec:
     run:
       num_inference_steps: 30
       guidance_scale: 5.0
+      fps: 24
       return_latents: false
       timesteps_as_indices: true
       expand_timesteps: false
@@ -347,6 +349,6 @@ spec:
       panel: sampling
       required: false
       default: 5.0
-      min: 1.0
+      min: 0.0
       max: 15.0
       step: 0.5

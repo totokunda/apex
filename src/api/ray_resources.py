@@ -120,12 +120,13 @@ def get_ray_resources(
     Get Ray resource requirements dynamically based on current availability.
 
     Behavior:
-      - CPU: allocate up to 1 CPU (or whatever is available if < 1 remains)
-      - MPS: treat as CPU-only for Ray scheduling
-      - CUDA: allocate up to 1 GPU if available; otherwise take a fractional
-        share (>= 0.25 if possible, else whatever remains). If the cluster
-        exposes per-GPU custom resources like `GPU_{index}`, honor them to
-        pin the request to a specific device when `device_index` is provided.
+      - CPU: allocate CPUs based on load profile.
+      - MPS: treat as CPU-only for Ray scheduling.
+      - CUDA: **always request a full GPU (num_gpus=1.0)** when a CUDA device
+        is selected. This ensures Ray queues tasks when the GPU is busy, instead
+        of falling back to CPU or oversubscribing via fractional GPUs.
+        If the cluster exposes per-GPU custom resources like `GPU_{index}`, we
+        honor them to best-effort pin placement when `device_index` is provided.
 
     Args:
         device_index: GPU index to use (None means CPU when device_type is "cpu").
@@ -221,15 +222,16 @@ def get_ray_resources(
             total_cpus = float(cluster.get("CPU", cpu_avail)) or cpu_avail
             num_cpus = _select_cpus(cpu_avail, total_cpus, profile)
 
-            # GPU request: prefer 1 full GPU; otherwise try to take at least 0.25 if possible,
-            # else take whatever fractional remains (> 0)
-            if gpu_avail >= 1.0:
-                num_gpus = 1.0
-            elif gpu_avail > 0.0:
-                num_gpus = 0.25 if gpu_avail >= 0.25 else gpu_avail
-            else:
-                # No GPUs available right now; fall back to CPU-only scheduling
+            # GPU request: always request a full GPU so Ray queues when the GPU is busy.
+            # Only fall back to CPU-only if the cluster has *no* GPU capacity at all.
+            total_gpus = float(cluster.get("GPU", gpu_avail) or 0.0)
+            if total_gpus <= 0.0:
+                logger.warning(
+                    "CUDA selected but Ray cluster reports no GPU capacity; "
+                    "falling back to CPU-only scheduling."
+                )
                 return {"num_cpus": num_cpus}
+            num_gpus = 1.0
 
             resources = None
             # If the cluster exposes per-GPU custom resources, honor them to pin the task

@@ -1,6 +1,6 @@
 from typing import Union, List, Optional, Callable, Dict, Any, Tuple
 import torch
-from src.utils.progress import safe_emit_progress
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from .shared import ZImageShared
 from PIL import Image
 import numpy as np
@@ -89,7 +89,7 @@ class ZImageControlEngine(ZImageShared):
         inpaint_image: Union[torch.FloatTensor] = None,
         control_image: Union[torch.FloatTensor] = None,
         mask_image: Union[torch.FloatTensor] = None,
-        control_context_scale: float = 1.0,
+        control_context_scale: float = 0.75,
         num_inference_steps: int = 50,
         sigmas: Optional[List[float]] = None,
         guidance_scale: float = 5.0,
@@ -120,15 +120,9 @@ class ZImageControlEngine(ZImageShared):
 
         vae_scale = self.vae_scale_factor * 2
         if height % vae_scale != 0:
-            raise ValueError(
-                f"Height must be divisible by {vae_scale} (got {height}). "
-                f"Please adjust the height to a multiple of {vae_scale}."
-            )
+            height = height - (height % vae_scale)
         if width % vae_scale != 0:
-            raise ValueError(
-                f"Width must be divisible by {vae_scale} (got {width}). "
-                f"Please adjust the width to a multiple of {vae_scale}."
-            )
+            width = width - (width % vae_scale)
         
         sample_size = [height, width]
         if inpaint_image is not None:
@@ -203,6 +197,7 @@ class ZImageControlEngine(ZImageShared):
                     "`negative_prompt_embeds` must also be provided for classifier-free guidance."
                 )
         else:
+            encode_progress_callback = make_mapped_progress(progress_callback, 0.02, 0.18)
             (
                 prompt_embeds,
                 negative_prompt_embeds,
@@ -214,7 +209,9 @@ class ZImageControlEngine(ZImageShared):
                 negative_prompt_embeds=negative_prompt_embeds,
                 device=device,
                 max_sequence_length=max_sequence_length,
+                progress_callback=encode_progress_callback,
             )
+            safe_emit_progress(progress_callback, 0.18, "Prompts ready")
 
         # 4. Prepare latent variables
         latents = self.prepare_latents(
@@ -238,8 +235,12 @@ class ZImageControlEngine(ZImageShared):
         image_seq_len = (latents.shape[2] // 2) * (latents.shape[3] // 2)
         
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.19, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.20, "Scheduler loaded")
+            safe_emit_progress(progress_callback, 0.21, "Moving scheduler to device")
             self.to_device(self.scheduler)
+            safe_emit_progress(progress_callback, 0.22, "Scheduler on device")
 
         # 5. Prepare timesteps
         mu = self.calculate_shift(
@@ -262,11 +263,15 @@ class ZImageControlEngine(ZImageShared):
         
         
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.23, "Loading transformer")
             self.load_component_by_type("transformer")
+            safe_emit_progress(progress_callback, 0.24, "Transformer loaded")
+            safe_emit_progress(progress_callback, 0.25, "Moving transformer to device")
             self.to_device(self.transformer)
+            safe_emit_progress(progress_callback, 0.26, "Transformer on device")
             
  
-
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.40, 0.92)
         # 6. Denoising loop
         with self._progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -349,11 +354,17 @@ class ZImageControlEngine(ZImageShared):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                    
+                if denoise_progress_callback is not None and len(timesteps) > 0:
+                    try:
+                        denoise_progress_callback(min((i + 1) / len(timesteps), 1.0), f"Denoising step {i + 1}/{len(timesteps)}")
+                    except Exception:
+                        pass
         
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
             safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
         
         if return_latents:

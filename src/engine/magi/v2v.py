@@ -95,7 +95,7 @@ class MagiV2VEngine(MagiShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         num_frames = self._parse_num_frames(duration, fps)
         num_chunks = math.ceil(
@@ -185,10 +185,10 @@ class MagiV2VEngine(MagiShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return torch.cat(latents, dim=2)

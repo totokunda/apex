@@ -181,7 +181,7 @@ class Flux2Control(Flux2Shared):
         )
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         # 3. prepare text embeddings
         prompt_embeds, text_ids = self.encode_prompt(
@@ -194,7 +194,7 @@ class Flux2Control(Flux2Shared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         # 4. process images
         if image is not None and not isinstance(image, list):
@@ -352,7 +352,7 @@ class Flux2Control(Flux2Shared):
         self._current_timestep = None
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             image = latents

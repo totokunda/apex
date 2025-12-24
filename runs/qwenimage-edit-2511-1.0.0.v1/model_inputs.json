@@ -1,0 +1,56 @@
+{
+    "engine_kwargs": {
+        "engine_type": "qwenimage",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/image/qwenimage-edit-2511-1.0.0.v1.yml",
+        "model_type": "edit_plus",
+        "selected_components": {
+            "scheduler": {
+                "name": "scheduler",
+                "base": "diffusers.FlowMatchEulerDiscreteScheduler",
+                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/14974494c4a006cd46697c18bdc97b06b53ba4de71983ae018e937e92eadfd77_scheduler_config.json",
+                "type": "scheduler",
+                "label": "FlowMatch Euler Discrete Scheduler",
+                "default": "FlowMatchEulerDiscreteScheduler",
+                "description": "The FlowMatch Euler Discrete Scheduler is a scheduler for the QwenImage Edit model."
+            },
+            "vae": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "transformer": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "image.processor": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            }
+        },
+        "auto_memory_management": false,
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "image_list": [
+            "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/by-hash/de62539af1c2e3e195d5e8b9ad3a89e71e1ed26ca01559e4c76346666b7ad18c.png",
+            "/home/tosin_coverquick_co/apex-diffusion/cache/uploads/by-hash/2026399fe2f539b0ac6c386f123b762bf724a370f72aaa7dc60206eef08ee245.png"
+        ],
+        "prompt": "Place both men together in the same frame, standing side by side in an urban outdoor setting. They are positioned in front of a dark concrete or brick wall with subtle texture, suggesting a city street or alley. One man has his arm wrapped naturally around the other\u2019s shoulders in a relaxed, supportive pose. Both face forward with serious, neutral expressions. Preserve their original faces, clothing, and body proportions. Match lighting, perspective, and color tones so both men and the background appear naturally integrated in the same scene.",
+        "negative_prompt": " ",
+        "resolution": 1024,
+        "aspect_ratio": "custom",
+        "num_inference_steps": 40,
+        "height": 1024,
+        "width": 1024,
+        "seed": 1339878393,
+        "true_cfg_scale": 4,
+        "duration": "5s"
+    }
+}

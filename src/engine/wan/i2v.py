@@ -24,6 +24,8 @@ class WanI2VEngine(WanShared):
         seed: int | None = None,
         fps: int = 16,
         guidance_scale: float = 5.0,
+        high_noise_guidance_scale: float = 1.0,
+        low_noise_guidance_scale: float = 1.0,
         progress_callback: Callable = None,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
@@ -40,6 +42,12 @@ class WanI2VEngine(WanShared):
         enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
+        if (
+            high_noise_guidance_scale is not None
+            and low_noise_guidance_scale is not None
+        ):
+            guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
+            safe_emit_progress(progress_callback, 0.01, "Using high/low-noise guidance scales")
 
         safe_emit_progress(progress_callback, 0.0, "Starting image-to-video pipeline")
         if guidance_scale is not None and isinstance(guidance_scale, list):
@@ -90,7 +98,7 @@ class WanI2VEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
@@ -106,12 +114,7 @@ class WanI2VEngine(WanShared):
             loaded_image, height=height, width=width
         ).to(self.device, dtype=torch.float32)
 
-        if not self.transformer:
-            self.load_component_by_type("transformer")
-
         transformer_dtype = self.component_dtypes["transformer"]
-
-        self.to_device(self.transformer)
 
         if boundary_ratio is None and not expand_timesteps:
             image_embeds = self.helpers["clip"](
@@ -127,7 +130,7 @@ class WanI2VEngine(WanShared):
             )
 
         if offload and boundary_ratio is None and not expand_timesteps:
-            self._offload(self.helpers["clip"])
+            self._offload("clip")
 
         if not self.scheduler:
             self.load_component_by_type("scheduler")
@@ -289,7 +292,7 @@ class WanI2VEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:

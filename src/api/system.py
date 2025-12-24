@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 import psutil
 from typing import Any, Dict, List, Optional
+from functools import partial
+import anyio
 
 # Reuse helpers to detect device type and query GPU memory info
 from .ray_resources import (
@@ -14,6 +16,10 @@ import re
 
 
 router = APIRouter(prefix="/system", tags=["system"])
+
+async def _run_blocking(func, *args, **kwargs):
+    """Run blocking (sync) work in a worker thread so we don't block the event loop."""
+    return await anyio.to_thread.run_sync(partial(func, *args, **kwargs))
 
 
 def _collect_gpu_memory_info() -> Optional[Dict[str, Any]]:
@@ -70,7 +76,11 @@ def _collect_gpu_memory_info() -> Optional[Dict[str, Any]]:
 
 
 @router.get("/memory")
-def get_system_memory() -> Dict[str, Any]:
+async def get_system_memory() -> Dict[str, Any]:
+    return await _run_blocking(_get_system_memory_sync)
+
+
+def _get_system_memory_sync() -> Dict[str, Any]:
     """Report current memory usage for system RAM and GPU VRAM.
 
     On Apple Silicon (unified memory), only a single unified memory metric is returned

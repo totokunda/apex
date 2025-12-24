@@ -31,13 +31,11 @@ spec:
     scale: 0.0
     name: lightx2v_lora
     label: Lightx2v LoRA
-    component: transformer
     verified: true
   - source: vrgamedevgirl84/Wan14BT2VFusioniX/FusionX_LoRa/Wan2.1_T2V_14B_FusionX_LoRA.safetensors
     scale: 1.0
     name: fusionx_lora
     label: FusionX LoRA
-    component: transformer
     verified: true
   attention_types:
   - sdpa
@@ -52,7 +50,7 @@ spec:
     scheduler_options:
     - name: UniPCMultistepScheduler
       label: UniPC Multistep Scheduler
-      description: The UniPC Multistep Scheduler is used for WAN Lynx 14B.
+      description: The UniPC Multistep Scheduler is used for WAN 2.1 14B Text to Video.
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.1-T2V-14B-Diffusers/scheduler/scheduler_config.json
   - type: vae
@@ -83,7 +81,7 @@ spec:
       file_size: 6731333792
     config_path: Wan-AI/Wan2.2-I2V-A14B-Diffusers/text_encoder/config.json
   - type: transformer
-    base: wan.lynx
+    base: wan.base
     label: Wan Transformer
     model_path:
     - path: Wan-AI/Wan2.1-T2V-14B-Diffusers/transformer

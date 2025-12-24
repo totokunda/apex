@@ -65,7 +65,7 @@ class LongCatRefineEngine(LongCatShared):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -227,7 +227,7 @@ class LongCatRefineEngine(LongCatShared):
         self._current_timestep = None
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if not return_latents:
             output_video = self.vae_decode(latents, offload=offload)

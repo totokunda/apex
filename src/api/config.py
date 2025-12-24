@@ -492,3 +492,29 @@ class HostnameResponse(BaseModel):
 def get_hostname():
     """Get the hostname of the current server machine"""
     return HostnameResponse(hostname=socket.gethostname())
+
+
+class UseFastDownloadRequest(BaseModel):
+    enabled: bool
+    
+class UseFastDownloadResponse(BaseModel):
+    enabled: bool
+
+@router.get("/enable-fast-download", response_model=UseFastDownloadResponse)
+def get_use_fast_download():
+    """Get whether fast download is enabled"""
+    return UseFastDownloadResponse(enabled=_get_env_bool("APEX_USE_FAST_DOWNLOAD", default=True))
+
+@router.post("/enable-fast-download", response_model=UseFastDownloadResponse)
+def set_use_fast_download(request: UseFastDownloadRequest):
+    """Enable/disable fast download"""
+    try:
+        value = "true" if bool(request.enabled) else "false"
+        os.environ["APEX_USE_FAST_DOWNLOAD"] = value
+        _update_persisted_config(APEX_USE_FAST_DOWNLOAD=value)
+        return UseFastDownloadResponse(enabled=request.enabled)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to set APEX_USE_FAST_DOWNLOAD: {str(e)}",
+        )

@@ -38,7 +38,7 @@ spec:
   - flash
   - flash3
   - sage
-  loras:
+  loras: 
   - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors
     scale: 1.0
     name: lightx2v_lora
@@ -55,17 +55,6 @@ spec:
       description: The UniPC Multistep Scheduler is used for WAN 2.1 14B I2V.
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/scheduler/scheduler_config.json
-  - type: vae
-    name: wan/vae
-    label: Wan VAE
-    base: wan
-    model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/vae
-      variant: default
-      precision: fp16
-      type: safetensors
-      file_size: 507592616
-    config_path: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/resolve/main/vae/config.json
   - type: vae
     label: WAN VAE
     name: wan/vae_2.2
@@ -203,7 +192,8 @@ spec:
         flow: column
         rows:
         - - aspect_ratio
-        - - height
+        - - resolution
+          - height
           - width
     - name: sampling
       label: Sampling
@@ -242,6 +232,19 @@ spec:
         bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
         proportions, malformed limbs, missing arms, missing legs, extra arms, extra
         legs, fused fingers, too many fingers, long neck, username, watermark, signature
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video
+      panel: size
+      type: select
+      default: 480
+      options:
+      - name: SD
+        value: 480
+      - name: HD
+        value: 720
+      - name: Custom
+        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video

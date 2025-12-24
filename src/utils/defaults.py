@@ -135,7 +135,13 @@ def set_torch_device(device: torch.device | str | None = None) -> None:
 
 
 def get_torch_device() -> torch.device:
-    return DEFAULT_DEVICE
+    # check if cuda or mps from default device is available otherwise return cpu 
+    if DEFAULT_DEVICE.type == "cuda" and torch.cuda.is_available():
+        return DEFAULT_DEVICE
+    elif DEFAULT_DEVICE.type == "mps" and torch.backends.mps.is_available():
+        return DEFAULT_DEVICE
+    else:
+        return torch.device("cpu")
 
 
 def get_cache_path() -> str:

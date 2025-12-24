@@ -1,9 +1,13 @@
 import importlib
 import inspect
+import logging
 from pathlib import Path
 from diffusers.models.modeling_utils import ModelMixin
 from .base import TRANSFORMERS_REGISTRY
-from loguru import logger
+try:
+    from loguru import logger  # type: ignore
+except Exception:  # pragma: no cover
+    logger = logging.getLogger(__name__)
 
 
 def _auto_register_transformers():

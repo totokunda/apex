@@ -295,7 +295,7 @@ class WanAnimateEngine(WanShared):
         image = image_processor(images=image, return_tensors="pt").to(self.device)
         image_embeds = image_encoder(**image, output_hidden_states=True)
         if offload:
-            self._offload(image_encoder)
+            self._offload("image_encoder")
         return image_embeds.hidden_states[-2]
 
     def prepare_pose_latents(
@@ -743,7 +743,7 @@ class WanAnimateEngine(WanShared):
             )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

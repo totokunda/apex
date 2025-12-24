@@ -537,7 +537,7 @@ class WanHoloCineEngine(WanShared):
             
         
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Preparing latents")
 
@@ -604,9 +604,7 @@ class WanHoloCineEngine(WanShared):
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Offloading previous transformer",
                         )
-                        self._offload(self.low_noise_transformer)
-                        setattr(self, "low_noise_transformer", None)
-                        empty_cache()
+                        self._offload("low_noise_transformer")
 
                     if not hasattr(self, "high_noise_transformer") or not self.high_noise_transformer:
                         safe_emit_progress(
@@ -636,9 +634,7 @@ class WanHoloCineEngine(WanShared):
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Switching model boundary, offloading previous transformer",
                         )
-                        self._offload(self.high_noise_transformer)
-                        setattr(self, "high_noise_transformer", None)
-                        empty_cache()
+                        self._offload("high_noise_transformer")
 
                     if not hasattr(self, "low_noise_transformer") or not self.low_noise_transformer:
                         safe_emit_progress(
@@ -697,9 +693,9 @@ class WanHoloCineEngine(WanShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
         if offload:
             if hasattr(self, "high_noise_transformer") and self.high_noise_transformer:
-                self._offload(self.high_noise_transformer)
+                self._offload("high_noise_transformer")
             if hasattr(self, "low_noise_transformer") and self.low_noise_transformer:
-                self._offload(self.low_noise_transformer)
+                self._offload("low_noise_transformer")
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:

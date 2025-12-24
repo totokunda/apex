@@ -59,12 +59,12 @@ def load_safetensors(
     with safetensors.safe_open(filename, framework=framework, device=device) as f:
         # Fast path: no framework conversion and no dtype casting.
         if not framework_is_np and not has_dtype:
-            for k in f.keys():
+            for k in f.offset_keys():
                 result[k] = f.get_tensor(k)
             return result
 
         # General path with optional framework and/or dtype conversion.
-        for k in f.keys():
+        for k in f.offset_keys():
             tensor = f.get_tensor(k)
 
             if framework_is_np:
@@ -76,9 +76,11 @@ def load_safetensors(
                     and isinstance(tensor, torch.Tensor)
                     and is_fp(tensor)
                 ):
-                    tensor = tensor.to(dtype)
+                    if tensor.dtype != dtype:
+                        tensor = tensor.to(dtype, copy=False, non_blocking=True)
                 elif is_mx_dtype and isinstance(tensor, mx.array):
-                    tensor = tensor.astype(dtype)
+                    if tensor.dtype != dtype:
+                        tensor = tensor.astype(dtype)
 
             result[k] = tensor
 

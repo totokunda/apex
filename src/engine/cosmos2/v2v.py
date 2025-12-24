@@ -57,7 +57,7 @@ class Cosmos2V2VEngine(Cosmos2Shared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if self.scheduler is None:
             self.load_component_by_type("scheduler")
@@ -180,10 +180,7 @@ class Cosmos2V2VEngine(Cosmos2Shared):
         )
 
         if offload:
-            self._offload(self.transformer)
-
-        if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents
@@ -203,6 +200,6 @@ class Cosmos2V2VEngine(Cosmos2Shared):
                 )
 
             if guardrail is not None and offload:
-                self._offload(guardrail)
+                self._offload("guardrail")
 
             return self._tensor_to_frames(video)

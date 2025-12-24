@@ -30,6 +30,7 @@ from src.api.manifest import get_manifest, MANIFEST_BASE_PATH
 import gc
 import ctypes
 import ctypes.util
+import time
 
 def _persist_run_config(
     manifest_path: str,
@@ -394,6 +395,7 @@ def _ensure_lora_registered_in_manifests(
         for entry in loras:
             if isinstance(entry, dict) and (
                 entry.get("source") == source or entry.get("remote_source") == source
+                or entry.get("name") == lora_name
             ):
                 already_present = True
                 break
@@ -509,7 +511,7 @@ def _is_transformer_downloaded_for_manifest(
 
 
 def _mark_lora_verified_in_manifests(
-    source: str, manifest_id: Optional[str] = None
+    source: str, manifest_id: Optional[str] = None, lora_name: Optional[str] = None
 ) -> Optional[bool]:
     """
     Update manifest entries for `source` with a `verified` flag.
@@ -532,6 +534,12 @@ def _mark_lora_verified_in_manifests(
         loras = spec.get("loras") or []
         if not isinstance(loras, list):
             return None
+        
+        if lora_name:
+            for entry in loras:
+                if isinstance(entry, dict) and entry.get("name") == lora_name and entry.get("verified"):
+                    return True
+        
         # Only attempt verification if the manifest's transformer is present locally
         transformer_component = _is_transformer_downloaded_for_manifest(doc)
         logger.info(
@@ -545,6 +553,7 @@ def _mark_lora_verified_in_manifests(
                 yaml_path=str(manifest_path),
                 should_download=False,
                 auto_apply_loras=False,
+                auto_memory_management=False,
             ).engine
         except Exception as e:
             logger.warning(
@@ -674,9 +683,9 @@ def download_unified(
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
             if progress is not None:
-                logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+                logger.debug(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
             else:
-                logger.info(f"[{job_id}] {message}")
+                logger.debug(f"[{job_id}] {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
 
@@ -741,6 +750,7 @@ def download_unified(
                     "message": "Preprocessor downloaded and initialized",
                 }
             except Exception as maybe_not_preproc:
+                logger.error(traceback.format_exc())
                 # Not a registered preprocessor id; fall through to generic downloader
                 logger.info(
                     f"'{source}' is not a registered preprocessor id or failed to init. Falling back to generic download. Reason: {maybe_not_preproc}"
@@ -881,7 +891,7 @@ def download_unified(
                 except Exception:
                     pass
 
-                verified = _mark_lora_verified_in_manifests(source, manifest_id)
+                verified = _mark_lora_verified_in_manifests(source, manifest_id, lora_name)
 
                 # If verification explicitly failed, surface an error and remove the LoRA
                 if verified is False:
@@ -1273,7 +1283,7 @@ def run_preprocessor(
         """Local send_progress that uses the passed ws_bridge"""
         try:
             ray.get(ws_bridge.send_update.remote(job_id, progress, message, metadata))
-            logger.info(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
+            logger.debug(f"[{job_id}] Progress: {progress*100:.1f}% - {message}")
         except Exception as e:
             logger.error(f"Failed to send progress update to websocket: {e}")
 
@@ -1377,6 +1387,7 @@ def run_engine_from_manifest(
             "yaml_path": manifest_path,
             "model_type": model_type,
             "selected_components": selected_components,
+            "auto_memory_management": os.environ.get("AUTO_MEMORY_MANAGEMENT", False),
             **(config.get("engine_kwargs", {}) or {}),
         }
 
@@ -1387,10 +1398,12 @@ def run_engine_from_manifest(
 
         # Compute FPS once so we don't capture the full engine/config inside callbacks.
         fps_for_video: int = 16
+        has_fps = False
         try:
             fps_candidate = config.get("fps", None)
             if fps_candidate:
                 fps_for_video = int(fps_candidate)
+                has_fps = True
             else:
                 impl = getattr(engine.engine, "implementation_engine", None)
                 if impl is not None:
@@ -1575,7 +1588,6 @@ def run_engine_from_manifest(
                                 "Audio muxing failed; returning video-only output. "
                                 f"Error: {mux_err}"
                             )
-
                 else:
                     # Fallback best-effort serialization
                     try:
@@ -1724,7 +1736,7 @@ def run_engine_from_manifest(
                     result.get("error")
                     or f"Preprocessor {job['preprocessor_name']} failed"
                 )
-            print(f"\n\n\n {result} \n\n\n")
+            
             prepared_inputs[job["input_id"]] = result.get("result_path")
 
         # Resolve concrete file paths for any audio inputs that should be saved with the final video
@@ -1849,12 +1861,18 @@ def run_engine_from_manifest(
             if model_type.lower() != "ovi"
             else render_on_step_callback_ovi
         )
-        # _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
-
+        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+        
+        # get if the model is video or image
+        if has_fps:
+            render_on_step = os.environ.get("ENABLE_VIDEO_RENDER_STEP", "true") == "true"
+        else:
+            render_on_step = os.environ.get("ENABLE_IMAGE_RENDER_STEP", "true") == "true"
+        
         output = engine.run(
             **(prepared_inputs or {}),
             progress_callback=progress_callback,
-            render_on_step=True,
+            
             render_on_step_callback=render_func,
         )
         # Avoid logging giant tensors/lists (can be very large and can amplify RSS).

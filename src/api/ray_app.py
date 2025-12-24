@@ -4,8 +4,17 @@ import ray
 from .settings import settings
 from loguru import logger
 
-# Initialize Ray if not already initialized
-if not ray.is_initialized():
+def _init_ray() -> None:
+    """
+    Initialize Ray (once) with sane defaults for this service.
+
+    IMPORTANT: do NOT initialize Ray at import-time. When running under Gunicorn,
+    import-time side effects interact badly with multi-worker preload/forking and
+    can lead to very slow startup or hung workers.
+    """
+    if ray.is_initialized():
+        return
+
     # Prepare spilling config directory
     spill_dir = settings.results_dir / "ray_spill"
     spill_dir.mkdir(parents=True, exist_ok=True)
@@ -59,7 +68,7 @@ if not ray.is_initialized():
 def get_ray_app():
     """Get the Ray runtime"""
     if not ray.is_initialized():
-        ray.init(ignore_reinit_error=True)
+        _init_ray()
     return ray
 
 

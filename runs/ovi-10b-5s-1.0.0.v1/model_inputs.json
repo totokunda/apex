@@ -1,0 +1,80 @@
+{
+    "engine_kwargs": {
+        "engine_type": "wan",
+        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/video/ovi-10b-5s-1.0.0.v1.yml",
+        "model_type": "ovi",
+        "selected_components": {
+            "transformer_scheduler": {
+                "name": "transformer_scheduler_unipc",
+                "base": "src.scheduler.unipc.UniPCMultistepScheduler",
+                "type": "scheduler",
+                "label": "UniPC Multistep Scheduler",
+                "default": "transformer_scheduler_unipc",
+                "description": "The UniPC Multistep Scheduler is used for Ovi 10B.",
+                "config": {
+                    "shift": 1.0,
+                    "num_train_timesteps": 1000
+                }
+            },
+            "audio_scheduler": {
+                "name": "audio_scheduler_unipc",
+                "base": "src.scheduler.unipc.UniPCMultistepScheduler",
+                "type": "scheduler",
+                "label": "UniPC Multistep Scheduler",
+                "default": "audio_scheduler_unipc",
+                "description": "The UniPC Multistep Scheduler is used for Ovi 10B.",
+                "config": {
+                    "shift": 1.0,
+                    "num_train_timesteps": 1000
+                }
+            },
+            "transformer_vae": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "audio_vae": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "audio_vae_extra_model_path": {
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "variant": "FP8",
+                "precision": "fp8",
+                "type": "safetensors"
+            },
+            "960x960_5s": {
+                "variant": "FP8",
+                "precision": "fp8",
+                "type": "safetensors"
+            },
+            "scheduler": {
+                "name": "transformer_scheduler_unipc",
+                "base": "src.scheduler.unipc.UniPCMultistepScheduler"
+            }
+        },
+        "auto_memory_management": false,
+        "attention_type": "sdpa"
+    },
+    "inputs": {
+        "prompt": "A space scene features a lone man drifting just outside a spacecraft. He wears a bulky white astronaut suit with visible scuffs and frost forming along the seams, a cracked reflective helmet visor revealing his wide, panic-stricken eyes. His face is flushed and strained as condensation fogs the inside of the helmet. He flails slightly, one gloved hand clawing toward the void as his other arm tethers loosely to the ship. His chest heaves violently as he begins to scream, <S>the man yells: I can\u2019t breathe\u2014there\u2019s no air!<E> his voice breaking as his oxygen supply fails. The vast blackness of space surrounds him, dotted with distant stars and the curved blue edge of Earth far below, while the cold metallic hull of the spacecraft looms just out of reach. <AUDCAP>Muffled, distorted male shouting filtered through a helmet radio, punctuated by frantic gasping breaths, rapid warning beeps from a failing life-support system, and a deep, oppressive silence between alarms.<ENDAUDCAP>",
+        "negative_prompt": "jitter, bad hands, blur, distortion",
+        "audio_negative_prompt": "robotic, muffled, echo, distorted",
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 50,
+        "height": 1024,
+        "width": 1024,
+        "seed": 1770003670,
+        "video_guidance_scale": 4,
+        "audio_guidance_scale": 3,
+        "shift": 5,
+        "easy_cache_thresh": 0.05,
+        "easy_cache_ret_steps": 10,
+        "duration": "5s"
+    }
+}

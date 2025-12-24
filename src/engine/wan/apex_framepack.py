@@ -54,7 +54,7 @@ class WanApexFramepackEngine(WanShared):
             negative_prompt_embeds = None
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -138,6 +138,7 @@ class WanApexFramepackEngine(WanShared):
                     timesteps_as_indices=timesteps_as_indices,
                     num_inference_steps=num_inference_steps,
                 )
+                
 
                 denoised_latents = self.denoise(
                     timesteps=timesteps_input,
@@ -179,7 +180,7 @@ class WanApexFramepackEngine(WanShared):
                 pbar.update(1)
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

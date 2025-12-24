@@ -85,30 +85,6 @@ spec:
         min_vram_gb: 16
         recommended_vram_gb: 24
       file_size: 40861227514
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
-      variant: GGUF_Q2_K
-      precision: q2_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 6
-        recommended_vram_gb: 10
-      file_size: 7147452960
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
-      variant: GGUF_Q4_K_S
-      precision: q4_k_s
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 12
-        recommended_vram_gb: 18
-      file_size: 12204309024
-    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 16
-        recommended_vram_gb: 24
-      file_size: 16824990240
     - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -117,6 +93,33 @@ spec:
         min_vram_gb: 20
         recommended_vram_gb: 30
       file_size: 21761817120
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 16
+        recommended_vram_gb: 24
+      file_size: 16824990240
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 12
+        recommended_vram_gb: 18
+      file_size: 12204309024
+    - path: QuantStack/Qwen-Image-Edit-2509-GGUF/Qwen-Image-Edit-2509-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 6
+        recommended_vram_gb: 10
+      file_size: 7147452960
+    
+    
+    
   - type: helper
     name: image.processor
     label: Image Processor
@@ -124,12 +127,15 @@ spec:
     base: Qwen2VLProcessor
     model_path:
     - path: Qwen/Qwen-Image-Edit-2509/processor
+      variant: default
+      precision: fp16
       type: safetensors
       file_size: 15879236
   defaults:
     run:
       num_inference_steps: 40
       return_latents: false
+      guidance_scale: 1.0
       text_encoder_kwargs:
         add_special_tokens: false
         clean_text: false
@@ -204,7 +210,7 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: blurry, low quality, distorted, artifacts
+      default: " "
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -251,7 +257,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1
@@ -297,7 +303,7 @@ spec:
       step: 0.5
   loras:
   - scale: 1.0
-    name: Qwen edit 2509 lightning
-    label: Qwen edit 2509 lightning
+    name: qwen_image_lightning
+    label: Qwen Image Lightning 8 Steps
     verified: true
-    source: /home/ext_diviade_gmail_com/apex-diffusion/loras/95a40f17a226279c4f8d176ecf40ebd636b2accd5515199039ef43d496da9f8f_Qwen-Image-Edit-2509-Lightning-8steps-V1.0-fp32.safetensors
+    source: lightx2v/Qwen-Image-Lightning/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors

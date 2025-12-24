@@ -75,6 +75,7 @@ class WanMultitalkEngine(WanShared):
             shift: Timestep transform shift parameter
         """
 
+        safe_emit_progress(progress_callback, 0.0, "Starting multitalk pipeline")
         num_frames = self._parse_num_frames(duration, fps)
         use_cfg_guidance = guidance_scale > 1.0 and negative_prompt is not None
 
@@ -83,19 +84,23 @@ class WanMultitalkEngine(WanShared):
         ), "Either image or video must be provided"
 
         if image is not None:
+            safe_emit_progress(progress_callback, 0.02, "Loading conditioning image")
             loaded_image = self._load_image(image)
             loaded_image, height, width = self._aspect_ratio_resize(
                 loaded_image, max_area=height * width, mod_value=16
             )
 
+            safe_emit_progress(progress_callback, 0.05, "Preprocessing conditioning image")
             cond_image = self.video_processor.preprocess(
                 loaded_image, height=height, width=width
             ).to(self.device, dtype=torch.float32)
             cond_image = cond_image.unsqueeze(2)
 
         if video is not None:
+            safe_emit_progress(progress_callback, 0.02, "Loading conditioning video")
             input_video = self._load_video(video, fps=fps)
             image = input_video[0]
+            safe_emit_progress(progress_callback, 0.05, "Preprocessing conditioning video")
             for idx, frame in enumerate(input_video):
                 frame, height, width = self._aspect_ratio_resize(
                     frame, max_area=height * width, mod_value=16
@@ -139,6 +144,7 @@ class WanMultitalkEngine(WanShared):
 
         preprocessor = self.helpers["wan.multitalk"]
 
+        safe_emit_progress(progress_callback, 0.08, "Preparing audio/masks inputs")
         processed_inputs = preprocessor(
             image=image,
             audio_paths=audio_paths,
@@ -152,6 +158,7 @@ class WanMultitalkEngine(WanShared):
         human_masks = processed_inputs["human_masks"]
         human_num = processed_inputs["human_num"]
         full_audio_embs = processed_inputs["audio_embeddings"]
+        safe_emit_progress(progress_callback, 0.12, "Prepared audio embeddings and masks")
 
         indices = (torch.arange(2 * 2 + 1) - 2) * 1
         clip_length = num_frames
@@ -172,10 +179,14 @@ class WanMultitalkEngine(WanShared):
         transformer_dtype = self.component_dtypes["transformer"]
 
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.14, "Loading text encoder")
             self.load_component_by_type("text_encoder")
+            safe_emit_progress(progress_callback, 0.15, "Text encoder loaded")
 
+        safe_emit_progress(progress_callback, 0.16, "Moving text encoder to device")
         self.to_device(self.text_encoder)
 
+        safe_emit_progress(progress_callback, 0.17, "Encoding prompt")
         prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
@@ -186,6 +197,7 @@ class WanMultitalkEngine(WanShared):
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.18, "Encoding negative prompt")
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
@@ -194,17 +206,59 @@ class WanMultitalkEngine(WanShared):
             )
         else:
             negative_prompt_embeds = None
+        safe_emit_progress(
+            progress_callback,
+            0.19,
+            "Prepared negative prompt" if negative_prompt_embeds is not None else "Skipped negative prompt",
+        )
 
         if offload:
-            self._offload(self.text_encoder)
+            safe_emit_progress(progress_callback, 0.20, "Offloading text encoder")
+            self._offload("text_encoder")
+        safe_emit_progress(progress_callback, 0.21, "Text encoder offloaded")
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.22, "Loading transformer")
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+            safe_emit_progress(progress_callback, 0.23, "Transformer loaded")
 
         using_video_input = input_video is not None
 
+        # Estimate total frame budget for monotonic progress across multiple clips
+        try:
+            per_human_frames = [
+                int(full_audio_embs[h].shape[0]) for h in range(int(human_num))
+            ]
+            total_target_frames = min(int(max_num_frames), min(per_human_frames)) if per_human_frames else int(max_num_frames)
+        except Exception:
+            total_target_frames = int(max_num_frames)
+        total_target_frames = max(1, int(total_target_frames))
+
+        # Reserve progress spans: pre-clip prep [0.30, 0.55], denoise [0.55, 0.90], decode/post [0.90, 0.98]
+        pre_clip_progress = make_mapped_progress(progress_callback, 0.30, 0.55)
+        denoise_progress = make_mapped_progress(progress_callback, 0.55, 0.90)
+        decode_progress = make_mapped_progress(progress_callback, 0.90, 0.98)
+        safe_emit_progress(progress_callback, 0.24, "Starting clip generation")
+
+        clip_idx = 0
         while True:
+            clip_idx += 1
+            clip_start = min(1.0, float(audio_start_idx) / float(total_target_frames))
+            clip_end = min(1.0, float(min(audio_end_idx, total_target_frames)) / float(total_target_frames))
+            # Ensure a non-zero span to avoid progress staying constant for tiny/edge clips
+            if clip_end <= clip_start:
+                clip_end = min(1.0, clip_start + (1.0 / float(total_target_frames)))
+
+            clip_pre_progress = make_mapped_progress(pre_clip_progress, clip_start, clip_end)
+            clip_denoise_progress = make_mapped_progress(denoise_progress, clip_start, clip_end)
+            clip_decode_progress = make_mapped_progress(decode_progress, clip_start, clip_end)
+
+            safe_emit_progress(
+                clip_pre_progress,
+                0.0,
+                f"Preparing clip {clip_idx} (frames {audio_start_idx}:{audio_end_idx})",
+            )
             audio_embs = []
             # split audio with window size
             for human_idx in range(human_num):
@@ -222,6 +276,7 @@ class WanMultitalkEngine(WanShared):
                 audio_embs.append(audio_emb)
 
             audio_embs = torch.cat(audio_embs, dim=0).to(transformer_dtype)
+            safe_emit_progress(clip_pre_progress, 0.10, "Prepared audio window embeddings")
 
             latent_height, latent_width = (
                 height // self.vae_scale_factor_spatial,
@@ -229,6 +284,7 @@ class WanMultitalkEngine(WanShared):
             )
 
             # get mask
+            safe_emit_progress(clip_pre_progress, 0.15, "Preparing masks")
             mask_lat_size = torch.ones(
                 batch_size,
                 1,
@@ -263,14 +319,17 @@ class WanMultitalkEngine(WanShared):
 
             # get clip embedding
             clip_processor = self.helpers["clip"]
+            safe_emit_progress(clip_pre_progress, 0.22, "Moving CLIP to device")
             self.to_device(clip_processor)
 
+            safe_emit_progress(clip_pre_progress, 0.25, "Encoding image with CLIP")
             image_embeds = clip_processor(loaded_image, hidden_states_layer=-2, device=self.device, dtype=torch.float32).to(
                 transformer_dtype
             )
 
             if offload:
-                self._offload(clip_processor, delete_from_cpu=False)
+                safe_emit_progress(clip_pre_progress, 0.28, "Offloading CLIP")
+                self._offload("clip", offload_type="cpu")
 
             # zero padding and vae encode
             # InfiniteTalk: always condition on the current source video frame when a video is provided;
@@ -294,6 +353,7 @@ class WanMultitalkEngine(WanShared):
                 dim=2,
             )
 
+            safe_emit_progress(clip_pre_progress, 0.35, "Encoding conditioning frames (VAE)")
             latent_condition = self.vae_encode(
                 video_condition,
                 offload=offload,
@@ -307,6 +367,7 @@ class WanMultitalkEngine(WanShared):
             #   - subsequent clips: inject latents encoded from last generated frames
             if using_video_input:
                 motion_source = cond_image if is_first_clip else cond_frame
+                safe_emit_progress(clip_pre_progress, 0.40, "Encoding motion reference (VAE)")
                 motion_latents = self.vae_encode(
                     motion_source,
                     offload=offload,
@@ -325,6 +386,7 @@ class WanMultitalkEngine(WanShared):
             )  # B 4+C T H W
 
             # prepare masks
+            safe_emit_progress(clip_pre_progress, 0.45, "Preparing face/body target masks")
             ref_target_masks = self.resize_and_centercrop(human_masks, (height, width))
             ref_target_masks = F.interpolate(
                 ref_target_masks.unsqueeze(0),
@@ -335,6 +397,7 @@ class WanMultitalkEngine(WanShared):
             ref_target_masks = ref_target_masks.float().to(self.device)
 
             # prepare noise
+            safe_emit_progress(clip_pre_progress, 0.50, "Initializing latent noise")
             latents = randn_tensor(
                 (
                     batch_size,
@@ -349,11 +412,14 @@ class WanMultitalkEngine(WanShared):
             )
 
             if not self.scheduler:
+                safe_emit_progress(clip_pre_progress, 0.52, "Loading scheduler")
                 self.load_component_by_type("scheduler")
                 self.to_device(self.scheduler)
+                safe_emit_progress(clip_pre_progress, 0.53, "Scheduler loaded")
 
             scheduler = self.scheduler
 
+            safe_emit_progress(clip_pre_progress, 0.55, "Computing timesteps")
             input_timesteps, _ = self._get_timesteps(
                 scheduler=scheduler,
                 num_inference_steps=num_inference_steps,
@@ -375,9 +441,10 @@ class WanMultitalkEngine(WanShared):
                 latents[:, :C, :T_m, :H, :W] = add_latent
 
             total_steps = len(input_timesteps) if input_timesteps is not None else 0
-            #!TODO: This is incorrect.
-            denoise_progress_callback = make_mapped_progress(
-                progress_callback, 0.0, 1.0
+            safe_emit_progress(
+                clip_denoise_progress,
+                0.0,
+                f"Starting denoising clip {clip_idx} (CFG: {'on' if use_cfg_guidance else 'off'})",
             )
             audio_embeds = audio_embs.to(transformer_dtype).to(self.device)
 
@@ -492,22 +559,28 @@ class WanMultitalkEngine(WanShared):
                         self._render_step(latents, render_on_step_callback)
                     pbar.update(1)
                     safe_emit_progress(
-                        denoise_progress_callback,
+                        clip_denoise_progress,
                         float(i + 1) / float(total_steps),
-                        f"Denoising step {i + 1}/{total_steps}",
+                        f"Denoising step {i + 1}/{total_steps} (clip {clip_idx})",
                     )
 
                 self.logger.info("Denoising completed.")
+            safe_emit_progress(clip_denoise_progress, 1.0, f"Denoising completed (clip {clip_idx})")
+
+            safe_emit_progress(clip_decode_progress, 0.0, f"Decoding latents (clip {clip_idx})")
             videos = self.vae_decode(latents, offload=offload)
+            safe_emit_progress(clip_decode_progress, 0.6, f"Decoded latents (clip {clip_idx})")
 
             # >>> START OF COLOR CORRECTION STEP <<<
             if color_correction_strength > 0.0 and original_color_reference is not None:
+                safe_emit_progress(clip_decode_progress, 0.7, f"Applying color correction (clip {clip_idx})")
                 videos = match_and_blend_colors(
                     videos.float(),
                     original_color_reference.float(),
                     color_correction_strength,
                 )
             # >>> END OF COLOR CORRECTION STEP <<<
+            safe_emit_progress(clip_decode_progress, 1.0, f"Clip {clip_idx} complete")
 
             if is_first_clip:
                 gen_video_list.append(videos)
@@ -574,13 +647,17 @@ class WanMultitalkEngine(WanShared):
             
 
         if offload:
-            self._offload(self.transformer)
+            safe_emit_progress(progress_callback, 0.985, "Offloading transformer")
+            self._offload("transformer")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 0.99, "Collecting latents")
             latents = torch.cat(gen_latents_list, dim=2).cpu()
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
             # postprocess
+            safe_emit_progress(progress_callback, 0.99, "Postprocessing video")
             gen_video_samples = torch.cat(gen_video_list, dim=2)[
                 :, :, : int(max_num_frames)
             ]
@@ -594,6 +671,7 @@ class WanMultitalkEngine(WanShared):
                     gen_video_samples = gen_video_samples[:, :, : -1 * miss_lengths[0]]
 
             postprocessed_video = self._tensor_to_frames(gen_video_samples)
+            safe_emit_progress(progress_callback, 1.0, "Completed multitalk pipeline")
             return postprocessed_video
 
     def _render_step(self, latents, render_on_step_callback):

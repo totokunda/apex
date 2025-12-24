@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, Optional
 
 from diffusers.utils.state_dict_utils import (
@@ -12,6 +13,57 @@ BASE_TO_PEFT = {
 }
 
 from enum import Enum
+
+
+# Kohya "single_file" format flattens module path dots into underscores (keeping the
+# last two dots, e.g. `.lora_down.weight`). Many models (Flux/Hunyuan/etc) have
+# legitimate underscores in module names (`diffusion_model`, `double_blocks`, ...),
+# so a naive `prefix.replace("_", ".")` corrupts keys (e.g. `double_blocks` -> `double.blocks`).
+_KOHYA_UNFLATTEN_PROTECTED_TOKENS = (
+    # Common diffusion/transformer component names with *real* underscores
+    "diffusion_model",
+    "double_blocks",
+    "single_blocks",
+    "transformer_blocks",
+    "img_attn",
+    "txt_attn",
+    "img_mod",
+    "txt_mod",
+    "img_mlp",
+    "txt_mlp",
+    "query_norm",
+    "key_norm",
+    "time_embed",
+    "time_embedding",
+    "pos_embed",
+    "proj_in",
+    "proj_out",
+)
+
+
+def _restore_kohya_flattened_prefix(prefix: str) -> str:
+    """
+    Best-effort restore of dots flattened into underscores by Kohya, while trying
+    to preserve underscores that belong to actual module names.
+    """
+    # Use a placeholder that should never naturally occur in a PyTorch state_dict key.
+    placeholder = "\u0001"
+
+    # Protect known underscore-containing tokens.
+    for token in sorted(_KOHYA_UNFLATTEN_PROTECTED_TOKENS, key=len, reverse=True):
+        if "_" in token and token in prefix:
+            prefix = prefix.replace(token, token.replace("_", placeholder))
+
+    # Protect common "word_digit" tokens like `linear_1` / `conv_2` / `norm_3`.
+    prefix = re.sub(r"linear_(\d+)", lambda m: f"linear{placeholder}{m.group(1)}", prefix)
+    prefix = re.sub(r"conv_(\d+)", lambda m: f"conv{placeholder}{m.group(1)}", prefix)
+    prefix = re.sub(r"norm_(\d+)", lambda m: f"norm{placeholder}{m.group(1)}", prefix)
+
+    # Convert remaining underscores (which are more likely to be flattened dots) into dots.
+    prefix = prefix.replace("_", ".")
+
+    # Restore protected underscores.
+    return prefix.replace(placeholder, "_")
 
 class StateDictType(Enum):
     DIFFUSERS = "diffusers"
@@ -71,6 +123,32 @@ class LoraConverter(TransformerConverter):
         # Default to PEFT if no patterns match
         return StateDictType.PEFT
     
+    def get_alpha_scales(self, down_weight, alpha):
+        rank = down_weight.shape[0]
+        
+        scale = alpha / rank  # LoRA is scaled by 'alpha / rank' in forward pass, so we need to scale it back here
+        scale_down = scale
+        scale_up = 1.0
+        while scale_down * 2 < scale_up:
+            scale_down *= 2
+            scale_up /= 2
+        return scale_down, scale_up
+    
+    def scale_alpha(self, state_dict: Dict[str, Any]):
+        for key, value in state_dict.items():
+            if ".alpha" in key:
+                down_key = key.replace(".alpha", ".lora_A.weight")
+                up_key = key.replace(".alpha", ".lora_B.weight")
+                if down_key in state_dict and up_key in state_dict:
+                    down_weight = state_dict[down_key]
+                    up_weight = state_dict[up_key]
+                    alpha = state_dict[key].item()
+                    scale_down, scale_up = self.get_alpha_scales(down_weight, alpha)
+                    state_dict[down_key] = down_weight * scale_down
+                    state_dict[up_key] = up_weight * scale_up
+        return state_dict
+    
+    
     def convert(self, state_dict: Dict[str, Any]):
         state_dict_type = self._get_state_dict_type(state_dict)
         if state_dict_type == StateDictType.KOHYA_SS:
@@ -86,6 +164,7 @@ class LoraConverter(TransformerConverter):
             super().convert(state_dict)
         elif state_dict_type == StateDictType.PEFT:
             pass
+        state_dict = self.scale_alpha(state_dict)
         return state_dict
 
 
@@ -141,7 +220,7 @@ def convert_kohya_to_peft_state_dict(
                 prefix = k[:second_last_dot]
                 tail = k[second_last_dot:]  # includes the dot
 
-                prefix = prefix.replace("_", ".")
+                prefix = _restore_kohya_flattened_prefix(prefix)
                 k = prefix + tail
 
         # Undo lora_down / lora_up mapping.
@@ -152,7 +231,7 @@ def convert_kohya_to_peft_state_dict(
         if adapter_name and (k.endswith(".weight") or k.endswith(".bias")):
             base, suffix = k.rsplit(".", 1)
             k = f"{base}.{adapter_name}.{suffix}"
-
+            
         kohya_state_dict[k] = value
 
     return kohya_state_dict

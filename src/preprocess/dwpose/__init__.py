@@ -15,9 +15,7 @@ import torch
 import numpy as np
 from . import util
 from .body import Body, BodyResult, Keypoint
-from .hand import Hand
-from .face import Face
-from .types import PoseResult, HandResult, FaceResult, AnimalPoseResult
+from .types import PoseResult, AnimalPoseResult
 from huggingface_hub import hf_hub_download
 from .wholebody import Wholebody
 import warnings
@@ -306,8 +304,8 @@ class DwposeDetector(BasePreprocessor):
         input_image: InputImage,
         detect_resolution=512,
         include_body=True,
-        include_hand=False,
-        include_face=False,
+        include_hand=True,
+        include_face=True,
         hand_and_face=None,
         image_and_json=False,
         upscale_method="INTER_CUBIC",

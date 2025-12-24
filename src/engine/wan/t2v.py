@@ -91,7 +91,7 @@ class WanT2VEngine(WanShared):
         )
 
         if offload:
-            del self.text_encoder
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 

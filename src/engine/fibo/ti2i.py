@@ -525,7 +525,7 @@ class FiboTI2IEngine(BaseEngine):
         safe_emit_progress(progress_callback, 0.48, "Encoded prompt")
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not hasattr(self, "transformer") or not self.transformer:
             self.load_component_by_type("transformer")
@@ -717,7 +717,7 @@ class FiboTI2IEngine(BaseEngine):
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
             safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 
         if return_latents:
@@ -870,5 +870,5 @@ class FiboTI2IEngine(BaseEngine):
             progress_callback=progress_callback,
         )
         if offload:
-            self._offload(llm)
+            self._offload("prompt_gen")
         return json_str

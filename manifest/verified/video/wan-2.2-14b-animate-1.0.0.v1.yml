@@ -35,18 +35,28 @@ spec:
   - flash3
   - sage
   loras:
-  - source: Wan-AI/Wan2.2-Animate-14B/relighting_lora/adapter_model.safetensors
+  - source: /home/tosin_coverquick_co/apex-diffusion/loras/1eb63b098ae86d7191e62fe0b114381da34526c7b2b9218e1eb4afb3a2da7d2a_adapter_model.safetensors
     scale: 1.0
     name: relighting_lora
     label: Relighting LoRA
     component: transformer
     verified: true
-  - source: lightx2v/Wan2.1-Distill-Loras/wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors
+  - source: /home/tosin_coverquick_co/apex-diffusion/loras/d9a7fce8b0ee3d276613930cef48f493688a20c4b77dccc4265fa4abb01151d3_wan2.1_i2v_lora_rank64_lightx2v_4step.safetensors
     scale: 1.0
     name: lightx2v_lora
     label: Lightx2v LoRA
     component: transformer
     verified: true
+  - scale: 0.0
+    name: Lightning Lora 2
+    label: Lightning Lora 2
+    verified: true
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/29569a7b82c9afc9ced4638d666fd2128f2d84ee106a17dd879db733fe9143b9_wan2.1_t2v_14b_lora_rank64_lightx2v_4step.safetensors
+  - scale: 0.0
+    name: Fusion IX
+    label: Fusion IX
+    verified: true
+    source: /home/tosin_coverquick_co/apex-diffusion/loras/63f50ce39089a99caab061d6edb2674cf263ad022335f6be776b9954616d8dd6_Wan2.1_T2V_14B_FusionX_LoRA.safetensors
   components:
   - type: scheduler
     label: Scheduler
@@ -181,7 +191,7 @@ spec:
       num_inference_steps: 20
       guidance_scale: 1.0
       return_latents: false
-      text_encoder_kwargs: 
+      text_encoder_kwargs:
         use_attention_mask: true
       attention_kwargs: {}
   ui:
@@ -356,6 +366,14 @@ spec:
         value: '9:16'
         ratio_w: 9
         ratio_h: 16
+      - name: Classic
+        value: '4:3'
+        ratio_w: 4
+        ratio_h: 3
+      - name: Square
+        value: '1:1'
+        ratio_w: 1
+        ratio_h: 1
       - name: Custom
         value: custom
     - id: height
@@ -367,7 +385,7 @@ spec:
       default: 480
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
@@ -377,7 +395,7 @@ spec:
       default: 832
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility

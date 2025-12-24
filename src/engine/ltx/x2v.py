@@ -380,7 +380,7 @@ class LTXX2VEngine(BaseEngine):
         video = self._tensor_to_frames(decoded_video)
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         return video
 
@@ -874,7 +874,7 @@ class LTXX2VEngine(BaseEngine):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
@@ -1241,7 +1241,7 @@ class LTXX2VEngine(BaseEngine):
                 #     self._render_step(latents, render_on_step_callback)
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
@@ -1256,7 +1256,7 @@ class LTXX2VEngine(BaseEngine):
         )
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")

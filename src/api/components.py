@@ -94,6 +94,7 @@ def delete_component(request: DeleteRequest):
             target.unlink()
         return {"status": "deleted", "path": str(target)}
     except Exception as e:
+        logger.error(f"Failed to delete: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
 
 

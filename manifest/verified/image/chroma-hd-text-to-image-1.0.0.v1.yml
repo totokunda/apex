@@ -43,6 +43,8 @@ spec:
     base: auto
     model_path:
     - path: lodestones/Chroma1-HD/vae
+      precision: fp16
+      type: safetensors
       variant: default
       file_size: 167667721
   - type: text_encoder
@@ -51,6 +53,8 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/text_encoder
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 9524669246
     tokenizer_class: T5Tokenizer
     tokenizer_name: lodestones/Chroma1-HD
@@ -62,15 +66,9 @@ spec:
     model_path:
     - path: lodestones/Chroma1-HD/transformer
       variant: default
+      precision: fp16
+      type: safetensors
       file_size: 17800194937
-    - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q4_0.gguf
-      variant: GGUF_Q4_0
-      precision: q4_0
-      type: gguf
-      resource_requirements:
-        min_vram_gb: 8
-        recommended_vram_gb: 12
-      file_size: 5432053920
     - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
@@ -79,10 +77,19 @@ spec:
         min_vram_gb: 12
         recommended_vram_gb: 16
       file_size: 9735409824
+    - path: silveroxides/Chroma-GGUF/Chroma1-HD/Chroma1-HD-Q4_0.gguf
+      variant: GGUF_Q4_0
+      precision: q4_0
+      type: gguf
+      resource_requirements:
+        min_vram_gb: 8
+        recommended_vram_gb: 12
+      file_size: 5432053920
+   
   defaults:
     run:
       num_inference_steps: 50
-      guidance_scale: 5.0
+      guidance_scale: 3.0
       true_cfg_scale: 4.0
       return_latents: false
       text_encoder_kwargs:
@@ -144,7 +151,12 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: blurry, low quality, distorted, artifacts
+      default: lowres, error, cropped, worst quality, low quality, jpeg artifacts,
+        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
+        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
+        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
+        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
+        legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -204,7 +216,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: width
       label: Width
       description: Explicit width override
@@ -214,7 +226,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 16
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -232,7 +244,7 @@ spec:
       panel: sampling
       required: false
       default: 4.0
-      min: 1.0
+      min: 0.0
       max: 15.0
       step: 0.5
     - id: guidance_scale
@@ -241,7 +253,7 @@ spec:
       value_type: float
       panel: sampling
       required: false
-      default: 5.0
-      min: 1.0
+      default: 3.0
+      min: 0.0
       max: 15.0
       step: 0.5

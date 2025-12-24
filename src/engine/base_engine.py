@@ -12,6 +12,7 @@ from tqdm import tqdm
 import shutil
 import accelerate
 import psutil
+import json
 from src.utils.defaults import (
     get_components_path,
     get_preprocessor_path,
@@ -47,7 +48,7 @@ from src.utils.defaults import (
     DEFAULT_LORA_SAVE_PATH,
 )
 from src.utils.compute import validate_compute_requirements, get_compute_capability
-
+from accelerate import cpu_offload
 import tempfile
 from src.transformer import _auto_register_transformers
 from src.mixins import LoaderMixin, ToMixin, OffloadMixin, CompileMixin
@@ -218,6 +219,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
     _memory_management_map: Dict[str, MemoryConfig] | None = None
     selected_components: Dict[str, Any] | None = None
     auto_apply_loras: bool = True
+    auto_memory_management: bool = True
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -333,7 +335,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                     if cfg:
                         explicit_from_selected[str(key)] = cfg
 
-        allow_auto = True
+        allow_auto = self.auto_memory_management
         if explicit_from_selected:
             allow_auto = False
             # Merge: caller-provided memory_management wins for overlapping keys.
@@ -614,29 +616,34 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         no_weights: bool = False,
     ):
         component_type = component.get("type")
+        device = self.device
+        if device is not None:
+            device = device.type
+        else:
+            device = "cpu"
         component_module = None
         if component_type == "scheduler":
             scheduler = self.load_scheduler(component)
             component_module = scheduler
         elif component_type == "vae":
-            vae = self.load_vae(component, load_dtype, no_weights)
+            vae = self.load_vae(component, load_dtype, no_weights, device)
             component_module = vae
         elif component_type == "text_encoder":
-            text_encoder = self.load_text_encoder(component, no_weights)
+            text_encoder = self.load_text_encoder(component, no_weights, device)
             component_module = text_encoder
         elif component_type == "transformer":
             logger.info(f"Loading transformer component: {component}")
-            transformer = self.load_transformer(component, load_dtype, no_weights)
+            transformer = self.load_transformer(component, load_dtype, no_weights, device)
             component_module = transformer
         elif component_type == "helper":
-            helper = self.load_helper(component)
+            helper = self.load_helper(component, device)
             component_module = helper
         else:
             raise ValueError(f"Component type {component_type} not supported")
         empty_cache()
         return component_module
 
-    def load_helper(self, component: Dict[str, Any]):
+    def load_helper(self, component: Dict[str, Any], device: str = "cpu"):
 
         config = component.copy()  # Don't modify the original
         base = config.pop("base")
@@ -651,12 +658,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         if helper_class is None:
             raise ValueError(f"Helper class {base} not found")
         
-        
-
-
         # create an instance of the helper class
         if hasattr(helper_class, "from_pretrained") and "model_path" in config:
-            helper = helper_class.from_pretrained(config["model_path"])
+            helper = helper_class.from_pretrained(config["model_path"], device_map=device)
         else:
             # check for config_path
             if "config_path" in config and config.get("module", None) is not None:
@@ -682,7 +686,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # Move helper to device if possible
         if hasattr(helper, "to") and self.device is not None:
-            helper = helper.to(self.device)
+            if next(helper.parameters()).device.type != device:
+                helper = helper.to(device)
 
         return helper
 
@@ -696,6 +701,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
     def _auto_load_helper(self, helper_key: str):
         """Automatically load a helper by searching for it in the configuration."""
         # First, check if there's a helper component with matching name or base
+        device = self.device
+        if device is not None:
+            device = device.type
+        else:
+            device = "cpu"
         for component in self.config.get("components", []):
             if component.get("type") == "helper":
                 component_name = component.get("name", "")
@@ -710,7 +720,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 ):
 
                     try:
-                        helper = self.load_helper(component)
+                        helper = self.load_helper(component, device)
                         self.logger.info(
                             f"Auto-loaded helper '{helper_key}' from configuration"
                         )
@@ -796,15 +806,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         component: Dict[str, Any],
         load_dtype: torch.dtype | None,
         no_weights: bool = False,
+        device: str = "cpu",
     ):
         vae = self._load_model(
             component,
-            get_vae,
-            "VAE",
-            load_dtype,
+            getter_fn=get_vae,
+            module_name="VAE",
+            load_dtype=load_dtype,
             no_weights=no_weights,
             key_map=component.get("key_map", {}),
             extra_kwargs=component.get("extra_kwargs", {}),
+            load_device=device,
         )
         if self.component_dtypes and "vae" in self.component_dtypes:
             self.to_dtype(vae, self.component_dtypes["vae"])
@@ -907,10 +919,10 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             else:
                 raise ValueError(f"Component name {component_name} not found")
 
-    def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False):
+    def load_text_encoder(self, component: Dict[str, Any], no_weights: bool = False, device: str = "cpu"):
         component["load_dtype"] = self.component_load_dtypes.get("text_encoder", None)
         component["dtype"] = self.component_dtypes.get("text_encoder", None)
-        text_encoder = TextEncoder(component, no_weights, device=self.device)
+        text_encoder = TextEncoder(component, no_weights, device=device)
 
         # Lazily wrap its internal model once loaded, if memory management is configured
         mm_config = self._resolve_memory_config_for_component(component)
@@ -957,6 +969,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         component: Dict[str, Any],
         load_dtype: torch.dtype | mx.Dtype | None,
         no_weights: bool = False,
+        device: str = "cpu",
     ):
 
         base = component.get("base")
@@ -970,12 +983,13 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         transformer = self._load_model(
             component,
-            registry.get,
-            "Transformer",
-            dtype_converter(load_dtype) if load_dtype else None,
-            no_weights,
+            getter_fn=registry.get,
+            module_name="Transformer",
+            load_dtype=dtype_converter(load_dtype) if load_dtype else None,
+            no_weights=no_weights,
             key_map=component.get("key_map", {}),
             extra_kwargs=component.get("extra_kwargs", {}),
+            load_device=device,
         )
 
         if self.component_dtypes and "transformer" in self.component_dtypes:
@@ -1685,6 +1699,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         component_name: str = "vae",
         denormalize_latents: bool = True,
         timestep: Optional[torch.Tensor] = None,
+        offload_type: Literal["cpu", "discard"] = "cpu",
     ):
         if getattr(self, component_name, None) is None:
             self.load_component_by_type(component_name)
@@ -1704,7 +1719,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             denormalized_latents, return_dict=False
         )[0]
         if offload:
-            self._offload(getattr(self, component_name), delete_from_cpu=False)
+            self._offload(component_name, offload_type=offload_type)
         return video.to(dtype=dtype)
 
     @torch.no_grad()
@@ -1718,6 +1733,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         dtype: torch.dtype = None,
         normalize_latents: bool = True,
         normalize_latents_dtype: torch.dtype | None = None,
+        offload_type: Literal["cpu", "discard"] = "discard",
     ):
         if getattr(self, component_name, None) is None:
             self.load_component_by_type("vae")
@@ -1741,7 +1757,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             latents = getattr(self, component_name).normalize_latents(latents)
 
         if offload:
-            self._offload(getattr(self, component_name), delete_from_cpu=False)
+            self._offload(component_name, offload_type=offload_type)
 
         return latents.to(dtype=dtype)
 
@@ -2002,7 +2018,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         adapter_names: List[str] | None = None,
         scales: List[float] | None = None,
         model_name_or_type: str = "transformer",
-        replace_keys: bool = True,
         model: ModelMixin | None = None,
     ):
         """
@@ -2026,8 +2041,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             model,
             loras,
             adapter_names=adapter_names,
-            scales=scales,
-            replace_keys=replace_keys,
+            scales=scales
         )
 
 
@@ -2248,6 +2262,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 selected_scheduler_option = self.selected_components.get(
                     component_name, self.selected_components.get(component_type, None)
                 )
+                
                 if not selected_scheduler_option:
                     # take the first scheduler option
                     selected_scheduler_option = scheduler_options[0]
@@ -2257,7 +2272,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         current_component = component.copy()
                         del current_component["scheduler_options"]
                         selected_scheduler_option.update(current_component)
+                        selected_scheduler_option.update(scheduler_option)
                         component = selected_scheduler_option
+                        
+                if component_name:
+                    component["name"] = component_name
 
                 if component.get("config_path"):
                     downloaded_config_path = self.fetch_config(
@@ -2711,3 +2730,40 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         finally:
             del transformer
             empty_cache()
+
+
+    def save_and_upload_component(self, component_name_or_type:str, repo_id:str):
+        
+        from huggingface_hub import  upload_folder
+
+        component = self.get_component_by_name(component_name_or_type) or self.get_component_by_type(component_name_or_type)
+        if component.get("type") == "scheduler":
+            scheduler = self.load_scheduler(component)
+            # `upload_folder()` expects a directory path, not a single file path.
+            # Save the scheduler config into a temp directory and upload only the config file.
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                config = scheduler.save_config(save_directory=tmp_dir)
+                config_path = os.path.join(tmp_dir, "scheduler_config.json")
+
+                # Be defensive: some implementations may return the config dict rather than writing it.
+                if not os.path.exists(config_path):
+                    if isinstance(config, dict):
+                        with open(config_path, "w") as f:
+                            json.dump(config, f, indent=2, sort_keys=True)
+                    else:
+                        raise RuntimeError(
+                            "Scheduler did not create scheduler_config.json and did not return a config dict."
+                        )
+                        
+                upload_folder(
+                    folder_path=tmp_dir,
+                    repo_id=repo_id,
+                    repo_type="model",
+                    path_in_repo="scheduler",
+                    allow_patterns=["scheduler_config.json"],
+                )
+            return True
+        else:
+            raise ValueError(f"Unsupported component type: {component.get('type')}")
+
+    

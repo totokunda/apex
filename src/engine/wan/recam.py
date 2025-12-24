@@ -183,7 +183,7 @@ class WanRecamEngine(WanShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.18, "Text encoder offloaded")
 
@@ -360,7 +360,7 @@ class WanRecamEngine(WanShared):
         safe_emit_progress(progress_callback, 0.92, "Denoising completed")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         safe_emit_progress(progress_callback, 0.94, "Transformer offloaded")
 

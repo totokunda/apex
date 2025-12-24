@@ -1,8 +1,21 @@
 from typing import Dict, Any
-
+from transformers import Qwen3ForCausalLM
 from src.converters.transformer_converters import TransformerConverter
 
 
+class Qwen2_5_VLTextEncoderConverter(TransformerConverter):
+    """
+    Converter for Qwen2.5 VL text encoder checkpoints.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+             "^visual": "model.visual",
+            r"^model(?!\.(language_model|visual))": "model.language_model",
+        }
+    
+        
 class T5TextEncoderConverter(TransformerConverter):
     """
     Converter for T5-style text encoder checkpoints.
@@ -84,6 +97,64 @@ class T5TextEncoderConverter(TransformerConverter):
         if "encoder.embed_tokens.weight" not in state_dict:
             state_dict["encoder.embed_tokens.weight"] = state_dict[key]
 
+    @staticmethod
+    def _normalize_double_encoder_prefix_inplace(state_dict: Dict[str, Any]) -> None:
+        """
+        Defensive cleanup: collapse accidental `encoder.encoder.` prefixes.
+
+        This can happen if upstream code runs conversion multiple times or if
+        legacy mappings are combined with Wan-style mappings.
+        """
+        for key in list(state_dict.keys()):
+            if "encoder.encoder." not in key:
+                continue
+            new_key = key
+            while "encoder.encoder." in new_key:
+                new_key = new_key.replace("encoder.encoder.", "encoder.")
+            if new_key != key and key in state_dict:
+                state_dict[new_key] = state_dict.pop(key)
+
+    @staticmethod
+    def _already_hf_umt5_layout(state_dict: Dict[str, Any]) -> bool:
+        """
+        Heuristic: return True if `state_dict` keys already match HF UMT5/T5 encoder layout.
+
+        This is intentionally conservative and avoids using `rename_dict` markers because
+        some source fragments (e.g. `block.` / `norm.weight`) are substrings of *target*
+        keys (e.g. `encoder.block.*` / `layer_norm.weight`), which would defeat the base
+        converter's generic heuristic.
+        """
+        if not state_dict:
+            return True
+
+        keys = list(state_dict.keys())
+
+        # Strong positive signals of HF-style UMT5/T5 keys.
+        has_target = any(
+            k.startswith("encoder.block.") or k.startswith("encoder.final_layer_norm.")
+            for k in keys
+        )
+        if not has_target:
+            return False
+
+        # Strong signals of *source* (Wan / legacy) layouts that need conversion.
+        # Use exact/prefix checks to avoid collisions with HF keys like `layer_norm.weight`.
+        has_source = any(
+            k.startswith("enc.")
+            or k.startswith("blocks.")
+            or k.startswith("block.")
+            or k == "norm.weight"
+            or k == "norm.bias"
+            or k.startswith("token_embedding")
+            or "token_embd" in k
+            or "output_norm" in k
+            or ".blk." in k
+            or ".attn." in k
+            or ".ffn." in k
+            for k in keys
+        )
+        return not has_source
+
     def convert(self, state_dict: Dict[str, Any]):
         """
         Custom convert that allows multiple rename rules to apply to the same key.
@@ -108,8 +179,25 @@ class T5TextEncoderConverter(TransformerConverter):
                 if pre_special_key in key:
                     handler_fn_inplace(key, state_dict)
 
+        # If this already looks like an HF UMT5/T5 encoder state dict, do NOT apply
+        # substring-based renames (they can corrupt already-correct keys like
+        # `encoder.final_layer_norm.weight` because `norm.weight` is a substring of
+        # `layer_norm.weight`). We still run special handlers (e.g., tying embeddings).
+        if self._already_hf_umt5_layout(state_dict):
+            self._normalize_double_encoder_prefix_inplace(state_dict)
+            for key in list(state_dict.keys()):
+                for special_key, handler_fn_inplace in self.special_keys_map.items():
+                    if special_key in key:
+                        handler_fn_inplace(key, state_dict)
+            return state_dict
+
         # Apply *all* rename_dict rules to each key before updating the dict.
         for key in list(state_dict.keys()):
+            # Never rewrite already-HF keys. This keeps conversion safe even for
+            # partially-converted state dicts where both source and target keys
+            # coexist (we only want to convert the source-shaped keys).
+            if key.startswith("encoder.") or key.startswith("shared."):
+                continue
             new_key = key
             for replace_key, rename_key in self.rename_dict.items():
                 # Handle legacy "enc." prefix carefully: only normalize true
@@ -118,6 +206,31 @@ class T5TextEncoderConverter(TransformerConverter):
                 if replace_key == "enc.":
                     if new_key.startswith("enc."):
                         new_key = new_key.replace("enc.", rename_key, 1)
+                    continue
+
+                # Avoid accidental substring collisions for the global final norm mapping:
+                # `norm.weight` is a substring of `layer_norm.weight` (HF keys), so only
+                # map it when the *entire* key matches.
+                if replace_key in {"norm.weight", "norm.bias"}:
+                    if new_key == replace_key:
+                        new_key = rename_key
+                    continue
+
+                # Only treat `blocks` / `block.` as source prefixes, not generic substrings,
+                # to avoid rewriting already-HF keys like `encoder.block.*`.
+                if replace_key == "blocks":
+                    # Replace a `blocks` path segment, either at the start or after a prefix.
+                    if new_key.startswith("blocks."):
+                        new_key = new_key.replace("blocks", rename_key, 1)
+                    elif ".blocks." in new_key:
+                        new_key = new_key.replace(".blocks.", f".{rename_key}.")
+                    continue
+                if replace_key == "block.":
+                    # Replace a `block.` path segment, either at the start or after a prefix.
+                    if new_key.startswith("block."):
+                        new_key = new_key.replace("block.", rename_key, 1)
+                    elif ".block." in new_key:
+                        new_key = new_key.replace(".block.", f".{rename_key}")
                     continue
 
                 if replace_key in new_key:

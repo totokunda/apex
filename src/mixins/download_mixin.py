@@ -9,7 +9,39 @@ import hashlib
 from typing import Dict, Any
 import tempfile
 import traceback
+from typing import Tuple
+ProgressCb = Callable[[int, Optional[int], Optional[str]], None]
+from tqdm import tqdm
 
+def _progress_tqdm(desc: str) -> Tuple[tqdm, ProgressCb]:
+    """
+    Create a tqdm bar and a progress callback matching DownloadMixin signature:
+      cb(downloaded_so_far, total_or_none, filename_or_none)
+    """
+    bar = tqdm(
+        desc=desc,
+        total=None,
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+        dynamic_ncols=True,
+    )
+    state = {"last_n": 0, "total": None}
+
+    def cb(n: int, total: Optional[int], _label: Optional[str] = None) -> None:
+        try:
+            if total is not None and state["total"] != total:
+                bar.total = int(total)
+                state["total"] = int(total)
+            n_int = int(n or 0)
+            delta = n_int - int(state["last_n"])
+            if delta > 0:
+                bar.update(delta)
+            state["last_n"] = n_int
+        except Exception:
+            pass
+
+    return bar, cb
 
 class DownloadMixin:
     logger: Logger = logger
@@ -123,11 +155,37 @@ class DownloadMixin:
                     if not os.path.isfile(path):
                         return False
                     if path.endswith(".part"):
+                        # If a partial file is passed but the full file exists, clean up the partial.
+                        full_path = path[: -len(".part")]
+                        try:
+                            if (
+                                os.path.isfile(full_path)
+                                and os.path.getsize(full_path) > 0
+                                and os.path.isfile(path)
+                            ):
+                                os.remove(path)
+                        except Exception:
+                            pass
                         return False
-                    # Must not have an associated partial file and should be non-empty
-                    if os.path.exists(f"{path}.part"):
+
+                    # Should be non-empty
+                    try:
+                        size = os.path.getsize(path)
+                    except Exception:
                         return False
-                    return os.path.getsize(path) > 0
+                    if size <= 0:
+                        return False
+
+                    # If a lingering partial exists but the full file is complete, delete the partial
+                    part_path = f"{path}.part"
+                    if os.path.exists(part_path):
+                        try:
+                            if os.path.isfile(part_path):
+                                os.remove(part_path)
+                        except Exception:
+                            # Treat the full file as complete even if we can't delete the partial.
+                            pass
+                    return True
                 except Exception:
                     return False
 
@@ -141,6 +199,19 @@ class DownloadMixin:
                     for root, _dirs, files in os.walk(path):
                         for name in files:
                             if name.endswith(".part"):
+                                # If the full file exists alongside the partial, remove the partial and continue.
+                                part_path = os.path.join(root, name)
+                                full_path = part_path[: -len(".part")]
+                                try:
+                                    if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
+                                        try:
+                                            if os.path.isfile(part_path):
+                                                os.remove(part_path)
+                                        except Exception:
+                                            pass
+                                        continue
+                                except Exception:
+                                    pass
                                 return False
                             # Count only real files (zero-length may be legitimate, so don't require > 0 here)
                             found_any_file = True or found_any_file
@@ -999,17 +1070,71 @@ class DownloadMixin:
             else:
                 dest_path = os.path.join(save_path)
 
-            # If destination already exists and is non-empty:
-            # - When downloading the whole repo (no subfolder), skip re-download.
-            # - When downloading a subfolder, we will merge the staged subfolder into dest at finalize.
-            if os.path.exists(dest_path) and os.listdir(dest_path) and not subfolder:
-                self.logger.info(
-                    f"Directory {dest_path} already exists with content; skipping full repo re-download."
-                )
-                return dest_path
+            def _hf_local_file_is_complete(path: str) -> bool:
+                """Return True if the local path appears to be a fully downloaded file."""
+                try:
+                    if not os.path.isfile(path):
+                        return False
+                    if path.endswith(".part"):
+                        return False
+                    if os.path.exists(f"{path}.part"):
+                        return False
+                    # Treat 0-byte files as incomplete/corrupt for HF artifacts.
+                    return os.path.getsize(path) > 0
+                except Exception:
+                    return False
+
             # Snapshot-style: list files, resolve signed URLs for each, download in parallel, preserve structure
             api = HfApi()
             all_files = api.list_repo_files(repo_id=repo_id)
+
+            # If destination already exists and is non-empty:
+            # - When downloading the whole repo (no subfolder), verify all expected files exist before skipping.
+            # - When downloading a subfolder, we will merge the staged subfolder into dest at finalize.
+            if os.path.exists(dest_path) and os.listdir(dest_path) and not subfolder:
+                try:
+                    missing = []
+                    for rel_path in all_files:
+                        local_path = os.path.join(dest_path, rel_path)
+                        if not _hf_local_file_is_complete(local_path):
+                            missing.append(rel_path)
+
+                    has_part = False
+                    for root, _dirs, files in os.walk(dest_path):
+                        if any(name.endswith(".part") for name in files):
+                            has_part = True
+                            break
+
+                    if not missing and not has_part:
+                        self.logger.info(
+                            f"Directory {dest_path} already exists and matches Hugging Face repo file list; skipping full repo re-download."
+                        )
+                        return dest_path
+
+                    preview = ", ".join(missing[:10])
+                    more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+                    self.logger.warning(
+                        "Directory %s already exists but appears incomplete for Hugging Face repo %s; "
+                        "missing %d files%s%s. Proceeding to download/merge missing files.",
+                        dest_path,
+                        repo_id,
+                        len(missing),
+                        f": {preview}" if preview else "",
+                        more,
+                    )
+                    if has_part:
+                        self.logger.warning(
+                            "Directory %s contains one or more '.part' files; proceeding to download/merge missing files.",
+                            dest_path,
+                        )
+                except Exception as e:
+                    # If verification fails, do not skip: proceed with normal download path so we can correct/complete.
+                    self.logger.warning(
+                        "Failed to verify existing Hugging Face directory %s for %s (%s); proceeding with download.",
+                        dest_path,
+                        repo_id,
+                        e,
+                    )
             # Restrict to subfolder if provided
             subfolder_root = None
             if subfolder:
@@ -1027,6 +1152,44 @@ class DownloadMixin:
                 if subfolder:
                     return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
+
+            # If destination already exists, only download files that are missing/incomplete.
+            files_to_resolve = all_files
+            if os.path.exists(dest_path):
+                try:
+                    needed = []
+                    skipped = 0
+                    for rel_path in all_files:
+                        local_path = os.path.join(dest_path, rel_path)
+                        if _hf_local_file_is_complete(local_path):
+                            skipped += 1
+                            continue
+                        needed.append(rel_path)
+                    files_to_resolve = needed
+
+                    if skipped:
+                        self.logger.info(
+                            "Hugging Face repo %s already has %d/%d files present locally; only downloading missing/incomplete files.",
+                            repo_id,
+                            skipped,
+                            len(all_files),
+                        )
+
+                    if not files_to_resolve:
+                        # Nothing to do; everything we expect is already present locally.
+                        return (
+                            dest_path
+                            if not subfolder
+                            else os.path.join(dest_path, *subfolder).rstrip("*")
+                        )
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to compute missing/incomplete Hugging Face files for %s (%s); proceeding with full file list.",
+                        repo_id,
+                        e,
+                    )
+                    files_to_resolve = all_files
+
             # Prepare session and headers
             token = HfFolder.get_token()
             headers = build_hf_headers(token=token)
@@ -1035,7 +1198,7 @@ class DownloadMixin:
             # First, resolve signed URLs and collect sizes to compute total
             file_entries = []
             total_size = 0
-            for rel_path in all_files:
+            for rel_path in files_to_resolve:
                 # Split into subdir and filename
                 filename = os.path.basename(rel_path)
                 rel_dir = os.path.dirname(rel_path)
@@ -1071,28 +1234,92 @@ class DownloadMixin:
                     return os.path.join(dest_path, *subfolder).rstrip("*")
                 return dest_path
 
-            # Progress aggregation across threads
+            # Per-file progress callback factory.
+            # If caller did not supply a callback, default to a tqdm-based callback.
             def make_cb(rel_path: str, size_hint: Optional[int]):
-                def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
-                    if progress_callback:
-                        try:
-                            # Report per-file progress with per-file total
-                            progress_callback(
-                                int(n),
-                                _total if _total is not None else size_hint,
-                                _label or os.path.basename(rel_path),
-                            )
-                        except Exception:
-                            pass
+                label = os.path.basename(rel_path)
 
-                return _cb
+                # If no callback provided, use a per-file tqdm bar
+                if progress_callback is None:
+                    bar, cb = _progress_tqdm(label)
+
+                    def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
+                        # Drive tqdm and let it infer/receive totals when available
+                        cb(int(n), _total if _total is not None else size_hint, _label)
+
+                    return bar, _cb
+
+                # Otherwise, wrap the provided callback to ensure consistent signature
+                def _cb(n: int, _total: Optional[int], _label: Optional[str] = None):
+                    try:
+                        progress_callback(
+                            int(n),
+                            _total if _total is not None else size_hint,
+                            _label or label,
+                        )
+                    except Exception:
+                        pass
+
+                return None, _cb
 
             # Download in parallel to temp (staging dir), then move the entire directory into dest_path atomically
             with tempfile.TemporaryDirectory() as tmp_root:
                 stage_dir = os.path.join(tmp_root, os.path.basename(dest_path))
                 os.makedirs(stage_dir, exist_ok=True)
                 futures = []
-                with ThreadPoolExecutor(max_workers=min(8, len(file_entries))) as ex:
+                # Control HF parallelism via env vars.
+                # - When Rust downloader is enabled, default HF concurrency to 1 to reduce rate limiting.
+                # - When not using Rust, keep the existing parallel default (8) but make it configurable.
+                def _bool_env(name: str, default: bool = True) -> bool:
+                    try:
+                        v = os.environ.get(name)
+                        if v is None:
+                            return default
+                        return str(v).strip().lower() not in ("0", "false", "no", "off")
+                    except Exception:
+                        return default
+
+                def _int_env(name: str, default: int) -> int:
+                    try:
+                        v = os.environ.get(name)
+                        if v is None:
+                            return int(default)
+                        return int(str(v).strip())
+                    except Exception:
+                        return int(default)
+
+                rust_enabled = False
+                try:
+                    # Match the Rust fast-path gating in `_download_from_url`.
+                    from apex_download_rs import download_from_url as _rs_download_from_url  # type: ignore
+
+                    rust_enabled = _rs_download_from_url is not None and _bool_env(
+                        "APEX_USE_RUST_DOWNLOAD", True
+                    )
+                except Exception:
+                    rust_enabled = False
+
+                default_workers = 1 if rust_enabled else 8
+                env_var = (
+                    "APEX_HF_RUST_MAX_SIMULTANEOUS_DOWNLOADS"
+                    if rust_enabled
+                    else "APEX_HF_MAX_SIMULTANEOUS_DOWNLOADS"
+                )
+                max_workers = _int_env(env_var, default_workers)
+                # Clamp to a safe range
+                if max_workers < 1:
+                    max_workers = 1
+                max_workers = min(max_workers, len(file_entries))
+
+                if hasattr(self, "logger") and rust_enabled and max_workers > 1:
+                    self.logger.warning(
+                        "Rust downloader is enabled and Hugging Face parallelism is set to %d via %s. "
+                        "Higher parallelism can increase the risk of Hugging Face rate limits.",
+                        max_workers,
+                        env_var,
+                    )
+
+                with ThreadPoolExecutor(max_workers=max_workers) as ex:
                     for rel_path, filename, rel_dir, signed_url, _size in file_entries:
                         final_dir = (
                             os.path.join(stage_dir, rel_dir) if rel_dir else stage_dir
@@ -1132,54 +1359,62 @@ class DownloadMixin:
                             dest_file = os.path.join(final_dir, filename)
 
                             max_retries = 3
-                            for attempt in range(max_retries):
-                                try:
-                                    self._download_from_url(
-                                        url=signed_url,
-                                        save_path=tmp_dir,
-                                        progress_callback=make_cb(
-                                            rel_path, expected_size
-                                        ),
-                                        session=session,
-                                        filename=filename,
-                                        dest_path=dest_file,
-                                    )
-
-                                    # Verification
-                                    if not os.path.exists(dest_file):
-                                        raise ValueError(
-                                            f"File {dest_file} not found after download"
+                            bar, cb = make_cb(rel_path, expected_size)
+                            try:
+                                for attempt in range(max_retries):
+                                    try:
+                                        self._download_from_url(
+                                            url=signed_url,
+                                            save_path=tmp_dir,
+                                            progress_callback=cb,
+                                            session=session,
+                                            filename=filename,
+                                            dest_path=dest_file,
                                         )
 
-                                    actual_size = os.path.getsize(dest_file)
-                                    if actual_size == 0:
-                                        raise ValueError(f"File {dest_file} is empty")
-
-                                    if (
-                                        expected_size is not None
-                                        and actual_size != expected_size
-                                    ):
-                                        raise ValueError(
-                                            f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}"
-                                        )
-
-                                    return dest_file
-
-                                except Exception as e:
-                                    if attempt < max_retries - 1:
-                                        if hasattr(self, "logger"):
-                                            self.logger.warning(
-                                                f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}"
+                                        # Verification
+                                        if not os.path.exists(dest_file):
+                                            raise ValueError(
+                                                f"File {dest_file} not found after download"
                                             )
 
-                                    if os.path.exists(dest_file):
-                                        try:
-                                            os.remove(dest_file)
-                                        except Exception:
-                                            pass
+                                        actual_size = os.path.getsize(dest_file)
+                                        if actual_size == 0:
+                                            raise ValueError(
+                                                f"File {dest_file} is empty"
+                                            )
 
-                                    if attempt == max_retries - 1:
-                                        raise e
+                                        if (
+                                            expected_size is not None
+                                            and actual_size != expected_size
+                                        ):
+                                            raise ValueError(
+                                                f"File {dest_file} size mismatch: expected {expected_size}, got {actual_size}"
+                                            )
+
+                                        return dest_file
+
+                                    except Exception as e:
+                                        if attempt < max_retries - 1:
+                                            if hasattr(self, "logger"):
+                                                self.logger.warning(
+                                                    f"Download failed for {filename} (attempt {attempt+1}/{max_retries}): {e}"
+                                                )
+
+                                        if os.path.exists(dest_file):
+                                            try:
+                                                os.remove(dest_file)
+                                            except Exception:
+                                                pass
+
+                                        if attempt == max_retries - 1:
+                                            raise e
+                            finally:
+                                try:
+                                    if bar is not None:
+                                        bar.close()
+                                except Exception:
+                                    pass
 
                         futures.append(ex.submit(task))
                     # ensure completion
@@ -1192,7 +1427,7 @@ class DownloadMixin:
                         # Merge staged content into existing destination without introducing empty dirs:
                         # - move only completed files (non-.part)
                         # - create parent dirs only when moving a file
-                        # - skip overwriting existing files
+                        # - skip overwriting existing complete files (but overwrite incomplete/partial ones)
                         files_to_move = []
                         for root, _dirs, files in os.walk(stage_dir):
                             for f in files:
@@ -1205,13 +1440,20 @@ class DownloadMixin:
                         for src_f in files_to_move:
                             rel = os.path.relpath(src_f, stage_dir)
                             dst_f = os.path.join(dest_path, rel)
-                            if os.path.exists(dst_f):
+                            if os.path.exists(dst_f) and _hf_local_file_is_complete(dst_f):
                                 continue
                             os.makedirs(os.path.dirname(dst_f), exist_ok=True)
                             try:
                                 os.replace(src_f, dst_f)
                             except Exception:
                                 shutil.move(src_f, dst_f)
+                            # If a stale partial exists next to the finalized file, remove it.
+                            try:
+                                part_candidate = f"{dst_f}.part"
+                                if os.path.exists(part_candidate):
+                                    os.remove(part_candidate)
+                            except Exception:
+                                pass
                         # Cleanup any empty directories left in staging
                         for root, dirs, files in os.walk(stage_dir, topdown=False):
                             for name in files:
@@ -1407,6 +1649,8 @@ class DownloadMixin:
         import requests
         from tqdm import tqdm
         import time
+        from dataclasses import dataclass
+        from typing import Mapping
 
         parsed_url = urlparse(url)
         relative_path_from_url = parsed_url.path.lstrip("/")
@@ -1430,6 +1674,125 @@ class DownloadMixin:
         part_path = f"{file_path}.part"
         # Name to use in logs/progress
         log_name = os.path.basename(file_path)
+
+        # Optional Rust fast-path (if the extension module is installed).
+        # NOTE: This project uses Hatch for packaging, so the Rust module is built/installed separately.
+        # See `rust/apex_download_rs/pyproject.toml` for the maturin project.
+        try:
+            from apex_download_rs import download_from_url as _rs_download_from_url  # type: ignore
+        except Exception:
+            _rs_download_from_url = None
+
+        def _bool_env(name: str, default: bool = True) -> bool:
+            try:
+                v = os.environ.get(name)
+                if v is None:
+                    return default
+                return str(v).strip().lower() not in ("0", "false", "no", "off")
+            except Exception:
+                return default
+
+        def _cookie_header_from_session(sess) -> Optional[str]:
+            try:
+                if sess is None:
+                    return None
+                cookies = getattr(sess, "cookies", None)
+                if not cookies:
+                    return None
+                # requests' cookiejar supports iterating Cookie objects
+                parts = []
+                for c in cookies:
+                    try:
+                        parts.append(f"{c.name}={c.value}")
+                    except Exception:
+                        continue
+                return "; ".join(parts) if parts else None
+            except Exception:
+                return None
+
+        @dataclass
+        class _RateLimitInfo:
+            # Mirrors rust/apex_download_rs RateLimitInfo
+            resource_type: str
+            remaining: int
+            reset_in_seconds: int
+            limit: Optional[int] = None
+            window_seconds: Optional[int] = None
+
+        def _parse_first_quoted_token(s: str) -> Optional[str]:
+            try:
+                start = s.find('"')
+                if start < 0:
+                    return None
+                rest = s[start + 1 :]
+                end = rest.find('"')
+                if end < 0:
+                    return None
+                return rest[:end]
+            except Exception:
+                return None
+
+        def _parse_semicolon_kv_int(s: str, key: str) -> Optional[int]:
+            try:
+                for part in s.split(";"):
+                    part = part.strip()
+                    if "=" not in part:
+                        continue
+                    k, v = part.split("=", 1)
+                    if k.strip() == key:
+                        try:
+                            return int(v.strip())
+                        except Exception:
+                            return None
+                return None
+            except Exception:
+                return None
+
+        def _parse_ratelimit_headers(headers: Mapping[str, str]) -> Optional[_RateLimitInfo]:
+            """
+            Follows IETF draft (subset): https://www.ietf.org/archive/id/draft-ietf-httpapi-ratelimit-headers-09.html
+            Example:
+              ratelimit: '"api";r=0;t=55'
+              ratelimit-policy: '"fixed window";"api";q=500;w=300'
+            """
+            try:
+                ratelimit = headers.get("ratelimit")
+                if not ratelimit:
+                    return None
+                resource_type = _parse_first_quoted_token(ratelimit)
+                if not resource_type:
+                    return None
+                remaining = _parse_semicolon_kv_int(ratelimit, "r")
+                reset_in_seconds = _parse_semicolon_kv_int(ratelimit, "t")
+                if remaining is None or reset_in_seconds is None:
+                    return None
+
+                limit = None
+                window_seconds = None
+                policy = headers.get("ratelimit-policy")
+                if policy:
+                    limit = _parse_semicolon_kv_int(policy, "q")
+                    window_seconds = _parse_semicolon_kv_int(policy, "w")
+
+                return _RateLimitInfo(
+                    resource_type=resource_type,
+                    remaining=int(remaining),
+                    reset_in_seconds=int(reset_in_seconds),
+                    limit=None if limit is None else int(limit),
+                    window_seconds=None if window_seconds is None else int(window_seconds),
+                )
+            except Exception:
+                return None
+
+        def _parse_retry_after_seconds(headers: Mapping[str, str]) -> Optional[int]:
+            try:
+                ra = headers.get("retry-after")
+                if not ra:
+                    return None
+                return int(str(ra).strip())
+            except Exception:
+                return None
+
         try:
             # If the file already exists, do not re-download
             if os.path.exists(file_path):
@@ -1438,6 +1801,83 @@ class DownloadMixin:
 
             # Prepare directory
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            # Prefer Rust implementation when available (can significantly reduce Python overhead).
+            # Can be disabled via APEX_USE_RUST_DOWNLOAD=0
+            if _rs_download_from_url is not None and _bool_env(
+                "APEX_USE_RUST_DOWNLOAD", True
+            ):
+                # Merge base headers with session headers/cookies (best-effort).
+                headers_for_rust = dict(base_headers)
+                try:
+                    if session is not None and hasattr(session, "headers"):
+                        headers_for_rust.update(dict(getattr(session, "headers") or {}))
+                except Exception:
+                    pass
+                cookie_header = _cookie_header_from_session(session)
+                if cookie_header:
+                    headers_for_rust["Cookie"] = cookie_header
+                # Prefer identity encoding so byte counts match file writes (and avoid decompression overhead).
+                headers_for_rust.setdefault("Accept-Encoding", "identity")
+
+                # Throttle callbacks to avoid Python-call overhead becoming the bottleneck.
+                callback_interval = float(
+                    os.environ.get("APEX_DOWNLOAD_PROGRESS_INTERVAL", "0.2")
+                )
+                callback_min_bytes = int(
+                    os.environ.get("APEX_DOWNLOAD_PROGRESS_MIN_BYTES", str(1024 * 1024))
+                )
+                
+                
+                # If caller didn't supply a progress callback, default to a tqdm-based callback
+                # (can be disabled via APEX_RUST_TQDM=0).
+                rust_bar = None
+                effective_progress_callback = progress_callback
+                if effective_progress_callback is None and _bool_env("APEX_RUST_TQDM", True):
+                    rust_bar, effective_progress_callback = _progress_tqdm(os.path.basename(file_path))
+
+                try:
+                    _rs_download_from_url(
+                        url=url,
+                        file_path=file_path,
+                        part_path=part_path,
+                        headers=headers_for_rust,
+                        verify_tls=self._requests_verify(),
+                        progress_callback=effective_progress_callback,
+                        adaptive=adaptive,
+                        chunk_size=int(chunk_size),
+                        initial_chunk_size=int(initial_chunk_size),
+                        target_chunk_seconds=float(target_chunk_seconds),
+                        min_chunk_size=int(min_chunk_size),
+                        max_chunk_size=int(max_chunk_size),
+                        callback_min_interval_secs=float(callback_interval),
+                        callback_min_bytes=int(callback_min_bytes),
+                    )
+                    self.logger.info(
+                        f"Successfully downloaded {log_name} to {file_path} (rust)"
+                    )
+                    return file_path
+                except Exception as e:
+                    # Best-effort Rust fast-path: if it fails for any reason, fall back
+                    # to the Python downloader (which also supports resuming from .part).
+                    #
+                    # Do not delete part_path here; keeping it enables the Python path
+                    # to resume if Rust wrote any partial bytes.
+                    if os.path.exists(file_path):
+                        self.logger.info(
+                            f"Rust downloader errored but {file_path} exists; using existing file."
+                        )
+                        return file_path
+                    self.logger.warning(
+                        f"Rust downloader failed for {log_name} from: {url}; falling back to Python downloader. Error: {e}",
+                        exc_info=True,
+                    )
+                finally:
+                    try:
+                        if rust_bar is not None:
+                            rust_bar.close()
+                    except Exception:
+                        pass
 
             # Determine resume offset if a partial file exists
             resume_size = 0
@@ -1452,13 +1892,41 @@ class DownloadMixin:
             accept_ranges = False
             try:
                 requester = session if session is not None else requests
-                head_resp = requester.head(
-                    url,
-                    timeout=10,
-                    verify=self._requests_verify(),
-                    headers=base_headers,
-                    allow_redirects=True,
+                ratelimit_max_retries = int(
+                    os.environ.get("APEX_DOWNLOAD_RATELIMIT_MAX_RETRIES", "20")
                 )
+                rl_attempts = 0
+                while True:
+                    head_resp = requester.head(
+                        url,
+                        timeout=10,
+                        verify=self._requests_verify(),
+                        headers=base_headers,
+                        allow_redirects=True,
+                    )
+                    if head_resp.status_code == 429:
+                        if ratelimit_max_retries == 0 or rl_attempts >= ratelimit_max_retries:
+                            self.logger.warning(
+                                f"Rate limited (429) too many times while probing; retries={ratelimit_max_retries}"
+                            )
+                            break
+                        info = _parse_ratelimit_headers(head_resp.headers)
+                        if info is not None:
+                            self.logger.info(
+                                f"Rate limited while probing ({info.resource_type}): remaining={info.remaining}, reset_in_seconds={info.reset_in_seconds}"
+                            )
+                            time.sleep(max(0, int(info.reset_in_seconds)))
+                            rl_attempts += 1
+                            continue
+                        secs = _parse_retry_after_seconds(head_resp.headers)
+                        if secs is not None:
+                            self.logger.info(
+                                f"Rate limited while probing: retry-after={secs}s"
+                            )
+                            time.sleep(max(0, int(secs)))
+                            rl_attempts += 1
+                            continue
+                    break
                 if head_resp.ok:
                     try:
                         remote_size = (
@@ -1501,14 +1969,55 @@ class DownloadMixin:
             )
 
             get_requester = session if session is not None else requests
-            with get_requester.get(
-                url,
-                timeout=10,
-                verify=self._requests_verify(),
-                headers=headers,
-                stream=True,
-                allow_redirects=True,
-            ) as response:
+            ratelimit_max_retries = int(
+                os.environ.get("APEX_DOWNLOAD_RATELIMIT_MAX_RETRIES", "20")
+            )
+            rl_attempts = 0
+            while True:
+                response = get_requester.get(
+                    url,
+                    timeout=10,
+                    verify=self._requests_verify(),
+                    headers=headers,
+                    stream=True,
+                    allow_redirects=True,
+                )
+                if response.status_code == 429:
+                    if ratelimit_max_retries == 0 or rl_attempts >= ratelimit_max_retries:
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                        raise requests.HTTPError(
+                            f"Rate limited (429) too many times while downloading; retries={ratelimit_max_retries}"
+                        )
+                    info = _parse_ratelimit_headers(response.headers)
+                    if info is not None:
+                        self.logger.info(
+                            f"Rate limited while downloading ({info.resource_type}): remaining={info.remaining}, reset_in_seconds={info.reset_in_seconds}"
+                        )
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                        time.sleep(max(0, int(info.reset_in_seconds)))
+                        rl_attempts += 1
+                        continue
+                    secs = _parse_retry_after_seconds(response.headers)
+                    if secs is not None:
+                        self.logger.info(
+                            f"Rate limited while downloading: retry-after={secs}s"
+                        )
+                        try:
+                            response.close()
+                        except Exception:
+                            pass
+                        time.sleep(max(0, int(secs)))
+                        rl_attempts += 1
+                        continue
+                break
+
+            with response:
                 # If we attempted to resume but server responded with 200, it ignored Range.
                 # If we know total size and resume already matches it, finalize; otherwise restart from scratch.
                 if (
@@ -1674,8 +2183,8 @@ class DownloadMixin:
         except Exception as e:
             traceback.print_exc()
             self.logger.error(f"Failed to download from URL: {url}. Error: {e}")
-        finally:
-            return file_path
+            raise
+        return file_path
 
     def download_from_url(
         self,

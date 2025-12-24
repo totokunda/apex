@@ -14,6 +14,7 @@ from src.utils.cache import empty_cache
 from .mlx import WanMLXDenoise
 from torch import Tensor
 import os
+import gc
 
 class WanShared(BaseEngine, WanMLXDenoise):
     """Base class for WAN engine implementations containing common functionality"""
@@ -213,7 +214,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         return prompt_embeds, negative_prompt_embeds
 
@@ -232,6 +233,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
         encoded_image = self.vae_encode(ip_image, sample_mode="mode", dtype=dtype)
         return encoded_image
 
+  
 
     
     def moe_denoise(self, *args, **kwargs) -> torch.Tensor:
@@ -278,14 +280,15 @@ class WanShared(BaseEngine, WanMLXDenoise):
                 timestep = t.expand(latents.shape[0])
 
                 if boundary_timestep is not None and t >= boundary_timestep:
-                    if hasattr(self, "low_noise_transformer") and self.low_noise_transformer:
+                    if getattr(self, "low_noise_transformer", None): 
+                        self.logger.info("Offloading low noise transformer")
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Offloading previous transformer",
                         )
-                        self._offload(self.low_noise_transformer)
-                        empty_cache()
+                        # IMPORTANT: group-offloading hooks can keep CPU tensors alive.
+                        self._offload("low_noise_transformer")
 
                     if not getattr(self, "high_noise_transformer", None):
                         safe_emit_progress(
@@ -294,8 +297,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
                             "Loading new transformer",
                         )
                         
-                        
                         self.load_component_by_name("high_noise_transformer")
+                        
                         self.to_device(self.high_noise_transformer)
                         self.high_noise_transformer.current_steps = i
                         self.high_noise_transformer.num_inference_steps = total_steps
@@ -312,14 +315,14 @@ class WanShared(BaseEngine, WanMLXDenoise):
                         guidance_scale = guidance_scale[0]
                 else:
                     if getattr(self, "high_noise_transformer", None):
+                        self.logger.info("Offloading high noise transformer")
                         safe_emit_progress(
                             denoise_progress_callback,
                             float(i) / float(total_steps) if total_steps else 0.0,
-                            "Switching model boundary, offloading previous transformer",
+                            "Offloading previous transformer",
                         )
-                        self._offload(self.high_noise_transformer)
-                        empty_cache()
-
+                        self._offload("high_noise_transformer")
+                        
                     if not getattr(self, "low_noise_transformer", None):
                         safe_emit_progress(
                             denoise_progress_callback,
@@ -333,14 +336,11 @@ class WanShared(BaseEngine, WanMLXDenoise):
                             float(i) / float(total_steps) if total_steps else 0.0,
                             "Alternate transformer ready",
                         )
-                    self.low_noise_transformer.current_steps = i
-                    self.low_noise_transformer.num_inference_steps = total_steps
                     transformer = self.low_noise_transformer
                     if isinstance(guidance_scale, list):
                         guidance_scale = guidance_scale[1]
-                    # Standard denoising
-                    
-
+                        
+                # Standard denoising
                 noise_pred = transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep,
@@ -384,14 +384,16 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     float(i + 1) / float(total_steps),
                     f"Denoising step {i + 1}/{total_steps}",
                 )
+                
+                del transformer
 
             self.logger.info("Denoising completed.")
             
         if offload:
-            if hasattr(self, "low_noise_transformer") and self.low_noise_transformer:
-                self._offload(self.low_noise_transformer)
-            if hasattr(self, "high_noise_transformer") and self.high_noise_transformer:
-                self._offload(self.high_noise_transformer)
+            if getattr(self, "low_noise_transformer", None):
+                self._offload("low_noise_transformer")
+            if getattr(self, "high_noise_transformer", None):
+                self._offload("high_noise_transformer")
 
         return latents
 
@@ -504,7 +506,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     )
 
                 if i == len(timesteps) - 1 or (
-                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                    (i + 1) > num_warmup_steps and (i + 1) % getattr(self.scheduler, "order", 1) == 0
                 ):
                     pbar.update(1)
 

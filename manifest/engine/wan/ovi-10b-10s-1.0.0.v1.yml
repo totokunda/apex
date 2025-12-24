@@ -79,7 +79,22 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    extra_model_paths:
+  - type: vae
+    name: audio_vae
+    label: Audio VAE
+    base: mmaudio
+    extra_kwargs:
+      require_conversion: true
+    model_path:
+    - path: hkchengrex/MMAudio/ext_weights/best_netG.pt
+      variant: default
+      precision: fp16
+      type: safetensors
+  - type: extra_model_path
+    name: audio_vae_extra_model_path
+    label: Audio VAE Extra Model Path
+    component: audio_vae
+    model_path:
     - path: hkchengrex/MMAudio/ext_weights/v1-16.pth
       variant: default
       precision: fp16
@@ -89,7 +104,7 @@ spec:
     base: UMT5EncoderModel
     label: UMT5 Text Encoder
     model_path:
-    - path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder
+    - path: Wan-AI/Wan2.2-I2V-14B-480P-Diffusers/text_encoder
       variant: default
       precision: fp16
       type: safetensors
@@ -141,6 +156,7 @@ spec:
       num_inference_steps: 50
       video_guidance_scale: 4.0
       audio_guidance_scale: 3.0
+      easy_cache_thresh: 0.05
       return_latents: false
       timesteps_as_indices: true
       expand_timesteps: false
@@ -196,6 +212,15 @@ spec:
         - - audio_guidance_scale
         - - seed
         - - shift
+    - name: easy_cache
+      label: Easy Cache
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - easy_cache_thresh
+        - - easy_cache_ret_steps
     inputs:
     - id: image
       label: Image
@@ -226,6 +251,15 @@ spec:
       panel: advanced_prompting
       required: false
       default: robotic, muffled, echo, distorted
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video
+      type: number+slider
+      value_type: integer
+      panel: size
+      default: 
+      min: 256
+      max: 8192
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video
@@ -322,3 +356,25 @@ spec:
       min: 1.0
       max: 15.0
       step: 0.5
+    - id: easy_cache_thresh
+      label: Easy Cache Threshold
+      description: Threshold for the easy cache
+      type: number+slider
+      value_type: float
+      panel: easy_cache
+      required: false
+      default: 0.05
+      min: 0.0
+      max: 1.0
+      step: 0.001
+    - id: easy_cache_ret_steps
+      label: Easy Cache Return Steps
+      description: Number of steps to return for the easy cache
+      type: number+slider
+      value_type: integer
+      panel: easy_cache
+      required: false
+      default: 10
+      min: 1
+      max: 100
+      step: 1

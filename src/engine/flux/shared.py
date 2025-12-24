@@ -224,11 +224,16 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         num_images: int = 1,
         text_encoder_kwargs: Optional[Dict[str, Any]] = {},
         text_encoder_2_kwargs: Optional[Dict[str, Any]] = {},
+        progress_callback: Callable | None = None,
     ):
         if not hasattr(self, "text_encoder") or not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.10, "Loading text encoder")
             self.load_component_by_name("text_encoder")
+            safe_emit_progress(progress_callback, 0.20, "Text encoder loaded")
 
+        safe_emit_progress(progress_callback, 0.25, "Moving text encoder to device")
         self.to_device(self.text_encoder)
+        safe_emit_progress(progress_callback, 0.30, "Text encoder on device")
 
         if isinstance(prompt, str):
             prompt = [prompt]
@@ -240,6 +245,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 negative_prompt, self.text_encoder.tokenizer
             )
 
+        safe_emit_progress(progress_callback, 0.40, "Encoding pooled prompt embeddings")
         pooled_prompt_embeds = self.text_encoder.encode(
             prompt,
             device=self.device,
@@ -247,8 +253,12 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             output_type="pooler_output",
             **text_encoder_kwargs,
         )
+        safe_emit_progress(progress_callback, 0.55, "Pooled prompt embeddings ready")
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(
+                progress_callback, 0.60, "Encoding pooled negative prompt embeddings"
+            )
             negative_pooled_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
@@ -256,17 +266,25 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 output_type="pooler_output",
                 **text_encoder_kwargs,
             )
+            safe_emit_progress(
+                progress_callback, 0.70, "Pooled negative prompt embeddings ready"
+            )
         else:
             negative_pooled_prompt_embeds = None
         
         if offload:
+            safe_emit_progress(progress_callback, 0.72, "Offloading text encoder")
             del self.text_encoder
 
 
         if not hasattr(self, "text_encoder_2") or not self.text_encoder_2:
+            safe_emit_progress(progress_callback, 0.75, "Loading text encoder 2")
             self.load_component_by_name("text_encoder_2")
+            safe_emit_progress(progress_callback, 0.80, "Text encoder 2 loaded")
 
+        safe_emit_progress(progress_callback, 0.82, "Moving text encoder 2 to device")
         self.to_device(self.text_encoder_2)
+        safe_emit_progress(progress_callback, 0.85, "Text encoder 2 on device")
 
         if not prompt_2:
             prompt_2 = prompt
@@ -284,6 +302,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 negative_prompt_2, self.text_encoder_2.tokenizer
             )
 
+        safe_emit_progress(progress_callback, 0.90, "Encoding prompt embeddings")
         prompt_embeds = self.text_encoder_2.encode(
             prompt_2,
             device=self.device,
@@ -291,12 +310,14 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             output_type="hidden_states",
             **text_encoder_2_kwargs,
         )
+        safe_emit_progress(progress_callback, 0.95, "Prompt embeddings ready")
 
         text_ids = torch.zeros(prompt_embeds.shape[1], 3).to(
             device=self.device, dtype=prompt_embeds.dtype
         )
 
         if negative_prompt_2 is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.96, "Encoding negative prompt embeddings")
             negative_prompt_embeds = self.text_encoder_2.encode(
                 negative_prompt_2,
                 device=self.device,
@@ -304,6 +325,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                 output_type="hidden_states",
                 **text_encoder_2_kwargs,
             )
+            safe_emit_progress(progress_callback, 0.99, "Negative prompt embeddings ready")
             negative_text_ids = torch.zeros(negative_prompt_embeds.shape[1], 3).to(
                 device=self.device, dtype=negative_prompt_embeds.dtype
             )
@@ -311,6 +333,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
             negative_prompt_embeds = None
             negative_text_ids = None
 
+        safe_emit_progress(progress_callback, 1.0, "Prompt encoding complete")
         return (
             pooled_prompt_embeds,
             negative_pooled_prompt_embeds,

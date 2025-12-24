@@ -83,7 +83,7 @@ class LongCatVCEngine(LongCatShared):
         )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -240,7 +240,7 @@ class LongCatVCEngine(LongCatShared):
             self._current_timestep = None
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if not return_latents:
             output_video = self.vae_decode(latents, offload=offload)

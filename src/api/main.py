@@ -16,22 +16,41 @@ from fastapi.middleware.cors import CORSMiddleware
 from .ray_app import get_ray_app, shutdown_ray
 from contextlib import asynccontextmanager
 import asyncio
+from typing import Optional
+
+
+_ray_ready: bool = False
+_ray_start_error: Optional[str] = None
+
+
+async def _start_background_services() -> None:
+    """
+    Start Ray + dependent background services without blocking API startup.
+    Keeps `/health` responsive quickly while Ray spins up.
+    """
+    global _ray_ready, _ray_start_error
+    try:
+        await asyncio.to_thread(get_ray_app)
+
+        # Initialize the Ray websocket bridge
+        from .ws_manager import get_ray_ws_bridge
+
+        get_ray_ws_bridge()
+
+        # Initialize preprocessor download tracking
+        from .preprocessor_registry import initialize_download_tracking
+
+        initialize_download_tracking()
+
+        _ray_ready = True
+    except Exception as e:
+        _ray_start_error = repr(e)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize Ray
-    get_ray_app()
-
-    # Initialize the Ray websocket bridge
-    from .ws_manager import get_ray_ws_bridge
-
-    get_ray_ws_bridge()
-
-    # Initialize preprocessor download tracking
-    from .preprocessor_registry import initialize_download_tracking
-
-    initialize_download_tracking()
+    # Startup: initialize Ray and related services in the background (non-blocking)
+    startup_task = asyncio.create_task(_start_background_services())
 
     # Start background task for polling Ray updates
     from .preprocessor import poll_ray_updates
@@ -41,13 +60,17 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown: Cancel polling task and close Ray
+    startup_task.cancel()
     poll_task.cancel()
+    try:
+        await startup_task
+    except asyncio.CancelledError:
+        pass
     try:
         await poll_task
     except asyncio.CancelledError:
         pass
     shutdown_ray()
-
 
 app = FastAPI(name="Apex Engine", lifespan=lifespan)
 app.include_router(ws_router)
@@ -76,3 +99,11 @@ app.add_middleware(
 @app.get("/health")
 def read_root():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready():
+    # Readiness probe: indicates whether Ray + dependent services finished starting.
+    if _ray_ready:
+        return {"status": "ready"}
+    return {"status": "starting", "error": _ray_start_error}

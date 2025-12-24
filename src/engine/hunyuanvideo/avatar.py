@@ -130,9 +130,9 @@ class HunyuanAvatarEngine(HunyuanVideoShared):
             )
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
             if self.llama_text_encoder is not None:
-                self._offload(self.llama_text_encoder)
+                self._offload("llama_text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -563,7 +563,7 @@ class HunyuanAvatarEngine(HunyuanVideoShared):
         self.logger.info("Denoising completed.")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         latents = latents_all.float()[:, :, :video_length]
 

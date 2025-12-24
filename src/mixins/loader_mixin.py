@@ -27,7 +27,7 @@ import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model_from_state_dict as patch_model_ggml_from_state_dict
-from src.quantize.ggml_tensor import GGMLTensor
+from transformers import Qwen2_5_VLForConditionalGeneration
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
@@ -87,6 +87,7 @@ class LoaderMixin(DownloadMixin):
         getter_fn: Callable | None = None,
         module_name: str = "diffusers",
         load_dtype: torch.dtype | mx.Dtype | None = None,
+        load_device: str = "cpu",
         no_weights: bool = False,
         key_map: Dict[str, str] | None = None,
         extra_kwargs: Dict[str, Any] | None = None,
@@ -114,7 +115,13 @@ class LoaderMixin(DownloadMixin):
 
         model_base = component.get("base")
         model_path = component.get("model_path")
-
+        
+        if mm_config is not None:
+            # Should be cpu often times since the model is loaded on the cpu
+            load_device = "cpu"
+        
+        if no_weights:
+            load_device = "cpu"
 
         if getter_fn:
             model_class = getter_fn(model_base)
@@ -126,8 +133,10 @@ class LoaderMixin(DownloadMixin):
             raise ValueError(f"Model class for base '{model_base}' not found")
         config_path = component.get("config_path")
         config = {}
-
-
+        
+        if "nunchaku" in model_base:
+            return model_class.from_pretrained(model_path, torch_dtype=load_dtype)
+            
 
         if config_path:
             config.update(self.fetch_config(config_path))
@@ -152,110 +161,14 @@ class LoaderMixin(DownloadMixin):
             converter = get_text_encoder_converter(model_base)
         else:
             converter = NoOpConverter()
-    
- 
-        # Only take the diffusers `from_pretrained` fast-path when we *don't*
-        # need to run any custom conversion logic. If a converter is required,
-        # we fall through to the manual loading path below where we explicitly
-        # load checkpoints and call `converter.convert(state_dict)` before
-        # assigning weights.
-        
-        requires_conversion = extra_kwargs.get("require_conversion", False)
+            
 
-        if (
-            not requires_conversion
-            and (
-                not config
-                or (
-                    os.path.isdir(model_path)
-                    and os.path.exists(os.path.join(model_path, "config.json"))
-                )
-            )
-        ) and (
-            not component.get("extra_model_paths")
-        ) and not extra_kwargs.get("load_from_config"):
-
-            if (
-                (
-                    hasattr(self, "engine_type")
-                    and self.engine_type == "mlx"
-                    and component.get("type") == "transformer"
-                )
-                and load_dtype is not None
-                and "dtype" not in extra_kwargs
-            ):
-                extra_kwargs["dtype"] = load_dtype
-            elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
-                extra_kwargs["torch_dtype"] = load_dtype
-
-            self.logger.info(f"Loading {model_class} from {model_path}")
-            context = init_empty_weights() if no_weights else nullcontext()
-
-            with context:
-                # remove all kwargs that are null
-                extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
-
-                # Filter out any kwargs that `from_pretrained` cannot accept.
-                # If the method accepts **kwargs we keep everything.
-                try:
-                    sig = inspect.signature(model_class.from_pretrained)
-                    params = sig.parameters
-                    accepts_var_kw = any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
-                    )
-                    if not accepts_var_kw:
-                        filtered_kwargs = {}
-                        for k, v in extra_kwargs.items():
-                            if k in params:
-                                filtered_kwargs[k] = v
-                            else:
-                                # Drop unsupported kwargs rather than failing hard.
-                                if hasattr(self, "logger"):
-                                    self.logger.debug(
-                                        f"Dropping unsupported kwarg '{k}' for "
-                                        f"{model_class.__name__}.from_pretrained"
-                                    )
-                        extra_kwargs = filtered_kwargs
-                except (TypeError, ValueError):
-                    # If inspection fails for any reason, fall back to passing all kwargs.
-                    pass
-
-                model = model_class.from_pretrained(model_path, **extra_kwargs)
-
-            if mm_config is not None and not no_weights and component.get("type") != "transformer":
-                apply_group_offloading = getattr(self, "_apply_group_offloading", None)
-                if callable(apply_group_offloading):
-                    label = (
-                        component.get("name")
-                        or component.get("type")
-                        or type(model).__name__
-                    )
-                    offloading_module = component.get("offloading_module", None)
-                    if offloading_module:
-                        model_to_offload = model.get_submodule(offloading_module)
-                    else:
-                        model_to_offload = model
-                    try:
-                        apply_group_offloading(
-                            model_to_offload, mm_config, module_label=label
-                        )
-                    except Exception as e:
-                        if hasattr(self, "logger"):
-                            self.logger.warning(
-                                f"Failed to enable group offloading for '{label}': {e}"
-                            )
-
-            # Optionally compile the fully initialized module according to config.
-            if not no_weights:
-                maybe_compile = getattr(self, "_maybe_compile_module", None)
-                if callable(maybe_compile):
-                    model = maybe_compile(model, component)
-
-            return model
-
-        self.logger.info(
-            f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}"
-        )
+        if os.path.isdir(model_path):
+            # look for a config.json file
+            config_path = os.path.join(model_path, "config.json")
+            if os.path.exists(config_path):
+                config.update(self._load_json(config_path))
+                
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects
@@ -298,6 +211,7 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
         
+
   
         files_to_load = []
         if os.path.isdir(model_path):
@@ -326,7 +240,7 @@ class LoaderMixin(DownloadMixin):
         if extra_kwargs.get("load_extra_model_paths", True):
             files_to_load.extend(extra_model_paths)
         # Track whether we've already patched this model for FP-scaled weights
-
+ 
         patched_for_fpscaled = False
         gguf_kwargs = component.get("gguf_kwargs", {})
         for file_path in tqdm(files_to_load, desc="Loading weights", total=len(files_to_load)):
@@ -344,6 +258,7 @@ class LoaderMixin(DownloadMixin):
                     file_path,
                     type=component.get("type"),
                     dequant_dtype=load_dtype,
+                    device=load_device,
                     **gguf_kwargs,
                 )
                 converter.convert(state_dict)
@@ -369,6 +284,7 @@ class LoaderMixin(DownloadMixin):
             if is_safetensors:
                 state_dict = load_safetensors(
                     file_path,
+                    device=load_device,
                     dtype=load_dtype,
                     framework=(
                         "np"
@@ -379,11 +295,9 @@ class LoaderMixin(DownloadMixin):
                 )
             else:
                 state_dict = torch.load(
-                    file_path, map_location="cpu", weights_only=True, mmap=True
+                    file_path, map_location=load_device, weights_only=True, mmap=True
                 )
-            if load_dtype and not is_safetensors:
-                for k, v in state_dict.items():
-                    state_dict[k] = v.to(load_dtype)
+            
             # remap keys if key_map is provided replace part of existing key with new key
             if key_map:
                 new_state_dict = {}
@@ -395,8 +309,11 @@ class LoaderMixin(DownloadMixin):
                             new_state_dict[k2] = v2
                 state_dict = new_state_dict
             
-
             converter.convert(state_dict)
+            
+            if load_dtype and not is_safetensors:
+                for k, v in state_dict.items():
+                    state_dict[k] = v.to(load_dtype)
             # Detect FP-scaled checkpoints (e.g., Wan2.2 FP e4m3fn scaled)
             # and patch the model with FPScaled* layers *before* loading
             # the state dict. We only do this once per model.
@@ -462,6 +379,113 @@ class LoaderMixin(DownloadMixin):
             has_meta_params = False
             patched_for_fpscaled = getattr(model, "_patched_for_fpscaled", False)
 
+            # Some HF causal LMs may legally omit `lm_head.*` from checkpoints when
+            # weights are tied to input embeddings. When we build the module under
+            # `init_empty_weights()`, those params start on the meta device and will
+            # remain meta if the state dict didn't contain them. Before treating
+            # meta params as a hard error, attempt to materialize/tie lm_head.
+            if isinstance(model, PreTrainedModel):
+                try:
+                    out_emb = (
+                        model.get_output_embeddings()
+                        if hasattr(model, "get_output_embeddings")
+                        else None
+                    )
+                    needs_out_emb_fix = (
+                        out_emb is not None
+                        and hasattr(out_emb, "weight")
+                        and getattr(out_emb.weight, "device", None) is not None
+                        and out_emb.weight.device.type == "meta"
+                    )
+                    if needs_out_emb_fix:
+                        # First try HF's standard tying logic.
+                        if hasattr(model, "tie_weights") and callable(
+                            getattr(model, "tie_weights")
+                        ):
+                            try:
+                                model.tie_weights()
+                            except Exception:
+                                pass
+
+                        # Re-fetch after tie attempt.
+                        out_emb = (
+                            model.get_output_embeddings()
+                            if hasattr(model, "get_output_embeddings")
+                            else out_emb
+                        )
+                        still_meta = (
+                            out_emb is not None
+                            and hasattr(out_emb, "weight")
+                            and getattr(out_emb.weight, "device", None) is not None
+                            and out_emb.weight.device.type == "meta"
+                        )
+
+                        if still_meta:
+                            in_emb = (
+                                model.get_input_embeddings()
+                                if hasattr(model, "get_input_embeddings")
+                                else None
+                            )
+                            # If input embeddings are real, tie output weight to them.
+                            if (
+                                in_emb is not None
+                                and hasattr(in_emb, "weight")
+                                and getattr(in_emb.weight, "device", None) is not None
+                                and in_emb.weight.device.type != "meta"
+                            ):
+                                try:
+                                    out_emb.weight = in_emb.weight
+                                except Exception:
+                                    pass
+
+                        # If it is *still* meta, allocate parameters so downstream
+                        # code can run (e.g., some checkpoints truly omit lm_head).
+                        out_emb = (
+                            model.get_output_embeddings()
+                            if hasattr(model, "get_output_embeddings")
+                            else out_emb
+                        )
+                        if (
+                            out_emb is not None
+                            and hasattr(out_emb, "weight")
+                            and getattr(out_emb.weight, "device", None) is not None
+                            and out_emb.weight.device.type == "meta"
+                        ):
+                            import torch.nn as nn
+
+                            init_range = getattr(
+                                getattr(model, "config", None), "initializer_range", 0.02
+                            )
+                            param_dtype = (
+                                load_dtype if isinstance(load_dtype, torch.dtype) else torch.float32
+                            )
+                            w = torch.empty(
+                                tuple(out_emb.weight.shape),
+                                device=load_device,
+                                dtype=param_dtype,
+                            )
+                            # Match HF Linear default init: normal_(0, initializer_range)
+                            nn.init.normal_(w, mean=0.0, std=float(init_range))
+                            out_emb.weight = nn.Parameter(w, requires_grad=False)
+
+                            # Bias is uncommon for lm_head, but handle it if present.
+                            if hasattr(out_emb, "bias") and out_emb.bias is not None:
+                                b = out_emb.bias
+                                if getattr(b, "device", None) is not None and b.device.type == "meta":
+                                    out_emb.bias = nn.Parameter(
+                                        torch.zeros(
+                                            tuple(b.shape),
+                                            device=load_device,
+                                            dtype=param_dtype,
+                                        ),
+                                        requires_grad=False,
+                                    )
+                except Exception as e:
+                    # Never fail loading solely due to this best-effort fix; the
+                    # meta-param check below will still catch real issues.
+                    if hasattr(self, "logger"):
+                        self.logger.debug(f"lm_head meta fix skipped: {e}")
+
             # If this is an FP-scaled model, re-wrap any FP weights as
             # FPScaledParameter after loading, since some load_state_dict
             # code paths may strip custom Parameter subclasses.
@@ -475,8 +499,99 @@ class LoaderMixin(DownloadMixin):
                     model, default_compute_dtype=default_compute_dtype
                 )
 
+            # Final FP8 sanity pass: if we ended up with raw `nn.Linear` modules
+            # whose weights are stored in FP8 dtypes, swap them to our FPScaledLinear
+            # implementation so forward passes remain stable (it casts/dequantizes
+            # weights to a compute dtype and avoids relying on float8 matmul support).
+            #
+            # This is intentionally cheap (type checks + dtype inspection) and only
+            # runs when weights are loaded.
+            if not no_weights:
+                try:
+                    import torch.nn as nn
+
+                    from src.quantize.scaled_layer import FPScaledLinear, FPScaledLayer
+
+                    fp8_dtypes = tuple(
+                        dt
+                        for dt in (
+                            getattr(torch, "float8_e4m3fn", None),
+                            getattr(torch, "float8_e5m2", None),
+                            # Newer PyTorch builds may include *_fnuz variants
+                            getattr(torch, "float8_e4m3fnuz", None),
+                            getattr(torch, "float8_e5m2fnuz", None),
+                        )
+                        if dt is not None
+                    )
+
+                    def _physical_dtype(p: torch.nn.Parameter) -> torch.dtype:
+                        # FPScaledParameter exposes true storage dtype via `.physical_dtype`.
+                        try:
+                            return getattr(p, "physical_dtype")  # type: ignore[return-value]
+                        except Exception:
+                            return p.dtype
+
+                    converted = 0
+                    stack = [("", model)]
+                    default_compute_dtype = getattr(
+                        model, "_fpscaled_default_compute_dtype", None
+                    )
+                    while stack:
+                        prefix, mod = stack.pop()
+                        for child_name, child in list(mod._modules.items()):
+                            qname = f"{prefix}{child_name}"
+                            if child is None:
+                                continue
+                            # Recurse first so we can safely replace leaf modules.
+                            stack.append((f"{qname}.", child))
+
+                            if isinstance(child, nn.Linear) and not isinstance(
+                                child, FPScaledLayer
+                            ):
+                                w = getattr(child, "weight", None)
+                                if w is None:
+                                    continue
+                                try:
+                                    phys = _physical_dtype(w)
+                                except Exception:
+                                    phys = w.dtype
+                                if fp8_dtypes and phys in fp8_dtypes:
+                                    new_mod = FPScaledLinear(
+                                        child.in_features,
+                                        child.out_features,
+                                        bias=child.bias is not None,
+                                        compute_dtype=default_compute_dtype,
+                                        device=child.weight.device,
+                                        dtype=child.weight.dtype,
+                                    )
+                                    with torch.no_grad():
+                                        new_mod.weight.copy_(child.weight)
+                                        if child.bias is not None:
+                                            new_mod.bias.copy_(child.bias)
+                                        # Preserve scale_weight if present on the original module
+                                        if hasattr(child, "scale_weight") and hasattr(
+                                            new_mod, "scale_weight"
+                                        ):
+                                            try:
+                                                new_mod.scale_weight.copy_(
+                                                    child.scale_weight
+                                                )
+                                            except Exception:
+                                                pass
+                                    mod._modules[child_name] = new_mod
+                                    converted += 1
+
+                    if converted and hasattr(self, "logger"):
+                        self.logger.info(
+                            f"Converted {converted} Linear layers to FPScaledLinear based on FP8 weight dtypes."
+                        )
+                except Exception as e:
+                    # Best-effort only; never fail loading due to a final FP8 fixup.
+                    if hasattr(self, "logger"):
+                        self.logger.debug(f"FP8 final linear check skipped: {e}")
+
             for name, param in model.named_parameters():
-                if param.device.type == "meta":
+                if param.device.type == "meta" and component.get("type") != "text_encoder":
                     # If this is an FP-scaled model and the offending parameter
                     # is a residual `scale_weight` that never got real weights
                     # loaded, we can safely drop it instead of erroring out.
@@ -622,7 +737,6 @@ class LoaderMixin(DownloadMixin):
 
         config_path = component.get("config_path")
         config = component.get("config")
-        
         if config_path and config:
             fetched_config = self.fetch_config(config_path)
             config = {**fetched_config, **config}
@@ -656,6 +770,8 @@ class LoaderMixin(DownloadMixin):
             config_to_register = {
                 k: v for k, v in (config or {}).items() if k not in init_param_names
             }
+            
+        
 
         component = component_class(**init_kwargs)
 

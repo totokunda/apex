@@ -81,7 +81,7 @@ class MochiT2VEngine(BaseEngine):
         video = self.vae.decode(latents.to(self.vae.dtype), return_dict=False)[0]
 
         if offload:
-            self._offload(self.vae)
+            self._offload("vae")
 
         return video.to(dtype=dtype)
 
@@ -151,7 +151,7 @@ class MochiT2VEngine(BaseEngine):
             prompt_attention_mask = prompt_attention_mask.to(self.device)
 
         if offload:
-            self._offload(self.text_encoder)
+            self._offload("text_encoder")
 
         if not self.transformer:
             self.load_component_by_type("transformer")
@@ -249,7 +249,7 @@ class MochiT2VEngine(BaseEngine):
         self.logger.info("Denoising completed.")
 
         if offload:
-            self._offload(self.transformer)
+            self._offload("transformer")
 
         if return_latents:
             return latents

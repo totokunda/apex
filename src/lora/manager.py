@@ -38,6 +38,18 @@ class LoraItem:
     scale: float = 1.0
     name: Optional[str] = None
     component: Optional[str] = None
+    
+
+
+
+
+def has_alpha_scales(model_name: str) -> bool:
+    if model_name == "QwenImageTransformer2DModel":
+        return True
+    if model_name == "ZImageTransformer2DModel":
+        return True
+    return False
+
 
 
 class LoraManager(DownloadMixin):
@@ -188,15 +200,15 @@ class LoraManager(DownloadMixin):
     
     def _get_prefix_key(self, keys:List[str]):
         prefix = None
-        if keys[0].startswith("transformer") and keys[-1].startswith(
-            "transformer"
+        if keys[0].startswith("transformer.") and keys[-1].startswith(
+            "transformer."
         ):
             prefix = "transformer"
-        elif keys[0].startswith("diffusion_model") and keys[-1].startswith(
-            "diffusion_model"
+        elif keys[0].startswith("diffusion_model.") and keys[-1].startswith(
+            "diffusion_model."
         ):
             prefix = "diffusion_model"
-        elif keys[0].startswith("model") and keys[-1].startswith("model"):
+        elif keys[0].startswith("model.") and keys[-1].startswith("model."):
             prefix = "model"
             
         return prefix
@@ -261,7 +273,6 @@ class LoraManager(DownloadMixin):
         loras: List[Union[str, LoraItem, Tuple[Union[str, LoraItem], float]]],
         adapter_names: Optional[List[str]] = None,
         scales: Optional[List[float]] = None,
-        replace_keys: bool = True,
     ) -> List[LoraItem]:
         """
         Load multiple LoRAs into a PEFT-enabled model. Supports per-adapter scaling.
@@ -300,7 +311,7 @@ class LoraManager(DownloadMixin):
             item.scale = float(scale)
             resolved.append(item)
 
-        if hasattr(model, "update_lora_params") and compose_lora is not None:
+        if False:
             composed_lora = []
             for i, item in enumerate(resolved):
                 for local_path in item.local_paths:
@@ -356,7 +367,7 @@ class LoraManager(DownloadMixin):
                     if metadata is not None and prefix is not None:
                         # diffusers filters metadata keys by prefix and strips it, so prefix these keys to keep them.
                         metadata = {f"{prefix}.{k}": v for k, v in metadata.items()}
-
+                    
                     model.load_lora_adapter(
                         local_path_state_dict,
                         adapter_name=adapter_name,
@@ -368,7 +379,7 @@ class LoraManager(DownloadMixin):
             # Activate all adapters with their weights in one call
             try:
                 model.set_adapters(final_names, weights=final_scales)
-                loaded_resolved.append(resolved[i])
+                loaded_resolved.extend(resolved)
             except Exception as e:
                 # print the full stack trace
                 import traceback
@@ -376,6 +387,8 @@ class LoraManager(DownloadMixin):
                 logger.warning(
                     f"Failed to activate adapters {final_names} with scales {final_scales}: {e}"
                 )
+                import traceback
+                traceback.print_exc()
         
         return loaded_resolved
 
@@ -507,3 +520,6 @@ class LoraManager(DownloadMixin):
 
         del state_dict
         return new_state
+    
+    
+

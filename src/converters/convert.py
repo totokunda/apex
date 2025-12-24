@@ -38,7 +38,8 @@ from src.converters.utils import (
 from src.converters.text_encoder_converters import (
     T5TextEncoderConverter,
     LlamaTextEncoderConverter,
-    StepTextEncoderConverter
+    StepTextEncoderConverter,
+    Qwen2_5_VLTextEncoderConverter,
 )
 
 from src.converters.vae_converters import (
@@ -146,6 +147,8 @@ def get_text_encoder_converter(text_encoder_type: str):
         return LlamaTextEncoderConverter()
     elif "step" in text_encoder_type:
         return StepTextEncoderConverter()
+    elif "qwen2_5_vl" in text_encoder_type:
+        return Qwen2_5_VLTextEncoderConverter()
     else:
         return NoOpConverter()
 
