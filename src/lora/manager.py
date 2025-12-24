@@ -38,6 +38,18 @@ class LoraItem:
     scale: float = 1.0
     name: Optional[str] = None
     component: Optional[str] = None
+    
+
+
+
+
+def has_alpha_scales(model_name: str) -> bool:
+    if model_name == "QwenImageTransformer2DModel":
+        return True
+    if model_name == "ZImageTransformer2DModel":
+        return True
+    return False
+
 
 
 class LoraManager(DownloadMixin):
@@ -355,7 +367,7 @@ class LoraManager(DownloadMixin):
                     if metadata is not None and prefix is not None:
                         # diffusers filters metadata keys by prefix and strips it, so prefix these keys to keep them.
                         metadata = {f"{prefix}.{k}": v for k, v in metadata.items()}
-
+                    
                     model.load_lora_adapter(
                         local_path_state_dict,
                         adapter_name=adapter_name,
@@ -505,3 +517,6 @@ class LoraManager(DownloadMixin):
 
         del state_dict
         return new_state
+    
+    
+

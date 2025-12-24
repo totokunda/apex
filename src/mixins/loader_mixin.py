@@ -499,6 +499,97 @@ class LoaderMixin(DownloadMixin):
                     model, default_compute_dtype=default_compute_dtype
                 )
 
+            # Final FP8 sanity pass: if we ended up with raw `nn.Linear` modules
+            # whose weights are stored in FP8 dtypes, swap them to our FPScaledLinear
+            # implementation so forward passes remain stable (it casts/dequantizes
+            # weights to a compute dtype and avoids relying on float8 matmul support).
+            #
+            # This is intentionally cheap (type checks + dtype inspection) and only
+            # runs when weights are loaded.
+            if not no_weights:
+                try:
+                    import torch.nn as nn
+
+                    from src.quantize.scaled_layer import FPScaledLinear, FPScaledLayer
+
+                    fp8_dtypes = tuple(
+                        dt
+                        for dt in (
+                            getattr(torch, "float8_e4m3fn", None),
+                            getattr(torch, "float8_e5m2", None),
+                            # Newer PyTorch builds may include *_fnuz variants
+                            getattr(torch, "float8_e4m3fnuz", None),
+                            getattr(torch, "float8_e5m2fnuz", None),
+                        )
+                        if dt is not None
+                    )
+
+                    def _physical_dtype(p: torch.nn.Parameter) -> torch.dtype:
+                        # FPScaledParameter exposes true storage dtype via `.physical_dtype`.
+                        try:
+                            return getattr(p, "physical_dtype")  # type: ignore[return-value]
+                        except Exception:
+                            return p.dtype
+
+                    converted = 0
+                    stack = [("", model)]
+                    default_compute_dtype = getattr(
+                        model, "_fpscaled_default_compute_dtype", None
+                    )
+                    while stack:
+                        prefix, mod = stack.pop()
+                        for child_name, child in list(mod._modules.items()):
+                            qname = f"{prefix}{child_name}"
+                            if child is None:
+                                continue
+                            # Recurse first so we can safely replace leaf modules.
+                            stack.append((f"{qname}.", child))
+
+                            if isinstance(child, nn.Linear) and not isinstance(
+                                child, FPScaledLayer
+                            ):
+                                w = getattr(child, "weight", None)
+                                if w is None:
+                                    continue
+                                try:
+                                    phys = _physical_dtype(w)
+                                except Exception:
+                                    phys = w.dtype
+                                if fp8_dtypes and phys in fp8_dtypes:
+                                    new_mod = FPScaledLinear(
+                                        child.in_features,
+                                        child.out_features,
+                                        bias=child.bias is not None,
+                                        compute_dtype=default_compute_dtype,
+                                        device=child.weight.device,
+                                        dtype=child.weight.dtype,
+                                    )
+                                    with torch.no_grad():
+                                        new_mod.weight.copy_(child.weight)
+                                        if child.bias is not None:
+                                            new_mod.bias.copy_(child.bias)
+                                        # Preserve scale_weight if present on the original module
+                                        if hasattr(child, "scale_weight") and hasattr(
+                                            new_mod, "scale_weight"
+                                        ):
+                                            try:
+                                                new_mod.scale_weight.copy_(
+                                                    child.scale_weight
+                                                )
+                                            except Exception:
+                                                pass
+                                    mod._modules[child_name] = new_mod
+                                    converted += 1
+
+                    if converted and hasattr(self, "logger"):
+                        self.logger.info(
+                            f"Converted {converted} Linear layers to FPScaledLinear based on FP8 weight dtypes."
+                        )
+                except Exception as e:
+                    # Best-effort only; never fail loading due to a final FP8 fixup.
+                    if hasattr(self, "logger"):
+                        self.logger.debug(f"FP8 final linear check skipped: {e}")
+
             for name, param in model.named_parameters():
                 if param.device.type == "meta" and component.get("type") != "text_encoder":
                     # If this is an FP-scaled model and the offending parameter

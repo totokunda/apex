@@ -182,6 +182,7 @@ spec:
     run:
       num_inference_steps: 40
       return_latents: false
+      guidance_scale: 1.0
       text_encoder_kwargs:
         add_special_tokens: false
         clean_text: false
@@ -256,7 +257,7 @@ spec:
       type: text
       panel: advanced_prompting
       required: false
-      default: blurry, low quality, distorted, artifacts
+      default: ' '
     - id: resolution
       label: Resolution
       description: Select the resolution of the output image
@@ -303,7 +304,7 @@ spec:
       type: number+slider
       value_type: integer
       panel: sampling
-      default: 50
+      default: 40
       min: 1
       max: 100
       step: 1

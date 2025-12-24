@@ -79,7 +79,22 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    extra_model_paths:
+  - type: vae
+    name: audio_vae
+    label: Audio VAE
+    base: mmaudio
+    extra_kwargs:
+      require_conversion: true
+    model_path:
+    - path: hkchengrex/MMAudio/ext_weights/best_netG.pt
+      variant: default
+      precision: fp16
+      type: safetensors
+  - type: extra_model_path
+    name: audio_vae_extra_model_path
+    label: Audio VAE Extra Model Path
+    component: audio_vae
+    model_path:
     - path: hkchengrex/MMAudio/ext_weights/v1-16.pth
       variant: default
       precision: fp16
@@ -236,6 +251,15 @@ spec:
       panel: advanced_prompting
       required: false
       default: robotic, muffled, echo, distorted
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video
+      type: number+slider
+      value_type: integer
+      panel: size
+      default: 
+      min: 256
+      max: 8192
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video

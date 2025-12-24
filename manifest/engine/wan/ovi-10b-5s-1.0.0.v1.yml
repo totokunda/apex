@@ -78,7 +78,11 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    extra_model_paths:
+  - type: extra_model_path
+    name: audio_vae_extra_model_path
+    label: Audio VAE Extra Model Path
+    component: audio_vae
+    model_path:
     - path: hkchengrex/MMAudio/ext_weights/v1-16.pth
       variant: default
       precision: fp16
@@ -225,6 +229,21 @@ spec:
       panel: advanced_prompting
       required: false
       default: robotic, muffled, echo, distorted
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video
+      panel: size
+      type: select
+      default: 960
+      options:
+      - name: Full HD
+        value: 960
+      - name: HD
+        value:  720
+      - name: SD
+        value: 480
+      - name: Custom
+        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video

@@ -1267,7 +1267,59 @@ class DownloadMixin:
                 stage_dir = os.path.join(tmp_root, os.path.basename(dest_path))
                 os.makedirs(stage_dir, exist_ok=True)
                 futures = []
-                with ThreadPoolExecutor(max_workers=min(8, len(file_entries))) as ex:
+                # Control HF parallelism via env vars.
+                # - When Rust downloader is enabled, default HF concurrency to 1 to reduce rate limiting.
+                # - When not using Rust, keep the existing parallel default (8) but make it configurable.
+                def _bool_env(name: str, default: bool = True) -> bool:
+                    try:
+                        v = os.environ.get(name)
+                        if v is None:
+                            return default
+                        return str(v).strip().lower() not in ("0", "false", "no", "off")
+                    except Exception:
+                        return default
+
+                def _int_env(name: str, default: int) -> int:
+                    try:
+                        v = os.environ.get(name)
+                        if v is None:
+                            return int(default)
+                        return int(str(v).strip())
+                    except Exception:
+                        return int(default)
+
+                rust_enabled = False
+                try:
+                    # Match the Rust fast-path gating in `_download_from_url`.
+                    from apex_download_rs import download_from_url as _rs_download_from_url  # type: ignore
+
+                    rust_enabled = _rs_download_from_url is not None and _bool_env(
+                        "APEX_USE_RUST_DOWNLOAD", True
+                    )
+                except Exception:
+                    rust_enabled = False
+
+                default_workers = 1 if rust_enabled else 8
+                env_var = (
+                    "APEX_HF_RUST_MAX_SIMULTANEOUS_DOWNLOADS"
+                    if rust_enabled
+                    else "APEX_HF_MAX_SIMULTANEOUS_DOWNLOADS"
+                )
+                max_workers = _int_env(env_var, default_workers)
+                # Clamp to a safe range
+                if max_workers < 1:
+                    max_workers = 1
+                max_workers = min(max_workers, len(file_entries))
+
+                if hasattr(self, "logger") and rust_enabled and max_workers > 1:
+                    self.logger.warning(
+                        "Rust downloader is enabled and Hugging Face parallelism is set to %d via %s. "
+                        "Higher parallelism can increase the risk of Hugging Face rate limits.",
+                        max_workers,
+                        env_var,
+                    )
+
+                with ThreadPoolExecutor(max_workers=max_workers) as ex:
                     for rel_path, filename, rel_dir, signed_url, _size in file_entries:
                         final_dir = (
                             os.path.join(stage_dir, rel_dir) if rel_dir else stage_dir

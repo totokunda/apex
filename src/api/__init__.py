@@ -4,5 +4,4 @@ Now powered by Ray for distributed task processing
 """
 
 from . import main
-from . import ray_app
 from . import ray_tasks

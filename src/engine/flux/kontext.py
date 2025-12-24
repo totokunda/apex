@@ -51,11 +51,12 @@ class FluxKontextEngine(FluxShared):
 
         safe_emit_progress(progress_callback, 0.0, "Starting Kontext pipeline")
         if seed is not None:
+            safe_emit_progress(progress_callback, 0.01, "Setting random seed")
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
 
-        safe_emit_progress(progress_callback, 0.05, "Encoding prompts")
+        safe_emit_progress(progress_callback, 0.02, "Encoding prompts")
         (
             pooled_prompt_embeds,
             negative_pooled_prompt_embeds,
@@ -73,29 +74,37 @@ class FluxKontextEngine(FluxShared):
             num_images,
             text_encoder_kwargs,
             text_encoder_2_kwargs,
+            progress_callback=make_mapped_progress(progress_callback, 0.02, 0.20),
         )
 
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
+
         if offload:
+            safe_emit_progress(progress_callback, 0.21, "Offloading text encoder 2")
             del self.text_encoder_2
+            safe_emit_progress(progress_callback, 0.22, "Text encoder 2 offloaded")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 
-        safe_emit_progress(progress_callback, 0.10, "Loading and preprocessing image")
+        safe_emit_progress(progress_callback, 0.24, "Loading image")
         image = self._load_image(image)
         if resize_to_preferred_resolution:
+            safe_emit_progress(progress_callback, 0.26, "Resizing image to preferred resolution")
             image = self.resize_to_preferred_resolution(image)
             width, height = image.size
         else:
+            safe_emit_progress(progress_callback, 0.26, "Resizing image")
             image, height, width = self._aspect_ratio_resize(
                 image, mod_value=32, max_area=height * width
             )
 
+        safe_emit_progress(progress_callback, 0.28, "Preprocessing image")
         image = self.image_processor.preprocess(image)
         image = image.to(dtype=transformer_dtype)
 
         batch_size = prompt_embeds.shape[0]
 
-        safe_emit_progress(progress_callback, 0.15, "Preparing latents")
+        safe_emit_progress(progress_callback, 0.30, "Preparing latents")
         latents, image_latents, latent_ids, image_ids = self._get_latents(
             image=image,
             batch_size=batch_size,
@@ -106,6 +115,7 @@ class FluxKontextEngine(FluxShared):
             device=self.device,
             generator=generator,
         )
+        safe_emit_progress(progress_callback, 0.36, "Prepared latents")
 
         if image_ids is not None:
             latent_ids = torch.cat(
@@ -113,7 +123,10 @@ class FluxKontextEngine(FluxShared):
             )  # dim 0 is sequence dimension
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.38, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.39, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.40, "Moving scheduler to device")
         self.to_device(self.scheduler)
 
         sigmas = (
@@ -123,7 +136,7 @@ class FluxKontextEngine(FluxShared):
         )
 
         image_seq_len = latents.shape[1]
-        safe_emit_progress(progress_callback, 0.20, "Configuring scheduler")
+        safe_emit_progress(progress_callback, 0.41, "Configuring scheduler")
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -131,7 +144,7 @@ class FluxKontextEngine(FluxShared):
             self.scheduler.config.get("base_shift", 0.5),
             self.scheduler.config.get("max_shift", 1.15),
         )
-        safe_emit_progress(progress_callback, 0.25, "Computing timesteps")
+        safe_emit_progress(progress_callback, 0.43, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -139,16 +152,19 @@ class FluxKontextEngine(FluxShared):
             timesteps=timesteps,
             mu=mu,
         )
+        safe_emit_progress(progress_callback, 0.45, "Timesteps prepared")
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
 
         if not hasattr(self, "transformer") or not self.transformer:
+            safe_emit_progress(progress_callback, 0.46, "Loading transformer")
             self.load_component_by_type("transformer")
 
+        safe_emit_progress(progress_callback, 0.47, "Moving transformer to device")
         self.to_device(self.transformer)
-        safe_emit_progress(progress_callback, 0.30, "Transformer ready")
+        safe_emit_progress(progress_callback, 0.48, "Transformer ready")
 
         if self.transformer.config.guidance_embeds:
             guidance = torch.full(
@@ -158,7 +174,7 @@ class FluxKontextEngine(FluxShared):
         else:
             guidance = None
 
-        safe_emit_progress(progress_callback, 0.34, "Preparing IP-Adapter embeds")
+        safe_emit_progress(progress_callback, 0.49, "Preparing guidance / IP-Adapter embeds")
         if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
             negative_ip_adapter_image is None
             and negative_ip_adapter_image_embeds is None
@@ -204,7 +220,11 @@ class FluxKontextEngine(FluxShared):
 
         # Reserve a progress gap for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
-        safe_emit_progress(progress_callback, 0.50, "Starting denoise")
+        safe_emit_progress(
+            progress_callback,
+            0.50,
+            f"Starting denoise (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
 
         # Set preview context for per-step rendering on the main engine (denoise runs there)
         self._preview_height = height
@@ -241,8 +261,11 @@ class FluxKontextEngine(FluxShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.94, "Unpacking latents")
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+        safe_emit_progress(progress_callback, 0.96, "Decoding latents")
         image = self.vae_decode(latents, offload=offload)
+        safe_emit_progress(progress_callback, 0.98, "Postprocessing image")
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed Kontext pipeline")
         return image

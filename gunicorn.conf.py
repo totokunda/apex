@@ -6,7 +6,11 @@ bind = "0.0.0.0:8765"
 backlog = 2048
 
 # Worker processes
-workers = multiprocessing.cpu_count() * 2 + 1
+#
+# NOTE: This service initializes Ray. Ray does not like being initialized in many
+# gunicorn workers (and especially not with preload_app). Default to ONE worker.
+# If you truly need more, set WEB_CONCURRENCY / APEX_GUNICORN_WORKERS explicitly.
+workers = int(os.getenv("APEX_GUNICORN_WORKERS") or os.getenv("WEB_CONCURRENCY") or "1")
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
 max_requests = 1000
@@ -32,8 +36,8 @@ limit_request_fields = 100
 limit_request_field_size = 8190
 
 # Performance
-preload_app = True
-reuse_port = True
+preload_app = False
+reuse_port = False
 
 # SSL (uncomment and configure for HTTPS)
 # keyfile = "/path/to/keyfile"
@@ -45,9 +49,9 @@ if os.getenv("ENVIRONMENT") == "development":
     workers = 1
     loglevel = "debug"
 elif os.getenv("ENVIRONMENT") == "staging":
-    workers = multiprocessing.cpu_count()
+    workers = int(os.getenv("APEX_GUNICORN_WORKERS") or os.getenv("WEB_CONCURRENCY") or str(multiprocessing.cpu_count()))
     loglevel = "warning"
 elif os.getenv("ENVIRONMENT") == "production":
-    workers = multiprocessing.cpu_count() * 2 + 1
+    workers = int(os.getenv("APEX_GUNICORN_WORKERS") or os.getenv("WEB_CONCURRENCY") or "1")
     loglevel = "error"
-    preload_app = True
+    preload_app = False

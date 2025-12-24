@@ -1,11 +1,11 @@
 category: Face and Pose
-class: DwposeDetector
+class: DwposeNlfDetector
 description: Comprehensive whole-body pose estimation capturing body, hands, and facial
   keypoints in a single unified model. Fast and accurate for real-time applications.
   Ideal for animation reference, motion analysis, and character pose extraction with
-  granular control over which components to detect.
-module: src.preprocess.dwpose
-name: DWPose
+  granular control over which components to detect, with additional non-linear filtering and resizing.
+module: src.preprocess.dwpose_nlf
+name: DWPoseNLF
 parameters:
 - default: 512
   description: The resolution used for detection and inference. Higher resolutions

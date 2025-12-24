@@ -69,6 +69,12 @@ fn jitter_ms() -> usize {
     thread_rng().gen_range(0..=500)
 }
 
+fn default_ratelimit_wait() -> Duration {
+    // Fallback when a server returns 429 without ratelimit/retry-after headers.
+    // Keep it short, add jitter to avoid thundering herds.
+    Duration::from_millis((1500 + jitter_ms()) as u64)
+}
+
 fn exponential_backoff_ms(base_wait_ms: usize, n: usize, max_wait_ms: usize) -> usize {
     (base_wait_ms + n.pow(2) + jitter_ms()).min(max_wait_ms)
 }
@@ -233,10 +239,6 @@ fn download_from_url(
     let max_retries = env_usize("APEX_RUST_DOWNLOAD_MAX_RETRIES", 0);
     let base_wait_ms = env_usize("APEX_RUST_DOWNLOAD_RETRY_BASE_MS", 300);
     let max_wait_ms = env_usize("APEX_RUST_DOWNLOAD_RETRY_MAX_MS", 10_000);
-    // Rate limit retries are handled separately and default to being enabled.
-    // Set to 0 to disable smart ratelimit waiting/retries.
-    let ratelimit_max_retries = env_usize("APEX_RUST_DOWNLOAD_RATELIMIT_MAX_RETRIES", 20);
-
     // Effective chunk size for parallel range downloads
     let eff_chunk_size = if adaptive {
         clamp_usize(chunk_size.max(initial_chunk_size), min_chunk_size, max_chunk_size)
@@ -286,21 +288,18 @@ fn download_from_url(
                     .map_err(|e| PyRuntimeError::new_err(format!("Error while downloading: {e}")))?;
 
                 if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    if ratelimit_max_retries == 0 || rl_attempts >= ratelimit_max_retries {
-                        return Err::<(), PyErr>(PyRuntimeError::new_err(format!(
-                            "Rate limited (429) too many times while probing; retries={ratelimit_max_retries}"
-                        )));
-                    }
+                    // Never fail the overall request due to 429; wait and retry.
+                    // Prefer standardized ratelimit headers, fall back to Retry-After,
+                    // then fall back to a small default backoff.
                     if let Some(info) = parse_ratelimit_headers(resp.headers()) {
-                        sleep(Duration::from_secs(info.reset_in_seconds)).await;
-                        rl_attempts += 1;
-                        continue;
+                        sleep(Duration::from_secs(info.reset_in_seconds.max(1))).await;
+                    } else if let Some(secs) = parse_retry_after_seconds(resp.headers()) {
+                        sleep(Duration::from_secs(secs.max(1))).await;
+                    } else {
+                        sleep(default_ratelimit_wait()).await;
                     }
-                    if let Some(secs) = parse_retry_after_seconds(resp.headers()) {
-                        sleep(Duration::from_secs(secs)).await;
-                        rl_attempts += 1;
-                        continue;
-                    }
+                    rl_attempts += 1;
+                    continue;
                 }
 
                 break resp
@@ -398,13 +397,15 @@ fn download_from_url(
                     .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
                 if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    // Never treat 429 as a hard error; report a wait duration.
                     if let Some(info) = parse_ratelimit_headers(resp.headers()) {
                         return Err(DownloadChunkError::RateLimited(Duration::from_secs(
-                            info.reset_in_seconds,
+                            info.reset_in_seconds.max(1),
                         )));
-                    }
-                    if let Some(secs) = parse_retry_after_seconds(resp.headers()) {
-                        return Err(DownloadChunkError::RateLimited(Duration::from_secs(secs)));
+                    } else if let Some(secs) = parse_retry_after_seconds(resp.headers()) {
+                        return Err(DownloadChunkError::RateLimited(Duration::from_secs(secs.max(1))));
+                    } else {
+                        return Err(DownloadChunkError::RateLimited(default_ratelimit_wait()));
                     }
                 }
 
@@ -433,7 +434,6 @@ fn download_from_url(
                 let semaphore = semaphore.clone();
                 let pf_sem = parallel_failures_semaphore.clone();
                 let downloaded = downloaded.clone();
-                let ratelimit_max_retries = ratelimit_max_retries;
 
                 handles.push(tokio::spawn(async move {
                     let permit = semaphore
@@ -442,7 +442,6 @@ fn download_from_url(
                         .map_err(|e| PyRuntimeError::new_err(format!("Error while downloading: {e}")))?;
 
                     let mut attempt = 0usize;
-                    let mut rl_attempts = 0usize;
                     loop {
                         match download_chunk(&client, &url, &filename, start, stop, headers.clone()).await {
                             Ok(wrote) => {
@@ -451,14 +450,8 @@ fn download_from_url(
                                 return Ok::<usize, PyErr>(wrote);
                             }
                             Err(DownloadChunkError::RateLimited(wait)) => {
-                                if ratelimit_max_retries == 0 || rl_attempts >= ratelimit_max_retries {
-                                    drop(permit);
-                                    return Err(PyRuntimeError::new_err(format!(
-                                        "Rate limited (429) too many times while downloading chunk; retries={ratelimit_max_retries}"
-                                    )));
-                                }
+                                // Never fail the overall download due to 429; just wait and retry.
                                 sleep(wait).await;
-                                rl_attempts += 1;
                             }
                             Err(DownloadChunkError::Other(e)) => {
                                 if parallel_failures == 0 || max_retries == 0 {

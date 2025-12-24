@@ -123,6 +123,32 @@ class LoraConverter(TransformerConverter):
         # Default to PEFT if no patterns match
         return StateDictType.PEFT
     
+    def get_alpha_scales(self, down_weight, alpha):
+        rank = down_weight.shape[0]
+        
+        scale = alpha / rank  # LoRA is scaled by 'alpha / rank' in forward pass, so we need to scale it back here
+        scale_down = scale
+        scale_up = 1.0
+        while scale_down * 2 < scale_up:
+            scale_down *= 2
+            scale_up /= 2
+        return scale_down, scale_up
+    
+    def scale_alpha(self, state_dict: Dict[str, Any]):
+        for key, value in state_dict.items():
+            if ".alpha" in key:
+                down_key = key.replace(".alpha", ".lora_A.weight")
+                up_key = key.replace(".alpha", ".lora_B.weight")
+                if down_key in state_dict and up_key in state_dict:
+                    down_weight = state_dict[down_key]
+                    up_weight = state_dict[up_key]
+                    alpha = state_dict[key].item()
+                    scale_down, scale_up = self.get_alpha_scales(down_weight, alpha)
+                    state_dict[down_key] = down_weight * scale_down
+                    state_dict[up_key] = up_weight * scale_up
+        return state_dict
+    
+    
     def convert(self, state_dict: Dict[str, Any]):
         state_dict_type = self._get_state_dict_type(state_dict)
         if state_dict_type == StateDictType.KOHYA_SS:
@@ -138,6 +164,7 @@ class LoraConverter(TransformerConverter):
             super().convert(state_dict)
         elif state_dict_type == StateDictType.PEFT:
             pass
+        state_dict = self.scale_alpha(state_dict)
         return state_dict
 
 

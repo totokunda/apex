@@ -31,11 +31,23 @@ legacy_job_store: Dict[str, ray.ObjectRef] = {}
 # Background task to poll updates from Ray bridge and send to websockets
 async def poll_ray_updates():
     """Background task that polls the Ray bridge for updates and forwards to websockets"""
-    bridge = get_ray_ws_bridge()
-    logger.info("Started polling Ray bridge for websocket updates")
+    # Ray may be started asynchronously (see `api.main`), so the websocket bridge might
+    # not be available immediately. We retry until Ray is ready to avoid silently
+    # disabling websocket-driven progress for all jobs.
+    bridge = None
+    logger.info("Starting polling Ray bridge for websocket updates")
 
     while True:
         try:
+            if bridge is None:
+                try:
+                    bridge = get_ray_ws_bridge()
+                    logger.info("Ray websocket bridge ready; polling enabled")
+                except Exception:
+                    # Ray not initialized yet (or bridge creation failed); retry shortly.
+                    await asyncio.sleep(0.5)
+                    continue
+
             # Get all job IDs that might have updates
             all_job_ids = set()
             try:
@@ -73,6 +85,8 @@ async def poll_ray_updates():
             import traceback
 
             logger.error(traceback.format_exc())
+            # Bridge may have died (Ray restart); force re-create on next iteration.
+            bridge = None
             await asyncio.sleep(1)
 
 

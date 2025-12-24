@@ -51,11 +51,11 @@ class QwenImageEditPlusEngine(QwenImageShared):
             if not isinstance(images, list):
                 images = [images]
             all_image_latents = []
-            for image in images:
+            for idx, image in enumerate(images):
                 image = image.to(device=device, dtype=dtype)
                 if image.shape[1] != self.num_channels_latents:
                     image_latents = self.vae_encode(
-                        image, sample_mode="mode", offload=offload
+                        image, sample_mode="mode", offload=offload, offload_type="cpu" if idx != len(images) - 1 else "discard"
                     )
                 else:
                     image_latents = image
@@ -136,9 +136,6 @@ class QwenImageEditPlusEngine(QwenImageShared):
 
         images = image_list
 
-        # reverse the images
-        images.reverse()
-        
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
 
         if len(images) == 0:
@@ -320,6 +317,7 @@ class QwenImageEditPlusEngine(QwenImageShared):
             mu=mu,
             timesteps=timesteps,
         )
+
         safe_emit_progress(
             progress_callback, 0.50, "Timesteps computed; starting denoise"
         )
@@ -370,6 +368,8 @@ class QwenImageEditPlusEngine(QwenImageShared):
             0.50,
             f"Starting denoising (CFG: {'on' if (negative_prompt is not None and use_cfg_guidance) else 'off'})",
         )
+        
+
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,

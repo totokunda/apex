@@ -192,7 +192,8 @@ spec:
         flow: column
         rows:
         - - aspect_ratio
-        - - height
+        - - resolution
+          - height
           - width
     - name: sampling
       label: Sampling
@@ -231,6 +232,19 @@ spec:
         bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
         proportions, malformed limbs, missing arms, missing legs, extra arms, extra
         legs, fused fingers, too many fingers, long neck, username, watermark, signature
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video
+      panel: size
+      type: select
+      default: 480
+      options:
+      - name: SD
+        value: 480
+      - name: HD
+        value: 720
+      - name: Custom
+        value: custom
     - id: aspect_ratio
       label: Aspect Ratio
       description: Select the aspect ratio of the output video

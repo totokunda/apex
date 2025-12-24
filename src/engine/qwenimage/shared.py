@@ -206,6 +206,7 @@ class QwenImageShared(BaseEngine):
                     self.text_encoder.model_loaded = True
 
                 safe_emit_progress(progress_callback, 0.22, "Running text+vision encoder")
+
                 encoder_outputs = self.text_encoder.model(**input_kwargs)
                 attention_mask = model_inputs.attention_mask
 

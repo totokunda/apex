@@ -2273,6 +2273,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         selected_scheduler_option.update(current_component)
                         selected_scheduler_option.update(scheduler_option)
                         component = selected_scheduler_option
+                        
+                if component_name:
+                    component["name"] = component_name
 
                 if component.get("config_path"):
                     downloaded_config_path = self.fetch_config(

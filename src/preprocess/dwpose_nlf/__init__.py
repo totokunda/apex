@@ -109,11 +109,15 @@ def _to_rgb_uint8(
     raise ValueError(f"Unsupported channel count: {C}")
 
 class DwposeNlfDetector(DwposeDetector):
-    def __init__(self, dw_pose_estimation, nlf_model):
+    def __init__(self, dw_pose_estimation, nlf_model, device=None):
         super().__init__(dw_pose_estimation)
         self.nlf_model = nlf_model
-        ti.init(arch=ti.gpu)
-        self.device = get_torch_device()
+        if device is None:
+            self.device = get_torch_device()
+        else:
+            self.device = device
+        ti.init(arch=ti.gpu if self.device.type == "cuda" else ti.cpu)
+        
         self.nlf_model.to(self.device).eval()
         
 
@@ -169,9 +173,7 @@ class DwposeNlfDetector(DwposeDetector):
             pretrained_nlf_model_or_path = "https://github.com/isarandi/nlf/releases/download/v0.3.2/nlf_l_multi_0.3.2.torchscript"
             
         nlf_model_path = cls.download_nlf_model(pretrained_nlf_model_or_path, nlf_model_filename)
-        print(
-            f"\nDWPose: Using {det_filename} for bbox detection and {pose_filename} for pose estimation"
-        )
+
         if (
             global_cached_dwpose.det is None
             or global_cached_dwpose.det_filename != det_filename
@@ -191,7 +193,7 @@ class DwposeNlfDetector(DwposeDetector):
             global_cached_dwpose = t
         
         # load nlf model with torch.jit 
-        nlf_model = torch.jit.load(nlf_model_path)
+        nlf_model = torch.jit.load(nlf_model_path, map_location=get_torch_device().type)
         return cls(global_cached_dwpose, nlf_model)
 
     def render_nlf_as_images(self, data, poses, reshape_pool=None, intrinsic_matrix=None, draw_2d=True, aug_2d=False, aug_cam=False):

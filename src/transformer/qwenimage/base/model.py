@@ -771,6 +771,7 @@ class QwenImageTransformer2DModel(
         if USE_PEFT_BACKEND:
             # weight the lora layers by setting `lora_scale` for each PEFT layer
             scale_lora_layers(self, lora_scale)
+            pass
         else:
             if attention_kwargs is not None and attention_kwargs.get("scale", None) is not None:
                 logger.warning(
