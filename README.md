@@ -1,63 +1,29 @@
----
-datasets:
-- quanhaol/MagicData
-base_model:
-- Wan-AI/Wan2.2-TI2V-5B
----
+<h1 align="center">Apex Studio</h1>
+
+<hr />
+
 <p align="center">
-<h1 align="center">Wan2.2-TI2V-5B-Turbo</h1>
-<a href="https://github.com/quanhaol/Wan2.2-TI2V-5B-Turbo"><img src="https://img.shields.io/badge/GitHub-Repository-0066cc.svg" alt="GitHub"></a>
-<a href="https://huggingface.co/quanhaol/Wan2.2-TI2V-5B-Turbo"><img src="https://img.shields.io/badge/🤗_HuggingFace-Model-ffbd45.svg" alt="HuggingFace"></a>
-<a href="https://huggingface.co/datasets/quanhaol/MagicData"><img src="https://img.shields.io/badge/🤗_HuggingFace-Dataset-ffbd45.svg" alt="HuggingFace"></a>
+  Content creation made easy with a video editor built around open-source models.
+</p>
 
-Wan2.2-TI2V-5B-Turbo is designed for efficient step distillation and CFG distillation based on <a href="https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B"><b>Wan2.2-TI2V-5B</b></a>. 
+<p align="center">
+  <img src="assets/images/apex-studio.png" alt="Apex Studio" />
+</p>
 
-Leveraging the Self-Forcing framework, it enables 4-step TI2V-5B model training. **Our model can generate 121-frame videos at 24 FPS with a resolution of 1280×704 in just 4 steps, eliminating the need for the CFG trick.**
+<p align="center">
+  We built Apex around a simple belief: using free and open-source diffusion models should feel effortless. Making the model run shouldn’t be the challenge, the challenge should be the ambition, depth, and complexity of the content you choose to create.
+</p>
 
-To the best of our knowledge, Wan2.2-TI2V-5B-Turbo is the **first** open-source repository of the distilled I2V version of Wan2.2-TI2V-5B.
+## Documentation
 
-## 🔥Video Demos
-The videos below can be reproduced using [examples/example.csv](examples/example.csv).
+<hr />
 
-<table border="0" style="width: 100%; text-align: left; margin-top: 20px;">
-  <tr>
-      <td>
-          <video src="https://github.com/user-attachments/assets/dae5045c-c7a0-4e99-aa1c-e07d2300ea1c" width="100%" controls loop></video>
-      </td>
-      <td>
-          <video src="https://github.com/user-attachments/assets/f6d66a0e-eb8b-4b69-a29f-9d9607c02dda" width="100%" controls loop></video>
-      </td>
-  </tr>
-  <tr>
-      <td>
-          <video src="https://github.com/user-attachments/assets/0adc81ad-0389-4a06-b362-1078e5b4b564" width="100%" controls loop></video>
-      </td>
-      <td>
-          <video src="https://github.com/user-attachments/assets/dcf860c4-1da7-469c-bd88-0ab8641d400a" width="100%" controls loop></video>
-      </td>
-  </tr>
-  <tr>
-      <td>
-          <video src="https://github.com/user-attachments/assets/c5478230-2093-4443-8d76-f845675a4331" width="100%" controls loop></video>
-      </td>
-      <td>
-          <video src="https://github.com/user-attachments/assets/661daf97-aff3-4c5d-8912-44696a86a24e" width="100%" controls loop></video>
-      </td>
-  </tr>
-</table>
+### [docuementation links](#)
+### [the basics](#)
 
-## 📣 Updates
-- `2025/08/06` 🔥Wan2.2-TI2V-5B-Turbo has been released [`here`](https://huggingface.co/quanhaol/Wan2.2-TI2V-5B-Turbo).
+## Getting Started
 
-## 🐍 Installation
-Create a conda environment and install dependencies:
-```bash
-conda create -n wanturbo python=3.10 -y
-conda activate wanturbo
-pip install -r requirements.txt
-pip install flash-attn --no-build-isolation
-python setup.py develop
-```
+<hr />
 
 ### Optional: Rust-accelerated downloader (for max download throughput)
 
@@ -84,50 +50,71 @@ Rust parallel range-download tuning (hf_transfer-style, signature unchanged; all
 
 ## 🚀Quick Start
 
-### Checkpoint Download
+- Packaged application
+- Available for MacOS and Windows machines
 
-```bash
-pip install "huggingface_hub[hf_transfer]"
-HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download Wan-AI/Wan2.2-TI2V-5B --local-dir wan_models/Wan2.2-TI2V-5B
-HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download quanhaol/Wan2.2-TI2V-5B-Turbo --local-dir wan_models/Wan2.2-TI2V-5B-Turbo
-```
+### Terminal startup ([details](#terminal-startup))
 
-### DMD Training 
-```bash
-bash running_scripts/train/Wan2.2/dmd.sh
-```
-Our training run uses 4000 iterations and completes in under 2 days using 16 A100 GPUs.
+- Seperated studio and engine
+- Can be used with remote machines
 
-### Fewstep Inference
-```bash
-bash running_scripts/inference/Wan2.2/i2v_fewstep.sh
-```
+## Features
 
-## 🤝 Acknowledgements
+<hr />
 
-We would like to express our gratitude to the following open-source projects that have been instrumental in the development of our project:
+- Video editor built with JavaScript and Electron for easy video creation, and timeline based editing.
+- Easy preprocessing by dragging your desired preprocessor model onto a media clip.
+- Point-based masking with positive and negative markers for precise, intuitive control over exactly what gets masked.
+- Use any LoRA from popular model hubs like Hugging Face or Civitai—bring your own checkpoints, styles, and character LoRAs and plug them directly into your workflow.
+- Projects are saved as simple JSON files, making them easy to version, hand-edit and share
+- No node graphs: projects stay straightforward and portable, improving cross-compatibility across machines, setups, and collaborators.
+- Built-in queueing so you can line up multiple renders/generations and let Apex process them in order.
+- Denoised latent previews at predetermined intervals, so you can watch generations evolve as they render.
+- Built-in video controls including speed changes, frame interpolation, and keyframe selection.
+- Editing controls for trimming, slicing, cropping, and much more.
+- Hundreds of effects available to use within your creation.
+- Audio controls including detaching audio from video, waveform manipulation, noise reduction, and more.
 
-- [CausVid](https://github.com/tianweiy/CausVid)
-- [Self-Forcing](https://github.com/guandeh17/Self-Forcing)
-- [Self-Forcing-Plus](https://github.com/GoatWu/Self-Forcing-Plus)
-- [Wan2.1](https://github.com/Wan-Video/Wan2.1)
-- [Wan2.2](https://github.com/Wan-Video/Wan2.2)
+### Models
 
-Special thanks to the contributors of these libraries for their hard work and dedication!
+- **Image Models**
+  - [chroma hd text to image](manifest/verified/image/chroma-hd-text-to-image-1.0.0.v1.yml)
+  - [flux dev kontext](manifest/verified/image/flux-dev-kontext-1.0.0.v1.yml)
+  - [flux dev text to image](manifest/verified/image/flux-dev-text-to-image-1.0.0.v1.yml)
+  - [flux krea text to image](manifest/verified/image/flux-krea-text-to-image-1.0.0.v1.yml)
+  - [nunchaku flux dev kontext](manifest/verified/image/nunchaku-flux-dev-kontext-1.0.0.v1.yml)
+  - [nunchaku flux dev text to image](manifest/verified/image/nunchaku-flux-dev-text-to-image-1.0.0.v1.yml)
+  - [nunchaku flux krea text to image](manifest/verified/image/nunchaku-flux-krea-text-to-image-1.0.0.v1.yml)
+  - [nunchaku qwenimage edit 2509 lightning 8steps](manifest/verified/image/nunchaku-qwenimage-edit-2509-lightning-8steps-1.0.0.v1.yml)
+  - [nunchaku qwenimage edit lightning 8steps](manifest/verified/image/nunchaku-qwenimage-edit-lightning-8steps-1.0.0.v1.yml)
+  - [nunchaku qwenimage lightning 8steps](manifest/verified/image/nunchaku-qwenimage-lightning-8steps-1.0.0.v1.yml)
+  - [qwenimage](manifest/verified/image/qwenimage-1.0.0.v1.yml)
+  - [qwenimage edit](manifest/verified/image/qwenimage-edit-1.0.0.v1.yml)
+  - [qwenimage edit 2509](manifest/verified/image/qwenimage-edit-2509-1.0.0.v1.yml)
+  - [wan 2.2 a14b text to image 4 steps](manifest/verified/image/wan-2.2-a14b-text-to-image-4-steps-1.0.0.v1.yml)
+  - [zimage turbo](manifest/verified/image/zimage-turbo-1.0.0.v1.yml)
+  - [zimage turbo control](manifest/verified/image/zimage-turbo-control-1.0.0.v1.yml)
 
-## 📚 Contact
+- **Video Models**
+  - [hunyuanvideo 1.5 i2v](manifest/verified/video/hunyuanvideo-1.5-i2v-1.0.0.v1.yml)
+  - [hunyuanvideo 1.5 t2v](manifest/verified/video/hunyuanvideo-1.5-t2v-1.0.0.v1.yml)
+  - [wan 2.1 14b image to video 480p](manifest/verified/video/wan-2.1-14b-image-to-video-480p-1.0.0.v1.yml)
+  - [wan 2.1 14b infinitetalk text to video](manifest/verified/video/wan-2.1-14b-infinitetalk-text-to-video-1.0.0.v1.yml)
+  - [wan 2.1 14b multitalk text to video](manifest/verified/video/wan-2.1-14b-multitalk-text-to-video-1.0.0.v1.yml)
+  - [wan 2.1 14b vace control](manifest/verified/video/wan-2.1-14b-vace-control-1.0.0.v1.yml)
+  - [wan 2.1 14b vace expand swap](manifest/verified/video/wan-2.1-14b-vace-expand-swap-1.0.0.v1.yml)
+  - [wan 2.1 14b vace painting](manifest/verified/video/wan-2.1-14b-vace-painting-1.0.0.v1.yml)
+  - [wan 2.1 14b vace reference to video](manifest/verified/video/wan-2.1-14b-vace-reference-to-video-1.0.0.v1.yml)
+  - [wan 2.2 14b animate](manifest/verified/video/wan-2.2-14b-animate-1.0.0.v1.yml)
+  - [wan 2.2 5b text to image to video turbo](manifest/verified/video/wan-2.2-5b-text-to-image-to-video-turbo.1.0.0.v1.yml)
+  - [wan 2.2 a14b text to video](manifest/verified/video/wan-2.2-a14b-text-to-video-1.0.0.v1.yml)
+  - [wan 2.2 fun a14b control](manifest/verified/video/wan-2.2-fun-a14b-control-1.0.0.v1.yml)
+  - [wan2.2 a14b first frame last frame](manifest/verified/video/wan2.2-a14b-first-frame-last-frame-1.0.0.v1.yml)
+  - [wan2.2 a14b image to video](manifest/verified/video/wan2.2-a14b-image-to-video-1.0.0.v1.yml)
 
-If you have any suggestions or find our work helpful, feel free to contact us
+## Terminal Startup
 
-Email: liqh24@m.fudan.edu.cn or zhenxingfd@gmail.com or wangrui21@m.fudan.edu.cn
+<hr />
 
-If you find our work useful, <b>please consider giving a star to this github repository and citing it</b>:
 
-```bibtex
-@article{li2025magicmotion,
-  title={MagicMotion: Controllable Video Generation with Dense-to-Sparse Trajectory Guidance},
-  author={Li, Quanhao and Xing, Zhen and Wang, Rui and Zhang, Hui and Dai, Qi and Wu, Zuxuan},
-  journal={arXiv preprint arXiv:2503.16421},
-  year={2025}
-}
-```
+

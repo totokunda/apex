@@ -10,7 +10,7 @@ metadata:
   - chroma
   - hd
   - t2i
-  author: Apex AI
+  author: LodestoneRock
   license: Apache-2.0
   demo_path: models/chroma-hd.png
   categories:
