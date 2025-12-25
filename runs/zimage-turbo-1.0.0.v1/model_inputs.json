@@ -1,29 +1,32 @@
 {
     "engine_kwargs": {
         "engine_type": "zimage",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/image/zimage-turbo-1.0.0.v1.yml",
+        "yaml_path": "/home/divineade/apex/manifest/verified/image/zimage-turbo-1.0.0.v1.yml",
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
                 "name": "FlowMatchEulerDiscreteScheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
-                "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
                 "type": "scheduler",
                 "label": "FlowMatch Euler Discrete Scheduler",
                 "default": "FlowMatchEulerDiscreteScheduler",
                 "description": "The FlowMatch Euler Discrete Scheduler is a scheduler for the ZImage Turbo model."
             },
             "vae": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Tongyi-MAI_Z-Image-Turbo/transformer",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
@@ -33,12 +36,12 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "A dog walking near a lake. ",
-        "resolution": 1024,
-        "aspect_ratio": "1:1",
-        "height": 1024,
-        "width": 1024,
-        "seed": 1785699631,
+        "prompt": "A joyful Santa Claus standing full-body in a festive dance studio, wearing a classic red and white fur-trimmed suit with shiny black boots and a wide black belt with a gold buckle. His snowy white beard and twinkling eyes radiate warmth and cheer. He is standing upright at center frame, feet planted on the polished dance floor, arms relaxed at his sides, with a friendly, welcoming expression.\n\nThe setting is a professional dance studio bathed in rich green mood lighting: polished wooden floor with glossy reflections, soft atmospheric haze in the air, and bright green studio lights and glowing green panels casting vibrant emerald tones throughout the scene. Subtle green rim lighting outlines Santa\u2019s silhouette and creates depth, while soft key lights highlight the textures of his suit and beard. Background elements like studio mirrors and dance fixtures are gently blurred for cinematic depth.\n\nCinematic studio photography, clean composition, shallow depth of field, ultra-detailed textures (fabric, fur, wood), high-resolution, film still aesthetic with festive holiday mood and vibrant green ambiance.",
+        "resolution": 720,
+        "aspect_ratio": "custom",
+        "height": 1280,
+        "width": 704,
+        "seed": 3487433003,
         "duration": "5s"
     }
 }
