@@ -11,7 +11,7 @@ import os
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
-with open("/home/divineade/apex/runs/wan-2.1-14b-image-to-video-480p-1.0.0.v1/model_inputs.json", "r") as f:
+with open("/home/divineade/apex/runs/wan-2.2-14b-animate-1.0.0.v1/model_inputs.json", "r") as f:
    data = json.load(f)
 
 engine_kwargs = data["engine_kwargs"]
@@ -21,10 +21,10 @@ print(engine_kwargs)
 prompt = "A cinematic space-themed scene set against a deep starfield and distant galaxies. A small group of people in sleek, futuristic attire stand together on a glowing platform floating in space, gazing outward with a sense of creativity and ambition. Above and slightly behind them, the text “Apex Studio” appears large and clearly readable, styled in modern, bold typography with a soft luminous glow. Dramatic lighting, subtle nebula colors, depth and scale, high detail but clean composition, professional sci-fi creative aesthetic."
 
 inputs = data["inputs"]
-# base_path = "/home/divineade/apex/runs/wan-2.2-14b-animate-1.0.0.v1"
-# inputs["pose_video"] = os.path.join(base_path, inputs["pose_video"])
-# inputs["face_video"] = os.path.join(base_path, inputs["face_video"])
-# inputs["image"] = os.path.join(base_path, inputs["image"])
+base_path = "/home/divineade/apex/runs/wan-2.2-14b-animate-1.0.0.v1"
+inputs["pose_video"] = os.path.join(base_path, inputs["pose_video"])
+inputs["face_video"] = os.path.join(base_path, inputs["face_video"])
+inputs["image"] = os.path.join(base_path, inputs["image"])
 
 # inputs["prompt"] = prompt
 
@@ -33,10 +33,10 @@ yaml_path = engine_kwargs.get("yaml_path")
 engine = UniversalEngine(yaml_path=yaml_path, selected_components = {
 
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/d1a92cd17281e39a9901bb7f8edf647cd5a2173d9927b1ca1145aac3e30f0677_wan2.1-i2v-14b-480p-Q5_K_S.gguf",
-                "variant": "GGUF_Q5_K_S",
-                "precision": "q5_k_s",
-                "type": "gguf"
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/4d070faacff0a3bfc145235c1eb9432a1451c06f5be5da155a6d51fe16c58348_Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors",
+                "variant": "FP8",
+                "precision": "fp8",
+                "type": "safetensors"
             },
     
 })

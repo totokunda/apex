@@ -187,7 +187,6 @@ class LoaderMixin(DownloadMixin):
                 extra_kwargs["dtype"] = load_dtype
             elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
                 extra_kwargs["torch_dtype"] = load_dtype
-
             self.logger.info(f"Loading {model_class} from {model_path}")
             context = init_empty_weights() if no_weights else nullcontext()
 

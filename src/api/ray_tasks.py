@@ -122,9 +122,6 @@ def _persist_run_config(
                         rel_path = f"assets/{dest_path.name}" 
 
 
-
-
-
                         if isinstance(value, dict) and field_key:
                             updated = dict(value)
                             updated[field_key] = rel_path
@@ -1849,7 +1846,7 @@ def run_engine_from_manifest(
             if model_type.lower() != "ovi"
             else render_on_step_callback_ovi
         )
-        # _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
+        _persist_run_config(manifest_path, input_kwargs, prepared_inputs)
 
         output = engine.run(
             **(prepared_inputs or {}),

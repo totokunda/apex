@@ -82,6 +82,11 @@ spec:
       precision: fp16
       type: safetensors
       file_size: 69099547207
+    - path: https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/Wan22Animate/Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
+      file_size: 17317143060
   - type: helper
     name: image_processor
     label: Image Processor

@@ -689,9 +689,6 @@ class WanAnimateEngine(WanShared):
             )
             self._num_timesteps = len(timesteps)
 
-            logger.info(f"\n\nlatents: {latents.shape} \n\n")
-            logger.info(f"\n\nattention_kwargs: {attention_kwargs} \n\n")
-
             latents = self.denoise(
                 timesteps=timesteps,
                 latents=latents,
@@ -726,8 +723,6 @@ class WanAnimateEngine(WanShared):
 
             out_frames = self.vae_decode(latents[:, :, 1:], offload=offload)
             video = self._tensor_to_frames(out_frames)
-            from diffusers.utils import export_to_video
-            export_to_video(video[0], "output_animate_segment.mp4", fps=16, quality=8.0)
             if start > 0:
                 out_frames = out_frames[:, :, prev_segment_conditioning_frames:]
             all_out_frames.append(out_frames)

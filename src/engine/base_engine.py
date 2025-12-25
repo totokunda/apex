@@ -325,7 +325,6 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         # memory configs (auto inference is only used when none are provided).
         explicit_from_selected: Dict[str, Dict[str, Any]] = {}
         selected = getattr(self, "selected_components", None) or {}
-        logger.info(f"Selected components: {selected}")
         if isinstance(selected, dict):
             for key, value in selected.items():
                 if isinstance(value, dict) and self._has_memory_management_parameters(value):
