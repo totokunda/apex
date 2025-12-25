@@ -1,7 +1,7 @@
 {
     "engine_kwargs": {
         "engine_type": "wan",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/video/wan-2.2-14b-animate-1.0.0.v1.yml",
+        "yaml_path": "/home/divineade/apex/manifest/verified/video/wan-2.2-14b-animate-1.0.0.v1.yml",
         "model_type": "animate",
         "selected_components": {
             "scheduler": {
@@ -14,19 +14,19 @@
                 "description": "The UniPC Multistep Scheduler is used for WAN 2.2 14B Speech to Video."
             },
             "wan/vae": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "text_encoder": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/99cce76530692a83b04b80e4f05489c2e8a0ad9a1f177951777c10e5f06e6c13_umt5-xxl-enc-fp8_e4m3fn.safetensors",
-                "variant": "FP8",
-                "precision": "fp8",
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/4d070faacff0a3bfc145235c1eb9432a1451c06f5be5da155a6d51fe16c58348_Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors",
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/4d070faacff0a3bfc145235c1eb9432a1451c06f5be5da155a6d51fe16c58348_Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors",
                 "variant": "FP8",
                 "precision": "fp8",
                 "type": "safetensors"
@@ -42,6 +42,12 @@
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
+            },
+            "wan/text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
             }
         },
         "auto_memory_management": false,
@@ -49,17 +55,16 @@
     },
     "inputs": {
         "mode": "animate",
-        "image": "assets/e683856bbd100e4e40f45fe50fe1ebfd43309caa6c7d04051e9f6962ecab1cac.png",
-        "pose_video": "assets/result.mp4",
-        "face_video": "assets/result.mp4",
-        "prompt": "The man does the actions in the video.",
-        "negative_prompt": "",
-        "resolution": 480,
+        "image": "assets/aa877134-6de9-47e9-9bb4-ca0343fdf094-801de940-9135-431f-a3fb-00bc34b0416b_image_0_49.png",
+        "pose_video": "assets/128c139a-e67d-4c04-ac9a-c45219346000-801de940-9135-431f-a3fb-00bc34b0416b_pose_video_0_120_48.mp4",
+        "face_video": "assets/581aa8de-738e-4ef5-887d-ca00db31f169-801de940-9135-431f-a3fb-00bc34b0416b_face_video_0_120_48.mp4",
+        "prompt": "A man in an elf costume in a brightly lit studio dancing on the stage",
+        "resolution": "custom",
         "num_inference_steps": 4,
         "aspect_ratio": "custom",
-        "height": 896,
-        "width": 448,
-        "seed": 384832194,
+        "height": 1080,
+        "width": 594,
+        "seed": 3490050550,
         "guidance_scale": 1,
         "duration": "3.5s"
     }

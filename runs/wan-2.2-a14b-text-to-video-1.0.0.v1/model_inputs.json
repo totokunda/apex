@@ -1,22 +1,16 @@
 {
     "engine_kwargs": {
         "engine_type": "wan",
-        "yaml_path": "/home/divineade/apex/manifest/verified/video/wan-2.1-14b-image-to-video-480p-1.0.0.v1.yml",
-        "model_type": "i2v",
+        "yaml_path": "/home/divineade/apex/manifest/verified/video/wan-2.2-a14b-text-to-video-1.0.0.v1.yml",
+        "model_type": "t2v",
         "selected_components": {
             "scheduler": {
                 "name": "scheduler",
                 "base": "diffusers.UniPCMultistepScheduler",
-                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/components/00ce4c8fc5a7a13a69ef4aca11a3da4fd6083e295a27e3a1280020e496128950_scheduler_config.json",
+                "config_path": "/home/ext_diviade_gmail_com/apex-diffusion/configs/9bcf6ca67780d1db310af5d300a504eb1cac05165ed5d990ba83537160b57eb6_scheduler_config.json",
                 "type": "scheduler",
                 "label": "Scheduler",
                 "default": "UniPCMultistepScheduler"
-            },
-            "wan/vae": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/vae",
-                "variant": "default",
-                "precision": "fp16",
-                "type": "safetensors"
             },
             "wan/vae_2.2": {
                 "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
@@ -30,31 +24,33 @@
                 "precision": "fp16",
                 "type": "safetensors"
             },
-            "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/f19a294e53b8c9ef47bc00e856e9693a56f65c42c7d59f92b2ce8435582cf35e_Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
-                "variant": "FP8",
-                "precision": "fp8",
-                "type": "safetensors"
+            "high_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/1cd70cd3ac3f8e13ff21dcf52cca2e493b3f26f47f363cf073abd7f2cdfacb61_Wan2.2-T2V-A14B-HighNoise-Q2_K.gguf",
+                "variant": "GGUF_Q2_K",
+                "precision": "q2_k",
+                "type": "gguf"
             },
-            "clip": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/image_encoder",
-                "variant": "default",
-                "precision": "fp16",
-                "type": "safetensors"
+            "low_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/38e0ed19a47f40cf7aadb74aef8183d789e1af9e63daad5f171f6bd70706c960_Wan2.2-T2V-A14B-LowNoise-Q2_K.gguf",
+                "variant": "GGUF_Q2_K",
+                "precision": "q2_k",
+                "type": "gguf"
             }
         },
         "attention_type": "sdpa"
     },
     "inputs": {
-        "image": "assets/e7391aa9-68bc-40e3-a633-238f7e7b0394-dd877889-c75d-4282-87fd-33f8121b0d33_image_0_1.png",
-        "prompt": "turn the dog into a cat ",
+        "prompt": "A woman smiling",
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
-        "aspect_ratio": "16:9",
-        "num_inference_steps": 30,
-        "height": 1024,
-        "width": 1776,
-        "seed": 3525153297,
-        "guidance_scale": 5,
+        "resolution": 720,
+        "aspect_ratio": "1:1",
+        "num_inference_steps": 50,
+        "height": 704,
+        "width": 704,
+        "seed": 3984105140,
+        "high_noise_guidance_scale": 4,
+        "low_noise_guidance_scale": 3,
+        "boundary_ratio": 0.875,
         "duration": "5s"
     }
 }
