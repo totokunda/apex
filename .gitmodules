@@ -7,3 +7,9 @@
 [submodule "thirdparty/GroundingDINO"]
 	path = thirdparty/GroundingDINO
 	url = https://github.com/IDEA-Research/GroundingDINO.git
+[submodule "thirdparty/LongCat-Video"]
+	path = thirdparty/LongCat-Video
+	url = https://github.com/meituan-longcat/LongCat-Video.git
+[submodule "thirdparty/VideoX-Fun"]
+	path = thirdparty/VideoX-Fun
+	url = https://github.com/aigc-apps/VideoX-Fun.git
