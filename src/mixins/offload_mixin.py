@@ -381,7 +381,7 @@ class OffloadMixin(base_object):
             elif offload_type == "discard":
                 component = self.get_component_by_name(module)
                 if component:
-                    module_type_obj = getattr(self, component.get("type"))
+                    module_type_obj = getattr(self, component.get("type"), None)
                     
                     if module_type_obj is module_obj:
                         self.logger.info(f"Setting {component.get('type')} to None")

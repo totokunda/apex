@@ -160,7 +160,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
         # latent height and width to be divisible by 2.
         height = 2 * (int(height) // (self.vae_scale_factor * 2))
         width = 2 * (int(width) // (self.vae_scale_factor * 2))
-
+        
         shape = (batch_size, num_channels_latents, height, width)
 
         if latents is not None:
@@ -578,6 +578,8 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                     noise_pred = neg_noise_pred + true_cfg_scale * (
                         noise_pred - neg_noise_pred
                     )
+                
+                
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
@@ -603,7 +605,7 @@ class FluxShared(TextualInversionLoaderMixin, BaseEngine):
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
                 ):
                     progress_bar.update()
-
+                
                 # external progress callback
                 safe_emit_progress(
                     denoise_progress_callback,

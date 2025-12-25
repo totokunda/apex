@@ -192,10 +192,6 @@ def convert_kohya_to_peft_state_dict(
     kohya_state_dict.clear()
 
     for key, value in items:
-        # Skip Kohya alpha scalars – PEFT will infer / store scaling separately.
-        if key.endswith(".alpha"):
-            continue
-
         k = key
 
         # Undo header conversions.
@@ -217,8 +213,16 @@ def convert_kohya_to_peft_state_dict(
         if last_dot != -1:
             second_last_dot = k.rfind(".", 0, last_dot)
             if second_last_dot != -1:
+                # Normal case: at least two dots (e.g., "prefix.lora_A.weight")
                 prefix = k[:second_last_dot]
                 tail = k[second_last_dot:]  # includes the dot
+
+                prefix = _restore_kohya_flattened_prefix(prefix)
+                k = prefix + tail
+            else:
+                # Single dot case (e.g., "prefix.alpha") - restore entire prefix
+                prefix = k[:last_dot]
+                tail = k[last_dot:]  # includes the dot
 
                 prefix = _restore_kohya_flattened_prefix(prefix)
                 k = prefix + tail
@@ -233,6 +237,8 @@ def convert_kohya_to_peft_state_dict(
             k = f"{base}.{adapter_name}.{suffix}"
             
         kohya_state_dict[k] = value
+        
+
 
     return kohya_state_dict
 

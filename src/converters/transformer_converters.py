@@ -141,6 +141,7 @@ class TransformerConverter:
         self._sort_rename_dict()
         # If this looks like a checkpoint that already matches the target key layout,
         # exit early to keep conversion idempotent.
+
         if self._already_converted(state_dict):
             return state_dict
         # Apply pre-special keys map
@@ -921,12 +922,29 @@ class HunyuanVideo15TransformerConverter(TransformerConverter):
             - For fused *base* weights and LoRA "up" matrices, we split the fused dimension into 3.
             - For LoRA "down" matrices (rank x in_dim), we *do not* split: the same down matrix is shared
               by Q/K/V and only the corresponding LoRA "up" is partitioned.
+            - For FP8/FP4 scaled checkpoints, we may see `*.scale_weight` tensors alongside the fused QKV
+              weights. These can be either scalar (per-tensor) or per-out-feature vectors. For scalar
+              scales we replicate to Q/K/V; for vector scales we split along the same fused dimension
+              as the corresponding fused weight shard.
             """
             if _is_lora_down(key):
                 state_dict[key.replace(prefix_src, prefix_q)] = w
                 state_dict[key.replace(prefix_src, prefix_k)] = w
                 state_dict[key.replace(prefix_src, prefix_v)] = w
                 return
+
+            # FP-scaled checkpoints sometimes store scale tensors as scalars (0-d)
+            # or as length-1 vectors. Those should be shared across Q/K/V.
+            try:
+                if w.ndim == 0 or w.numel() == 1:
+                    state_dict[key.replace(prefix_src, prefix_q)] = w
+                    state_dict[key.replace(prefix_src, prefix_k)] = w
+                    state_dict[key.replace(prefix_src, prefix_v)] = w
+                    return
+            except Exception:
+                # If shape/numel is unavailable for any reason, fall back to
+                # the splitting logic below.
+                pass
 
             chunk_dim = self.get_chunk_dim(w)
             if w.shape[chunk_dim] % 3 != 0:
@@ -1412,12 +1430,12 @@ class FluxTransformerConverter(TransformerConverter):
 
             - `*.qkv.lora_down.*` / `*.qkv.lora_A.*` are shared across q/k/v
             - `*.qkv.lora_up.*` / `*.qkv.lora_B.*` are split into q/k/v along dim=0
-            """
-            if not key.startswith("double_blocks."):
-                return
 
+            Supports optional `unet.` prefix commonly found in LoRA checkpoints.
+            """
+            # Match with optional unet. prefix
             m = re.match(
-                r"double_blocks\.(\d+)\.(img_attn|txt_attn)\.qkv\.(lora_down|lora_up|lora_A|lora_B)\.(weight|bias)$",
+                r"(?:unet\.)?double_blocks\.(\d+)\.(img_attn|txt_attn)\.qkv\.(lora_down|lora_up|lora_A|lora_B)\.(weight|bias)$",
                 key,
             )
             if not m or key not in sd:
@@ -1453,6 +1471,55 @@ class FluxTransformerConverter(TransformerConverter):
                 sd[q_key] = ggml_cat([q])
                 sd[k_key] = ggml_cat([k])
                 sd[v_key] = ggml_cat([v])
+                return
+
+        def _handle_single_linear1_lora(key: str, sd: Dict[str, Any]):
+            """
+            Handle LoRA on single_blocks.*.linear1 (packed Q/K/V/MLP projection).
+
+            - lora_A/lora_down is shared across q/k/v/mlp
+            - lora_B/lora_up is split into q/k/v/mlp along dim=0
+
+            Supports optional `unet.` prefix commonly found in LoRA checkpoints.
+            """
+            m = re.match(
+                r"(?:unet\.)?single_blocks\.(\d+)\.linear1\.(lora_down|lora_up|lora_A|lora_B)\.(weight|bias)$",
+                key,
+            )
+            if not m or key not in sd:
+                return
+
+            i = int(m.group(1))
+            lora_kind = m.group(2)  # lora_down/up/A/B
+            suffix = m.group(3)  # weight | bias
+
+            is_down = lora_kind in ("lora_down", "lora_A")
+            is_up = lora_kind in ("lora_up", "lora_B")
+
+            blk = f"single_transformer_blocks.{i}"
+            q_key = f"{blk}.attn.to_q.{lora_kind}.{suffix}"
+            k_key = f"{blk}.attn.to_k.{lora_kind}.{suffix}"
+            v_key = f"{blk}.attn.to_v.{lora_kind}.{suffix}"
+            mlp_key = f"{blk}.proj_mlp.{lora_kind}.{suffix}"
+
+            t = sd.pop(key)
+            if is_down:
+                # Down projection is shared
+                sd[q_key] = t
+                sd[k_key] = t
+                sd[v_key] = t
+                sd[mlp_key] = t
+                return
+
+            if is_up:
+                # Up projection needs to be split
+                mlp_hidden_dim = int(inner_dim * mlp_ratio)
+                split_size = (inner_dim, inner_dim, inner_dim, mlp_hidden_dim)
+                q, k, v, mlp = ggml_split(t, split_size, dim=0)
+                sd[q_key] = ggml_cat([q])
+                sd[k_key] = ggml_cat([k])
+                sd[v_key] = ggml_cat([v])
+                sd[mlp_key] = ggml_cat([mlp])
                 return
 
         def _handle_single_linear1(key: str, sd: Dict[str, Any]):
@@ -1500,6 +1567,32 @@ class FluxTransformerConverter(TransformerConverter):
                 return
             update_state_dict_(sd, key, key.replace("single_blocks__keep.", "single_blocks.", 1))
 
+        def _handle_single_attn_norm_scales(key: str, sd: Dict[str, Any]):
+            """
+            Some Flux checkpoints store per-head attention norm scales for single blocks as:
+              - single_blocks.<i>.norm.query_norm.scale
+              - single_blocks.<i>.norm.key_norm.scale
+            After the generic rename pass, these become:
+              - single_transformer_blocks.<i>.norm.query_norm.scale
+              - single_transformer_blocks.<i>.norm.key_norm.scale
+            But the diffusers-style model expects:
+              - single_transformer_blocks.<i>.attn.norm_q.weight
+              - single_transformer_blocks.<i>.attn.norm_k.weight
+            """
+            if key not in sd:
+                return
+            m = re.match(
+                r"^(?:unet\.)?single_transformer_blocks\.(\d+)\.norm\.(query_norm|key_norm)\.scale$",
+                key,
+            )
+            if not m:
+                return
+            i = int(m.group(1))
+            which = m.group(2)  # query_norm | key_norm
+            suffix = "norm_q" if which == "query_norm" else "norm_k"
+            new_key = f"single_transformer_blocks.{i}.attn.{suffix}.weight"
+            update_state_dict_(sd, key, new_key)
+
         # Attach pre-special handlers (executed before the generic rename pass).
         self.pre_special_keys_map = {
             "guidance_in.": _handle_guidance_group,
@@ -1509,11 +1602,15 @@ class FluxTransformerConverter(TransformerConverter):
             ".img_attn.qkv.bias": _handle_double_img_qkv_bias,
             ".txt_attn.qkv.weight": _handle_double_txt_qkv_weight,
             ".txt_attn.qkv.bias": _handle_double_txt_qkv_bias,
+            ".linear1.lora_": _handle_single_linear1_lora,
             ".linear1.": _handle_single_linear1,
         }
         # Post-rename fixups (undo temporary placeholder used to keep partial keys untouched).
         self.special_keys_map = {
             "single_blocks__keep.": _unprotect_single_linear1_keys,
+            # Map single-block attention norm scales to expected attn norm weights.
+            ".norm.query_norm.scale": _handle_single_attn_norm_scales,
+            ".norm.key_norm.scale": _handle_single_attn_norm_scales,
         }
 
         # Use the shared conversion pipeline (pre-special → rename → post-special).

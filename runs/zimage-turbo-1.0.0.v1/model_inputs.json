@@ -5,7 +5,7 @@
         "model_type": "t2i",
         "selected_components": {
             "scheduler": {
-                "name": "FlowMatchEulerDiscreteScheduler",
+                "name": "scheduler",
                 "base": "diffusers.FlowMatchEulerDiscreteScheduler",
                 "config_path": "/home/tosin_coverquick_co/apex-diffusion/components/309fddec5ebc49a8aefab205fe7dff824cca5ac413726b93cdd87b078cd60423_scheduler_config.json",
                 "type": "scheduler",
@@ -33,12 +33,12 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "prompt": "A dog walking near a lake. ",
-        "resolution": 1024,
-        "aspect_ratio": "1:1",
-        "height": 1024,
-        "width": 1024,
-        "seed": 1785699631,
+        "prompt": "A surreal night-time confrontation in a rain-soaked city alley glowing with neon reflections. Two men stand several feet apart beneath a flickering streetlight, locked in a silent standoff. Rain streaks down their faces and coats, steam rising from the pavement around their boots. Neon signs in cyan and violet blur into abstract shapes behind them, casting sharp color contrast across their tense expressions. A slow wind lifts fabric and loose debris, amplifying the sense of imminent conflict. Shot from a low, cinematic angle with strong leading lines, shallow depth of field, high contrast lighting, ultra-detailed realism, dramatic atmosphere, modern neo-noir aesthetic, high-end film still.",
+        "resolution": 720,
+        "aspect_ratio": "16:9",
+        "height": 704,
+        "width": 1280,
+        "seed": 255511387,
         "duration": "5s"
     }
 }

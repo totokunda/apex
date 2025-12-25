@@ -294,6 +294,12 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         # Normalize optional memory management mapping.
         # If no explicit mapping is provided, we will try to infer sensible
         # defaults based on the size of the models that will be loaded.
+        
+        self.auto_apply_loras = kwargs.get("auto_apply_loras", True)
+        self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
+        loaded_loras, loaded_loras_names = self._load_loras()
+        for i, lora_item in enumerate(loaded_loras):
+            self.preloaded_loras[loaded_loras_names[i]] = lora_item
 
         self._parse_config(
             self.config,
@@ -305,11 +311,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         self.attention_type = kwargs.get("attention_type", "sdpa")
         attention_register.set_default(self.attention_type)
-        self.auto_apply_loras = kwargs.get("auto_apply_loras", True)
-        self._init_lora_manager(kwargs.get("lora_save_path", DEFAULT_LORA_SAVE_PATH))
-        loaded_loras, loaded_loras_names = self._load_loras()
-        for i, lora_item in enumerate(loaded_loras):
-            self.preloaded_loras[loaded_loras_names[i]] = lora_item
+        
 
     def post_init(self):
         """
@@ -686,9 +688,14 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # Move helper to device if possible
         if hasattr(helper, "to") and self.device is not None:
-            if next(helper.parameters()).device.type != device:
-                helper = helper.to(device)
-
+            try:
+                if next(helper.parameters()).device.type != device:
+                    helper = helper.to(device)
+            except StopIteration:
+                try:
+                    helper = helper.to(device)
+                except Exception:
+                    pass
         return helper
 
     def load_helper_by_type(self, helper_type: str):
@@ -2266,7 +2273,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 if not selected_scheduler_option:
                     # take the first scheduler option
                     selected_scheduler_option = scheduler_options[0]
-
+                    
+                
+                match_found = False
                 for scheduler_option in scheduler_options:
                     if selected_scheduler_option["name"] == scheduler_option["name"]:
                         current_component = component.copy()
@@ -2274,6 +2283,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         selected_scheduler_option.update(current_component)
                         selected_scheduler_option.update(scheduler_option)
                         component = selected_scheduler_option
+                        match_found = True
+                        break
+                if not match_found:
+                    # use the first scheduler option
+                    selected_scheduler_option = scheduler_options[0]
+                    current_component = component.copy()
+                    del current_component["scheduler_options"]
+                    selected_scheduler_option.update(current_component)
+                    selected_scheduler_option.update(scheduler_options[0])
+                    component = selected_scheduler_option
+                    match_found = True
                         
                 if component_name:
                     component["name"] = component_name

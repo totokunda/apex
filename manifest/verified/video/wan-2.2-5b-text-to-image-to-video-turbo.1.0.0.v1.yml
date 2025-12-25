@@ -40,7 +40,7 @@ spec:
     - cpu
   components:
   - type: scheduler
-    label: Scheduler
+    label: Wan 2.2 5B Turbo Scheduler
     default: UniPCMultistepScheduler
     scheduler_options:
     - name: UniPCMultistepScheduler
@@ -49,6 +49,7 @@ spec:
       base: diffusers.UniPCMultistepScheduler
       config_path: Wan-AI/Wan2.2-TI2V-5B-Diffusers/scheduler/scheduler_config.json
   - type: vae
+    label: Wan 2.2 5B Turbo VAE
     base: wan
     model_path:
     - path: Wan-AI/Wan2.2-TI2V-5B-Diffusers/vae
@@ -74,6 +75,7 @@ spec:
     config_path: Wan-AI/Wan2.1-I2V-14B-480P-Diffusers/text_encoder/config.json
   - type: transformer
     base: wan.base
+    label: Wan 2.2 5B Turbo Transformer
     model_path:
     - path: Kijai/WanVideo_comfy/Wan22-Turbo/Wan2_2-TI2V-5B-Turbo_fp16.safetensors
       variant: default
@@ -164,14 +166,6 @@ spec:
         flow: column
         rows:
         - - prompt
-    - name: advanced_prompting
-      label: Advanced Prompting
-      collapsible: true
-      default_open: false
-      layout:
-        flow: column
-        rows:
-        - - negative_prompt
     - name: size
       label: Size
       collapsible: true
@@ -210,19 +204,6 @@ spec:
       type: text
       panel: prompting
       required: true
-    - id: negative_prompt
-      label: Negative Prompt
-      description: Describe what to avoid in the generation.
-      placeholder: blurry, low quality, distorted, artifacts
-      type: text
-      panel: advanced_prompting
-      required: false
-      default: lowres, text, error, cropped, worst quality, low quality, jpeg artifacts,
-        ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands,
-        poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated,
-        bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross
-        proportions, malformed limbs, missing arms, missing legs, extra arms, extra
-        legs, fused fingers, too many fingers, long neck, username, watermark, signature
     - id: resolution
       label: Resolution
       description: Select the resolution of the output video
@@ -282,7 +263,7 @@ spec:
       default: 704
       min: 256
       max: 8192
-      step: 16
+      step: 32
     - id: width
       label: Width
       description: Explicit width override
@@ -292,7 +273,7 @@ spec:
       default: 1280
       min: 256
       max: 8192
-      step: 16
+      step: 32
     - id: seed
       label: Seed
       description: Random seed for reproducibility

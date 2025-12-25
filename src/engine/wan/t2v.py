@@ -21,6 +21,8 @@ class WanT2VEngine(WanShared):
         seed: int | None = None,
         fps: int = 16,
         guidance_scale: float = 5.0,
+        high_noise_guidance_scale: float = 1.0,
+        low_noise_guidance_scale: float = 1.0,
         return_latents: bool = False,
         text_encoder_kwargs: Dict[str, Any] = {},
         attention_kwargs: Dict[str, Any] = {},
@@ -38,6 +40,11 @@ class WanT2VEngine(WanShared):
         enhance_kwargs: Dict[str, Any] = {},
         **kwargs,
     ):
+        
+        if (high_noise_guidance_scale is not None and low_noise_guidance_scale is not None):
+            guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
+            safe_emit_progress(progress_callback, 0.01, "Using high/low-noise guidance scales")
+            
         safe_emit_progress(progress_callback, 0.0, "Starting text-to-video pipeline")
         if guidance_scale is not None and isinstance(guidance_scale, list):
             use_cfg_guidance = (
@@ -53,11 +60,13 @@ class WanT2VEngine(WanShared):
             render_on_step = False
 
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.02, "Loading text encoder")
             self.load_component_by_type("text_encoder")
 
+        safe_emit_progress(progress_callback, 0.03, "Moving text encoder to device")
         self.to_device(self.text_encoder)
 
-        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
+        safe_emit_progress(progress_callback, 0.05, "Encoding prompt")
 
         prompt_embeds = self.text_encoder.encode(
             prompt,
@@ -71,6 +80,7 @@ class WanT2VEngine(WanShared):
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.11, "Encoding negative prompt")
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
@@ -84,18 +94,20 @@ class WanT2VEngine(WanShared):
             progress_callback,
             0.13,
             (
-                "Prepared negative prompt embeds"
-                if negative_prompt is not None and use_cfg_guidance
-                else "Skipped negative prompt embeds"
+                "Prepared negative prompt"
+                if negative_prompt_embeds is not None
+                else "Skipped negative prompt"
             ),
         )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.14, "Offloading text encoder")
             self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         transformer_dtype = self.component_dtypes["transformer"]
+        safe_emit_progress(progress_callback, 0.16, "Moving embeddings to device")
         prompt_embeds = prompt_embeds.to(self.device, dtype=transformer_dtype)
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(
@@ -103,14 +115,19 @@ class WanT2VEngine(WanShared):
             )
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.17, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.18, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.19, "Moving scheduler to device")
         self.to_device(self.scheduler)
         scheduler = self.scheduler
 
+        safe_emit_progress(progress_callback, 0.195, "Configuring scheduler timesteps")
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
 
+        safe_emit_progress(progress_callback, 0.198, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -119,17 +136,20 @@ class WanT2VEngine(WanShared):
         )
 
         safe_emit_progress(
-            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+            progress_callback, 0.20, "Scheduler and timesteps prepared"
         )
 
         vae_config = self.load_config_by_type("vae")
         vae_scale_factor_spatial = getattr(
             vae_config, "scale_factor_spatial", self.vae_scale_factor_spatial
         )
+        
         vae_scale_factor_temporal = getattr(
             vae_config, "scale_factor_temporal", self.vae_scale_factor_temporal
         )
 
+        safe_emit_progress(progress_callback, 0.26, "Initializing latent noise")
+        
         latents = self._get_latents(
             height,
             width,
@@ -147,6 +167,7 @@ class WanT2VEngine(WanShared):
         safe_emit_progress(progress_callback, 0.30, "Initialized latent noise")
 
         if boundary_ratio is not None:
+            safe_emit_progress(progress_callback, 0.32, "Computing boundary timestep")
             boundary_timestep = boundary_ratio * getattr(
                 self.scheduler.config, "num_train_timesteps", 1000
             )
@@ -160,7 +181,11 @@ class WanT2VEngine(WanShared):
 
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
-        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+        safe_emit_progress(
+            progress_callback,
+            0.45,
+            f"Starting denoise (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
         mask = torch.ones(latents.shape, dtype=torch.float32, device=self.device)
         
         latents = self.denoise(
@@ -201,6 +226,7 @@ class WanT2VEngine(WanShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
+            safe_emit_progress(progress_callback, 0.94, "Decoding latents to video")
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)

@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 import numpy as np
 import torch
 from PIL import Image
@@ -8,6 +8,7 @@ from loguru import logger
 from src.engine.hunyuanvideo15.shared import HunyuanVideo15Shared
 from src.types.media import InputImage
 from src.helpers.hunyuanvideo15.cache import CacheHelper
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 
 
 class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
@@ -659,16 +660,30 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         eta: float = 0.0,
         offload: bool = True,
         generator: Optional[torch.Generator] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
         **kwargs: Any,
     ):
+        # Accept progress callback via kwargs as well (older orchestrators).
+        resolution = str(resolution).lower()
+        if not resolution.endswith("p"):
+            resolution = f"{resolution}p"
+        if resolution == "custom":
+            resolution = self.ideal_resolution or "720p"
+        progress_callback = kwargs.pop("progress_callback", progress_callback)
+
+        safe_emit_progress(
+            progress_callback, 0.0, "Starting HunyuanVideo 1.5 text/image-to-video pipeline"
+        )
         device = self.device
 
         if generator is None and seed is not None:
+            safe_emit_progress(progress_callback, 0.01, "Setting random seed")
             generator = torch.Generator(device=torch.device("cpu")).manual_seed(seed)
 
         transformer_dtype = self.component_dtypes.get("transformer", self.target_dtype)
         self.target_dtype = transformer_dtype
 
+        safe_emit_progress(progress_callback, 0.03, "Preparing configuration")
         if guidance_scale is None:
             guidance_scale = self.config.get("guidance_scale", self._guidance_scale)
         if embedded_guidance_scale is None:
@@ -682,6 +697,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         # Determine task type and reference image
         if reference_image is not None:
+            safe_emit_progress(progress_callback, 0.05, "Loading reference image")
             task_type = "i2v"
             reference_image = self._load_image(reference_image)
         else:
@@ -710,6 +726,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 (int(width_str), int(height_str)), target_resolution
             )
 
+        safe_emit_progress(progress_callback, 0.08, "Computing latent sizes")
         video_length = self._parse_num_frames(duration=duration, fps=fps)
         latent_target_length, latent_height, latent_width = self.get_latent_size(
             video_length, height, width
@@ -726,12 +743,18 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             batch_size = len(prompt)
         else:
             batch_size = 1
+            
+        
+        logger.info(f"{getattr(self, 'text_encoder', None)} text encoder")
 
         if getattr(self, "text_encoder", None) is None:
+            safe_emit_progress(progress_callback, 0.10, "Loading text encoder")
             self._get_text_encoder()
+        safe_emit_progress(progress_callback, 0.11, "Moving text encoder to device")
         self.to_device(self.text_encoder)
         self.text_len = getattr(self.text_encoder, "max_length", 1000)
 
+        safe_emit_progress(progress_callback, 0.12, "Encoding prompt (text encoder)")
         (
             prompt_embeds,
             negative_prompt_embeds,
@@ -754,13 +777,16 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         if getattr(self, "text_encoder_2", None) is None:
             try:
+                safe_emit_progress(progress_callback, 0.14, "Loading text encoder 2")
                 self.load_component_by_name("text_encoder_2")
                 if getattr(self, "text_encoder_2", None) is not None:
+                    safe_emit_progress(progress_callback, 0.15, "Moving text encoder 2 to device")
                     self.to_device(self.text_encoder_2)
             except Exception:
                 self.text_encoder_2 = None
 
         if getattr(self, "text_encoder_2", None) is not None:
+            safe_emit_progress(progress_callback, 0.16, "Encoding prompt (text encoder 2)")
             (
                 prompt_embeds_2,
                 negative_prompt_embeds_2,
@@ -778,10 +804,13 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.18, "Offloading text encoders")
             self._offload("text_encoder")
             if getattr(self, "text_encoder_2", None) is not None:
                 self._offload("text_encoder_2")
+            safe_emit_progress(progress_callback, 0.19, "Text encoders offloaded")
 
+        safe_emit_progress(progress_callback, 0.20, "Preparing auxiliary embeddings")
         extra_kwargs = self._prepare_byt5_embeddings(prompt, device)
 
         if self.do_classifier_free_guidance:
@@ -795,6 +824,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
 
         # Scheduler setup
         if getattr(self, "scheduler", None) is None:
+            safe_emit_progress(progress_callback, 0.22, "Loading scheduler")
             self.load_component_by_type("scheduler")
         else:
             try:
@@ -806,20 +836,24 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             except Exception:
                 pass
 
+        safe_emit_progress(progress_callback, 0.23, "Moving scheduler to device")
         self.to_device(self.scheduler)
         extra_set_timesteps_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.set_timesteps, {"n_tokens": n_tokens}
         )
 
+        safe_emit_progress(progress_callback, 0.25, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=self.scheduler,
             num_inference_steps=num_inference_steps,
             **extra_set_timesteps_kwargs,
         )
+        safe_emit_progress(progress_callback, 0.28, "Timesteps prepared")
 
         num_channels_latents = getattr(
             self.transformer_config, "in_channels", self.num_channels_latents
         )
+        safe_emit_progress(progress_callback, 0.30, "Initializing latents")
         latents = self.prepare_latents(
             batch_size * num_videos,
             num_channels_latents,
@@ -830,7 +864,9 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             device,
             generator,
         )
+        safe_emit_progress(progress_callback, 0.34, "Latents initialized")
 
+        safe_emit_progress(progress_callback, 0.35, "Preparing conditioning (VAE / vision)")
         self.load_component_by_type("vae")
         self.to_device(self.vae)
         image_cond = self.get_image_condition_latents(
@@ -842,6 +878,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         vision_states = self._prepare_vision_states(
             reference_image, target_resolution, latents, device
         )
+        safe_emit_progress(progress_callback, 0.40, "Conditioning prepared")
 
         extra_step_kwargs = self.prepare_extra_func_kwargs(
             self.scheduler.step, {"generator": generator, "eta": eta}
@@ -850,10 +887,14 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
         self._num_timesteps = len(timesteps)
 
         if getattr(self, "transformer", None) is None:
+            safe_emit_progress(progress_callback, 0.42, "Loading transformer")
             self.load_component_by_type("transformer")
+        safe_emit_progress(progress_callback, 0.44, "Moving transformer to device")
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.45, "Transformer ready")
 
         if enable_cache:
+            safe_emit_progress(progress_callback, 0.46, "Enabling transformer cache")
             no_cache_steps = (
                 list(range(0, cache_start_step))
                 + list(range(cache_start_step, cache_end_step, cache_step_interval))
@@ -871,6 +912,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             cache_helper = None
 
         if sparse_attn:
+            safe_emit_progress(progress_callback, 0.47, "Enabling sparse attention")
             if not self.is_sparse_attn_supported():
                 raise RuntimeError(
                     f"Current GPU is {torch.cuda.get_device_properties(0).name}, which does not support sparse attention."
@@ -886,9 +928,18 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
             cache_helper.clear_cache()
             assert num_inference_steps == total_steps
 
+        # Reserve a progress span for denoising [0.50, 0.90]
+        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        safe_emit_progress(
+            progress_callback,
+            0.50,
+            f"Starting denoise (CFG: {'on' if self.do_classifier_free_guidance else 'off'})",
+        )
+
         with self._progress_bar(
             total=num_inference_steps, desc="Denoising HunyuanVideo1.5"
         ) as progress_bar:
+            total_ts = len(timesteps)
             for i, t in enumerate(timesteps):
                 if cache_helper is not None:
                     cache_helper.cur_timestep = i
@@ -967,15 +1018,25 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 ):
                     if progress_bar is not None:
                         progress_bar.update()
+                safe_emit_progress(
+                    denoise_progress_callback,
+                    float(i + 1) / float(max(total_ts, 1)),
+                    f"Denoising step {i + 1}/{total_ts}",
+                )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.91, "Offloading transformer")
             self._offload("transformer")
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:
+            safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.94, "Decoding video")
         video_latents = latents if latents.ndim == 5 else latents.unsqueeze(2)
         video_frames = self.vae_decode(video_latents, offload=offload)
+        safe_emit_progress(progress_callback, 0.97, "Postprocessing video")
 
         if output_type == "np":
             video_frames = video_frames.numpy()
@@ -984,6 +1045,7 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 video_frames, output_type="pil"
             )
 
+        safe_emit_progress(progress_callback, 1.0, "Completed HunyuanVideo 1.5 TI2V pipeline")
         return video_frames
 
     def vae_decode(self, latents, offload=True):
@@ -1021,7 +1083,4 @@ class HunyuanVideo15TI2VEngine(HunyuanVideo15Shared):
                 sample_generator=sample_generator,
                 offload=offload,
             )
-            self.vae.disable_tiling()
-        if offload:
-            self._offload("vae")
         return out

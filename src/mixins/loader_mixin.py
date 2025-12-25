@@ -734,6 +734,7 @@ class LoaderMixin(DownloadMixin):
             raise ValueError(
                 f"Could not find scheduler class '{class_name}' in module '{module_name}' or its submodules."
             )
+            
 
         config_path = component.get("config_path")
         config = component.get("config")
@@ -744,6 +745,7 @@ class LoaderMixin(DownloadMixin):
             config = self.fetch_config(config_path)
         else:
             config = component.get("config", {})
+            
 
         # Determine which config entries can be passed to the component constructor
         try:

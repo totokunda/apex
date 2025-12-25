@@ -54,10 +54,12 @@ class WanVaceEngine(WanShared):
         )
 
         if not self.text_encoder:
+            safe_emit_progress(progress_callback, 0.02, "Loading text encoder")
             self.load_component_by_type("text_encoder")
 
+        safe_emit_progress(progress_callback, 0.03, "Moving text encoder to device")
         self.to_device(self.text_encoder)
-        safe_emit_progress(progress_callback, 0.05, "Text encoder ready")
+        safe_emit_progress(progress_callback, 0.05, "Encoding prompt")
 
         num_frames = self._parse_num_frames(duration, fps=fps)
 
@@ -73,6 +75,7 @@ class WanVaceEngine(WanShared):
         batch_size = prompt_embeds.shape[0]
 
         if negative_prompt is not None and use_cfg_guidance:
+            safe_emit_progress(progress_callback, 0.11, "Encoding negative prompt")
             negative_prompt_embeds = self.text_encoder.encode(
                 negative_prompt,
                 device=self.device,
@@ -86,32 +89,40 @@ class WanVaceEngine(WanShared):
             progress_callback,
             0.13,
             (
-                "Prepared negative prompt embeds"
-                if negative_prompt is not None and use_cfg_guidance
-                else "Skipped negative prompt embeds"
+                "Prepared negative prompt"
+                if negative_prompt_embeds is not None
+                else "Skipped negative prompt"
             ),
         )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.14, "Offloading text encoder")
             self._offload("text_encoder")
 
         safe_emit_progress(progress_callback, 0.15, "Text encoder offloaded")
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.16, "Loading transformer")
             self.load_component_by_type("transformer")
 
         pt, ph, pw = self.transformer.config.patch_size
+        safe_emit_progress(progress_callback, 0.17, "Moving transformer to device")
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.18, "Transformer ready")
         transformer_dtype = self.component_dtypes["transformer"]
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.19, "Loading scheduler")
             self.load_component_by_type("scheduler")
 
+        safe_emit_progress(progress_callback, 0.21, "Moving scheduler to device")
         self.to_device(self.scheduler)
         scheduler = self.scheduler
+        safe_emit_progress(progress_callback, 0.22, "Configuring scheduler timesteps")
         scheduler.set_timesteps(
             num_inference_steps if timesteps is None else 1000, device=self.device
         )
+        safe_emit_progress(progress_callback, 0.23, "Computing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             scheduler=scheduler,
             timesteps=timesteps,
@@ -120,12 +131,14 @@ class WanVaceEngine(WanShared):
         )
 
         safe_emit_progress(
-            progress_callback, 0.20, "Scheduler ready and timesteps computed"
+            progress_callback, 0.24, "Scheduler and timesteps prepared"
         )
 
         if mask:
+            safe_emit_progress(progress_callback, 0.25, "Loading mask")
             loaded_mask = self._load_video(mask, fps=fps, num_frames=num_frames)
 
+        safe_emit_progress(progress_callback, 0.26, "Preparing conditioning scales")
         if isinstance(conditioning_scale, (int, float)):
             conditioning_scale = [conditioning_scale] * len(
                 self.transformer.config.vace_layers
@@ -146,6 +159,7 @@ class WanVaceEngine(WanShared):
             )
 
         if video is not None:
+            safe_emit_progress(progress_callback, 0.28, "Loading input video")
             loaded_video = self._load_video(video, fps=fps, num_frames=num_frames)
 
             max_area = height * width
@@ -154,6 +168,7 @@ class WanVaceEngine(WanShared):
             ]
             video_height, video_width = loaded_video[0].height, loaded_video[0].width
 
+            safe_emit_progress(progress_callback, 0.30, "Preprocessing input video")
             preprocessed_video = self.video_processor.preprocess_video(
                 loaded_video,
                 height=video_height,
@@ -175,11 +190,13 @@ class WanVaceEngine(WanShared):
         if not mask:
             preprocessed_mask = torch.ones_like(preprocessed_video)
         else:
+            safe_emit_progress(progress_callback, 0.32, "Preprocessing mask")
             preprocessed_mask = self.video_processor.preprocess_video(
                 loaded_mask, video_height, video_width
             )
             preprocessed_mask = torch.clamp((preprocessed_mask + 1) / 2, min=0, max=1)
 
+        safe_emit_progress(progress_callback, 0.34, "Preparing reference images")
         if reference_images is None or not isinstance(reference_images, (list, tuple)):
             if reference_images is not None:
                 reference_images = self._load_image(reference_images)
@@ -250,6 +267,7 @@ class WanVaceEngine(WanShared):
         inactive = preprocessed_video * (1 - mask)
         reactive = preprocessed_video * mask
 
+        safe_emit_progress(progress_callback, 0.36, "Encoding inactive/reactive regions (VAE)")
         inactive = self.vae_encode(
             inactive,
             offload=offload,
@@ -265,6 +283,7 @@ class WanVaceEngine(WanShared):
 
         latents = torch.cat([inactive, reactive], dim=1)
 
+        safe_emit_progress(progress_callback, 0.40, "Encoding reference images (VAE)")
         latent_list = []
         for latent, reference_images_batch in zip(
             latents, reference_images_preprocessed
@@ -321,6 +340,7 @@ class WanVaceEngine(WanShared):
                 mask_ = torch.cat([mask_padding, mask_], dim=1)
             mask_list.append(mask_)
 
+        safe_emit_progress(progress_callback, 0.42, "Preparing conditioning latents/masks")
         conditioning_latents = torch.stack(latent_list, dim=0).to(self.device)
         conditioning_masks = torch.stack(mask_list, dim=0).to(self.device)
 
@@ -335,6 +355,7 @@ class WanVaceEngine(WanShared):
                 self.device, dtype=transformer_dtype
             )
 
+        safe_emit_progress(progress_callback, 0.44, "Initializing latent noise")
         latents = self._get_latents(
             height,
             width,
@@ -352,7 +373,11 @@ class WanVaceEngine(WanShared):
 
         # Reserve a progress span for denoising [0.50, 0.90]
         denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
-        safe_emit_progress(progress_callback, 0.45, "Starting denoise phase")
+        safe_emit_progress(
+            progress_callback,
+            0.45,
+            f"Starting denoise (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
 
         latents = self.denoise(
             timesteps=timesteps,
@@ -387,6 +412,7 @@ class WanVaceEngine(WanShared):
         )
 
         if offload:
+            safe_emit_progress(progress_callback, 0.91, "Offloading transformer")
             self._offload("transformer")
 
         safe_emit_progress(progress_callback, 0.92, "Denoising complete")
@@ -396,6 +422,7 @@ class WanVaceEngine(WanShared):
             return latents
         else:
             latents = latents[:, :, num_reference_images:]
+            safe_emit_progress(progress_callback, 0.94, "Decoding latents to video")
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)

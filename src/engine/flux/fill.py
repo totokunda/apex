@@ -13,7 +13,7 @@ class FluxFillEngine(FluxShared):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.num_channels_latents = (
-            self.transformer.config.in_channels // 4 if self.transformer else 16
+            self.transformer.config.out_channels // 4 if self.transformer else 16
         )
 
     def run(
@@ -48,10 +48,11 @@ class FluxFillEngine(FluxShared):
     ):
 
         safe_emit_progress(progress_callback, 0.0, "Starting fill pipeline")
-        safe_emit_progress(progress_callback, 0.05, "Preparing inputs and RNG")
         if seed is not None:
+            safe_emit_progress(progress_callback, 0.01, "Setting random seed")
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
+        safe_emit_progress(progress_callback, 0.03, "Preparing mask processor")
         mask_processor = VaeImageProcessor(
             vae_scale_factor=self.image_processor.config.vae_scale_factor,
             vae_latent_channels=self.image_processor.config.vae_latent_channels,
@@ -62,7 +63,7 @@ class FluxFillEngine(FluxShared):
 
         use_cfg_guidance = true_cfg_scale > 1.0 and negative_prompt is not None
 
-        safe_emit_progress(progress_callback, 0.10, "Encoding prompts")
+        safe_emit_progress(progress_callback, 0.02, "Encoding prompts")
         (
             pooled_prompt_embeds,
             negative_pooled_prompt_embeds,
@@ -80,16 +81,22 @@ class FluxFillEngine(FluxShared):
             num_images,
             text_encoder_kwargs,
             text_encoder_2_kwargs,
+            progress_callback=make_mapped_progress(progress_callback, 0.02, 0.20),
         )
         
+        safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
+
         if offload:
+            safe_emit_progress(progress_callback, 0.21, "Offloading text encoders")
             self._offload("text_encoder")
             self._offload("text_encoder_2")
+            safe_emit_progress(progress_callback, 0.22, "Text encoders offloaded")
 
         transformer_dtype = self.component_dtypes.get("transformer", None)
 
-        safe_emit_progress(progress_callback, 0.15, "Loading and preprocessing images")
+        safe_emit_progress(progress_callback, 0.24, "Loading input image")
         image = self._load_image(image)
+        safe_emit_progress(progress_callback, 0.26, "Preprocessing input image")
         init_image = self.image_processor.preprocess(image, height=height, width=width)
         init_image = init_image.to(dtype=torch.float32)
 
@@ -102,9 +109,13 @@ class FluxFillEngine(FluxShared):
             else sigmas
         )
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.28, "Loading scheduler")
             self.load_component_by_type("scheduler")
+            safe_emit_progress(progress_callback, 0.29, "Scheduler loaded")
+        safe_emit_progress(progress_callback, 0.30, "Moving scheduler to device")
         self.to_device(self.scheduler)
 
+        safe_emit_progress(progress_callback, 0.32, "Configuring scheduler")
         mu = self.calculate_shift(
             image_seq_len,
             self.scheduler.config.get("base_image_seq_len", 256),
@@ -113,7 +124,7 @@ class FluxFillEngine(FluxShared):
             self.scheduler.config.get("max_shift", 1.15),
         )
 
-        safe_emit_progress(progress_callback, 0.25, "Preparing timesteps")
+        safe_emit_progress(progress_callback, 0.34, "Preparing timesteps")
         timesteps, num_inference_steps = self._get_timesteps(
             self.scheduler,
             num_inference_steps,
@@ -122,11 +133,12 @@ class FluxFillEngine(FluxShared):
             mu=mu,
             strength=strength,
         )
+        safe_emit_progress(progress_callback, 0.36, "Timesteps prepared")
 
         latent_timestep = timesteps[:1].repeat(prompt_embeds.shape[0])
         batch_size = prompt_embeds.shape[0]
 
-        safe_emit_progress(progress_callback, 0.30, "Initializing latents")
+        safe_emit_progress(progress_callback, 0.38, "Initializing latents")
         latents, latent_ids = self._get_latents(
             image=init_image,
             batch_size=batch_size,
@@ -138,15 +150,19 @@ class FluxFillEngine(FluxShared):
             generator=generator,
             timestep=latent_timestep,
         )
+        safe_emit_progress(progress_callback, 0.42, "Initialized latents")
 
         num_warmup_steps = max(
             len(timesteps) - num_inference_steps * self.scheduler.order, 0
         )
 
         if not hasattr(self, "transformer") or not self.transformer:
+            safe_emit_progress(progress_callback, 0.43, "Loading transformer")
             self.load_component_by_type("transformer")
 
+        safe_emit_progress(progress_callback, 0.44, "Moving transformer to device")
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.45, "Transformer ready")
 
         if self.transformer.config.guidance_embeds:
             guidance = torch.full(
@@ -156,11 +172,12 @@ class FluxFillEngine(FluxShared):
         else:
             guidance = None
 
-        safe_emit_progress(progress_callback, 0.35, "Preparing mask and masked image")
+        safe_emit_progress(progress_callback, 0.46, "Loading mask image")
         mask_image = self._load_image(mask_image)
-
+        safe_emit_progress(progress_callback, 0.47, "Preprocessing mask image")
         mask_image = mask_processor.preprocess(mask_image, height=height, width=width)
 
+        safe_emit_progress(progress_callback, 0.48, "Preparing masked image latents")
         masked_image = init_image * (1 - mask_image)
 
         masked_image = masked_image.to(device=self.device, dtype=transformer_dtype)
@@ -189,7 +206,11 @@ class FluxFillEngine(FluxShared):
         self._preview_width = width
         self._preview_offload = offload
 
-        safe_emit_progress(progress_callback, 0.50, "Starting denoise")
+        safe_emit_progress(
+            progress_callback,
+            0.50,
+            f"Starting denoise (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
         latents = self.denoise(
             latents=latents,
             timesteps=timesteps,
@@ -212,13 +233,20 @@ class FluxFillEngine(FluxShared):
             denoise_progress_callback=denoise_progress_callback,
             render_on_step_interval=render_on_step_interval,
         )
+        
+        latents:torch.Tensor = latents
+
+        safe_emit_progress(progress_callback, 0.92, "Denoising complete")
 
         if return_latents:
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
 
+        safe_emit_progress(progress_callback, 0.94, "Unpacking latents")
         latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+        safe_emit_progress(progress_callback, 0.96, "Decoding latents")
         image = self.vae_decode(latents, offload=offload)
+        safe_emit_progress(progress_callback, 0.98, "Postprocessing image")
         image = self._tensor_to_frame(image)
         safe_emit_progress(progress_callback, 1.0, "Completed fill pipeline")
         return image

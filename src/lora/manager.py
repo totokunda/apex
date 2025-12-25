@@ -43,15 +43,6 @@ class LoraItem:
 
 
 
-def has_alpha_scales(model_name: str) -> bool:
-    if model_name == "QwenImageTransformer2DModel":
-        return True
-    if model_name == "ZImageTransformer2DModel":
-        return True
-    return False
-
-
-
 class LoraManager(DownloadMixin):
     def __init__(self, save_dir: str = DEFAULT_LORA_SAVE_PATH) -> None:
         self.save_dir = save_dir
@@ -210,7 +201,8 @@ class LoraManager(DownloadMixin):
             prefix = "diffusion_model"
         elif keys[0].startswith("model.") and keys[-1].startswith("model."):
             prefix = "model"
-            
+        elif keys[0].startswith("unet.") and keys[-1].startswith("unet."):
+            prefix = "unet"
         return prefix
         
     @staticmethod
@@ -331,9 +323,7 @@ class LoraManager(DownloadMixin):
                 # diffusers supports str or dict mapping for multiple files; we load one-by-one if multiple
 
                 for local_path in item.local_paths:
-                    class_name = getattr(model.config, "_class_name", "lora")
-
-
+                    class_name = model.__class__.__name__
                     local_path_state_dict = self.maybe_convert_state_dict(
                         local_path, class_name
                     )
@@ -341,6 +331,7 @@ class LoraManager(DownloadMixin):
                     local_path_state_dict = strip_common_prefix(
                         local_path_state_dict, model.state_dict()
                     )
+                    
 
                     # Normalize keys that include an embedded adapter name, e.g.:
                     # "vace_blocks.0.attn2.to_k.lora_B.default.weight"
@@ -361,8 +352,7 @@ class LoraManager(DownloadMixin):
                     adapter_name = self._clean_adapter_name(adapter_name)
                     # convert to dtype of the model
                     model_dtype = next(model.parameters()).dtype
-                    local_path_state_dict = {k: v.to(model_dtype) for k, v in local_path_state_dict.items()}
-                    
+    
                     metadata = self._build_lora_config_metadata_from_state_dict(local_path_state_dict)
                     if metadata is not None and prefix is not None:
                         # diffusers filters metadata keys by prefix and strips it, so prefix these keys to keep them.
@@ -395,10 +385,11 @@ class LoraManager(DownloadMixin):
     def maybe_convert_state_dict(self, local_path: str, model_name: str):
         state_dict = self.load_file(local_path)
         converter = get_transformer_converter_by_model_name(model_name)
-        if converter is not None:
-            converter.convert(state_dict)
         lora_converter = LoraConverter()
         lora_converter.convert(state_dict)
+        
+        if converter is not None:
+            converter.convert(state_dict)
         return state_dict
 
     def _format_to_extension(self, format: str) -> str:

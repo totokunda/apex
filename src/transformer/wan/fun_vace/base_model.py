@@ -23,6 +23,8 @@ from torch import nn
 
 from src.attention import attention_register
 
+logger = logging.get_logger(__name__)
+
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim):
@@ -953,6 +955,7 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, Pef
         # if self.model_type == 'i2v':
         #     assert clip_fea is not None and y is not None
         # params
+        
         x = list(hidden_states.unbind(dim=0))
         t = timestep
         device = self.patch_embedding.weight.device
@@ -1182,6 +1185,8 @@ class WanTransformer3DModel(ModelMixin, ConfigMixin, FromOriginalModelMixin, Pef
             self.teacache.cnt += 1
             if self.teacache.cnt == self.teacache.num_steps:
                 self.teacache.reset()
+                
+        
         return x
 
 

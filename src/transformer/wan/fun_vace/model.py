@@ -12,6 +12,13 @@ from diffusers.configuration_utils import register_to_config
 from diffusers.utils import is_torch_version
 from .base_model import (WanAttentionBlock, WanTransformer3DModel,
                                 sinusoidal_embedding_1d, cfg_skip)
+from diffusers.utils import (
+    USE_PEFT_BACKEND,
+    logging,
+    scale_lora_layers,
+    unscale_lora_layers,
+)
+logger = logging.get_logger(__name__)
 
 VIDEOX_OFFLOAD_VACE_LATENTS = os.environ.get("VIDEOX_OFFLOAD_VACE_LATENTS", True)
 
@@ -209,6 +216,24 @@ class FunVACETransformer3DModel(WanTransformer3DModel):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        
+        if attention_kwargs is not None:
+            attention_kwargs = attention_kwargs.copy()
+            lora_scale = attention_kwargs.pop("scale", 1.0)
+        else:
+            lora_scale = 1.0
+
+        if USE_PEFT_BACKEND:
+            # weight the lora layers by setting `lora_scale` for each PEFT layer
+            scale_lora_layers(self, lora_scale)
+        else:
+            if (
+                attention_kwargs is not None
+                and attention_kwargs.get("scale", None) is not None
+            ):
+                logger.warning(
+                    "Passing `scale` via `attention_kwargs` when not using the PEFT backend is ineffective."
+                )
         x = hidden_states
         t = timestep
         # if self.model_type == 'i2v':
@@ -377,4 +402,8 @@ class FunVACETransformer3DModel(WanTransformer3DModel):
             self.teacache.cnt += 1
             if self.teacache.cnt == self.teacache.num_steps:
                 self.teacache.reset()
+                
+        if USE_PEFT_BACKEND:
+            # remove `lora_scale` from each PEFT layer
+            unscale_lora_layers(self, lora_scale)
         return (x,)

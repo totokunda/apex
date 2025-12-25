@@ -34,8 +34,8 @@ class DreamOmni2Engine(FluxShared):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.num_channels_latents = (
-            self.transformer.config.in_channels // 4 if self.transformer else 16
+        self.num_channels_latents = (   
+            self.transformer.config.out_channels // 4 if self.transformer else 16
         )
 
     def run(

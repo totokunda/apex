@@ -435,6 +435,8 @@ class WanFunVACEEngine(WanShared):
         safe_emit_progress(progress_callback, 0.0, "Starting FunVACE pipeline")
         safe_emit_progress(progress_callback, 0.02, "Preparing inputs")
         video_length = self._parse_num_frames(duration, fps)
+        height = height // 16 * 16
+        width = width // 16 * 16
         sample_size = [height, width]
         if subject_ref_images is not None:
             safe_emit_progress(progress_callback, 0.03, "Loading subject reference images")
@@ -460,6 +462,7 @@ class WanFunVACEEngine(WanShared):
         
         if high_noise_guidance_scale is not None and low_noise_guidance_scale is not None:
             guidance_scale = [high_noise_guidance_scale, low_noise_guidance_scale]
+            safe_emit_progress(progress_callback, 0.01, "Using high/low-noise guidance scales")
 
         self._guidance_scale = guidance_scale
         self._attention_kwargs = attention_kwargs
@@ -612,7 +615,11 @@ class WanFunVACEEngine(WanShared):
         target_shape = (self.num_channels_latents, vace_latents[0].size(1), vace_latents[0].size(2), vace_latents[0].size(3))
 
         seq_len = math.ceil((target_shape[2] * target_shape[3]) / (transformer_config["patch_size"][1] * transformer_config["patch_size"][2]) * target_shape[1]) 
-        safe_emit_progress(progress_callback, 0.45, "Starting denoise")
+        safe_emit_progress(
+            progress_callback,
+            0.45,
+            f"Starting denoise (CFG: {'on' if do_classifier_free_guidance else 'off'})",
+        )
         # 7. Denoising loop
         transformer_dtype = self.component_dtypes["transformer"]
         latents = self.denoise(
@@ -651,6 +658,7 @@ class WanFunVACEEngine(WanShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return latents
         else:
+            safe_emit_progress(progress_callback, 0.94, "Decoding latents to video")
             video = self.vae_decode(latents, offload=offload)
             safe_emit_progress(progress_callback, 0.96, "Decoded latents to video")
             postprocessed_video = self._tensor_to_frames(video)

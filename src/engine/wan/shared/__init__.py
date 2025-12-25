@@ -278,7 +278,8 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     latent_model_input = latents.to(transformer_dtype)
 
                 timestep = t.expand(latents.shape[0])
-
+                
+ 
                 if boundary_timestep is not None and t >= boundary_timestep:
                     if getattr(self, "low_noise_transformer", None): 
                         self.logger.info("Offloading low noise transformer")
@@ -348,6 +349,7 @@ class WanShared(BaseEngine, WanMLXDenoise):
                     **kwargs.get("transformer_kwargs", {}),
                 )[0]
                 
+    
                 if use_cfg_guidance and kwargs.get(
                     "unconditional_transformer_kwargs", None
                 ):

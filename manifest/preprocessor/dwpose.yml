@@ -26,13 +26,13 @@ parameters:
   display_name: Include Body
   name: include_body
   type: bool
-- default: false
+- default: true
   description: When enabled, detects and displays detailed hand keypoints for finger
     and palm positions. Useful for capturing hand gestures and fine hand movements.
   display_name: Include Hands
   name: include_hand
   type: bool
-- default: false
+- default: true
   description: When enabled, detects and displays facial keypoints including eyes,
     nose, mouth, and facial landmarks. Useful for capturing facial expressions and
     head orientation.

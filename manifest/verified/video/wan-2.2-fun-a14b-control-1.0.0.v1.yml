@@ -284,7 +284,9 @@ spec:
       layout:
         flow: column
         rows:
-        - - reference_image
+        - - ref_image
+        - - start_image
+        - - end_image
     - name: input_videos
       label: Input Videos
       collapsible: true
@@ -293,6 +295,8 @@ spec:
         flow: column
         rows:
         - - control_video
+        - - video
+        - - mask_video
     - name: prompting
       label: Prompting
       collapsible: true
@@ -309,24 +313,6 @@ spec:
         flow: column
         rows:
         - - negative_prompt
-    - name: extra_input_images
-      label: Extra Inputs
-      collapsible: true
-      default_open: false
-      layout:
-        flow: column
-        rows:
-        - - subject_reference_images
-        - - start_image
-    - name: masking_inputs
-      label: Mask Inputs
-      collapsible: true
-      default_open: false
-      layout:
-        flow: column
-        rows:
-        - - video
-        - - mask
     - name: size
       label: Size
       collapsible: true
@@ -351,7 +337,7 @@ spec:
         - - seed
         - - boundary_ratio
     inputs:
-    - id: reference_image
+    - id: ref_image
       label: Reference Image
       description: The reference image to use for the generation.
       type: image
@@ -364,7 +350,16 @@ spec:
       label: Start Image
       description: The start image to use for the generation.
       type: image
-      panel: extra_input_images
+      panel: input_images
+      required: false
+      map_h: height
+      map_w: width
+      scale_by: resolution
+    - id: end_image
+      label: End Image
+      description: The end image to use for the generation.
+      type: image
+      panel: input_images
       required: false
       map_h: height
       map_w: width
@@ -376,24 +371,17 @@ spec:
       panel: input_videos
       required: true
     - id: video
-      label: Video
-      description: The control video to use for the generation.
+      label: Inpainting Video
+      description: The inpainting video to use for the generation.
       type: video
-      panel: masking_inputs
+      panel: input_videos
       required: false
-    - id: mask
-      label: Mask
+    - id: mask_video
+      label: Mask Video
       description: The masked video to use for the generation.
-      type: image
-      panel: masking_inputs
+      type: video
+      panel: input_videos
       required: false
-    - id: subject_reference_images
-      label: Subject Reference Images
-      description: The subject reference images to use for the generation.
-      type: image_list
-      panel: extra_input_images
-      required: false
-      max_images: 3
     - id: prompt
       label: Prompt
       description: Describe the video you want to generate.

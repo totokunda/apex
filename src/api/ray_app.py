@@ -27,6 +27,7 @@ def _init_ray() -> None:
             dashboard_host="0.0.0.0",
             dashboard_port=settings.ray_dashboard_port,
             include_dashboard=True,
+            _metrics_export_port=0,  # Disable metrics agent
             _system_config={
                 "automatic_object_spilling_enabled": True,
                 "object_spilling_config": json.dumps(
@@ -50,6 +51,7 @@ def _init_ray() -> None:
                 ignore_reinit_error=True,
                 num_cpus=os.cpu_count(),
                 include_dashboard=False,
+                _metrics_export_port=0,  # Disable metrics agent
                 _system_config={
                     "automatic_object_spilling_enabled": True,
                     "object_spilling_config": json.dumps(

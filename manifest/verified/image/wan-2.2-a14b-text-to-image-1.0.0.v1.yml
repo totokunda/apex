@@ -24,17 +24,17 @@ spec:
   attention_types:
   - sdpa
   loras:
-  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/high_noise_model.safetensors
-    scale: 0.0
-    name: Wan Lightning High Noise
-    label: Wan Lightning High Noise
+  - source: lightx2v/Wan2.2-Distill-Loras/wan2.2_t2v_A14b_high_noise_lora_rank64_lightx2v_4step_1217.safetensors
+    scale: 1.0
     verified: true
+    name: high_noise_lightning_lora
+    label: High Noise Lightning LoRA
     component: high_noise_transformer
-  - source: lightx2v/Wan2.2-Lightning/Wan2.2-T2V-A14B-4steps-lora-250928/low_noise_model.safetensors
-    scale: 0.0
-    name: Wan Lightning Low Noise
-    label: Wan Lightning Low Noise
+  - source: lightx2v/Wan2.2-Distill-Loras/wan2.2_t2v_A14b_low_noise_lora_rank64_lightx2v_4step_1217.safetensors
+    scale: 1.0
     verified: true
+    name: low_noise_lightning_lora
+    label: Low Noise Lightning LoRA
     component: low_noise_transformer
   components:
   - type: scheduler
@@ -81,51 +81,56 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q2_K.gguf
+    - path: Kijai/WanVideo_comfy_fp8_scaled/T2V/Wan2_2-T2V-A14B_HIGH_fp8_e4m3fn_scaled_KJ.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
+      file_size: 15001361458
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q8_0.gguf
+      variant: GGUF_Q8_0
+      precision: q8_0
+      type: gguf
+      file_size: 15406608896
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      file_size: 12003652096
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf
+      variant: GGUF_Q5_K_M
+      precision: q5_k_m
+      type: gguf
+      file_size: 10792055296
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_S.gguf
+      variant: GGUF_Q5_K_S
+      precision: q5_k_s
+      type: gguf
+      file_size: 10137514496
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_M.gguf
+      variant: GGUF_Q4_K_M
+      precision: q4_k_m
+      type: gguf
+      file_size: 9651728896
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      file_size: 8748151296
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q3_K_M.gguf
+      variant: GGUF_Q3_K_M
+      precision: q3_k_m
+      type: gguf
+      file_size: 7176106496
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q3_K_S.gguf
+      variant: GGUF_Q3_K_S
+      precision: q3_k_s
+      type: gguf
+      file_size: 6514024096
+    - path: QuantStack/Wan2.2-I2V-A14B-GGUF/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q2_K.gguf
       variant: GGUF_Q2_K
       precision: q2_k
       type: gguf
       file_size: 5299319296
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q3_K_S.gguf
-      variant: GGUF_Q3_K_S
-      precision: q3_k_s
-      type: gguf
-      file_size: 6513373696
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q3_K_M.gguf
-      variant: GGUF_Q3_K_M
-      precision: q3_k_m
-      type: gguf
-      file_size: 7174468096
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf
-      variant: GGUF_Q4_K_S
-      precision: q4_k_s
-      type: gguf
-      file_size: 8746512896
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q4_K_M.gguf
-      variant: GGUF_Q4_K_M
-      precision: q4_k_m
-      type: gguf
-      file_size: 9650090496
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q5_K_S.gguf
-      variant: GGUF_Q5_K_S
-      precision: q5_k_s
-      type: gguf
-      file_size: 10135876096
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q5_K_M.gguf
-      variant: GGUF_Q5_K_M
-      precision: q5_k_m
-      type: gguf
-      file_size: 10790416896
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      file_size: 12002013696
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/HighNoise/Wan2.2-T2V-A14B-HighNoise-Q8_0.gguf
-      variant: GGUF_Q8_0
-      precision: q8_0
-      type: gguf
-      file_size: 15404970496
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer/config.json
   - type: transformer
     label: Low Noise Transformer
@@ -136,51 +141,56 @@ spec:
       variant: default
       precision: fp16
       type: safetensors
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q2_K.gguf
-      variant: GGUF_Q2_K
-      precision: q2_k
-      type: gguf
-      file_size: 5299319296
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf
-      variant: GGUF_Q3_K_S
-      precision: q3_k_s
-      type: gguf
-      file_size: 6513373696
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf
-      variant: GGUF_Q3_K_M
-      precision: q3_k_m
-      type: gguf
-      file_size: 7174468096
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf
-      variant: GGUF_Q4_K_S
-      precision: q4_k_s
-      type: gguf
-      file_size: 8746512896
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf
-      variant: GGUF_Q4_K_M
-      precision: q4_k_m
-      type: gguf
-      file_size: 9650090496
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_S.gguf
-      variant: GGUF_Q5_K_S
-      precision: q5_k_s
-      type: gguf
-      file_size: 10135876096
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_M.gguf
-      variant: GGUF_Q5_K_M
-      precision: q5_k_m
-      type: gguf
-      file_size: 10790416896
-    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q6_K.gguf
-      variant: GGUF_Q6_K
-      precision: q6_k
-      type: gguf
-      file_size: 12002013696
+    - path: Kijai/WanVideo_comfy_fp8_scaled/T2V/Wan2_2-T2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors
+      variant: FP8
+      precision: fp8
+      type: safetensors
+      file_size: 15001361458
     - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q8_0.gguf
       variant: GGUF_Q8_0
       precision: q8_0
       type: gguf
       file_size: 15404970496
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q6_K.gguf
+      variant: GGUF_Q6_K
+      precision: q6_k
+      type: gguf
+      file_size: 12002013696
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_M.gguf
+      variant: GGUF_Q5_K_M
+      precision: q5_k_m
+      type: gguf
+      file_size: 10790416896
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q5_K_S.gguf
+      variant: GGUF_Q5_K_S
+      precision: q5_k_s
+      type: gguf
+      file_size: 10135876096
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_M.gguf
+      variant: GGUF_Q4_K_M
+      precision: q4_k_m
+      type: gguf
+      file_size: 9650090496
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf
+      variant: GGUF_Q4_K_S
+      precision: q4_k_s
+      type: gguf
+      file_size: 8746512896
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_M.gguf
+      variant: GGUF_Q3_K_M
+      precision: q3_k_m
+      type: gguf
+      file_size: 7174468096
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q3_K_S.gguf
+      variant: GGUF_Q3_K_S
+      precision: q3_k_s
+      type: gguf
+      file_size: 6513373696
+    - path: QuantStack/Wan2.2-T2V-A14B-GGUF/LowNoise/Wan2.2-T2V-A14B-LowNoise-Q2_K.gguf
+      variant: GGUF_Q2_K
+      precision: q2_k
+      type: gguf
+      file_size: 5299319296
     config_path: Wan-AI/Wan2.2-T2V-A14B-Diffusers/transformer_2/config.json
   defaults:
     run:
