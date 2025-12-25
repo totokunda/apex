@@ -32,13 +32,13 @@
                 "type": "safetensors"
             },
             "image_processor": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_processor",
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_processor",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "image_encoder": {
-                "path": "/home/tosin_coverquick_co/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_encoder",
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-Animate-14B-Diffusers/image_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
