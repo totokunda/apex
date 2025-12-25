@@ -13,7 +13,7 @@ metadata:
   - 14b
   author: ByteDance
   license: Apache-2.0
-  demo_path: https://preview.redd.it/wan-2-2-text-to-image-workflow-v0-gahw42yqkrgf1.png?width=640&crop=smart&auto=webp&s=6fec70fe08d915484f216a6c38520c22b2dc1db7
+  demo_path: models/wan-lynx-14b-lite.mp4
   categories:
   - reference-image-to-video
 spec:

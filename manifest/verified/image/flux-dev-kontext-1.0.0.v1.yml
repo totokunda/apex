@@ -13,7 +13,7 @@ metadata:
   - dev
   author: Black Forest Labs
   license: Apache-2.0
-  demo_path: models/flux-dev-kontext.png
+  demo_path: models/flux-kontext.png
   categories:
   - image-edit
 spec:

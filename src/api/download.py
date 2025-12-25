@@ -17,6 +17,8 @@ from .ray_tasks import download_unified
 from src.utils.defaults import get_components_path, get_lora_path, get_preprocessor_path
 from src.mixins.download_mixin import DownloadMixin
 from .preprocessor_registry import check_preprocessor_downloaded
+from .ray_resources import get_ray_resources
+from .ray_resources import get_best_gpu
 
 
 router = APIRouter(prefix="/download", tags=["download"])
@@ -237,8 +239,17 @@ def start_unified_download(request: UnifiedDownloadRequest):
             ray.get(bridge.clear_updates.remote(job_id))
         except Exception:
             pass
+        
+        
+        
+        
+        if request.item_type == "lora":
+            device_index, device_type = get_best_gpu()
+            resources = get_ray_resources(device_index, device_type, load_profile="light")
+        else:
+            resources = {}
 
-        ref = download_unified.remote(
+        ref = download_unified.options(**resources).remote(
             request.item_type,
             request.source,
             job_id,

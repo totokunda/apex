@@ -13,7 +13,7 @@ metadata:
   - '2.2'
   author: Wan-AI
   license: Apache-2.0
-  demo_path: https://preview.redd.it/wan-2-2-text2image-custom-workflow-v0-064bbacggggf1.png?width=640&crop=smart&auto=webp&s=6d76d4db328afa16d96720282d9f11fe926b95f2
+  demo_path: models/wan-2.2-i2v-14b.mp4
   categories:
   - image-to-video
 spec:
