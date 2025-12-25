@@ -1,6 +1,5 @@
 <h1 align="center">Apex Studio</h1>
 
-<hr />
 
 <p align="center">
   Content creation made easy with a video editor built around open-source models.
@@ -14,14 +13,12 @@
 
 ## Documentation
 
-<hr />
 
 ### [Docuementation links](#)
-### [Basics](#basics)
+### [Basics](#Basics)
 
 ## Getting Started
 
-<hr />
 
 ### Optional: Rust-accelerated downloader (for max download throughput)
 
@@ -58,7 +55,6 @@ Rust parallel range-download tuning (hf_transfer-style, signature unchanged; all
 
 ## Features
 
-<hr />
 
 - Video editor built with JavaScript and Electron for easy video creation, and timeline based editing.
 - Easy preprocessing by dragging your desired preprocessor model onto a media clip.
@@ -112,7 +108,6 @@ Rust parallel range-download tuning (hf_transfer-style, signature unchanged; all
 
 ## Basics
 
-<hr />
 ### Intro to D&Ding
 
 Apex is built on a simple principle: **drag and drop is how you create**. Whether you're working with media clips, audio tracks, text, effects, or models, the timeline is your canvas. Simply drag any element onto your project and get started. No complex menus, no steep learning curve, just intuitive, visual creation.
@@ -155,7 +150,6 @@ Export your entire project when finished, or right click on any media clip (adde
 
 ## Terminal Startup
 
-<hr />
 
 
 
