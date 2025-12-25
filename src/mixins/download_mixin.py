@@ -953,7 +953,7 @@ class DownloadMixin:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             from threading import Lock
             from huggingface_hub.utils import build_hf_headers
-            from huggingface_hub import HfFolder, HfApi, hf_hub_url
+            from huggingface_hub import HfApi, hf_hub_url, get_token
 
             if hasattr(self, "logger"):
                 self.logger.info(f"Downloading from Hugging Face Hub: {repo_id}")
@@ -986,7 +986,7 @@ class DownloadMixin:
                     resolve_url = hf_hub_url(
                         repo_id=base_repo, filename=file_name, subfolder=subfolder
                     )
-                    token = HfFolder.get_token()
+                    token = get_token()
                     headers = build_hf_headers(token=token)
                     with requests.Session() as sess:
                         sess.headers.update(headers)
@@ -1191,7 +1191,7 @@ class DownloadMixin:
                     files_to_resolve = all_files
 
             # Prepare session and headers
-            token = HfFolder.get_token()
+            token = get_token()
             headers = build_hf_headers(token=token)
             session = requests.Session()
             session.headers.update(headers)

@@ -130,6 +130,50 @@ def _get_env_bool(name: str, default: bool) -> bool:
         return default
     return str(val).strip().lower() == "true"
 
+def _refresh_hf_token_runtime(token: Optional[str]) -> None:
+    """
+    Ensure Hugging Face token updates take effect immediately in a long-running process.
+
+    Why: Some code paths/libraries read tokens from token files (HfFolder) or cache get_token().
+    We update env, clear any caches we can find, and (best-effort) sync the token file too.
+    """
+    try:
+        # Optional dependency; only present if huggingface_hub is installed.
+        import huggingface_hub  # noqa: F401
+
+        # Clear any lru_cache on get_token (varies by huggingface_hub version).
+        try:
+            from huggingface_hub import get_token as hf_get_token
+
+            if hasattr(hf_get_token, "cache_clear"):
+                hf_get_token.cache_clear()
+        except Exception:
+            pass
+
+        try:
+            from huggingface_hub.utils import _auth as hf_auth
+
+            if hasattr(hf_auth, "get_token") and hasattr(hf_auth.get_token, "cache_clear"):
+                hf_auth.get_token.cache_clear()
+        except Exception:
+            pass
+
+        # Keep legacy HfFolder readers in sync (best-effort; may write to HF_HOME).
+        try:
+            from huggingface_hub import HfFolder
+
+            if token is None:
+                if hasattr(HfFolder, "delete_token"):
+                    HfFolder.delete_token()
+            else:
+                if hasattr(HfFolder, "save_token"):
+                    HfFolder.save_token(token)
+        except Exception:
+            pass
+    except Exception:
+        # If huggingface_hub isn't installed (or any unexpected error), do nothing.
+        pass
+
 
 @router.get("/home-dir", response_model=HomeDirectoryResponse)
 def get_home_directory():
@@ -384,6 +428,7 @@ def set_huggingface_token(request: HuggingFaceTokenRequest):
         if not token:
             raise HTTPException(status_code=400, detail="Token cannot be empty")
         os.environ["HUGGING_FACE_HUB_TOKEN"] = token
+        _refresh_hf_token_runtime(token)
         _update_persisted_config(hf_token=token)
         masked = (token[:4] + "..." + token[-4:]) if len(token) > 8 else "***"
         return HuggingFaceTokenResponse(is_set=True, masked_token=masked)

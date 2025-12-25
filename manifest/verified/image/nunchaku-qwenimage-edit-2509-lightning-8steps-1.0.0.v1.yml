@@ -183,6 +183,7 @@ spec:
       layout:
         flow: column
         rows:
+        - - num_inference_steps
         - - true_cfg_scale
         - - seed
     inputs:
@@ -277,13 +278,21 @@ spec:
       value_type: integer
       panel: sampling
       required: false
+    - id: num_inference_steps
+      label: Number of Inference Steps
+      description: The number of inference steps to use for the generation.
+      type: number
+      value_type: integer
+      panel: sampling
+      required: false
+      default: 8
     - id: true_cfg_scale
       label: True CFG Scale
       type: number+slider
       value_type: float
       panel: sampling
       required: false
-      default: 4.0
+      default: 1.0
       min: 1.0
       max: 15.0
       step: 0.5

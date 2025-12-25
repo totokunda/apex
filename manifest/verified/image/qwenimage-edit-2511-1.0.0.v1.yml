@@ -6,7 +6,7 @@ metadata:
   name: QwenImage Edit 2511
   version: 1.0.0
   description: QwenImage Edit 2511 is a 20B parameter model for image editing with
-    up to three input images.
+    multiple input images.
   tags:
   - qwenimage
   - edit
@@ -242,7 +242,6 @@ spec:
       type: image_list
       required: true
       min: 1
-      max: 3
     - id: prompt
       label: Prompt
       description: The prompt to edit the image.

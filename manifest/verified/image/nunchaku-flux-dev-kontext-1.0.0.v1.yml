@@ -35,12 +35,7 @@ spec:
     - sm_90
   attention_types:
   - sdpa
-  loras:
-  - source: strangerzonehf/Flux-Kontext-Ultimate-LoRA/Kontext-Top-Down-View.safetensors
-    scale: 1.0
-    name: Top Down
-    label: Top Down
-    verified: false
+  loras: []
   components:
   - type: scheduler
     label: Scheduler
@@ -105,7 +100,7 @@ spec:
   defaults:
     run:
       num_inference_steps: 40
-      guidance_scale: 5.0
+      guidance_scale: 3.5
       return_latents: false
       text_encoder_kwargs:
         clean_text: false
@@ -164,6 +159,7 @@ spec:
         rows:
         - - num_inference_steps
         - - true_cfg_scale
+        - - guidance_scale
         - - seed
     inputs:
     - id: image
@@ -277,5 +273,16 @@ spec:
       required: false
       default: 1.0
       min: 1.0
+      max: 15.0
+      step: 0.5
+    - id: guidance_scale
+      label: Guidance Scale
+      description: Enter a guidance scale for the generation.
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 3.5
+      min: 0.0
       max: 15.0
       step: 0.5
