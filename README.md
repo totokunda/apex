@@ -14,8 +14,8 @@
 ## Documentation
 
 
-### [Documentation links](#)
-### [Basics](#basics)
+### [Docuementation links](#)
+### [Basics](#Basics)
 
 ## Getting Started
 
