@@ -122,6 +122,8 @@ class LoaderMixin(DownloadMixin):
         
         if no_weights:
             load_device = "cpu"
+            
+            
 
         if getter_fn:
             model_class = getter_fn(model_base)
