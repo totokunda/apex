@@ -163,12 +163,99 @@ class LoaderMixin(DownloadMixin):
             converter = NoOpConverter()
             
 
-        if os.path.isdir(model_path):
-            # look for a config.json file
-            config_path = os.path.join(model_path, "config.json")
-            if os.path.exists(config_path):
-                config.update(self._load_json(config_path))
-                
+        if (
+            not requires_conversion
+            and (
+                not config
+                or (
+                    os.path.isdir(model_path)
+                    and os.path.exists(os.path.join(model_path, "config.json"))
+                )
+            )
+        ) and (
+            not component.get("extra_model_paths")
+        ) and not extra_kwargs.get("load_from_config"):
+
+            if (
+                (
+                    hasattr(self, "engine_type")
+                    and self.engine_type == "mlx"
+                    and component.get("type") == "transformer"
+                )
+                and load_dtype is not None
+                and "dtype" not in extra_kwargs
+            ):
+                extra_kwargs["dtype"] = load_dtype
+            elif load_dtype is not None and "torch_dtype" not in extra_kwargs:
+                extra_kwargs["torch_dtype"] = load_dtype
+            self.logger.info(f"Loading {model_class} from {model_path}")
+            context = init_empty_weights() if no_weights else nullcontext()
+
+            with context:
+                # remove all kwargs that are null
+                extra_kwargs = {k: v for k, v in extra_kwargs.items() if v is not None}
+
+                # Filter out any kwargs that `from_pretrained` cannot accept.
+                # If the method accepts **kwargs we keep everything.
+                try:
+                    sig = inspect.signature(model_class.from_pretrained)
+                    params = sig.parameters
+                    accepts_var_kw = any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+                    )
+                    if not accepts_var_kw:
+                        filtered_kwargs = {}
+                        for k, v in extra_kwargs.items():
+                            if k in params:
+                                filtered_kwargs[k] = v
+                            else:
+                                # Drop unsupported kwargs rather than failing hard.
+                                if hasattr(self, "logger"):
+                                    self.logger.debug(
+                                        f"Dropping unsupported kwarg '{k}' for "
+                                        f"{model_class.__name__}.from_pretrained"
+                                    )
+                        extra_kwargs = filtered_kwargs
+                except (TypeError, ValueError):
+                    # If inspection fails for any reason, fall back to passing all kwargs.
+                    pass
+
+                model = model_class.from_pretrained(model_path, **extra_kwargs)
+
+            if mm_config is not None and not no_weights and component.get("type") != "transformer":
+                apply_group_offloading = getattr(self, "_apply_group_offloading", None)
+                if callable(apply_group_offloading):
+                    label = (
+                        component.get("name")
+                        or component.get("type")
+                        or type(model).__name__
+                    )
+                    offloading_module = component.get("offloading_module", None)
+                    if offloading_module:
+                        model_to_offload = model.get_submodule(offloading_module)
+                    else:
+                        model_to_offload = model
+                    try:
+                        apply_group_offloading(
+                            model_to_offload, mm_config, module_label=label
+                        )
+                    except Exception as e:
+                        if hasattr(self, "logger"):
+                            self.logger.warning(
+                                f"Failed to enable group offloading for '{label}': {e}"
+                            )
+
+            # Optionally compile the fully initialized module according to config.
+            if not no_weights:
+                maybe_compile = getattr(self, "_maybe_compile_module", None)
+                if callable(maybe_compile):
+                    model = maybe_compile(model, component)
+
+            return model
+
+        self.logger.info(
+            f"Loading {model_class} from {model_path} with extra kwargs: {extra_kwargs} {no_weights}"
+        )
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects

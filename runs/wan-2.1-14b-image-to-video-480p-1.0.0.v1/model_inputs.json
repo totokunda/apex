@@ -1,7 +1,7 @@
 {
     "engine_kwargs": {
         "engine_type": "wan",
-        "yaml_path": "/home/divineade/apex/manifest/engine/wan/wan-2.1-14b-image-to-video-480p-1.0.0.v1.yml",
+        "yaml_path": "/home/divineade/apex/manifest/verified/video/wan-2.1-14b-image-to-video-480p-1.0.0.v1.yml",
         "model_type": "i2v",
         "selected_components": {
             "scheduler": {
@@ -18,17 +18,23 @@
                 "precision": "fp16",
                 "type": "safetensors"
             },
-            "wan/text_encoder": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/text_encoder",
+            "wan/vae_2.2": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/vae",
+                "variant": "default",
+                "precision": "fp16",
+                "type": "safetensors"
+            },
+            "text_encoder": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.2-I2V-A14B-Diffusers/text_encoder",
                 "variant": "default",
                 "precision": "fp16",
                 "type": "safetensors"
             },
             "transformer": {
-                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/d1a92cd17281e39a9901bb7f8edf647cd5a2173d9927b1ca1145aac3e30f0677_wan2.1-i2v-14b-480p-Q5_K_S.gguf",
-                "variant": "GGUF_Q5_K_S",
-                "precision": "q5_k_s",
-                "type": "gguf"
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/f19a294e53b8c9ef47bc00e856e9693a56f65c42c7d59f92b2ce8435582cf35e_Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+                "variant": "FP8",
+                "precision": "fp8",
+                "type": "safetensors"
             },
             "clip": {
                 "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/Wan-AI_Wan2.1-I2V-14B-480P-Diffusers/image_encoder",
@@ -40,14 +46,14 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "image": "/home/divineade/apex/runs/wan-2.1-14b-image-to-video-480p-1.0.0.v1/assets/2461ea0b-6177-498f-9595-c93d0d6792c3-cbcaccf5-7b32-4759-9ebe-01bcad29b3fd_image_0_3.png",
-        "prompt": "A dog laughing and smiling",
+        "image": "assets/e7391aa9-68bc-40e3-a633-238f7e7b0394-dd877889-c75d-4282-87fd-33f8121b0d33_image_0_1.png",
+        "prompt": "turn the dog into a cat ",
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "aspect_ratio": "16:9",
         "num_inference_steps": 30,
         "height": 1024,
         "width": 1776,
-        "seed": 3549968939,
+        "seed": 3525153297,
         "guidance_scale": 5,
         "duration": "5s"
     }

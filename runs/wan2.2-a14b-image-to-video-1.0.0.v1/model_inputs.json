@@ -1,7 +1,7 @@
 {
     "engine_kwargs": {
         "engine_type": "wan",
-        "yaml_path": "/home/tosin_coverquick_co/apex/manifest/verified/video/wan2.2-a14b-image-to-video-1.0.0.v1.yml",
+        "yaml_path": "/home/divineade/apex/manifest/verified/video/wan2.2-a14b-image-to-video-1.0.0.v1.yml",
         "model_type": "i2v",
         "selected_components": {
             "scheduler": {
@@ -24,11 +24,13 @@
                 "type": "safetensors"
             },
             "high_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/7e3016751a297b8e021412f0f69f3b98d2deff26fb87d85e80a300e7b460bc67_Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors",
                 "variant": "FP8",
                 "precision": "fp8",
                 "type": "safetensors"
             },
             "low_noise_transformer": {
+                "path": "/home/ext_diviade_gmail_com/apex-diffusion/components/fcd686426da34817568ed645bcd1d575b2f437e8dcc8060a85d28ce6c4faeca2_Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors",
                 "variant": "FP8",
                 "precision": "fp8",
                 "type": "safetensors"
@@ -43,7 +45,7 @@
         "negative_prompt": "lowres, text, error, cropped, worst quality, low quality, jpeg artifacts, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, deformed, blurry, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, watermark, signature",
         "resolution": "custom",
         "aspect_ratio": "custom",
-        "num_inference_steps": 4,
+        "num_inference_steps": 50,
         "height": 720,
         "width": 1320,
         "seed": 2345954682,
