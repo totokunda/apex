@@ -12,7 +12,7 @@ metadata:
   - fill
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://fluxai.pro/_next/image?url=https%3A%2F%2Fs.detools.dev%2Fassets%2Flogo-for-flux-fill-followed-by-11-on-the-vpyc90shm.jpeg&w=3840&q=75
+  demo_path: models/flux-dev-fill.png
   categories:
   - inpaint
 spec:

@@ -14,7 +14,7 @@ metadata:
   - '2511'
   author: Qwen
   license: Apache-2.0
-  demo_path: models/qwenimage-edit-2509.png
+  demo_path: models/qwen-image-edit-2511.png
   categories:
   - image-edit
 spec:

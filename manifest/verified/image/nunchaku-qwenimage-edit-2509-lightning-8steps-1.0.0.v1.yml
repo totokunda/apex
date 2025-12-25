@@ -19,7 +19,7 @@ metadata:
   - 8steps
   author: Nunchaku Tech
   license: Apache-2.0
-  demo_path: models/nunchaku-qwenimage-edit-2509.png
+  demo_path: models/nunchaku-qwenimage-lightning-8steps.png
   categories:
   - image-edit
 spec:

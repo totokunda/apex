@@ -12,7 +12,7 @@ metadata:
   - t2i
   author: Black Forest Labs
   license: Apache-2.0
-  demo_path: models/flux-krea.png
+  demo_path: models/nunchaku-flux-krea.png
   categories:
   - text-to-image
 spec:

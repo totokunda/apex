@@ -18,7 +18,7 @@ metadata:
   - int4
   author: Nunchaku Tech
   license: Apache-2.0
-  demo_path: models/nunchaku-flux-dev-kontext.png
+  demo_path: models/nunchaku-flux-kontext-dev.png
   categories:
   - image-edit
 spec:

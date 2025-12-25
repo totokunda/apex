@@ -12,7 +12,7 @@ metadata:
   - t2i
   author: LodestoneRock
   license: Apache-2.0
-  demo_path: models/chroma-hd.png
+  demo_path: models/chroma-1-hd.png
   categories:
   - text-to-image
 spec:

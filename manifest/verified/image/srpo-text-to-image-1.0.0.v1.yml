@@ -12,7 +12,7 @@ metadata:
   - t2i
   author: Tencent
   license: Apache-2.0
-  demo_path: models/srpo.png
+  demo_path: models/flux-srpo.png
   categories:
   - text-to-image
 spec:

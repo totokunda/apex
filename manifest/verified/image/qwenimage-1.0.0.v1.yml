@@ -11,7 +11,7 @@ metadata:
   - t2i
   author: Qwen
   license: Apache-2.0
-  demo_path: models/qwenimage.png
+  demo_path: models/qwenimage-text-to-image.png
   categories:
   - text-to-image
 spec:

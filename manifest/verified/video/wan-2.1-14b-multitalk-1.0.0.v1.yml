@@ -13,7 +13,7 @@ metadata:
   - '2.1'
   author: Meigen AI
   license: Apache-2.0
-  demo_path: https://packaged-media.redd.it/lj2vzpt13qbf1/pb/m2-res_720p.mp4?m=DASHPlaylist.mpd&v=1&e=1763694000&s=dea93f505fea01fd79a15be07526942a6a24a37e
+  demo_path: models/multitalk.mp4
   categories:
    - audio-to-video
 spec:

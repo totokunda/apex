@@ -13,7 +13,7 @@ metadata:
   - '2.2'
   author: Apex AI
   license: Apache-2.0
-  demo_path: https://resp.wananimate.art/wananimate/images/Wan-Animate-Generalizable-Arbitrary-Character-Animation-3.webp
+  demo_path: models/wan-animate.mp4
   categories:
   - control
 spec:
