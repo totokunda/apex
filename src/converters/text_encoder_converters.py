@@ -312,3 +312,69 @@ class StepTextEncoderConverter(TransformerConverter):
         self.special_keys_map: Dict[str, Any] = {}
 
 
+class MistralTextEncoderConverter(TransformerConverter):
+    """
+    Converter for Mistral-style text encoder checkpoints.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            # Prefix all keys with `model.` unless they already start with it.
+            # Uses regex because TransformerConverter supports regex-based rename rules.
+            r"^(?!model\.)": "model.",
+        }
+        
+        self.special_keys_map = {
+            "language_model.model" : self._rename_model_inplace,
+            "language_model.lm_head.weight": self._duplicate_lm_head_weight_inplace,
+            "model.vision_tower.token_embd.img_break": self._remove_img_break_token_inplace,
+        }
+    
+    @staticmethod
+    def _rename_model_inplace(key: str, state_dict: Dict[str, Any]):
+        """
+        Rename the `model.` key to `model.language_model.model.`.
+        """
+        if key not in state_dict:
+            return
+        state_dict[key.replace("language_model.model.", "language_model.")] = state_dict.pop(key)
+    
+    @staticmethod
+    def _rename_model_embed_tokens_inplace(key: str, state_dict: Dict[str, Any]):
+        """
+        Rename the `model.embed_tokens.` key to `model.language_model.model.embed_tokens.`.
+        """
+        if key not in state_dict:
+            return
+        state_dict[key.replace("model.embed_tokens.", "model.language_model.embed_tokens.")] = state_dict.pop(key)
+
+    @staticmethod
+    def _rename_model_layers_inplace(key: str, state_dict: Dict[str, Any]):
+        """
+        Rename the `model.layers.` key to `model.language_model.model.layers.`.
+        """
+        if key not in state_dict:
+            return
+        state_dict[key.replace("model.layers.", "model.language_model.layers.")] = state_dict.pop(key)
+        
+
+    @staticmethod
+    def _duplicate_lm_head_weight_inplace(key: str, state_dict: Dict[str, Any]):
+        """
+        Ensure that `lm_head.weight` exists and shares weights with `language_model.lm_head.weight`.
+        """
+        if key not in state_dict:
+            return
+        if "lm_head.weight" not in state_dict:
+            state_dict["lm_head.weight"] = state_dict.pop(key)
+    
+    @staticmethod
+    def _remove_img_break_token_inplace(key: str, state_dict: Dict[str, Any]):
+        """
+        Remove the `model.vision_tower.token_embd.img_break` token from the state dict.
+        """
+        if key not in state_dict:
+            return
+        if "model.vision_tower.token_embd.img_break" in state_dict:
+            state_dict.pop("model.vision_tower.token_embd.img_break")

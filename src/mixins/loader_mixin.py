@@ -27,7 +27,6 @@ import tempfile
 from glob import glob
 from transformers.modeling_utils import PreTrainedModel
 from src.quantize.ggml_layer import patch_model_from_state_dict as patch_model_ggml_from_state_dict
-from transformers import Qwen2_5_VLForConditionalGeneration
 from src.quantize.load import load_gguf
 from src.mixins.download_mixin import DownloadMixin
 from contextlib import nullcontext
@@ -41,6 +40,7 @@ from src.utils.defaults import DEFAULT_CONFIG_SAVE_PATH
 from src.types import InputImage, InputVideo, InputAudio
 import librosa
 import gguf
+import pydash
 ACCEPTABLE_DTYPES = [torch.float16, torch.float32, torch.bfloat16]
 IMAGE_EXTS = [
     "jpg",
@@ -123,8 +123,7 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             load_device = "cpu"
             
-            
-
+    
         if getter_fn:
             model_class = getter_fn(model_base)
         else:
@@ -141,10 +140,10 @@ class LoaderMixin(DownloadMixin):
             
 
         if config_path:
-            config.update(self.fetch_config(config_path))
+            pydash.merge(config, self.fetch_config(config_path))
 
         if component.get("config"):
-            config.update(component.get("config"))
+            pydash.merge(config, component.get("config"))
 
         # Lazy import here as well to avoid circular imports.
         from src.converters.convert import (
@@ -169,8 +168,7 @@ class LoaderMixin(DownloadMixin):
             # look for a config.json file
             config_path = os.path.join(model_path, "config.json")
             if os.path.exists(config_path):
-                config.update(self._load_json(config_path))
-                
+                pydash.merge(config, self._load_json(config_path))
 
         with init_empty_weights():
             # Check the constructor signature to determine what it expects
@@ -214,7 +212,7 @@ class LoaderMixin(DownloadMixin):
             return model
         
 
-  
+
         files_to_load = []
         if os.path.isdir(model_path):
             extensions = component.get(
@@ -237,6 +235,7 @@ class LoaderMixin(DownloadMixin):
             if any(model_path.endswith(ext) for ext in extensions):
                 files_to_load = [model_path]
         extra_model_paths = component.get("extra_model_paths", [])
+        
         if isinstance(extra_model_paths, str):
             extra_model_paths = [extra_model_paths]
         if extra_kwargs.get("load_extra_model_paths", True):
@@ -270,6 +269,7 @@ class LoaderMixin(DownloadMixin):
                     state_dict,
                     default_dequant_dtype=load_dtype,
                 )
+                
                 
                 for key, value in state_dict.items():
                     if load_dtype:
@@ -593,7 +593,7 @@ class LoaderMixin(DownloadMixin):
                         self.logger.debug(f"FP8 final linear check skipped: {e}")
 
             for name, param in model.named_parameters():
-                if param.device.type == "meta" and component.get("type") != "text_encoder":
+                if param.device.type == "meta":
                     # If this is an FP-scaled model and the offending parameter
                     # is a residual `scale_weight` that never got real weights
                     # loaded, we can safely drop it instead of erroring out.

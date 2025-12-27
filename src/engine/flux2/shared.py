@@ -1,6 +1,6 @@
 import torch
 from diffusers.utils.torch_utils import randn_tensor
-from typing import Union, List, Optional, Dict, Any, Callable, Tuple
+from typing import Union, List, Optional, Dict, Any, Callable, Tuple, Literal
 from PIL import Image
 from diffusers.loaders.textual_inversion import TextualInversionLoaderMixin
 from diffusers.image_processor import VaeImageProcessor
@@ -75,7 +75,7 @@ class Flux2Shared(BaseEngine):
         return prompt_embeds, text_ids
 
     def _encode_vae_image(
-        self, image: torch.Tensor, generator: torch.Generator, offload: bool = True
+        self, image: torch.Tensor, generator: torch.Generator, offload: bool = True, offload_type: Literal["cpu", "discard"] = "discard"
     ):
         if image.ndim != 4:
             raise ValueError(f"Expected image dims 4, got {image.ndim}.")
@@ -86,6 +86,7 @@ class Flux2Shared(BaseEngine):
             sample_mode="mode",
             offload=offload,
             normalize_latents=False,
+            offload_type=offload_type,
         )
         image_latents = self._patchify_latents(image_latents)
         if not self.vae:
@@ -231,7 +232,8 @@ class Flux2Shared(BaseEngine):
         # Move to device
         input_ids = inputs["input_ids"].to(device)
         attention_mask = inputs["attention_mask"].to(device)
-
+        
+        self.text_encoder.model.language_model.embed_tokens.to(device)
         # Forward pass through the model
         output = self.text_encoder.model(
             input_ids=input_ids,
@@ -436,10 +438,10 @@ class Flux2Shared(BaseEngine):
         offload: bool = True,
     ):
         image_latents = []
-        for image in images:
+        for idx, image in enumerate(images):
             image = image.to(device=device, dtype=dtype)
             imagge_latent = self._encode_vae_image(
-                image=image, generator=generator, offload=offload
+                image=image, generator=generator, offload=offload, offload_type="cpu" if idx != len(images) - 1 else "discard"
             )
             image_latents.append(imagge_latent)  # (1, 128, 32, 32)
 

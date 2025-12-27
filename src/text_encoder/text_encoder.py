@@ -13,7 +13,6 @@ from src.utils.module import find_class_recursive
 import transformers
 import inspect
 
-
 def nan_hook(module, inputs, outputs):
     if isinstance(outputs, torch.Tensor):
         if not torch.isfinite(outputs).all():
@@ -76,7 +75,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
         self.model_loaded = False
 
     def load_model(
-        self, no_weights: bool = False, override_kwargs: Dict[str, Any] = None
+        self, no_weights: bool = False, override_kwargs: Dict[str, Any] = None, to_device: bool = True
     ):
         input_kwargs = dict(
             component={
@@ -86,6 +85,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
                 "base": self.base,
                 "type": "text_encoder",
                 "gguf_kwargs": self.config.get("gguf_kwargs", {}),
+                "extra_model_paths": self.config.get("extra_model_paths", []),
             },
             load_dtype=self.dtype,
             module_name=self.module_name,
@@ -98,7 +98,7 @@ class TextEncoder(torch.nn.Module, LoaderMixin, CacheMixin, ToMixin):
             input_kwargs.update(override_kwargs)
         model = self._load_model(**input_kwargs)
 
-        if not no_weights:
+        if not no_weights and to_device:
             self.to_device(model, device=self.device)
 
         return model
