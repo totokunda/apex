@@ -71,8 +71,8 @@ fn jitter_ms() -> usize {
 
 fn default_ratelimit_wait() -> Duration {
     // Fallback when a server returns 429 without ratelimit/retry-after headers.
-    // Keep it short, add jitter to avoid thundering herds.
-    Duration::from_millis((1500 + jitter_ms()) as u64)
+    // HuggingFace rate limits often require longer waits; use a more conservative default.
+    Duration::from_millis((5000 + jitter_ms()) as u64)
 }
 
 fn exponential_backoff_ms(base_wait_ms: usize, n: usize, max_wait_ms: usize) -> usize {
@@ -235,8 +235,8 @@ fn download_from_url(
     // - APEX_RUST_DOWNLOAD_PARALLEL_FAILURES (default 0)
     // - APEX_RUST_DOWNLOAD_MAX_RETRIES (default 0)
     let max_files = env_usize("APEX_RUST_DOWNLOAD_MAX_FILES", 8).max(1);
-    let parallel_failures = env_usize("APEX_RUST_DOWNLOAD_PARALLEL_FAILURES", 0);
-    let max_retries = env_usize("APEX_RUST_DOWNLOAD_MAX_RETRIES", 0);
+    let parallel_failures = env_usize("APEX_RUST_DOWNLOAD_PARALLEL_FAILURES", 3);
+    let max_retries = env_usize("APEX_RUST_DOWNLOAD_MAX_RETRIES", 5);
     let base_wait_ms = env_usize("APEX_RUST_DOWNLOAD_RETRY_BASE_MS", 300);
     let max_wait_ms = env_usize("APEX_RUST_DOWNLOAD_RETRY_MAX_MS", 10_000);
     // Effective chunk size for parallel range downloads
@@ -287,8 +287,10 @@ fn download_from_url(
                     .await
                     .map_err(|e| PyRuntimeError::new_err(format!("Error while downloading: {e}")))?;
 
-                if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    // Never fail the overall request due to 429; wait and retry.
+                if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || resp.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                {
+                    // Never fail the overall request due to 429/503; wait and retry.
                     // Prefer standardized ratelimit headers, fall back to Retry-After,
                     // then fall back to a small default backoff.
                     if let Some(info) = parse_ratelimit_headers(resp.headers()) {
@@ -396,8 +398,10 @@ fn download_from_url(
                     .await
                     .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
-                if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    // Never treat 429 as a hard error; report a wait duration.
+                if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || resp.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                {
+                    // Never treat 429/503 as a hard error; report a wait duration.
                     if let Some(info) = parse_ratelimit_headers(resp.headers()) {
                         return Err(DownloadChunkError::RateLimited(Duration::from_secs(
                             info.reset_in_seconds.max(1),

@@ -8,6 +8,9 @@ not fail just because optional deps of `convert.py` aren't installed in the curr
 try:
     from .convert import (
         convert_transformer,
+        get_text_encoder_converter,
+        get_transformer_converter,
+        get_vae_converter,
         get_transformer_keys,
         convert_vae,
         get_vae_keys,
@@ -15,6 +18,7 @@ try:
 
     __all__ = [
         "convert_transformer",
+        "get_text_encoder_converter",
         "get_transformer_keys",
         "convert_vae",
         "get_vae_keys",

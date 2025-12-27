@@ -62,8 +62,56 @@ STEP_SD_MAP = {
     "token_embd": "tok_embeddings.word_embeddings",
 }
 
+MISTRAL_SD_MAP = {
+    # Mistral "language_model.*" HF-style key layout (e.g. Mistral3 / Pixtral-style wrappers)
+    # NOTE: GGUF stores dims reversed; loader already reverses shapes, so we only rename keys here.
+    "blk.": "language_model.layers.",
+    "attn_norm": "input_layernorm",
+    "attn_q": "self_attn.q_proj",
+    "attn_k": "self_attn.k_proj",
+    "attn_v": "self_attn.v_proj",
+    "attn_output": "self_attn.o_proj",
+    "ffn_up": "mlp.up_proj",
+    "ffn_down": "mlp.down_proj",
+    "ffn_gate": "mlp.gate_proj",
+    "ffn_norm": "post_attention_layernorm",
+    "patch_embd": "patch_conv",
 
-def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
+    # Common non-block tensors (kept for completeness / parity with LLAMA_SD_MAP)
+    "token_embd": "language_model.embed_tokens",
+    "output_norm": "language_model.norm",
+    "output.weight": "language_model.lm_head.weight",
+    "mm.1": "multi_modal_projector.linear_1",
+    "mm.2": "multi_modal_projector.linear_2",
+    "mm.input_norm": "multi_modal_projector.norm",
+    "mm.patch_merger": "multi_modal_projector.patch_merger.merging_layer"
+}
+
+MISTRAL_VISION_SD_MAP = {
+    # Pixtral-style vision tower ("v.*" in GGUF)
+    "v.blk.": "vision_tower.transformer.layers.",
+    "v.patch_embd": "vision_tower.patch_conv",
+    "v.pre_ln": "vision_tower.ln_pre",
+    "v.token_embd.img_break": "vision_tower.token_embd.img_break",
+
+    # attention
+    "attn_q": "attention.q_proj",
+    "attn_k": "attention.k_proj",
+    "attn_v": "attention.v_proj",
+    "attn_out": "attention.o_proj",
+
+    # norms (Pixtral HF naming)
+    "ln1": "attention_norm",
+    "ln2": "ffn_norm",
+
+    # feed-forward
+    "ffn_up": "feed_forward.up_proj",
+    "ffn_down": "feed_forward.down_proj",
+    "ffn_gate": "feed_forward.gate_proj",
+}
+
+
+def remap_key(key: str, key_map: Literal["t5", "llama", "step", "mistral"] = "t5"):
 
     if key_map == "t5":
         key_map = T5_SD_MAP
@@ -71,6 +119,10 @@ def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
         key_map = LLAMA_SD_MAP
     elif key_map == "step":
         key_map = STEP_SD_MAP
+    elif key_map == "mistral":
+        # Mistral multimodal GGUF can contain both language and vision keys.
+        # Vision keys are prefixed with "v." and use different HF-style submodule names.
+        key_map = MISTRAL_VISION_SD_MAP if key.startswith("v.") else MISTRAL_SD_MAP
     else:
         raise ValueError(f"Invalid key map: {key_map}")
     for k, v in key_map.items():
@@ -80,7 +132,7 @@ def remap_key(key: str, key_map: Literal["t5", "llama", "step"] = "t5"):
 
 def load_text_encoder_gguf(
     path: str,
-    key_map: Literal["t5", "llama", "step"] = "t5",
+    key_map: Literal["t5", "llama", "step", "mistral"] = "t5",
     dequant_dtype: torch.dtype | str = torch.float16,
     device: str = "cpu",
     **kwargs,

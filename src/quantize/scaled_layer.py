@@ -522,6 +522,8 @@ class FPScaledLinear(FPScaledLayer, nn.Linear):
             torch.ones(1, dtype=torch.float32), requires_grad=False
         )
         
+        
+        
 
     @property
     def effective_dtype(self):

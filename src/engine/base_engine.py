@@ -935,9 +935,11 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         mm_config = self._resolve_memory_config_for_component(component)
         if mm_config is not None:
             original_load_model = text_encoder.load_model
+            import types
+            text_encoder._resolve_memory_config_for_component = types.MethodType(lambda self, x: mm_config, text_encoder)
 
             def _patched_load_model(no_weights: bool = False, *args, **kwargs):
-                model = original_load_model(no_weights=no_weights, *args, **kwargs)
+                model = original_load_model(no_weights=no_weights, to_device=False, *args, **kwargs)
                 text_encoder.model = model
 
                 if no_weights:
@@ -946,7 +948,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 already_enabled = getattr(
                     text_encoder, "_group_offloading_enabled", False
                 )
-
+                
                 if not already_enabled:
                     offloading_module = component.get("offloading_module", None)
                     if offloading_module:
@@ -961,6 +963,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                     setattr(text_encoder, "_group_offloading_enabled", True)
                     
                 self._maybe_compile_module(text_encoder.model, component)
+                self.to_device(text_encoder)
                 return text_encoder.model
 
             text_encoder.load_model = _patched_load_model  # type: ignore
@@ -1593,13 +1596,15 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
 
         # Estimate total model size
         total_size_bytes = self._estimate_component_model_size_bytes(component)
+        
+        
         if total_size_bytes <= 0:
             return None
 
         total_size_gb = float(total_size_bytes) / 1e9
         
 
- 
+        
         # No GPU or model doesn't fit? Need offloading
         needs_offload = False
         if gpu_total_gb is None or gpu_total_gb == 0:
@@ -1683,17 +1688,17 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
             return None
 
         auto_map: Dict[str, MemoryConfig] = {}
-
+        
         for comp in components:
             ctype = comp.get("type")
             if ctype not in {"transformer", "vae", "text_encoder"}:
                 continue
-
+            
             strategy = self._determine_memory_strategy(comp)
+            
             if strategy is not None:
                 key = comp.get("name") or ctype
                 auto_map[key] = strategy
-
 
         return auto_map or None
 
@@ -1820,6 +1825,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
     ) -> Optional[Dict[str, MemoryConfig]]:
         # Start with any explicit mapping provided by the caller.
         normalized: Dict[str, MemoryConfig] = {}
+        
 
         if spec:
 
@@ -1857,8 +1863,8 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                 for key, cfg in auto_map.items():
                     if key not in normalized:
                         normalized[key] = cfg
+            
 
-        
         return normalized if normalized else None
 
     def _resolve_memory_config_for_component(
@@ -2370,7 +2376,7 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
                         ] = downloaded_extra_model_path
 
             new_components_cfg.append(component)
-
+    
         self.config["components"] = new_components_cfg
 
     def _get_latents(

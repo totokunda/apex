@@ -1,23 +1,33 @@
+from dotenv import load_dotenv
+load_dotenv()
+from src.quantize.load import load_gguf
+from src.utils.safetensors import load_safetensors
+import torch
+from transformers import Mistral3ForConditionalGeneration, AutoConfig
+from src.quantize.ggml_layer import patch_model_from_state_dict as patch_model_ggml_from_state_dict
+from src.quantize.scaled_layer import patch_fpscaled_model_from_state_dict
+from src.converters.text_encoder_converters import MistralTextEncoderConverter
+from accelerate import init_empty_weights
+file_path = "/home/tosin_coverquick_co/apex-diffusion/components/31089e6e194a10b16eae3097ecc5c035443bf09a34a5e9ab893f4d48e5a00d71_mistral_3_small_flux2_fp8.safetensors"
+file_path_vision = "/home/tosin_coverquick_co/apex-diffusion/components/c502895883668a329ae0e00ea0d2771a6acf4c1f343cccff9479a47bcfe34baa_mmproj-BF16.gguf"
+state_dict_language_model = load_safetensors(file_path, device="cpu")
+state_dict_vision, _ = load_gguf(file_path_vision, type="text_encoder", key_map="mistral", dequant_dtype=torch.bfloat16, device="cpu")
 
-from src.transformer.wan.base.model import WanTransformer3DModel
-from src.converters.transformer_converters import FluxTransformerConverter
-from src.lora.lora_converter import LoraConverter
-from src.lora.manager import LoraManager
-from safetensors.torch import load_file
-from src.converters.convert import strip_common_prefix
-from src.engine import UniversalEngine
-yaml_path = "/home/tosin_coverquick_co/apex/manifest/verified/video/wan-2.2-a14b-text-to-video-1.0.0.v1.yml"
-engine = UniversalEngine(yaml_path=yaml_path, components_to_load=["transformer"], auto_apply_loras=False, selected_components={
-    "high_noise_transformer": {
-        "variant": "FP8",
-    },
-    "low_noise_transformer": {
-        "variant": "FP8",
-    },
-})
-lora_path = "/home/tosin_coverquick_co/apex-diffusion/loras/439d28b80e5d2fdabbd68e72b1c9cd1f1f792e5f7cf7a68c34b1af16aca2db5f_high_noise_model.safetensors"
+converter = MistralTextEncoderConverter()
 
-weights = load_file(lora_path)
-manager = LoraManager()
+with init_empty_weights():
+    config = AutoConfig.from_pretrained("black-forest-labs/FLUX.2-dev", subfolder="text_encoder")
+    config.text_config.num_hidden_layers = 30
+    model = Mistral3ForConditionalGeneration(config)
 
-manager.load_into(engine.transformer, [lora_path], adapter_names=["high_noise_lightning_lora"])
+converter.convert(state_dict_language_model)
+patch_fpscaled_model_from_state_dict(model, state_dict_language_model)
+model.load_state_dict(state_dict_language_model, assign=True, strict=False)
+
+converter.convert(state_dict_vision)
+patch_model_ggml_from_state_dict(model, state_dict_vision)
+model.load_state_dict(state_dict_vision, assign=True, strict=False)
+
+for key, value in model.state_dict().items():
+    if value.device == torch.device("meta"):
+        print(key, value.shape)

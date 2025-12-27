@@ -143,6 +143,7 @@ class DownloadMixin:
         """
 
         try:
+            import json
 
             def compute_hash(s: str) -> str:
                 try:
@@ -216,6 +217,51 @@ class DownloadMixin:
                             # Count only real files (zero-length may be legitimate, so don't require > 0 here)
                             found_any_file = True or found_any_file
                     return found_any_file
+                except Exception:
+                    return False
+
+            def hf_safetensors_index_is_complete(dir_path: str) -> bool:
+                """If a HF-style safetensors index exists, verify all referenced shard files exist.
+
+                If no index exists, return True (no additional completeness signal).
+                """
+                try:
+                    if not dir_path or not os.path.isdir(dir_path):
+                        return False
+
+                    index_path = os.path.join(dir_path, "model.safetensors.index.json")
+                    if not os.path.isfile(index_path):
+                        return True
+
+                    # Ensure the index file itself looks complete
+                    if not is_complete_file(index_path):
+                        return False
+
+                    try:
+                        with open(index_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception:
+                        return False
+
+                    weight_map = data.get("weight_map")
+                    if not isinstance(weight_map, dict) or not weight_map:
+                        # If an index exists but is malformed/empty, treat as incomplete
+                        return False
+
+                    # Values are shard filenames (possibly with subdirs)
+                    shard_files = set()
+                    for v in weight_map.values():
+                        if isinstance(v, str) and v.strip():
+                            shard_files.add(v.strip())
+                        else:
+                            return False
+
+                    for rel in shard_files:
+                        shard_path = os.path.join(dir_path, rel)
+                        if not is_complete_file(shard_path):
+                            return False
+
+                    return True
                 except Exception:
                     return False
 
@@ -397,12 +443,16 @@ class DownloadMixin:
                     sub_dir = os.path.join(base_dir, *split_path[2:])
                     return (
                         sub_dir
-                        if os.path.isdir(sub_dir) and dir_is_complete(sub_dir)
+                        if os.path.isdir(sub_dir)
+                        and dir_is_complete(sub_dir)
+                        and hf_safetensors_index_is_complete(sub_dir)
                         else None
                     )
                 return (
                     base_dir
-                    if os.path.isdir(base_dir) and dir_is_complete(base_dir)
+                    if os.path.isdir(base_dir)
+                    and dir_is_complete(base_dir)
+                    and hf_safetensors_index_is_complete(base_dir)
                     else None
                 )
 

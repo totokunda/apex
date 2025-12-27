@@ -27,6 +27,7 @@ from src.converters.transformer_converters import (
     NoOpTransformerConverter,
     LoraTransformerConverter,
     HunyuanVideo15TransformerConverter,
+    Flux2TransformerConverter,
 )
 
 from src.converters.utils import (
@@ -40,6 +41,7 @@ from src.converters.text_encoder_converters import (
     LlamaTextEncoderConverter,
     StepTextEncoderConverter,
     Qwen2_5_VLTextEncoderConverter,
+    MistralTextEncoderConverter,
 )
 
 from src.converters.vae_converters import (
@@ -90,6 +92,9 @@ def get_transformer_converter(model_base: str):
         return MagiTransformerConverter()
     elif model_base == "flux.base" or model_base == "flux.nunchaku":
         return FluxTransformerConverter()
+    elif model_base == "flux2.base":
+        return Flux2TransformerConverter()
+        return FluxTransformerConverter()
     else:
         return NoOpTransformerConverter()
 
@@ -121,6 +126,8 @@ def get_transformer_converter_by_model_name(model_name: str):
         return SkyReelsTransformerConverter()
     elif "Magi" in model_name:
         return MagiTransformerConverter()
+    elif "Flux2" in model_name:
+        return Flux2TransformerConverter()
     elif "Flux" in model_name or "Chroma" in model_name:
         return FluxTransformerConverter()
     elif "lora" in model_name:
@@ -149,6 +156,8 @@ def get_text_encoder_converter(text_encoder_type: str):
         return StepTextEncoderConverter()
     elif "qwen2_5_vl" in text_encoder_type:
         return Qwen2_5_VLTextEncoderConverter()
+    elif "mistral" in text_encoder_type:
+        return MistralTextEncoderConverter()
     else:
         return NoOpConverter()
 
