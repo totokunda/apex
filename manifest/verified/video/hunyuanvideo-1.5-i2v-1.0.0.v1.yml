@@ -12,7 +12,7 @@ metadata:
   - i2v
   author: Tencent
   license: Apache-2.0
-  demo_path: models/hunyuan-video-1.5-t2v.mp4
+  demo_path: models/hunyuan-video-15-i2v.mp4
   categories:
   - image-to-video
 spec:

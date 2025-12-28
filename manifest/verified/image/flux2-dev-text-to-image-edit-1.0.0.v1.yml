@@ -16,7 +16,7 @@ metadata:
   - text-to-image
   author: Black Forest Labs
   license: Apache-2.0
-  demo_path: https://huggingface.co/black-forest-labs/FLUX.2-dev/resolve/main/teaser_generation.png
+  demo_path: models/flux-dev-2-text-to-image-edit.png
 spec:
   engine: flux2
   model_type: ti2i

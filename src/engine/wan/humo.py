@@ -1,6 +1,6 @@
 from .shared import WanShared
-from src.types import InputImage, InputAudio, InputVideo
-from typing import List, Union, Optional, Dict, Any, Tuple, Callable
+from src.types import InputImage, InputAudio
+from typing import List, Dict, Any, Callable
 from torch import Tensor
 from PIL import Image
 import torch
@@ -9,12 +9,8 @@ import numpy as np
 import torch.nn.functional as F
 import math
 from diffusers.utils.torch_utils import randn_tensor
-from diffusers.video_processor import VideoProcessor
-from PIL import Image, ImageOps
-from torchvision.transforms import Compose, Normalize, ToTensor
 from tqdm import tqdm
 import torch.amp as amp
-from loguru import logger
 
 
 class HuMoEngine(WanShared):
@@ -37,6 +33,7 @@ class HuMoEngine(WanShared):
     ):
         # Load size.
         h, w = size[1], size[0]
+        height, width = None, None
         device = device or self.device
 
         if self.vae is None:
@@ -48,64 +45,19 @@ class HuMoEngine(WanShared):
             ref_vae_latents = []
             for _image in image:
                 img = self._load_image(_image)
-                # Calculate the required size to keep aspect ratio and fill the rest with padding.
-                img_ratio = img.width / img.height
-                target_ratio = w / h
-
-                if img_ratio > target_ratio:  # Image is wider than target
-                    new_width = w
-                    new_height = int(new_width / img_ratio)
-                else:  # Image is taller than target
-                    new_height = h
-                    new_width = int(new_height * img_ratio)
-
-                # img = img.resize((new_width, new_height), Image.ANTIALIAS)
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                # Create a new image with the target size and place the resized image in the center
-                delta_w = w - img.size[0]
-                delta_h = h - img.size[1]
-                padding = (
-                    delta_w // 2,
-                    delta_h // 2,
-                    delta_w - (delta_w // 2),
-                    delta_h - (delta_h // 2),
-                )
-                new_img = ImageOps.expand(img, padding, fill=(255, 255, 255))
-                # Transform to tensor and normalize.
-                new_img = self.video_processor.preprocess(new_img).unsqueeze(2)
+                img, height, width = self._aspect_ratio_resize(img, max_area=h * w)
+                new_img = self.video_processor.preprocess(img).unsqueeze(2)
                 img_vae_latent = self.vae_encode(new_img)[0]
                 ref_vae_latents.append(img_vae_latent)
 
-            return [torch.cat(ref_vae_latents, dim=1)]
+            return [torch.cat(ref_vae_latents, dim=1)], height, width
         else:
             img = self._load_image(image)
             # Calculate the required size to keep aspect ratio and fill the rest with padding.
-            img_ratio = img.width / img.height
-            target_ratio = w / h
-
-            if img_ratio > target_ratio:  # Image is wider than target
-                new_width = w
-                new_height = int(new_width / img_ratio)
-            else:  # Image is taller than target
-                new_height = h
-                new_width = int(new_height * img_ratio)
-
-            # img = img.resize((new_width, new_height), Image.ANTIALIAS)
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            # Create a new image with the target size and place the resized image in the center
-            delta_w = w - img.size[0]
-            delta_h = h - img.size[1]
-            padding = (
-                delta_w // 2,
-                delta_h // 2,
-                delta_w - (delta_w // 2),
-                delta_h - (delta_h // 2),
-            )
-            new_img = ImageOps.expand(img, padding, fill=(255, 255, 255))
-            # Transform to tensor and normalize.
-            new_img = self.video_processor.preprocess(new_img).unsqueeze(2)
+            img, height, width = self._aspect_ratio_resize(img, max_area=h * w)
+            new_img = self.video_processor.preprocess(img).unsqueeze(2)
             img_vae_latent = self.vae_encode(new_img)[0]
-            return [img_vae_latent]
+            return [img_vae_latent], height, width
 
     def get_audio_emb_window(self, audio_emb, frame_num, frame0_idx, audio_shift=2):
         zero_audio_embed = torch.zeros(
@@ -195,6 +147,7 @@ class HuMoEngine(WanShared):
         arg_null,
         scale_a,
         scale_t,
+        cfg_guidance: bool = True,
     ):
         pos_tia, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_tia))
         torch.cuda.empty_cache()
@@ -202,33 +155,53 @@ class HuMoEngine(WanShared):
         pos_ti, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_ti))
         torch.cuda.empty_cache()
 
-        if t > step_change:
+        # If CFG is disabled, ignore negative/uncond prompt by skipping the neg forward pass.
+        # This reduces to a 2-branch blend between the two positive predictions.
+        if not cfg_guidance:
+            neg = pos_ti
+        elif t > step_change:
             neg, _ = self.parse_output(
                 self.transformer(latents, t=timestep, **arg_i)
             )  # img included in null, same with official Wan-2.1
             torch.cuda.empty_cache()
-
-            noise_pred = scale_a * (pos_tia - pos_ti) + scale_t * (pos_ti - neg) + neg
         else:
             neg, _ = self.parse_output(
                 self.transformer(latents, t=timestep, **arg_null)
             )  # img not included in null
             torch.cuda.empty_cache()
 
+        if t > step_change or not cfg_guidance:
+            noise_pred = scale_a * (pos_tia - pos_ti) + scale_t * (pos_ti - neg) + neg
+        else:
             noise_pred = (
                 scale_a * (pos_tia - pos_ti) + (scale_t - 2.0) * (pos_ti - neg) + neg
             )
         return noise_pred
 
-    def forward_ta(self, latents, timestep, arg_ta, arg_t, arg_null, scale_a, scale_t):
+    def forward_ta(
+        self,
+        latents,
+        timestep,
+        arg_ta,
+        arg_t,
+        arg_null,
+        scale_a,
+        scale_t,
+        cfg_guidance: bool = True,
+    ):
         pos_ta, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_ta))
         torch.cuda.empty_cache()
 
         pos_t, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_t))
         torch.cuda.empty_cache()
 
-        neg, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_null))
-        torch.cuda.empty_cache()
+        # If CFG is disabled, ignore negative/uncond prompt by skipping the neg forward pass.
+        # This reduces to a 2-branch blend between the two positive predictions.
+        if not cfg_guidance:
+            neg = pos_t
+        else:
+            neg, _ = self.parse_output(self.transformer(latents, t=timestep, **arg_null))
+            torch.cuda.empty_cache()
 
         noise_pred = scale_a * (pos_ta - pos_t) + scale_t * (pos_t - neg) + neg
         return noise_pred
@@ -244,18 +217,8 @@ class HuMoEngine(WanShared):
         arg_null,
         scale_a,
         scale_t,
+        cfg_guidance: bool = True,
     ):
-        neg = self.transformer(
-            [
-                torch.cat(
-                    [latent[:, : -latent_ref_neg.shape[1]], latent_ref_neg], dim=1
-                )
-                for latent, latent_ref_neg in zip(latents, latents_ref_neg)
-            ],
-            t=timestep,
-            **arg_null,
-        )[0][0]
-
         pos_t = self.transformer(
             [
                 torch.cat(
@@ -266,6 +229,22 @@ class HuMoEngine(WanShared):
             t=timestep,
             **arg_t,
         )[0][0]
+
+        # If CFG is disabled, ignore negative/uncond prompt by skipping the neg forward pass.
+        # This reduces to a 2-branch blend between the two positive predictions.
+        if not cfg_guidance:
+            neg = pos_t
+        else:
+            neg = self.transformer(
+                [
+                    torch.cat(
+                        [latent[:, : -latent_ref_neg.shape[1]], latent_ref_neg], dim=1
+                    )
+                    for latent, latent_ref_neg in zip(latents, latents_ref_neg)
+                ],
+                t=timestep,
+                **arg_null,
+            )[0][0]
         pos_ta = self.transformer(
             [
                 torch.cat(
@@ -304,18 +283,8 @@ class HuMoEngine(WanShared):
         arg_null,
         scale_a,
         scale_t,
+        cfg_guidance: bool = True,
     ):
-        neg = self.transformer(
-            [
-                torch.cat(
-                    [latent[:, : -latent_ref_neg.shape[1]], latent_ref_neg], dim=1
-                )
-                for latent, latent_ref_neg in zip(latents, latents_ref_neg)
-            ],
-            t=timestep,
-            **arg_null,
-        )[0][0]
-
         pos_t = self.transformer(
             [
                 torch.cat(
@@ -326,6 +295,22 @@ class HuMoEngine(WanShared):
             t=timestep,
             **arg_t,
         )[0][0]
+
+        # If CFG is disabled, ignore negative/uncond prompt by skipping the neg forward pass.
+        # This reduces to a 2-branch blend between the two positive predictions.
+        if not cfg_guidance:
+            neg = pos_t
+        else:
+            neg = self.transformer(
+                [
+                    torch.cat(
+                        [latent[:, : -latent_ref_neg.shape[1]], latent_ref_neg], dim=1
+                    )
+                    for latent, latent_ref_neg in zip(latents, latents_ref_neg)
+                ],
+                t=timestep,
+                **arg_null,
+            )[0][0]
         pos_ta = self.transformer(
             [
                 torch.cat(
@@ -377,6 +362,7 @@ class HuMoEngine(WanShared):
         seed: int | None = None,
         generator: torch.Generator | None = None,
         progress_callback: Callable | None = None,
+        denoise_progress_callback: Callable | None = None,
         render_on_step_callback: Callable | None = None,
         render_on_step: bool = False,
         render_on_step_interval: int = 3,
@@ -384,6 +370,7 @@ class HuMoEngine(WanShared):
         offload: bool = True,
         guidance_scale_a: float = 5.5,
         guidance_scale_t: float = 5.0,
+        use_audio_length: bool = False,
         step_change: int = 980,
         return_latents: bool = False,
         resolution: int | None = None,
@@ -392,60 +379,72 @@ class HuMoEngine(WanShared):
     ):
 
         use_cfg_guidance = (
-            guidance_scale_a > 1.0
-            and guidance_scale_t > 1.0
+            guidance_scale_t > 1.0
             and negative_prompt is not None
         )
+        
         safe_emit_progress(progress_callback, 0.0, "Starting HuMo pipeline")
 
-        height, width = self.get_height_width(height, width, resolution, aspect_ratio)
+        safe_emit_progress(
+            progress_callback, 0.01, f"Resolved target size ({width}x{height})"
+        )
 
         transformer_dtype = self.component_dtypes["transformer"]
         if image is not None:
             generation_mode = "TIA"
-            latents_ref = self.load_image_latents(image, (width, height))
+            safe_emit_progress(progress_callback, 0.02, "Loading image condition (TIA)")
+            latents_ref, height, width = self.load_image_latents(image, (width, height))
         else:
             generation_mode = "TA"
+            safe_emit_progress(progress_callback, 0.02, "No image provided (TA)")
             latents_ref = [
                 torch.zeros(16, 1, height // 8, width // 8).to(
                     self.device, dtype=transformer_dtype
                 )
             ]
+            height, width = self.get_height_width(height, width, resolution, aspect_ratio)
 
         latents_ref_neg = [torch.zeros_like(latent_ref) for latent_ref in latents_ref]
         latents_ref = [latent_ref for latent_ref in latents_ref]
 
         if offload and self.vae is not None:
             self._offload("vae")
+            safe_emit_progress(progress_callback, 0.03, "VAE offloaded")
 
         audio_processor = None
 
         if seed is not None:
             generator = torch.Generator(device=self.device)
             generator.manual_seed(seed)
+            safe_emit_progress(progress_callback, 0.04, f"Seeded generator ({seed})")
 
         frame_num = self._parse_num_frames(duration, fps)
+        safe_emit_progress(progress_callback, 0.05, f"Resolved frames: {frame_num} @ {fps}fps")
 
         if audio is not None:
             audio_processor = self.helpers["wan.humo_audio_processor"]
             audio_processor.update_sample_rate(16000)
             audio_processor.update_fps(fps)
+            safe_emit_progress(progress_callback, 0.06, "Preprocessing audio")
             audio_emb, audio_length = audio_processor.preprocess(audio)
+            safe_emit_progress(
+                progress_callback, 0.10, f"Audio preprocessed (length={audio_length})"
+            )
         else:
             audio_emb = torch.zeros(frame_num, 5, 1280).to(self.device)
             audio_length = frame_num
+            safe_emit_progress(progress_callback, 0.10, "No audio provided; using zeros")
 
         if offload and audio_processor is not None:
             self._offload("audio_processor")
+            safe_emit_progress(progress_callback, 0.11, "Audio processor offloaded")
 
-        if frame_num > 129 and width * height < 720 * 1280:
-            frame_num = 129
-
-        if frame_num > 161 and width * height >= 720 * 1280:
-            frame_num = 161
-
-        frame_num = frame_num if frame_num != -1 else audio_length
+        if use_audio_length:
+            frame_num = audio_length
+        else:
+            frame_num = frame_num if frame_num != -1 else audio_length
         frame_num = 4 * ((frame_num - 1) // 4) + 1
+        safe_emit_progress(progress_callback, 0.12, f"Clamped/rounded frame_num -> {frame_num}")
         audio_emb, _ = self.get_audio_emb_window(audio_emb, frame_num, frame0_idx=0)
         zero_audio_pad = torch.zeros(latents_ref[0].shape[1], *audio_emb.shape[1:]).to(
             audio_emb.device
@@ -454,6 +453,7 @@ class HuMoEngine(WanShared):
         audio_emb = [audio_emb.to(self.device)]
         audio_emb_neg = [torch.zeros_like(audio_emb[0])]
 
+        safe_emit_progress(progress_callback, 0.13, "Preparing initial noise latents")
         noise = self._get_latents(
             batch_size=1,
             num_channels_latents=self.num_channels_latents,
@@ -464,10 +464,12 @@ class HuMoEngine(WanShared):
             dtype=torch.float32,
             seed=seed,
         )
+        safe_emit_progress(progress_callback, 0.16, "Initialized noise latents")
 
         zero_video_tensor = torch.zeros(
             1, 3, frame_num, noise.shape[3] * 8, noise.shape[4] * 8
         ).to(self.device)
+        safe_emit_progress(progress_callback, 0.17, "Encoding zero VAE latent (reference)")
         zero_vae = self.vae_encode(
             zero_video_tensor, offload=offload, sample_mode="mode"
         )[0].squeeze(0)
@@ -480,7 +482,14 @@ class HuMoEngine(WanShared):
         seq_len = math.prod(noise_shape)
         noise = [noise.squeeze(0)]
         target_shape = tuple(noise[0].shape)
+        safe_emit_progress(progress_callback, 0.19, f"Prepared seq_len={seq_len}")
 
+        safe_emit_progress(
+            progress_callback,
+            0.19,
+            f"Encoding prompts (CFG: {'on' if use_cfg_guidance else 'off'})",
+        )
+        
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt,
             negative_prompt=negative_prompt,
@@ -494,9 +503,13 @@ class HuMoEngine(WanShared):
         safe_emit_progress(progress_callback, 0.20, "Encoded prompts")
 
         context = [prompt_embeds[0]]
-        context_null = [negative_prompt_embeds[0]]
+        if use_cfg_guidance:
+            context_null = [negative_prompt_embeds[0]]
+        else:
+            context_null = [torch.zeros_like(prompt_embeds[0])]
 
         if not self.scheduler:
+            safe_emit_progress(progress_callback, 0.30, "Loading scheduler")
             self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
 
@@ -510,18 +523,28 @@ class HuMoEngine(WanShared):
         )
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.42, "Loading transformer")
             self.load_component_by_type("transformer")
             self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.45, "Transformer ready")
 
         # HuMo has two variants: ~1.7B params and ~17B params.
         # Use a threshold safely between them so this is True only for the 1.7B model.
         num_params = self.get_num_weights()
         small_model = num_params < 10_000_000_000
+        safe_emit_progress(
+            progress_callback,
+            0.46,
+            f"Model params={num_params} (variant={'small' if small_model else 'large'})",
+        )
 
         latents = noise
 
         # Reserve a progress span for denoising [0.50, 0.90]
-        denoise_progress_callback = make_mapped_progress(progress_callback, 0.50, 0.90)
+        if denoise_progress_callback is None:
+            denoise_progress_callback = make_mapped_progress(
+                progress_callback, 0.50, 0.90
+            )
         total_steps = len(timesteps)
         safe_emit_progress(denoise_progress_callback, 0.0, "Starting denoise")
 
@@ -605,6 +628,7 @@ class HuMoEngine(WanShared):
                             arg_null,
                             guidance_scale_a,
                             guidance_scale_t,
+                            cfg_guidance=use_cfg_guidance,
                         )
                     elif generation_mode == "TA":
                         noise_pred = self.forward_ta(
@@ -615,6 +639,7 @@ class HuMoEngine(WanShared):
                             arg_null,
                             guidance_scale_a,
                             guidance_scale_t,
+                            cfg_guidance=use_cfg_guidance,
                         )
 
                     temp_x0 = self.scheduler.step(
@@ -632,6 +657,11 @@ class HuMoEngine(WanShared):
                         and ((i + 1) % render_on_step_interval == 0 or i == 0)
                         and i != len(timesteps) - 1
                     ):
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i + 1) / float(total_steps) if total_steps else 1.0,
+                            "Rendering preview",
+                        )
                         self._render_step(
                             torch.stack(
                                 [x0_[:, : -latents_ref[0].shape[1]] for x0_ in latents]
@@ -669,6 +699,7 @@ class HuMoEngine(WanShared):
                             arg_null,
                             guidance_scale_a,
                             guidance_scale_t,
+                            cfg_guidance=use_cfg_guidance,
                         )
                     elif generation_mode == "TA":
                         noise_pred = self.forward_ta_small(
@@ -680,6 +711,7 @@ class HuMoEngine(WanShared):
                             arg_null,
                             guidance_scale_a,
                             guidance_scale_t,
+                            cfg_guidance=use_cfg_guidance,
                         )
 
                     temp_x0 = self.scheduler.step(
@@ -697,6 +729,11 @@ class HuMoEngine(WanShared):
                         and ((i + 1) % render_on_step_interval == 0 or i == 0)
                         and i != len(timesteps) - 1
                     ):
+                        safe_emit_progress(
+                            denoise_progress_callback,
+                            float(i + 1) / float(total_steps) if total_steps else 1.0,
+                            "Rendering preview",
+                        )
                         self._render_step(
                             torch.stack(
                                 [x0_[:, : -latents_ref[0].shape[1]] for x0_ in latents]
@@ -723,6 +760,7 @@ class HuMoEngine(WanShared):
             safe_emit_progress(progress_callback, 1.0, "Returning latents")
             return x0
 
+        safe_emit_progress(progress_callback, 0.96, "Decoding video")
         video = self.vae_decode(x0, offload=offload)
         video = self._tensor_to_frames(video)
         safe_emit_progress(progress_callback, 1.0, "Completed HuMo pipeline")

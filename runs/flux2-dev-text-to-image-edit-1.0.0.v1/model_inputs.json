@@ -36,14 +36,13 @@
         "attention_type": "sdpa"
     },
     "inputs": {
-        "image": "assets/55a9d7062a218eb9c0d9ad646182947d62d03d7329391de0fcfd8bd69fccb826.png",
-        "prompt": "Make the man have white skin and blue eyes",
+        "image": "/home/tosin_coverquick_co/apex/wirestory_6dd10d2a86243e3402d1fdbbb5fabf37_16x9.avif",
+        "prompt": "Make the man animated like a disney character from the movie Tangled.",
         "resolution": "custom",
         "aspect_ratio": "custom",
         "num_inference_steps": 50,
-        "height": 1110,
-        "width": 740,
-        "seed": 4113697495,
+        "height": 1024,
+        "width": 1024,
         "guidance_scale": 3.5,
         "duration": "5s"
     }

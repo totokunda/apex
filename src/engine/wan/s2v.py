@@ -4,7 +4,7 @@ from typing import List, Union, Optional, Dict, Any, Tuple, Callable
 from torch import Tensor
 from PIL import Image
 import torch
-from src.utils.progress import safe_emit_progress
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 import numpy as np
 import torch.nn.functional as F
 import math
@@ -234,18 +234,13 @@ class WanS2VEngine(WanShared):
 
         scale = video_rate / fps
 
-        print(num_frames)
-        print(audio_frame_num)
-        print(scale)
 
         num_repeat = int(audio_frame_num / (num_frames * scale)) + 1
-        print(num_repeat)
 
         bucket_num = num_repeat * num_frames
         padd_audio_num = (
             math.ceil(num_repeat * num_frames / fps * video_rate) - audio_frame_num
         )
-        print(padd_audio_num)
 
         batch_idx = self.get_sample_indices(
             original_fps=video_rate,
@@ -321,9 +316,9 @@ class WanS2VEngine(WanShared):
         fps: int = 16,
         guidance_scale: float = 4.5,
         init_first_frame: bool = False,
-        use_cfg_guidance: bool = True,
         return_latents: bool = False,
         progress_callback: Callable | None = None,
+        denoise_progress_callback: Callable | None = None,
         render_on_step_callback: Callable = None,
         offload: bool = True,
         latents: Optional[torch.Tensor] = None,
@@ -336,6 +331,9 @@ class WanS2VEngine(WanShared):
         num_chunks: Optional[int] = None,
         **kwargs,
     ):
+        safe_emit_progress(progress_callback, 0.0, "Starting s2v pipeline")
+        
+        use_cfg_guidance = negative_prompt is not None and guidance_scale > 1.0
 
         if return_latents:
             self.logger.warning("Returning latents is not supported for WanS2VEngine")
@@ -350,8 +348,14 @@ class WanS2VEngine(WanShared):
             self.logger.warning(
                 f"`num_frames_per_chunk` had to be divisible by {self.vae_scale_factor_temporal}. Rounding to the nearest number: {num_frames_per_chunk}"
             )
+            safe_emit_progress(
+                progress_callback,
+                0.01,
+                f"Adjusted num_frames_per_chunk -> {num_frames_per_chunk}",
+            )
         num_frames_per_chunk = max(num_frames_per_chunk, 1)
 
+        safe_emit_progress(progress_callback, 0.02, "Encoding prompts")
         prompt_embeds, negative_prompt_embeds = self.encode_prompt(
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -361,9 +365,11 @@ class WanS2VEngine(WanShared):
             progress_callback=progress_callback,
             offload=offload,
         )
+        safe_emit_progress(progress_callback, 0.10, "Prompts encoded")
 
         if negative_prompt_embeds is None:
             use_cfg_guidance = False
+            safe_emit_progress(progress_callback, 0.105, "CFG disabled (no negative prompt)")
 
         batch_size = prompt_embeds.shape[0]
         transformer_dtype = self.component_dtypes["transformer"]
@@ -371,26 +377,36 @@ class WanS2VEngine(WanShared):
         if negative_prompt_embeds is not None:
             negative_prompt_embeds = negative_prompt_embeds.to(transformer_dtype)
 
+        safe_emit_progress(progress_callback, 0.12, "Encoding audio")
         audio_embeds, num_chunks_audio = self.encode_audio(
             audio, sampling_rate, num_frames_per_chunk, fps, offload=offload
         )
         if num_chunks is None or num_chunks > num_chunks_audio:
             num_chunks = num_chunks_audio
+        
+
+        safe_emit_progress(
+            progress_callback, 0.20, f"Audio encoded (chunks={num_chunks_audio})"
+        )
         audio_embeds = audio_embeds.to(transformer_dtype)
 
         latent_motion_frames = (
             self.motion_frames + 3
         ) // self.vae_scale_factor_temporal
 
+        safe_emit_progress(progress_callback, 0.21, "Loading and preprocessing input image")
         image = self._load_image(image)
         image, height, width = self._aspect_ratio_resize(image, max_area=height * width)
-        image, height, width = self._center_crop_resize(image, height, width)
 
         image = self.video_processor.preprocess(image, height=height, width=width).to(
             self.device, dtype=torch.float32
         )
+        safe_emit_progress(
+            progress_callback, 0.24, f"Prepared image ({width}x{height})"
+        )
 
         if pose_video is not None:
+            safe_emit_progress(progress_callback, 0.25, "Loading and preprocessing pose video")
             num_frames = num_frames_per_chunk * num_chunks
             pose_video = self._load_video(
                 pose_video, num_frames=num_frames, reverse=True, fps=fps
@@ -402,10 +418,15 @@ class WanS2VEngine(WanShared):
             pose_video = self.video_processor.preprocess_video(
                 pose_video, height=height, width=width
             ).to(self.device, dtype=torch.float32)
+            safe_emit_progress(progress_callback, 0.29, "Pose video prepared")
+        else:
+            safe_emit_progress(progress_callback, 0.29, "No pose video provided")
 
         if not self.transformer:
+            safe_emit_progress(progress_callback, 0.30, "Loading transformer")
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
+        safe_emit_progress(progress_callback, 0.32, "Transformer ready")
 
         video_chunks = []
         self._current_chunk = 0
@@ -413,9 +434,24 @@ class WanS2VEngine(WanShared):
 
         if seed is not None and generator is None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
+            safe_emit_progress(progress_callback, 0.33, f"Seeded generator ({seed})")
+
+        # Reserve an overall progress window for chunk processing
+        chunks_progress = make_mapped_progress(progress_callback, 0.35, 0.95)
+        safe_emit_progress(
+            progress_callback, 0.35, f"Starting chunk processing (chunks={num_chunks})"
+        )
 
         for r in range(num_chunks):
             self._current_chunk = r
+            chunk_progress = make_mapped_progress(
+                chunks_progress,
+                float(r) / float(max(num_chunks, 1)),
+                float(r + 1) / float(max(num_chunks, 1)),
+            )
+            safe_emit_progress(
+                chunk_progress, 0.0, f"Chunk {r + 1}/{num_chunks}: preparing latents"
+            )
             latents_outputs = self.prepare_latents(
                 image if r == 0 else None,
                 batch_size * num_videos,
@@ -460,9 +496,11 @@ class WanS2VEngine(WanShared):
             motion_latents_input = motion_latents.to(transformer_dtype).clone()
 
             if not self.scheduler:
+                safe_emit_progress(chunk_progress, 0.10, "Loading scheduler")
                 self.load_component_by_type("scheduler")
             self.to_device(self.scheduler)
             # 4. Prepare timesteps by resetting scheduler in each chunk
+            safe_emit_progress(chunk_progress, 0.12, "Preparing timesteps")
             timesteps, num_inference_steps = self._get_timesteps(
                 scheduler=self.scheduler,
                 num_inference_steps=num_inference_steps,
@@ -472,6 +510,19 @@ class WanS2VEngine(WanShared):
                 len(timesteps) - num_inference_steps * self.scheduler.order
             )
             self._num_timesteps = len(timesteps)
+            safe_emit_progress(
+                chunk_progress,
+                0.15,
+                f"Chunk {r + 1}/{num_chunks}: starting denoise (steps={num_inference_steps})",
+            )
+
+            # Map denoise step progress into the chunk progress window.
+            local_denoise_progress_callback = (
+                denoise_progress_callback
+                if denoise_progress_callback is not None
+                else make_mapped_progress(chunk_progress, 0.15, 0.80)
+            )
+            safe_emit_progress(local_denoise_progress_callback, 0.0, "Starting denoise")
 
             with self._progress_bar(total=num_inference_steps) as progress_bar:
                 for i, t in enumerate(timesteps):
@@ -530,6 +581,17 @@ class WanS2VEngine(WanShared):
                         and ((i + 1) % render_on_step_interval == 0 or i == 0)
                         and i != len(timesteps) - 1
                     ):
+                        total_steps = len(timesteps)
+                        step_progress = (
+                            min(float(i + 1) / float(total_steps), 1.0)
+                            if total_steps > 0
+                            else 0.0
+                        )
+                        safe_emit_progress(
+                            local_denoise_progress_callback,
+                            step_progress,
+                            "Rendering preview",
+                        )
                         self._render_step(latents, render_on_step_callback)
 
                     # call the callback, if provided
@@ -538,13 +600,19 @@ class WanS2VEngine(WanShared):
                         and (i + 1) % self.scheduler.order == 0
                     ):
                         progress_bar.update()
+                        total_steps = len(timesteps)
+                        if total_steps > 0:
+                            safe_emit_progress(
+                                local_denoise_progress_callback,
+                                min(float(i + 1) / float(total_steps), 1.0),
+                                f"Denoising step {i + 1}/{total_steps}",
+                            )
 
+            safe_emit_progress(chunk_progress, 0.82, "Denoising complete; decoding chunk")
             if not (self.drop_first_motion and r == 0):
                 decode_latents = torch.cat([motion_latents, latents], dim=2)
             else:
                 decode_latents = torch.cat([condition, latents], dim=2)
-
-            decode_latents = decode_latents.to(self.vae.dtype)
 
             video = self.vae_decode(decode_latents, offload=offload)
             video = video[:, :, -(num_frames_per_chunk):]
@@ -570,12 +638,15 @@ class WanS2VEngine(WanShared):
             video_chunks.append(video)
             self._preview_video_chunks.append(video)
 
-            break
+            safe_emit_progress(chunk_progress, 1.0, f"Chunk {r + 1}/{num_chunks} complete")
 
         if offload:
+            safe_emit_progress(progress_callback, 0.96, "Offloading transformer")
             self._offload("transformer")
 
+        safe_emit_progress(progress_callback, 0.98, "Concatenating and postprocessing video")
         video_chunks = torch.cat(video_chunks, dim=2)
+        safe_emit_progress(progress_callback, 1.0, "Completed s2v pipeline")
         return self._tensor_to_frames(video_chunks)
 
     def _render_step(self, latents, render_on_step_callback):

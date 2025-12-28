@@ -144,6 +144,7 @@ class LoaderMixin(DownloadMixin):
 
         if component.get("config"):
             pydash.merge(config, component.get("config"))
+            
 
         # Lazy import here as well to avoid circular imports.
         from src.converters.convert import (

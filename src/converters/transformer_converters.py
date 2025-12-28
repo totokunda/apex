@@ -290,6 +290,22 @@ class WanTransformerConverter(TransformerConverter):
         }
 
 
+class WanS2VTransformerConverter(WanTransformerConverter):
+    def __init__(self):
+        super().__init__()
+        self.new_rename_dict = {
+            r"^causal_audio_encoder\.": "condition_embedder.causal_audio_encoder.",
+            r"^casual_audio_encoder\.": "condition_embedder.causal_audio_encoder.",
+            ".q" : ".to_q",
+            ".k" : ".to_k",
+            ".v" : ".to_v",
+            ".o" : ".to_out.0",
+            "trainable_cond_mask" :"trainable_condition_mask"
+        }
+        
+        self.rename_dict.update(self.new_rename_dict)
+
+
 class WanAnimateTransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
