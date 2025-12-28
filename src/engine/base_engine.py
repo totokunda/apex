@@ -2466,9 +2466,9 @@ class BaseEngine(LoaderMixin, ToMixin, OffloadMixin, CompileMixin):
         else:
             return noise
 
-    def get_height_width(self, height, width, resolution, aspect_ratio):
-        height = (height // 2) * 2
-        width = (width // 2) * 2
+    def get_height_width(self, height, width, resolution, aspect_ratio, mod_value: int = 16):
+        height = (height // mod_value) * mod_value
+        width = (width // mod_value) * mod_value
         return height, width
 
     def _render_step(

@@ -28,6 +28,7 @@ from src.converters.transformer_converters import (
     LoraTransformerConverter,
     HunyuanVideo15TransformerConverter,
     Flux2TransformerConverter,
+    WanS2VTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -66,6 +67,8 @@ def get_transformer_converter(model_base: str):
         or model_base == "wan.lynx_lite"
     ):
         return WanTransformerConverter()
+    elif model_base == "wan.s2v":
+        return WanS2VTransformerConverter()
     elif model_base == "wan.vace":
         return WanVaceTransformerConverter()
     elif model_base == "wan.animate":
@@ -106,7 +109,9 @@ def get_transformer_converter_by_model_name(model_name: str):
         return WanVaceTransformerConverter()
     elif "WanMultiTalk" in model_name:
         return WanMultiTalkTransformerConverter()
-    elif "Wan" in model_name:
+    elif "WanS2V" in model_name:
+        return WanS2VTransformerConverter()
+    elif "Wan" in model_name and not "Humo" in model_name:
         return WanTransformerConverter()
     elif "CogVideoX" in model_name:
         return CogVideoXTransformerConverter()

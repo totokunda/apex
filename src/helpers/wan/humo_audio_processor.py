@@ -15,7 +15,6 @@ import torch
 # from audio_separator.separator import Separator
 from transformers import WhisperModel, AutoFeatureExtractor
 import torch.nn.functional as F
-from src.helpers.helpers import helpers
 from src.helpers.base import BaseHelper
 from src.utils.defaults import get_components_path
 from src.types import InputAudio
@@ -72,6 +71,7 @@ class HuMoAudioProcessor(BaseHelper):
         sample_rate,
         fps,
         model_path,
+        config_path: str = None,
         audio_separator_model_path: str = None,
         audio_separator_model_name: str = None,
         cache_dir: str = "",
@@ -82,7 +82,15 @@ class HuMoAudioProcessor(BaseHelper):
         self.fps = fps
         self.model_path = model_path
         model_path = self._download(model_path, get_components_path())
-        self.whisper = WhisperModel.from_pretrained(model_path).eval()
+        # check if is file or directory
+        if os.path.isfile(model_path) and config_path is not None:
+            self.whisper = self._load_model({
+                "base": "WhisperModel",
+                "model_path": model_path,
+                "config_path": config_path,
+            }, module_name="transformers")
+        else:
+            self.whisper = WhisperModel.from_pretrained(model_path).eval()
         self.to_device(self.whisper)
         self.whisper.requires_grad_(False)
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(model_path)
