@@ -14,7 +14,7 @@ metadata:
   - 'full'
   author: FlashVSR
   license: Apache-2.0
-  demo_path: models/flashvsr-1.1-full.mp4
+  demo_path: models/flashvsr-full.mp4
   categories:
   - upscale
 spec:
@@ -31,7 +31,7 @@ spec:
     - cpu
   attention_types:
   - block-sparse-attn
-  fps: 30
+  fps: 24
   components:
   - type: scheduler
     label: Scheduler
@@ -107,14 +107,17 @@ spec:
         flow: column
         rows:
         - - video
-    - name: scale
-      label: Scale
+    - name: size
+      label: Size
       collapsible: true
       default_open: false
       layout:
         flow: column
         rows:
-        - - scale
+        - - resolution
+        - - aspect_ratio
+        - - height
+        - - width
     - name: sampling
       label: Sampling
       collapsible: true
@@ -124,9 +127,9 @@ spec:
         rows:
         - - seed
         - - local_range
-        - - tiled
-        - - color_fix
         - - sparse_ratio
+        - - guidance_scale
+        - - color_fix
     inputs:
     - id: video
       label: Video
@@ -134,17 +137,71 @@ spec:
       type: video
       panel: input
       required: false
-    - id: scale
-      label: Scale
-      description: Select the scale of the output video
-      panel: size
-      type: number+slider
+      map_h: height
+      map_w: width
+      scale_by: resolution
+    - id: height
+      label: Height
+      description: Explicit height override
+      type: number
       value_type: integer
       panel: size
-      default: 4.0
-      min: 1
-      max: 10
-      step: 0.5
+      default: 720
+      min: 256
+      max: 8192
+      step: 16
+    - id: width
+      label: Width
+      description: Explicit width override
+      type: number
+      value_type: integer
+      panel: size
+      default: 1280
+      min: 256
+      max: 8192
+      step: 16
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output video
+      panel: size
+      type: select
+      default: '16:9'
+      options:
+      - name: Square
+        value: '1:1'
+        ratio_w: 1
+        ratio_h: 1
+      - name: Wide
+        value: '16:9'
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: '9:16'
+        ratio_w: 9
+        ratio_h: 16
+      - name: Classic
+        value: '4:3'
+        ratio_w: 4
+        ratio_h: 3
+      - name: Custom
+        value: custom
+    - id: resolution
+      label: Resolution
+      description: Select the resolution of the output video.
+      type: select
+      panel: size
+      required: false
+      options:
+      - name: "720p"
+        value: 720
+      - name: "1080p"
+        value: 1080
+      - name: "1440p"
+        value: 1440
+      - name: "1920p"
+        value: 1920
+      - name: "2160p" 
+        value: 2160
     - id: seed
       label: Seed
       description: Random seed for reproducibility
@@ -162,9 +219,9 @@ spec:
       value_type: integer
       panel: sampling
       required: false
-      default: 9.0
+      default: 11.0
       min: 1.0
-      max: 10.0
+      max: 11.0
       step: 1.0
     - id: color_fix
       label: Use Color Fix
@@ -172,7 +229,7 @@ spec:
       type: boolean
       panel: sampling
       required: false
-      default: false
+      default: true
     - id: sparse_ratio
       label: Sparse Ratio
       description: Sparse ratio for the upscaling.
@@ -183,4 +240,15 @@ spec:
       default: 2.0
       min: 1.0
       max: 3.0
+      step: 0.5
+    - id: guidance_scale
+      label: Guidance Scale
+      description: Guidance scale for the upscaling.
+      type: number+slider
+      value_type: float
+      panel: sampling
+      required: false
+      default: 1.0
+      min: 0.0
+      max: 10.0
       step: 0.5

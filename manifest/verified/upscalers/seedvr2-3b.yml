@@ -13,7 +13,7 @@ metadata:
   - '3b'
   author: SeedVR
   license: Apache-2.0
-  demo_path: models/seedvr2-3b.mp4
+  demo_path: models/seedvr2-3b.png
   categories:
   - upscale
 spec:
@@ -179,6 +179,17 @@ spec:
         - - vae_norm_max_mem
         - - vae_split_size
         - - vae_memory_device
+
+    - name: chunking
+      label: Chunking
+      collapsible: true
+      default_open: false
+      layout:
+        flow: column
+        rows:
+        - - use_chunking  
+        - - chunk_frames
+        - - chunk_overlap
     inputs:
     - id: video
       label: Video
@@ -186,12 +197,18 @@ spec:
       type: video
       panel: input
       required: false
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: image
       label: Image
       description: The input image to upscale.
       type: image
       panel: input
       required: false
+      map_h: height
+      map_w: width
+      scale_by: resolution
     - id: resolution
       label: Resolution
       description: The resolution of the output video.
@@ -204,8 +221,33 @@ spec:
           value: 720
         - name: "1080p"
           value: 1080
-        - name: "2160p"
-          value: 2160
+        - name: "1920p"
+          value: 1920
+    - id: aspect_ratio
+      label: Aspect Ratio
+      description: Select the aspect ratio of the output image
+      panel: size
+      type: select
+      default: "16:9"
+      options:
+      - name: Wide
+        value: "16:9"
+        ratio_w: 16
+        ratio_h: 9
+      - name: Vertical
+        value: "9:16"
+        ratio_w: 9
+        ratio_h: 16
+      - name: Square
+        value: "1:1"
+        ratio_w: 1
+        ratio_h: 1
+      - name: Classic
+        value: "4:3"
+        ratio_w: 4
+        ratio_h: 3
+      - name: Custom
+        value: custom
     - id: height
       label: Height
       description: The height of the output video.
@@ -331,3 +373,32 @@ spec:
       options:
         - "same"
         - "cpu"
+    - id: use_chunking
+      label: Use Chunking
+      description: Use chunking for the upscaling 
+      type: boolean
+      panel: chunking
+      required: false
+      default: false
+    - id: chunk_frames
+      label: Chunk Frames
+      description: Chunk frames for the upscaling 
+      type: number+slider
+      value_type: integer
+      panel: sampling
+      required: false
+      default: 33
+      min: 1
+      step: 1
+    - id: chunk_overlap
+      label: Chunk Overlap
+      description: Chunk overlap for the upscaling 
+      type: number+slider
+      value_type: integer
+      panel: sampling
+      required: false
+      default: 8
+      min: 1
+      step: 1
+
+      

@@ -19,6 +19,7 @@ from tqdm import tqdm
 from src.engine.base_engine import BaseEngine
 from src.types import InputVideo, InputImage
 from src.utils.cache import empty_cache
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 from diffusers.video_processor import VideoProcessor
 from src.engine.seedvr.shared.colorfix import wavelet_reconstruction
 
@@ -684,7 +685,7 @@ class SeedVRUpscaleEngine(BaseEngine):
         cfg_rescale: float,
         num_steps: int,
         dit_offload: bool = True,
-        progress_callback: Optional[Callable] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
     ) -> List[Tensor]:
         """
         Run diffusion inference loop.
@@ -708,6 +709,8 @@ class SeedVRUpscaleEngine(BaseEngine):
         if batch_size == 0:
             return []
 
+        safe_emit_progress(progress_callback, 0.0, "Preparing SeedVR sampling")
+
         # Ensure transformer is loaded
         if self.transformer is None:
             self.load_component_by_type("transformer")
@@ -723,6 +726,8 @@ class SeedVRUpscaleEngine(BaseEngine):
 
         # Get timesteps
         timesteps = self._get_sampling_timesteps(num_steps, self.device)
+
+        safe_emit_progress(progress_callback, 0.01, "Starting SeedVR sampling")
 
         # Sampling loop
         with self._progress_bar(total=num_steps, desc="SeedVR Sampling") as pbar:
@@ -769,7 +774,8 @@ class SeedVRUpscaleEngine(BaseEngine):
                 pbar.update(1)
 
                 if progress_callback:
-                    progress_callback((i + 1) / num_steps)
+                    lp = (i + 1) / num_steps
+                    progress_callback(lp, f"SeedVR Sampling {int(lp * 100)}%")
 
         # Restore training mode
         self.transformer.train(was_training)
@@ -787,6 +793,8 @@ class SeedVRUpscaleEngine(BaseEngine):
 
         if dit_offload:
             self._offload("vae")
+
+        safe_emit_progress(progress_callback, 1.0, "SeedVR sampling complete")
 
         return samples
 
@@ -812,6 +820,7 @@ class SeedVRUpscaleEngine(BaseEngine):
         vae_memory_device: str = "same",
         chunk_frames: Optional[int] = None,
         chunk_overlap: int = 8,
+        use_chunking: bool = False,
         **kwargs,
     ) -> Union[List[Image.Image], Image.Image]:
         """
@@ -852,6 +861,8 @@ class SeedVRUpscaleEngine(BaseEngine):
         """
         assert video is not None or image is not None, "video or image is required"
 
+        safe_emit_progress(progress_callback, 0.0, "Starting SeedVR upscale")
+
         # Set random seed
         if seed is not None:
             torch.manual_seed(seed)
@@ -870,6 +881,7 @@ class SeedVRUpscaleEngine(BaseEngine):
             input_data = video
 
         # Load and preprocess video/image
+        safe_emit_progress(progress_callback, 0.03, "Preparing input frames")
         video_tensor = self._prepare_video_tensor(
             input_data,
             target_height=height,
@@ -879,6 +891,7 @@ class SeedVRUpscaleEngine(BaseEngine):
             fps=output_fps,
         )
         # Apply divisible crop
+        safe_emit_progress(progress_callback, 0.07, "Cropping to divisible size")
         video_tensor = self._divisible_crop(video_tensor, (16, 16))
 
         total_frames = video_tensor.shape[1]
@@ -887,13 +900,15 @@ class SeedVRUpscaleEngine(BaseEngine):
         input_video_for_colorfix = video_tensor.clone()
 
         # Load prompt embeddings once
+        safe_emit_progress(progress_callback, 0.10, "Loading prompt embeddings")
         text_pos_embeds, text_neg_embeds = self._load_prompt_embeddings(self.device)
 
         # Determine if chunking is needed
-        use_chunking = chunk_frames is not None and total_frames > chunk_frames and not is_image_input
+        use_chunking = chunk_frames is not None and total_frames > chunk_frames and not is_image_input and use_chunking
         
         if use_chunking:
             self.logger.info(f"Chunking enabled: {total_frames} frames -> chunks of {chunk_frames} with {chunk_overlap} overlap")
+            safe_emit_progress(progress_callback, 0.12, "Splitting video into chunks")
             
             # Split video into chunks
             chunks, chunk_indices = self._split_video_into_chunks(
@@ -901,14 +916,29 @@ class SeedVRUpscaleEngine(BaseEngine):
             )
             
             processed_chunks = []
+            num_chunks = len(chunks)
+            # Reserve [0.20, 0.88] for chunk processing (encode + sampling + decode)
+            chunks_overall_start = 0.20
+            chunks_overall_end = 0.88
             
             for chunk_idx, (chunk, (start, end)) in enumerate(zip(chunks, chunk_indices)):
                 self.logger.info(f"Processing chunk {chunk_idx + 1}/{len(chunks)} (frames {start}-{end})")
+
+                # Map this chunk into the overall progress span
+                chunk_start_p = chunks_overall_start + (chunk_idx / max(1, num_chunks)) * (
+                    chunks_overall_end - chunks_overall_start
+                )
+                chunk_end_p = chunks_overall_start + ((chunk_idx + 1) / max(1, num_chunks)) * (
+                    chunks_overall_end - chunks_overall_start
+                )
+                chunk_progress = make_mapped_progress(progress_callback, chunk_start_p, chunk_end_p)
+                chunk_progress(0.0, f"Chunk {chunk_idx + 1}/{num_chunks}: preparing")
                 
                 # Pad chunk frames if needed
                 chunk_padded, chunk_original_len = self._pad_video_frames(chunk, sp_size)
                 
                 # VAE encode
+                chunk_progress(0.08, f"Chunk {chunk_idx + 1}/{num_chunks}: encoding latents")
                 cond_latents = self._seedvr_vae_encode(
                     [chunk_padded], offload=True,
                     conv_max_mem=vae_conv_max_mem, norm_max_mem=vae_norm_max_mem,
@@ -922,6 +952,7 @@ class SeedVRUpscaleEngine(BaseEngine):
                     if torch.cuda.is_available():
                         torch.cuda.manual_seed_all(chunk_seed)
                 
+                chunk_progress(0.18, f"Chunk {chunk_idx + 1}/{num_chunks}: initializing noise")
                 noises = [torch.randn_like(latent) for latent in cond_latents]
                 aug_noises = [torch.randn_like(latent) for latent in cond_latents]
                 
@@ -936,13 +967,10 @@ class SeedVRUpscaleEngine(BaseEngine):
                     self._get_condition(noise, cond_latent)
                     for noise, cond_latent in zip(noises, noised_cond_latents)
                 ]
-                
-                # Chunk progress callback wrapper
-                def chunk_progress(p):
-                    if progress_callback:
-                        overall = (chunk_idx + p) / len(chunks)
-                        progress_callback(overall)
-                
+
+                # Reserve a sub-span inside the chunk for sampling
+                chunk_sampling_progress = make_mapped_progress(chunk_progress, 0.22, 0.95)
+
                 # Run inference for this chunk
                 samples = self._inference(
                     noises=noises,
@@ -953,10 +981,11 @@ class SeedVRUpscaleEngine(BaseEngine):
                     cfg_rescale=cfg_rescale,
                     num_steps=num_inference_steps,
                     dit_offload=offload,
-                    progress_callback=chunk_progress,
+                    progress_callback=chunk_sampling_progress,
                 )
                 
                 # Process chunk output
+                chunk_progress(0.96, f"Chunk {chunk_idx + 1}/{num_chunks}: post-processing")
                 for sample in samples:
                     if sample.ndim == 3:
                         sample = sample.unsqueeze(1)
@@ -975,16 +1004,19 @@ class SeedVRUpscaleEngine(BaseEngine):
             
             # Blend chunks together
             self.logger.info("Blending chunks...")
+            safe_emit_progress(progress_callback, 0.90, "Blending chunks")
             blended_sample = self._blend_chunks(processed_chunks, chunk_indices, total_frames, chunk_overlap)
             
             # Apply color fix if requested
             if color_fix:
+                safe_emit_progress(progress_callback, 0.92, "Applying color correction")
                 blended_sample = wavelet_reconstruction(
                     blended_sample.cpu(),
                     input_video_for_colorfix.cpu().permute(1, 0, 2, 3),
                 )
             
             # Convert to output format
+            safe_emit_progress(progress_callback, 0.95, "Converting output frames")
             blended_sample = rearrange(blended_sample, "t c h w -> t h w c")
             blended_sample = blended_sample.clamp(-1, 1).mul(0.5).add(0.5).mul(255).round()
             blended_sample = blended_sample.to(torch.uint8).cpu().numpy()
@@ -997,10 +1029,12 @@ class SeedVRUpscaleEngine(BaseEngine):
         else:
             # Original non-chunked processing
             # Pad frames if needed
+            safe_emit_progress(progress_callback, 0.12, "Padding frames (if needed)")
             video_tensor, original_length = self._pad_video_frames(video_tensor, sp_size)
 
             # VAE encode the conditioned latents
             self.logger.info(f"Encoding video: {video_tensor.shape}")
+            safe_emit_progress(progress_callback, 0.18, "Encoding latents")
 
             cond_latents = self._seedvr_vae_encode(
                 [video_tensor], offload=True,
@@ -1009,6 +1043,7 @@ class SeedVRUpscaleEngine(BaseEngine):
             )
 
             # Generate noise and augmentation noise
+            safe_emit_progress(progress_callback, 0.24, "Initializing noise")
             noises = [torch.randn_like(latent) for latent in cond_latents]
             aug_noises = [torch.randn_like(latent) for latent in cond_latents]
 
@@ -1026,6 +1061,7 @@ class SeedVRUpscaleEngine(BaseEngine):
 
             # Run inference
             self.logger.info(f"Starting inference with {num_inference_steps} steps")
+            sampling_progress = make_mapped_progress(progress_callback, 0.30, 0.86)
             samples = self._inference(
                 noises=noises,
                 conditions=conditions,
@@ -1035,7 +1071,7 @@ class SeedVRUpscaleEngine(BaseEngine):
                 cfg_rescale=cfg_rescale,
                 num_steps=num_inference_steps,
                 dit_offload=offload,
-                progress_callback=progress_callback,
+                progress_callback=sampling_progress,
             )
 
             # Process outputs
@@ -1053,12 +1089,14 @@ class SeedVRUpscaleEngine(BaseEngine):
 
                 # Apply color fix if requested
                 if color_fix:
+                    safe_emit_progress(progress_callback, 0.90, "Applying color correction")
                     sample = wavelet_reconstruction(
                         sample.cpu(),
                         input_video_for_colorfix[:, :original_length].cpu().permute(1, 0, 2, 3),
                     )
 
                 # Convert to output format
+                safe_emit_progress(progress_callback, 0.95, "Converting output frames")
                 sample = rearrange(sample, "t c h w -> t h w c")
                 sample = sample.clamp(-1, 1).mul(0.5).add(0.5).mul(255).round()
                 sample = sample.to(torch.uint8).cpu().numpy()
@@ -1069,6 +1107,8 @@ class SeedVRUpscaleEngine(BaseEngine):
 
         gc.collect()
         empty_cache()
+
+        safe_emit_progress(progress_callback, 1.0, "SeedVR upscale complete")
 
         if is_image_input:
             return [output_frames[0] if output_frames else None]
