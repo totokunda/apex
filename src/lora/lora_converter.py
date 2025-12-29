@@ -5,7 +5,7 @@ from diffusers.utils.state_dict_utils import (
     DIFFUSERS_TO_PEFT,
     DIFFUSERS_OLD_TO_PEFT,
 )
-from src.converters.transformer_converters import TransformerConverter
+from src.converters.base_converter import BaseConverter
 
 BASE_TO_PEFT = {
     "lora_down": "lora_A",
@@ -72,7 +72,7 @@ class StateDictType(Enum):
     PEFT = "peft"
     BASE = "base"
 
-class LoraConverter(TransformerConverter):
+class LoraConverter(BaseConverter):
     """
     Utility to normalize arbitrary LoRA state dicts into PEFT format.
 

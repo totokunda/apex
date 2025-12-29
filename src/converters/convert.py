@@ -29,6 +29,7 @@ from src.converters.transformer_converters import (
     HunyuanVideo15TransformerConverter,
     Flux2TransformerConverter,
     WanS2VTransformerConverter,
+    FlashVSRTransformerConverter,
 )
 
 from src.converters.utils import (
@@ -49,6 +50,7 @@ from src.converters.vae_converters import (
     LTXVAEConverter,
     MagiVAEConverter,
     MMAudioVAEConverter,
+    TinyWANVAEConverter,
 )
 
 
@@ -62,8 +64,8 @@ def get_transformer_converter(model_base: str):
         model_base == "wan.base"
         or model_base == "wan.causal"
         or model_base == "wan.fun"
-        or model_base == "wan.recam" 
-        or model_base == "wan.lynx" 
+        or model_base == "wan.recam"
+        or model_base == "wan.lynx"
         or model_base == "wan.lynx_lite"
     ):
         return WanTransformerConverter()
@@ -97,7 +99,8 @@ def get_transformer_converter(model_base: str):
         return FluxTransformerConverter()
     elif model_base == "flux2.base":
         return Flux2TransformerConverter()
-        return FluxTransformerConverter()
+    elif model_base == "wan.flashvsr":
+        return FlashVSRTransformerConverter()
     else:
         return NoOpTransformerConverter()
 
@@ -113,12 +116,14 @@ def get_transformer_converter_by_model_name(model_name: str):
         return WanS2VTransformerConverter()
     elif "Wan" in model_name and not "Humo" in model_name:
         return WanTransformerConverter()
+    elif "FlashVSR" in model_name:
+        return FlashVSRTransformerConverter()
     elif "CogVideoX" in model_name:
         return CogVideoXTransformerConverter()
     elif "HunyuanAvatar" in model_name:
         return HunyuanAvatarTransformerConverter()
     elif "HunyuanVideo_1_5" in model_name:
-        return HunyuanVideo15TransformerConverter() 
+        return HunyuanVideo15TransformerConverter()
     elif "HunyuanVideo" in model_name:
         return HunyuanVideoTransformerConverter()
     elif "Mochi" in model_name:
@@ -147,10 +152,12 @@ def get_vae_converter(vae_type: str, **additional_kwargs):
         return MagiVAEConverter()
     elif vae_type == "mmaudio":
         return MMAudioVAEConverter()
+    elif vae_type == "tiny_wan":
+        return TinyWANVAEConverter()
     else:
         return NoOpConverter()
-    
-    
+
+
 def get_text_encoder_converter(text_encoder_type: str):
     text_encoder_type = text_encoder_type.lower()
     if "t5" in text_encoder_type or "umt5" in text_encoder_type:
@@ -321,24 +328,16 @@ def convert_transformer(
     else:
         using_mlx = False
         model_type = "transformer"
-    
-
 
     model_class = get_model_class(model_base, config, model_type=model_type)
 
-
-
     converter = get_transformer_converter(model_base)
-
 
     model = get_empty_model(model_class, config)
 
-
     original_state_dict = model.state_dict()
 
-
     keys_to_ignore = getattr(model, "_keys_to_ignore_on_load_unexpected", [])
-
 
     if isinstance(ckpt_path, list):
         state_dict = {}

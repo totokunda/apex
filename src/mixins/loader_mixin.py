@@ -367,6 +367,7 @@ class LoaderMixin(DownloadMixin):
                 )
                 patched_for_fpscaled = True
             if hasattr(model, "load_state_dict"):
+
                 model.load_state_dict(
                     state_dict, strict=False, assign=True
                 )  # must be false as we are iteratively loading the state dict
@@ -377,7 +378,6 @@ class LoaderMixin(DownloadMixin):
                     f"Model {model} does not have a load_state_dict or load_weights method"
                 )
                     
-        
         if getattr(self, "engine_type", "torch") == "torch":
             has_meta_params = False
             patched_for_fpscaled = getattr(model, "_patched_for_fpscaled", False)

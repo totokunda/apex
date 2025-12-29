@@ -1,24 +1,10 @@
 from typing import Dict, Any
 from src.converters.utils import update_state_dict_
+from src.converters.transformer_converters import TransformerConverter
 
 
-class VAEConverter:
-    def __init__(self):
-        self.rename_dict = {}
-        self.special_keys_map = {}
-
-    def convert(self, state_dict: Dict[str, Any]):
-        for key in list(state_dict.keys()):
-            new_key = key[:]
-            for replace_key, rename_key in self.rename_dict.items():
-                new_key = new_key.replace(replace_key, rename_key)
-            update_state_dict_(state_dict, key, new_key)
-
-        for key in list(state_dict.keys()):
-            for special_key, handler_fn_inplace in self.special_keys_map.items():
-                if special_key not in key:
-                    continue
-                handler_fn_inplace(key, state_dict)
+class VAEConverter(TransformerConverter):
+    pass
 
 
 class LTXVAEConverter(VAEConverter):
@@ -182,6 +168,15 @@ class MMAudioVAEConverter(VAEConverter):
             state_dict.update(decoder_state)
         else:
             raise ValueError("No generator or decoder state found in the state dict")
+
+
+class TinyWANVAEConverter(VAEConverter):
+    def __init__(self):
+        super().__init__()
+        self.rename_dict = {
+            "^decoder\.": "taehv.decoder.",
+        }
+        self.special_keys_map = {}
 
 
 class NoOpVAEConverter(VAEConverter):
