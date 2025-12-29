@@ -108,7 +108,6 @@ spec:
         flow: column
         rows:
         - - video
-        - - image
     - name: scale
       label: Scale
       collapsible: true
@@ -124,7 +123,6 @@ spec:
       layout:
         flow: column
         rows:
-        - - num_inference_steps
         - - seed
         - - local_range
         - - tiled
@@ -138,12 +136,6 @@ spec:
       type: video
       panel: input
       required: false
-    - id: image
-      label: Image
-      description: The input image to upscale.
-      type: image
-      panel: input
-      required: false
     - id: scale
       label: Scale
       description: Select the scale of the output video
@@ -155,16 +147,6 @@ spec:
       min: 1
       max: 10
       step: 0.5
-    - id: num_inference_steps
-      label: Inference Steps
-      description: Number of denoising steps
-      type: number+slider
-      value_type: integer
-      panel: sampling
-      default: 50
-      min: 1
-      max: 100
-      step: 1
     - id: seed
       label: Seed
       description: Random seed for reproducibility
