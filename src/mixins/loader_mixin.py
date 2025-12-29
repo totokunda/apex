@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 import requests
 from pathlib import Path
 from typing import Dict, Any, Union
+import math
 import os
 import json
 import yaml
@@ -212,12 +213,10 @@ class LoaderMixin(DownloadMixin):
         if no_weights:
             return model
         
-
-
         files_to_load = []
         if os.path.isdir(model_path):
             extensions = component.get(
-                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf"]
+                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf", "pth"]
             )
             if "gguf" not in extensions:
                 extensions = list(extensions) + ["gguf"]
@@ -228,7 +227,7 @@ class LoaderMixin(DownloadMixin):
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Model file not found at {model_path}")
             extensions = component.get(
-                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf"]
+                "extensions", ["safetensors", "bin", "pt", "ckpt", "gguf", "pth"]
             )
             if "gguf" not in extensions:
                 extensions = list(extensions) + ["gguf"]
@@ -367,7 +366,6 @@ class LoaderMixin(DownloadMixin):
                 )
                 patched_for_fpscaled = True
             if hasattr(model, "load_state_dict"):
-
                 model.load_state_dict(
                     state_dict, strict=False, assign=True
                 )  # must be false as we are iteratively loading the state dict
@@ -915,6 +913,9 @@ class LoaderMixin(DownloadMixin):
                     raise IOError(f"Cannot open video file: {video_path}")
 
                 original_fps = cap.get(cv2.CAP_PROP_FPS)
+                requested_fps = None
+                if fps is not None:
+                    requested_fps = abs(fps) if fps < 0 else fps
 
                 frames = []
                 frame_count = 0
@@ -941,35 +942,71 @@ class LoaderMixin(DownloadMixin):
                         )
                         frame_count += 1
                 else:
-                    # Extract frames at specified fps using time-based sampling
-                    frame_interval = original_fps / fps  # frames between each sample
-                    next_frame_time = 0.0
+                    # Extract frames at specified fps using *time-based* resampling.
+                    # This correctly handles both:
+                    # - downsampling (e.g. 24 -> 16 fps): skip frames
+                    # - upsampling (e.g. 16 -> 24 fps): duplicate frames as needed
+                    target_fps = requested_fps
 
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
+                    if target_fps is None or target_fps == 0:
+                        raise ValueError(f"Invalid target fps: {fps}")
 
-                        # Check if current frame should be extracted based on timing
-                        if frame_count >= next_frame_time:
-                            # Check if frame is grayscale or color
+                    # If OpenCV can't infer fps (0/NaN/inf), fall back to extracting all frames.
+                    if (
+                        original_fps is None
+                        or not math.isfinite(float(original_fps))
+                        or float(original_fps) <= 0
+                    ):
+                        while True:
+                            ret, frame = cap.read()
+                            if not ret:
+                                break
                             if len(frame.shape) == 2 or (
                                 len(frame.shape) == 3 and frame.shape[2] == 1
                             ):
-                                # Grayscale frame, no color conversion needed
                                 frame_rgb = frame
                             else:
-                                # Color frame, convert from BGR to RGB
                                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                             frames.append(
                                 convert_method(Image.fromarray(frame_rgb))
                                 if convert_method
                                 else Image.fromarray(frame_rgb)
                             )
-                            next_frame_time += frame_interval
+                        return _finalize_frames(frames, target_fps)
+
+                    orig_dt = 1.0 / float(original_fps)
+                    target_dt = 1.0 / float(target_fps)
+                    next_sample_t = 0.0
+
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+
+                        # Source frame covers [t0, t1) in seconds.
+                        t1 = (frame_count + 1) * orig_dt
+
+                        # Convert the frame once, then duplicate references as needed.
+                        if len(frame.shape) == 2 or (
+                            len(frame.shape) == 3 and frame.shape[2] == 1
+                        ):
+                            frame_rgb = frame
+                        else:
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_frame = (
+                            convert_method(Image.fromarray(frame_rgb))
+                            if convert_method
+                            else Image.fromarray(frame_rgb)
+                        )
+
+                        # Emit 0..N frames depending on how many target sample times
+                        # fall within this source-frame interval.
+                        while next_sample_t < (t1 + 1e-9):
+                            frames.append(pil_frame)
+                            next_sample_t += target_dt
 
                         frame_count += 1
-                return _finalize_frames(frames, original_fps)
+                return _finalize_frames(frames, requested_fps if requested_fps is not None else original_fps)
             finally:
                 if "cap" in locals() and cap.isOpened():
                     cap.release()
