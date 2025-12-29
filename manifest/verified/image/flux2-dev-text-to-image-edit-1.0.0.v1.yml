@@ -246,7 +246,6 @@ spec:
         rows:
         - - num_inference_steps
         - - guidance_scale
-        - - true_cfg_scale
         - - seed
     inputs:
     - id: image
@@ -324,7 +323,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 32
     - id: width
       label: Width
       description: Explicit width override
@@ -334,7 +333,7 @@ spec:
       default: 1024
       min: 256
       max: 8192
-      step: 64
+      step: 32
     - id: seed
       label: Seed
       description: Random seed for reproducibility

@@ -2,37 +2,19 @@ from src.types import InputVideo, InputImage
 import torch
 from PIL import Image
 from src.engine.flashvsr.shared import FlashVSRShared
-from typing import Optional
+from typing import Optional, Callable
 from src.transformer.wan.flashvsr.model import sinusoidal_embedding_1d
 import os
 import numpy as np
 from tqdm import tqdm
 from src.utils.cache import empty_cache
+from src.utils.progress import safe_emit_progress, make_mapped_progress
 context_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "flashvsr", "posi_prompt.pth"))
 from src.vae.tiny_wan.model import AutoencoderKLTinyWan
 
 class FlashVSRUpscaleEngine(FlashVSRShared):
     """FlashVSR Upscale Engine Implementation"""
-    @staticmethod
-    def compute_scaled_and_target_dims(w0: int, h0: int, scale: int = 4, multiple: int = 128):
-        if w0 <= 0 or h0 <= 0:
-            raise ValueError("invalid original size")
 
-        sW, sH = w0 * scale, h0 * scale
-        tW = max(multiple, (sW // multiple) * multiple)
-        tH = max(multiple, (sH // multiple) * multiple)
-        return sW, sH, tW, tH
-            
-    @staticmethod
-    def upscale_then_center_crop(img: Image.Image, scale: int, tW: int, tH: int) -> Image.Image:
-        w0, h0 = img.size
-        sW, sH = w0 * scale, h0 * scale
-        # 先放大
-        up = img.resize((sW, sH), Image.BICUBIC)
-        # 中心裁剪
-        l = max(0, (sW - tW) // 2); t = max(0, (sH - tH) // 2)
-        return up.crop((l, t, l + tW, t + tH))
-    
     @staticmethod
     def largest_8n1_leq(n):  # 8n+1
         return 0 if n < 1 else ((n - 1)//8)*8 + 1
@@ -43,34 +25,43 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         t = t.permute(2,0,1) / 255.0 * 2.0 - 1.0                                              # CHW in [-1,1]
         return t.to(dtype)
     
-    def prepare_input_tensor(self, video: InputVideo = None, image: InputImage = None, scale: int = 4, dtype=torch.bfloat16):
+    def prepare_input_tensor(
+        self,
+        video: InputVideo = None,
+        image: InputImage = None,
+        height: int = None,
+        width: int = None,
+        dtype=torch.bfloat16,
+        progress_callback: Callable[[float, str], None] | None = None,
+        fps: float = 24.0,
+    ):
 
         if image is not None:
             image = self._load_image(image)
+            image, tH, tW = self._aspect_ratio_resize(image, max_area=height*width, mod_value=128)
             paths = [image] * 25
-            w0, h0 = image.width, image.height
-            sW, sH, tW, tH = self.compute_scaled_and_target_dims(w0, h0, scale=scale, multiple=128)
             F = self.largest_8n1_leq(len(paths))
             paths = paths[:F]
             frames = []
-            for p in tqdm(paths, desc="Preparing input tensor"):
-                img_out = self.upscale_then_center_crop(p, scale=scale, tW=tW, tH=tH)   
-                frames.append(self.pil_to_tensor_neg1_1(img_out, dtype))
+            prep_progress = make_mapped_progress(progress_callback, 0.0, 1.0)
+            for p in tqdm(paths, desc="Preparing input tensor"): 
+                frames.append(self.pil_to_tensor_neg1_1(p, dtype))
+                prep_progress(len(frames) / max(1, len(paths)), "Preparing input tensor")
             vid = torch.stack(frames, 0).permute(1,0,2,3).unsqueeze(0)       
             return vid, tH, tW, F
     
         elif video is not None:
-            video = self._load_video(video)
+            video = self._load_video(video, fps=fps)
             total = len(video)
-            w0, h0 = video[0].width, video[0].height
-            sW, sH, tW, tH = self.compute_scaled_and_target_dims(w0, h0, scale=scale, multiple=128)
             idx = list(range(total)) + [total - 1] * 4
             F = self.largest_8n1_leq(len(idx))
             idx = idx[:F]
             frames = []
+            prep_progress = make_mapped_progress(progress_callback, 0.0, 1.0)
             for i in tqdm(idx, desc="Preparing input tensor"):
-                img_out = self.upscale_then_center_crop(video[i], scale=scale, tW=tW, tH=tH)   
-                frames.append(self.pil_to_tensor_neg1_1(img_out, dtype))
+                image, tH, tW = self._aspect_ratio_resize(video[i], max_area=height*width, mod_value=128)   
+                frames.append(self.pil_to_tensor_neg1_1(image, dtype))
+                prep_progress(len(frames) / max(1, len(idx)), "Preparing input tensor")
             vid = torch.stack(frames, 0).permute(1,0,2,3).unsqueeze(0)           
             return vid, tH, tW, F
         else:
@@ -164,7 +155,8 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         seed: int = None,
         buffer: bool = True,
         is_full_block: bool = False,
-        scale_factor: int = 4, 
+        height: int = None,
+        width: int = None,
         denoising_strength: float = 1.0,
         shift: float = 5.0,
         offload: bool = True,
@@ -173,11 +165,25 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         tile_sample_stride_height: int = 30,
         tile_sample_stride_width: int = 52,
         continuous_decode: bool = False,
+        progress_callback: Callable[[float, str], None] | None = None,
         **kwargs,
         ):
 
         assert video is not None or image is not None, "video or image is required"
-        vid, tH, tW, num_frames = self.prepare_input_tensor(video, image, scale=scale_factor)
+
+        safe_emit_progress(progress_callback, 0.0, "Starting FlashVSR upscale")
+        safe_emit_progress(progress_callback, 0.02, "Preparing input tensor")
+
+        # Reserve a span for input preparation [0.02, 0.18]
+        input_prep_progress = make_mapped_progress(progress_callback, 0.02, 0.18)
+        vid, tH, tW, num_frames = self.prepare_input_tensor(
+            video,
+            image,
+            height=height,
+            width=width,
+            progress_callback=input_prep_progress,
+        )
+
         if num_frames % 4 != 1:
             self.logger.warning(f"num_frames % 4 != 1, padding to {num_frames}")
             num_frames = (num_frames + 2) // 4 * 4 + 1
@@ -188,6 +194,7 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         else:
             input_num_frames = (num_frames - 1) // 4 + 1
         
+        safe_emit_progress(progress_callback, 0.20, "Initializing latent noise")
         noise = self._get_latents(
             height=tH,
             width=tW,
@@ -203,10 +210,12 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         process_total_num = (num_frames - 1) // 8 - 2
         is_stream = True
         if self.transformer is None:
+            safe_emit_progress(progress_callback, 0.22, "Loading transformer")
             self.load_component_by_type("transformer")
         self.to_device(self.transformer)
         
-        context = torch.load(context_path).to(device=self.device, dtype=transformer_dtype)
+        safe_emit_progress(progress_callback, 0.24, "Loading prompt context")
+        context = torch.load(context_path, map_location="cpu", weights_only=False).to(device=self.device, dtype=transformer_dtype)
         self.prompt_emb_posi = {}
         self.prompt_emb_posi['context'] = context
         
@@ -217,9 +226,11 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         latents_total = []
         frames_total = []
         if self.scheduler is None:
+            safe_emit_progress(progress_callback, 0.26, "Loading scheduler")
             self.load_component_by_type("scheduler")
         self.to_device(self.scheduler)
         
+        safe_emit_progress(progress_callback, 0.28, "Configuring timesteps")
         self.timestep = torch.tensor([1000.], device=self.device, dtype=transformer_dtype)
         self.t = self.transformer.time_embedding(sinusoidal_embedding_1d(self.transformer.freq_dim, self.timestep))
         self.t_mod = self.transformer.time_projection(self.t).unflatten(1, (6, self.transformer.dim))
@@ -228,6 +239,11 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
         LQ_pre_idx = 0
         LQ_cur_idx = 0
         clean_mem = True
+
+        # Reserve inference progress span [0.30, 0.88]
+        infer_progress = make_mapped_progress(progress_callback, 0.30, 0.88)
+        infer_progress(0.0, "Starting FlashVSR inference")
+
         with self._progress_bar(total=process_total_num) as progress_bar:
             
             for cur_process_idx in range(process_total_num):
@@ -313,21 +329,28 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
                 clean_mem = False
                 LQ_pre_idx = LQ_cur_idx
                 progress_bar.update(1)
+                infer_progress(
+                    (cur_process_idx + 1) / max(1, process_total_num),
+                    f"FlashVSR Inference {int(((cur_process_idx + 1) / max(1, process_total_num)) * 100)}%",
+                )
         
 
         # Decode
         if offload:
+            safe_emit_progress(progress_callback, 0.89, "Offloading transformer")
             self._offload("transformer")
             
         empty_cache()
         
         if not continuous_decode:
+            safe_emit_progress(progress_callback, 0.92, "Decoding latents")
             latents = torch.cat(latents_total, dim=2)
             vae_dtype = self.component_dtypes["vae"]
             cond = vid[:, :, :LQ_cur_idx, :, :].to(dtype=vae_dtype, device=self.device)
             frames = self.vae_decode(latents, cond=cond, offload=offload)
             try:
                 if color_fix:
+                    safe_emit_progress(progress_callback, 0.95, "Applying color correction")
                     frames = self.color_corrector(
                         frames.to(device=vid.device),
                         vid[:, :, :frames.shape[2], :, :],
@@ -338,12 +361,16 @@ class FlashVSRUpscaleEngine(FlashVSRShared):
             except:
                 pass
         else:
+            safe_emit_progress(progress_callback, 0.92, "Collecting decoded frames")
             frames = torch.cat(frames_total, dim=2)
         
+        safe_emit_progress(progress_callback, 0.98, "Converting output")
         if image is not None:
             frames = frames[:, :, :1, :, :]
+            safe_emit_progress(progress_callback, 1.0, "FlashVSR upscale complete")
             return self._tensor_to_frame(frames)
         else:
+            safe_emit_progress(progress_callback, 1.0, "FlashVSR upscale complete")
             return self._tensor_to_frames(frames)
     
     def vae_decode(self, latents: torch.Tensor, cond: torch.Tensor = None, offload: bool = False, clean_mem: bool = True, offload_type: str = "discard"):

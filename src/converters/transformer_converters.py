@@ -1044,22 +1044,22 @@ class Flux2TransformerConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
         self.rename_dict = {
-            "img_in": "x_embedder",
-            "txt_in": "context_embedder",
-            "double_blocks": "transformer_blocks",
-            "single_blocks": "single_transformer_blocks",
+            "img_in.": "x_embedder",
+            "txt_in.": "context_embedder",
+            "double_blocks.": "transformer_blocks.",
+            "single_blocks.": "single_transformer_blocks.",
             # Timestep and guidance embeddings
-            "time_in.in_layer": "time_guidance_embed.timestep_embedder.linear_1",
-            "time_in.out_layer": "time_guidance_embed.timestep_embedder.linear_2",
-            "guidance_in.in_layer": "time_guidance_embed.guidance_embedder.linear_1",
-            "guidance_in.out_layer": "time_guidance_embed.guidance_embedder.linear_2",
+            "time_in.in_layer.": "time_guidance_embed.timestep_embedder.linear_1.",
+            "time_in.out_layer.": "time_guidance_embed.timestep_embedder.linear_2.",
+            "guidance_in.in_layer.": "time_guidance_embed.guidance_embedder.linear_1.",
+            "guidance_in.out_layer.": "time_guidance_embed.guidance_embedder.linear_2.",
             # Modulation parameters
-            "double_stream_modulation_img.lin": "double_stream_modulation_img.linear",
-            "double_stream_modulation_txt.lin": "double_stream_modulation_txt.linear",
-            "single_stream_modulation.lin": "single_stream_modulation.linear",
+            "double_stream_modulation_img.lin.": "double_stream_modulation_img.linear.",
+            "double_stream_modulation_txt.lin.": "double_stream_modulation_txt.linear.",
+            "single_stream_modulation.lin.": "single_stream_modulation.linear.",
             # Final output layer
             # "final_layer.adaLN_modulation.1": "norm_out.linear",  # Handle separately since we need to swap mod params
-            "final_layer.linear": "proj_out",
+            "final_layer.linear.": "proj_out.",
             "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
             "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
             "img_attn.proj": "attn.to_out.0",
