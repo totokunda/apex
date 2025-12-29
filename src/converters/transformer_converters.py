@@ -3,226 +3,24 @@ from src.converters.utils import update_state_dict_, swap_proj_gate, swap_scale_
 from src.quantize.ggml_ops import ggml_cat, ggml_chunk, ggml_split
 import torch
 import re
+from src.converters.base_converter import BaseConverter
 
-class TransformerConverter:
+
+class TransformerConverter(BaseConverter):
+    pass
+
+
+class FlashVSRTransformerConverter(TransformerConverter):
     def __init__(self):
-        self.rename_dict = {}
-        self.special_keys_map = {}
-        self.pre_special_keys_map = {}
+        super().__init__()
+        self.rename_dict = {
+            r"^conv1\.": "LQ_proj_in.conv1.",
+            r"^conv2\.": "LQ_proj_in.conv2.",
+            r"^norm1\.": "LQ_proj_in.norm1.",
+            r"^norm2\.": "LQ_proj_in.norm2.",
+            r"^linear_layers\.": "LQ_proj_in.linear_layers.",
+        }
 
-    @staticmethod
-    def _looks_like_regex(pattern: str) -> bool:
-        """
-        Heuristic: treat `pattern` as a regex only when it contains explicit regex
-        constructs (anchors, groups, character classes, escapes, quantifiers).
-
-        We intentionally do NOT treat '.' as a regex indicator because most rename
-        keys are literal dotted paths and should remain substring replacements.
-        """
-        if not pattern:
-            return False
-        # Fast-path: most keys are plain substrings.
-        # Any of these characters strongly suggests an intentional regex.
-        #
-        # NOTE: we intentionally do NOT treat '*' as a regex indicator because we use
-        # it as a glob-style wildcard placeholder in rename_dict (see `_apply_rename_dict`).
-        return any(ch in pattern for ch in ("^", "$", "(", ")", "[", "]", "{", "}", "|", "?", "+", "\\"))
-
-    @staticmethod
-    def _looks_like_glob_star(pattern: str) -> bool:
-        """
-        Return True if `pattern` should be interpreted as a glob-style mapping pattern
-        using '*' as a placeholder.
-
-        This is used for patterns like:
-          - "single_blocks.*.linear1"
-        where '*' is meant to capture some literal substring (often an integer index)
-        and the same captured substring should be substituted into the target mapping.
-        """
-        if not pattern or "*" not in pattern:
-            return False
-        # If the user is using explicit regex constructs, keep regex semantics.
-        return not TransformerConverter._looks_like_regex(pattern)
-
-    @staticmethod
-    def _apply_glob_star_rule(key: str, src: str, tgt: str) -> str:
-        """
-        Apply a single glob-style '*' rule:
-          - src contains one or more '*' wildcards
-          - tgt contains the same number of '*' wildcards
-        and each '*' capture from src is substituted into tgt in order.
-        """
-        src_stars = src.count("*")
-        tgt_stars = tgt.count("*")
-        if src_stars != tgt_stars:
-            raise ValueError(
-                f"Glob-star rename rule must have the same number of '*' in src and tgt; "
-                f"got src={src!r} ({src_stars}) tgt={tgt!r} ({tgt_stars})"
-            )
-
-        # Build a safe regex where all literal parts are escaped and each '*' becomes
-        # a non-greedy capture group.
-        parts = src.split("*")
-        pattern = "".join(re.escape(p) + ("(.*?)" if i < len(parts) - 1 else "") for i, p in enumerate(parts))
-        compiled = re.compile(pattern)
-
-        def _repl(m: re.Match) -> str:
-            repl = tgt
-            for g in m.groups():
-                repl = repl.replace("*", g, 1)
-            return repl
-
-        return compiled.sub(_repl, key)
-
-    def _apply_rename_dict(self, key: str) -> str:
-        """
-        Apply `rename_dict` to a key using substring replacements by default, with
-        opt-in support for regex patterns (see `_looks_like_regex`).
-        """
-        new_key = key
-        for src, tgt in self.rename_dict.items():
-            if self._looks_like_glob_star(src):
-                new_key = self._apply_glob_star_rule(new_key, src, tgt)
-            elif self._looks_like_regex(src):
-                try:
-                    new_key = re.sub(src, tgt, new_key)
-                except re.error as e:
-                    raise ValueError(f"Invalid regex rename pattern: {src!r}") from e
-            else:
-                new_key = new_key.replace(src, tgt)
-        return new_key
-
-    @staticmethod
-    def _is_specific_marker(s: str) -> bool:
-        """
-        Return True if `s` is a "specific" key fragment that can be used as a reliable
-        signal when determining whether a checkpoint has already been converted.
-
-        We intentionally ignore very generic fragments (e.g. "norm2") that may appear
-        in *both* source and target key formats.
-        """
-        if not s:
-            return False
-        # Common ambiguous fragments that can exist in both source & target layouts.
-        if s in {"norm", "norm1", "norm2", "norm3", "weight", "bias"}:
-            return False
-        # Prefer dotted/underscored fragments; otherwise require sufficient length.
-        return ("." in s) or ("_" in s) or (len(s) >= 8)
-
-    def _already_converted(self, state_dict: Dict[str, Any]) -> bool:
-        """
-        Best-effort heuristic to detect whether `state_dict` appears to already be in
-        the *target* key format for this converter.
-
-        This is intentionally conservative:
-        - Requires *positive* evidence of target keys (target markers present)
-        - Requires *absence* of source markers that strongly suggest an unconverted ckpt
-        - Refuses to early-exit if we'd otherwise drop keys via pre/special handlers
-        """
-        if not state_dict:
-            return True
-
-        keys = list(state_dict.keys())
-
-        # Regex-based renames are hard to reason about via marker matching (source markers
-        # won't appear verbatim in real keys, and some targets are intentionally generic,
-        # e.g. prefixing with "model."). For converters that include any regex rules,
-        # prefer a direct, conservative check: if applying the rename rules would change
-        # any key, then we are NOT already converted.
-        #
-        # This keeps conversion correct for mixed/partially-prefixed checkpoints.
-        if any(self._looks_like_regex(k) or self._looks_like_glob_star(k) for k in self.rename_dict.keys()):
-            return not any(self._apply_rename_dict(k) != k for k in keys)
-
-        # Guard against partially-converted states introduced by placeholder hacks.
-        if any("norm__placeholder" in k for k in keys):
-            return False
-
-        # If we'd drop or synthesize keys, we are not "fully matching" yet.
-        if self.pre_special_keys_map:
-            for pre_special_key in self.pre_special_keys_map.keys():
-                if any(pre_special_key in k for k in keys):
-                    return False
-        if self.special_keys_map:
-            for special_key in self.special_keys_map.keys():
-                if any(special_key in k for k in keys):
-                    return False
-
-        # Build conservative marker sets from the rename map.
-        # NOTE: source-side markers must be literal fragments; regex patterns won't appear
-        # verbatim in real keys and would create false negatives/positives here.
-        source_markers = [
-            k
-            for k in self.rename_dict.keys()
-            if (not self._looks_like_regex(k)) and self._is_specific_marker(k)
-        ]
-        target_markers = [v for v in self.rename_dict.values() if self._is_specific_marker(v)]
-        # Without target markers we cannot safely assert the dict is already converted.
-        if not target_markers:
-            return False
-
-        has_target = any(any(m in k for m in target_markers) for k in keys)
-        if not has_target:
-            return False
-
-        has_source = any(any(m in k for m in source_markers) for k in keys)
-        return not has_source
-
-    @staticmethod
-    def remove_keys_inplace(key: str, state_dict: Dict[str, Any]):
-        state_dict.pop(key, None)
-
-    def _sort_rename_dict(self):
-        """
-        Sort `rename_dict` to ensure proper replacement order.
-
-        Default strategy:
-        - Keep the WAN norm swap hack keys first (in their original insertion order),
-          because they are intended to operate on *source* keys only. If we allow
-          length-based sorting to move them later, they can accidentally rewrite
-          *target* keys introduced by other renames (e.g. `img_emb.proj.4` -> `...norm2`).
-        - For all remaining keys, sort by source-key length (longest to shortest)
-          to avoid partial-substring collisions (e.g. `cross_attn.k_img` vs `cross_attn.k`).
-        """
-        priority_keys = ("norm2", "norm3", "norm__placeholder")
-        priority_set = set(priority_keys)
-
-        priority_items = []
-        for k in priority_keys:
-            if k in self.rename_dict:
-                priority_items.append((k, self.rename_dict[k]))
-
-        other_items = [(k, v) for k, v in self.rename_dict.items() if k not in priority_set]
-        other_items.sort(key=lambda item: len(item[0]), reverse=True)
-
-        self.rename_dict = dict(priority_items + other_items)
-
-    def convert(self, state_dict: Dict[str, Any]):
-        self._sort_rename_dict()
-        # If this looks like a checkpoint that already matches the target key layout,
-        # exit early to keep conversion idempotent.
-  
-        if self._already_converted(state_dict):
-            return state_dict
-        # Apply pre-special keys map
-        for key in list(state_dict.keys()):
-            for (
-                pre_special_key,
-                handler_fn_inplace,
-            ) in self.pre_special_keys_map.items():
-                if pre_special_key in key:
-                    handler_fn_inplace(key, state_dict)
-
-        for key in list(state_dict.keys()):
-            new_key = self._apply_rename_dict(key)
-            update_state_dict_(state_dict, key, new_key)
-
-        for key in list(state_dict.keys()):
-            for special_key, handler_fn_inplace in self.special_keys_map.items():
-                if special_key not in key:
-                    continue
-                handler_fn_inplace(key, state_dict)
-        return state_dict
 
 class WanTransformerConverter(TransformerConverter):
     def __init__(self):
@@ -296,13 +94,13 @@ class WanS2VTransformerConverter(WanTransformerConverter):
         self.new_rename_dict = {
             r"^causal_audio_encoder\.": "condition_embedder.causal_audio_encoder.",
             r"^casual_audio_encoder\.": "condition_embedder.causal_audio_encoder.",
-            ".q" : ".to_q",
-            ".k" : ".to_k",
-            ".v" : ".to_v",
-            ".o" : ".to_out.0",
-            "trainable_cond_mask" :"trainable_condition_mask"
+            ".q": ".to_q",
+            ".k": ".to_k",
+            ".v": ".to_v",
+            ".o": ".to_out.0",
+            "trainable_cond_mask": "trainable_condition_mask",
         }
-        
+
         self.rename_dict.update(self.new_rename_dict)
 
 
@@ -373,22 +171,23 @@ class WanAnimateTransformerConverter(TransformerConverter):
             "scaled_fp8": self.remove_keys_inplace,
         }
 
-        
     def convert(self, state_dict: Dict[str, Any]):
         self._sort_rename_dict()
         for key in list(state_dict.keys()):
             new_key = self._apply_rename_dict(key)
             update_state_dict_(state_dict, key, new_key)
-    
+
         for key in list(state_dict.keys()):
             for special_key, handler_fn_inplace in self.special_keys_map.items():
                 if special_key not in key:
                     continue
                 handler_fn_inplace(key, state_dict)
 
-    
+
 # TODO: Verify this and simplify if possible.
-def convert_animate_motion_encoder_weights(key: str, state_dict: Dict[str, Any], final_conv_idx: int = 8) -> None:
+def convert_animate_motion_encoder_weights(
+    key: str, state_dict: Dict[str, Any], final_conv_idx: int = 8
+) -> None:
     """
     Convert all motion encoder weights for Animate model.
 
@@ -511,8 +310,12 @@ def convert_animate_face_adapter_weights(key: str, state_dict: Dict[str, Any]) -
                     scale_weight_key = key.replace(".weight", ".scale_weight")
                     if scale_weight_key in state_dict:
                         scale_weight = state_dict.pop(scale_weight_key)
-                        state_dict[new_key_k.replace(".weight", ".scale_weight")] = scale_weight
-                        state_dict[new_key_v.replace(".weight", ".scale_weight")] = scale_weight
+                        state_dict[new_key_k.replace(".weight", ".scale_weight")] = (
+                            scale_weight
+                        )
+                        state_dict[new_key_v.replace(".weight", ".scale_weight")] = (
+                            scale_weight
+                        )
                 return
             else:
                 if layer_name == "q_norm":
@@ -533,9 +336,12 @@ def convert_animate_face_adapter_weights(key: str, state_dict: Dict[str, Any]) -
                     scale_weight_key = key.replace(".weight", ".scale_weight")
                     if scale_weight_key in state_dict:
                         scale_weight = state_dict.pop(scale_weight_key)
-                        state_dict[new_key.replace(".weight", ".scale_weight")] = scale_weight
+                        state_dict[new_key.replace(".weight", ".scale_weight")] = (
+                            scale_weight
+                        )
                 return
     return
+
 
 class SkyReelsTransformerConverter(WanTransformerConverter):
     def __init__(self):
@@ -968,11 +774,11 @@ class HunyuanVideo15TransformerConverter(TransformerConverter):
             "time_in.in_layer": "time_in.mlp.0",
             "time_in.out_layer": "time_in.mlp.2",
         }
-        
+
         self.special_keys_map = {
             "double_blocks": self.remap_double_blocks_,
         }
-        
+
     @staticmethod
     def get_chunk_dim(weight: torch.Tensor):
         if weight.ndim == 1:
@@ -991,7 +797,13 @@ class HunyuanVideo15TransformerConverter(TransformerConverter):
             # diffusers-style: ".lora_down.weight", PEFT-style: ".lora_A.weight"
             return (".lora_down" in k) or (".lora_A" in k) or k.endswith(".alpha")
 
-        def _write_qkv(prefix_src: str, prefix_q: str, prefix_k: str, prefix_v: str, w: torch.Tensor) -> None:
+        def _write_qkv(
+            prefix_src: str,
+            prefix_q: str,
+            prefix_k: str,
+            prefix_v: str,
+            w: torch.Tensor,
+        ) -> None:
             """
             Map a fused QKV tensor into separate Q/K/V tensors.
 
@@ -1035,53 +847,49 @@ class HunyuanVideo15TransformerConverter(TransformerConverter):
         if "img_attn_qkv" in key:
             weight = state_dict.pop(key)
             _write_qkv("img_attn_qkv", "img_attn_q", "img_attn_k", "img_attn_v", weight)
-            
-            
+
         if "img_attn.qkv" in key:
             weight = state_dict.pop(key)
             _write_qkv("img_attn.qkv", "img_attn_q", "img_attn_k", "img_attn_v", weight)
-        
+
         if "txt_attn_qkv" in key:
             weight = state_dict.pop(key)
             _write_qkv("txt_attn_qkv", "txt_attn_q", "txt_attn_k", "txt_attn_v", weight)
-        
+
         if "txt_attn.qkv" in key:
             weight = state_dict.pop(key)
             _write_qkv("txt_attn.qkv", "txt_attn_q", "txt_attn_k", "txt_attn_v", weight)
-            
+
         if "img_attn.proj" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("img_attn.proj", "img_attn_proj")] = weight
-            
+
         if "txt_attn.proj" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("txt_attn.proj", "txt_attn_proj")] = weight
-        
+
         if "img_mod.lin." in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("img_mod.lin.", "img_mod.linear.")] = weight
-        
+
         if "txt_mod.lin." in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("txt_mod.lin.", "txt_mod.linear.")] = weight
-            
+
         if "img_mlp.0" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("img_mlp.0", "img_mlp.fc1")] = weight
-        
+
         if "img_mlp.2" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("img_mlp.2", "img_mlp.fc2")] = weight
-            
+
         if "txt_mlp.0" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("txt_mlp.0", "txt_mlp.fc1")] = weight
         if "txt_mlp.2" in key:
             weight = state_dict.pop(key)
             state_dict[key.replace("txt_mlp.2", "txt_mlp.fc2")] = weight
-    
-            
-
 
 
 class MochiTransformerConverter(TransformerConverter):
@@ -1252,26 +1060,27 @@ class Flux2TransformerConverter(TransformerConverter):
             # Final output layer
             # "final_layer.adaLN_modulation.1": "norm_out.linear",  # Handle separately since we need to swap mod params
             "final_layer.linear": "proj_out",
-             "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
-             "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
-             "img_attn.proj": "attn.to_out.0",
-             "img_mlp.0": "ff.linear_in",
-             "img_mlp.2": "ff.linear_out",
-             "txt_attn.norm.query_norm.scale": "attn.norm_added_q.weight",
-             "txt_attn.norm.key_norm.scale": "attn.norm_added_k.weight",
-             "txt_attn.proj": "attn.to_add_out",
-             "txt_mlp.0": "ff_context.linear_in",
-             "txt_mlp.2": "ff_context.linear_out",
-              "linear1": "attn.to_qkv_mlp_proj",
-              "linear2": "attn.to_out",
-              "norm.query_norm.scale": "attn.norm_q.weight",
-              "norm.key_norm.scale": "attn.norm_k.weight",
+            "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
+            "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
+            "img_attn.proj": "attn.to_out.0",
+            "img_mlp.0": "ff.linear_in",
+            "img_mlp.2": "ff.linear_out",
+            "txt_attn.norm.query_norm.scale": "attn.norm_added_q.weight",
+            "txt_attn.norm.key_norm.scale": "attn.norm_added_k.weight",
+            "txt_attn.proj": "attn.to_add_out",
+            "txt_mlp.0": "ff_context.linear_in",
+            "txt_mlp.2": "ff_context.linear_out",
+            "linear1": "attn.to_qkv_mlp_proj",
+            "linear2": "attn.to_out",
+            "norm.query_norm.scale": "attn.norm_q.weight",
+            "norm.key_norm.scale": "attn.norm_k.weight",
         }
         self.pre_special_keys_map = {
             "final_layer.adaLN_modulation.1.": self._handle_final_layer_mod,
             "img_attn.qkv": self._handle_img_attn_qkv,
             "txt_attn.qkv": self._handle_txt_attn_qkv,
         }
+
     @staticmethod
     def _handle_txt_attn_qkv(key: str, state_dict: Dict[str, Any]):
         """
@@ -1284,7 +1093,7 @@ class Flux2TransformerConverter(TransformerConverter):
         state_dict[f"{blk}.attn.add_k_proj.weight"] = k
         state_dict[f"{blk}.attn.add_q_proj.weight"] = q
         state_dict[f"{blk}.attn.add_v_proj.weight"] = v
-    
+
     @staticmethod
     def _handle_img_attn_qkv(key: str, state_dict: Dict[str, Any]):
         """
@@ -1297,7 +1106,7 @@ class Flux2TransformerConverter(TransformerConverter):
         state_dict[f"{blk}.attn.to_k.weight"] = k
         state_dict[f"{blk}.attn.to_q.weight"] = q
         state_dict[f"{blk}.attn.to_v.weight"] = v
-    
+
     @staticmethod
     def _handle_final_layer_mod(key: str, state_dict: Dict[str, Any]):
         """
@@ -1309,6 +1118,7 @@ class Flux2TransformerConverter(TransformerConverter):
         tensor = swap_scale_shift(tensor, dim=0)
         suffix = "weight" if is_weight else "bias"
         state_dict[f"norm_out.linear.{suffix}"] = tensor
+
 
 class FluxTransformerConverter(TransformerConverter):
     def __init__(self):
@@ -1324,35 +1134,28 @@ class FluxTransformerConverter(TransformerConverter):
             # NOTE: do NOT rename guidance_in.* here (it is all-or-nothing; handled in pre-special)
             "txt_in.": "context_embedder.",
             "img_in.": "x_embedder.",
-
             # block roots
             "double_blocks.": "transformer_blocks.",
             "single_blocks.": "single_transformer_blocks.",
-
             # double-block norms
             ".img_mod.lin.": ".norm1.linear.",
             ".txt_mod.lin.": ".norm1_context.linear.",
-
             # attention norms (double blocks)
             "img_attn.norm.query_norm.scale": "attn.norm_q.weight",
             "img_attn.norm.key_norm.scale": "attn.norm_k.weight",
             "txt_attn.norm.query_norm.scale": "attn.norm_added_q.weight",
             "txt_attn.norm.key_norm.scale": "attn.norm_added_k.weight",
-
             # MLPs
             ".img_mlp.0.": ".ff.net.0.proj.",
             ".img_mlp.2.": ".ff.net.2.",
             ".txt_mlp.0.": ".ff_context.net.0.proj.",
             ".txt_mlp.2.": ".ff_context.net.2.",
-
             # output projections
             ".img_attn.proj.": ".attn.to_out.0.",
             ".txt_attn.proj.": ".attn.to_add_out.",
-
             # single-block pieces
             ".modulation.lin.": ".norm.linear.",
             ".linear2.": ".proj_out.",
-
             # final layer (optional)
             "final_layer.linear.": "proj_out.",
             # NOTE: final_layer.adaLN_modulation.* handled in pre-special (swap_scale_shift)
@@ -1527,7 +1330,10 @@ class FluxTransformerConverter(TransformerConverter):
             sd[f"norm_out.linear.{suffix}"] = tensor
 
         def _handle_double_img_qkv_weight(key: str, sd: Dict[str, Any]):
-            if not (key.startswith("double_blocks.") and key.endswith(".img_attn.qkv.weight")):
+            if not (
+                key.startswith("double_blocks.")
+                and key.endswith(".img_attn.qkv.weight")
+            ):
                 return
             m = re.match(r"double_blocks\.(\d+)\.img_attn\.qkv\.weight$", key)
             if not m:
@@ -1540,7 +1346,9 @@ class FluxTransformerConverter(TransformerConverter):
             sd[f"{blk}.to_v.weight"] = ggml_cat([v])
 
         def _handle_double_img_qkv_bias(key: str, sd: Dict[str, Any]):
-            if not (key.startswith("double_blocks.") and key.endswith(".img_attn.qkv.bias")):
+            if not (
+                key.startswith("double_blocks.") and key.endswith(".img_attn.qkv.bias")
+            ):
                 return
             m = re.match(r"double_blocks\.(\d+)\.img_attn\.qkv\.bias$", key)
             if not m:
@@ -1553,7 +1361,10 @@ class FluxTransformerConverter(TransformerConverter):
             sd[f"{blk}.to_v.bias"] = ggml_cat([v])
 
         def _handle_double_txt_qkv_weight(key: str, sd: Dict[str, Any]):
-            if not (key.startswith("double_blocks.") and key.endswith(".txt_attn.qkv.weight")):
+            if not (
+                key.startswith("double_blocks.")
+                and key.endswith(".txt_attn.qkv.weight")
+            ):
                 return
             m = re.match(r"double_blocks\.(\d+)\.txt_attn\.qkv\.weight$", key)
             if not m:
@@ -1566,7 +1377,9 @@ class FluxTransformerConverter(TransformerConverter):
             sd[f"{blk}.add_v_proj.weight"] = ggml_cat([v])
 
         def _handle_double_txt_qkv_bias(key: str, sd: Dict[str, Any]):
-            if not (key.startswith("double_blocks.") and key.endswith(".txt_attn.qkv.bias")):
+            if not (
+                key.startswith("double_blocks.") and key.endswith(".txt_attn.qkv.bias")
+            ):
                 return
             m = re.match(r"double_blocks\.(\d+)\.txt_attn\.qkv\.bias$", key)
             if not m:
@@ -1714,12 +1527,16 @@ class FluxTransformerConverter(TransformerConverter):
             # then revert in `special_keys_map` after the rename pass.
             for k in (w_key, b_key):
                 if k in sd:
-                    update_state_dict_(sd, k, k.replace("single_blocks.", "single_blocks__keep.", 1))
+                    update_state_dict_(
+                        sd, k, k.replace("single_blocks.", "single_blocks__keep.", 1)
+                    )
 
         def _unprotect_single_linear1_keys(key: str, sd: Dict[str, Any]):
             if "single_blocks__keep." not in key:
                 return
-            update_state_dict_(sd, key, key.replace("single_blocks__keep.", "single_blocks.", 1))
+            update_state_dict_(
+                sd, key, key.replace("single_blocks__keep.", "single_blocks.", 1)
+            )
 
         def _handle_single_attn_norm_scales(key: str, sd: Dict[str, Any]):
             """
@@ -1769,6 +1586,7 @@ class FluxTransformerConverter(TransformerConverter):
 
         # Use the shared conversion pipeline (pre-special → rename → post-special).
         return super().convert(state_dict)
+
 
 class NoOpTransformerConverter(TransformerConverter):
     def __init__(self):

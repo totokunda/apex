@@ -1,9 +1,13 @@
 from typing import Dict, Any
 from transformers import Qwen3ForCausalLM
-from src.converters.transformer_converters import TransformerConverter
+from src.converters.base_converter import BaseConverter
 
 
-class Qwen2_5_VLTextEncoderConverter(TransformerConverter):
+class TextEncoderConverter(BaseConverter):
+    pass
+
+
+class Qwen2_5_VLTextEncoderConverter(TextEncoderConverter):
     """
     Converter for Qwen2.5 VL text encoder checkpoints.
     """
@@ -11,16 +15,16 @@ class Qwen2_5_VLTextEncoderConverter(TransformerConverter):
     def __init__(self):
         super().__init__()
         self.rename_dict = {
-             "^visual": "model.visual",
+            "^visual": "model.visual",
             r"^model(?!\.(language_model|visual))": "model.language_model",
         }
-    
-        
-class T5TextEncoderConverter(TransformerConverter):
+
+
+class T5TextEncoderConverter(TextEncoderConverter):
     """
     Converter for T5-style text encoder checkpoints.
 
-    Uses the same rename/convert mechanics as `TransformerConverter`, with a
+    Uses the same rename/convert mechanics as `TextEncoderConverter`, with a
     `rename_dict` mirroring `T5_SD_MAP` from `src.quantize.load`.
     """
 
@@ -49,7 +53,7 @@ class T5TextEncoderConverter(TransformerConverter):
             "norm.weight": "encoder.final_layer_norm.weight",
             "norm.bias": "encoder.final_layer_norm.bias",
             # Blocks prefix
-            "blocks": "encoder.block",   # older style
+            "blocks": "encoder.block",  # older style
             "block.": "encoder.block.",  # Wan 2.2 style: block.<idx>.*
             # Self-attention inside each block
             "attn.q": "layer.0.SelfAttention.q",
@@ -252,7 +256,7 @@ class T5TextEncoderConverter(TransformerConverter):
                     handler_fn_inplace(key, state_dict)
 
 
-class LlamaTextEncoderConverter(TransformerConverter):
+class LlamaTextEncoderConverter(TextEncoderConverter):
     """
     Converter for LLaMA-style text encoder checkpoints.
 
@@ -280,7 +284,7 @@ class LlamaTextEncoderConverter(TransformerConverter):
         self.special_keys_map: Dict[str, Any] = {}
 
 
-class StepTextEncoderConverter(TransformerConverter):
+class StepTextEncoderConverter(TextEncoderConverter):
     """
     Converter for STEP-style text encoder checkpoints.
 
@@ -312,7 +316,7 @@ class StepTextEncoderConverter(TransformerConverter):
         self.special_keys_map: Dict[str, Any] = {}
 
 
-class MistralTextEncoderConverter(TransformerConverter):
+class MistralTextEncoderConverter(TextEncoderConverter):
     """
     Converter for Mistral-style text encoder checkpoints.
     """
@@ -324,13 +328,13 @@ class MistralTextEncoderConverter(TransformerConverter):
             # Uses regex because TransformerConverter supports regex-based rename rules.
             r"^(?!model\.)": "model.",
         }
-        
+
         self.special_keys_map = {
-            "language_model.model" : self._rename_model_inplace,
+            "language_model.model": self._rename_model_inplace,
             "language_model.lm_head.weight": self._duplicate_lm_head_weight_inplace,
             "model.vision_tower.token_embd.img_break": self._remove_img_break_token_inplace,
         }
-    
+
     @staticmethod
     def _rename_model_inplace(key: str, state_dict: Dict[str, Any]):
         """
@@ -338,8 +342,10 @@ class MistralTextEncoderConverter(TransformerConverter):
         """
         if key not in state_dict:
             return
-        state_dict[key.replace("language_model.model.", "language_model.")] = state_dict.pop(key)
-    
+        state_dict[key.replace("language_model.model.", "language_model.")] = (
+            state_dict.pop(key)
+        )
+
     @staticmethod
     def _rename_model_embed_tokens_inplace(key: str, state_dict: Dict[str, Any]):
         """
@@ -347,7 +353,9 @@ class MistralTextEncoderConverter(TransformerConverter):
         """
         if key not in state_dict:
             return
-        state_dict[key.replace("model.embed_tokens.", "model.language_model.embed_tokens.")] = state_dict.pop(key)
+        state_dict[
+            key.replace("model.embed_tokens.", "model.language_model.embed_tokens.")
+        ] = state_dict.pop(key)
 
     @staticmethod
     def _rename_model_layers_inplace(key: str, state_dict: Dict[str, Any]):
@@ -356,8 +364,9 @@ class MistralTextEncoderConverter(TransformerConverter):
         """
         if key not in state_dict:
             return
-        state_dict[key.replace("model.layers.", "model.language_model.layers.")] = state_dict.pop(key)
-        
+        state_dict[key.replace("model.layers.", "model.language_model.layers.")] = (
+            state_dict.pop(key)
+        )
 
     @staticmethod
     def _duplicate_lm_head_weight_inplace(key: str, state_dict: Dict[str, Any]):
@@ -368,7 +377,7 @@ class MistralTextEncoderConverter(TransformerConverter):
             return
         if "lm_head.weight" not in state_dict:
             state_dict["lm_head.weight"] = state_dict.pop(key)
-    
+
     @staticmethod
     def _remove_img_break_token_inplace(key: str, state_dict: Dict[str, Any]):
         """

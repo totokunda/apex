@@ -35,6 +35,7 @@ class FlowMatchScheduler(SchedulerInterface):
         denoising_strength=1.0,
         training=False,
         device=None,
+        shift=None,
     ):
         sigma_start = (
             self.sigma_min + (self.sigma_max - self.sigma_min) * denoising_strength
@@ -50,7 +51,10 @@ class FlowMatchScheduler(SchedulerInterface):
             )
         if self.inverse_timesteps:
             self.sigmas = torch.flip(self.sigmas, dims=[0])
-        self.sigmas = self.shift * self.sigmas / (1 + (self.shift - 1) * self.sigmas)
+        if shift is not None:
+            self.sigmas = shift * self.sigmas / (1 + (shift - 1) * self.sigmas)
+        else:
+            self.sigmas = self.shift * self.sigmas / (1 + (self.shift - 1) * self.sigmas)
         if self.reverse_sigmas:
             self.sigmas = 1 - self.sigmas
         self.timesteps = self.sigmas * self.num_train_timesteps
